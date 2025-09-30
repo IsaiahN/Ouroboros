@@ -11,6 +11,19 @@ import random
 
 from .arc_api_client import GameState
 
+# Import algorithm evaluator for evolved strategies
+try:
+    from algorithm_evaluator import AlgorithmEvaluator, StrategyAdapter, GameContext
+    from algorithm_representations import AlgorithmRepresentation
+    EVOLUTION_AVAILABLE = True
+except ImportError:
+    logger.warning("Algorithm evolution components not available")
+    AlgorithmEvaluator = None
+    StrategyAdapter = None
+    GameContext = None
+    AlgorithmRepresentation = None
+    EVOLUTION_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +39,16 @@ class ActionHandler:
         self.session_manager = session_manager
         self.last_frame = None
         self.last_score = 0.0
+
+        # Initialize algorithm evaluation components
+        if EVOLUTION_AVAILABLE:
+            self.algorithm_evaluator = AlgorithmEvaluator()
+            self.strategy_adapter = StrategyAdapter(self.algorithm_evaluator)
+            self.current_algorithm = None
+        else:
+            self.algorithm_evaluator = None
+            self.strategy_adapter = None
+            self.current_algorithm = None
 
     def _validate_coordinates(self, x: int, y: int, frame: List[List[int]]) -> bool:
         """Validate that coordinates are within frame bounds.
@@ -369,5 +392,74 @@ class ActionHandler:
             # Fall back to random if no effectiveness data
             return self.get_random_action(available)
 
+        elif strategy == "evolved":
+            # Use evolved algorithm for action selection
+            if EVOLUTION_AVAILABLE and self.current_algorithm and self.strategy_adapter:
+                try:
+                    # Update strategy adapter with current game state
+                    self.strategy_adapter.update_context(game_state, self)
+
+                    # Get action from evolved algorithm
+                    action = await self.strategy_adapter.get_next_action()
+
+                    # Validate action is available
+                    if action in available:
+                        return action
+                    else:
+                        logger.warning(f"Evolved algorithm suggested unavailable action: {action}")
+                        return self.get_random_action(available)
+
+                except Exception as e:
+                    logger.error(f"Error in evolved strategy: {e}")
+                    return self.get_random_action(available)
+            else:
+                # Fall back to balanced strategy if evolution not available
+                logger.warning("Evolved strategy requested but not available, using balanced")
+                return await self.smart_action_selection(game_state, "balanced")
+
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
+
+    def set_evolved_algorithm(self, algorithm: 'AlgorithmRepresentation'):
+        """Set the algorithm to use for evolved strategy.
+
+        Args:
+            algorithm: Algorithm representation to use
+        """
+        if EVOLUTION_AVAILABLE and self.strategy_adapter:
+            self.current_algorithm = algorithm
+            self.strategy_adapter.set_algorithm(algorithm)
+            logger.info(f"Set evolved algorithm: {algorithm.algorithm_id}")
+        else:
+            logger.warning("Cannot set evolved algorithm: evolution components not available")
+
+    def get_current_algorithm(self) -> Optional['AlgorithmRepresentation']:
+        """Get the currently set algorithm.
+
+        Returns:
+            Current algorithm or None
+        """
+        return self.current_algorithm
+
+    def update_algorithm_context(self, game_state: GameState):
+        """Update the algorithm context with current game state.
+
+        Args:
+            game_state: Current game state
+        """
+        if EVOLUTION_AVAILABLE and self.strategy_adapter:
+            self.strategy_adapter.update_context(game_state, self)
+
+    def get_algorithm_performance_data(self) -> Dict[str, Any]:
+        """Get performance analysis data for the current algorithm.
+
+        Returns:
+            Performance analysis dictionary
+        """
+        if (EVOLUTION_AVAILABLE and self.algorithm_evaluator and
+            self.current_algorithm):
+            return self.algorithm_evaluator.analyze_execution_patterns(
+                self.current_algorithm.algorithm_id
+            )
+        else:
+            return {"message": "No algorithm evaluation data available"}

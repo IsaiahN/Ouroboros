@@ -15,28 +15,79 @@ from .game_session_manager import GameSessionManager
 from .action_handler import ActionHandler
 from .arc_api_client import GameState
 
+# Import evolution system components
+try:
+    from evolution_manager import EvolutionManager, EvolutionConfig
+    from algorithm_evaluator import GameContext
+    EVOLUTION_AVAILABLE = True
+except ImportError:
+    EvolutionManager = None
+    EvolutionConfig = None
+    GameContext = None
+    EVOLUTION_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
 class GameplayEngine:
     """Core engine for playing ARC games."""
 
-    def __init__(self, api_key: str = None, db_path: str = "core_data.db"):
+    def __init__(self, api_key: str = None, db_path: str = "core_data.db",
+                 enable_evolution: bool = True):
         """Initialize gameplay engine.
 
         Args:
             api_key: ARC API key
             db_path: Database file path
+            enable_evolution: Whether to enable evolution system
         """
         self.session_manager = GameSessionManager(api_key, db_path)
         self.action_handler = ActionHandler(self.session_manager)
         self.game_config = {
             'max_actions_per_game': 100,
             'action_timeout': 30.0,
-            'strategy': 'balanced',
+            'strategy': 'evolved' if (enable_evolution and EVOLUTION_AVAILABLE) else 'balanced',
             'enable_random_exploration': True,
             'coordinate_retry_limit': 3
         }
+
+        # Initialize evolution system
+        self.evolution_manager = None
+        self.game_context = None
+
+        if enable_evolution and EVOLUTION_AVAILABLE:
+            try:
+                evolution_config = EvolutionConfig(
+                    population_size=25,
+                    evolution_frequency=5,  # Evolve every 5 games
+                    min_games_for_evolution=10
+                )
+
+                self.evolution_manager = EvolutionManager(
+                    evolution_config, self.session_manager.db
+                )
+
+                self.game_context = GameContext()
+
+                logger.info("Evolution system initialized in GameplayEngine")
+
+            except Exception as e:
+                logger.error(f"Failed to initialize evolution system: {e}")
+                self.evolution_manager = None
+                self.game_context = None
+                # Fall back to balanced strategy
+                self.game_config['strategy'] = 'balanced'
+
+    async def initialize_evolution_system(self):
+        """Initialize the evolution system asynchronously."""
+        if self.evolution_manager:
+            try:
+                await self.evolution_manager.initialize_system()
+                logger.info("Evolution system fully initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize evolution system: {e}")
+                self.evolution_manager = None
+                self.game_context = None
 
     def configure(self, **config):
         """Update game configuration.
@@ -118,6 +169,25 @@ class GameplayEngine:
             # Finish game in session manager
             await self.session_manager.finish_game(game_state.state, game_state.score)
 
+            # Update evolution system with game results
+            if self.evolution_manager:
+                try:
+                    current_algorithm = await self.evolution_manager.get_current_algorithm()
+                    if current_algorithm:
+                        # Add algorithm information to results
+                        results['algorithm_id'] = current_algorithm.algorithm_id
+                        results['algorithm_generation'] = current_algorithm.generation
+
+                        # Update algorithm performance in evolution system
+                        await self.evolution_manager.update_algorithm_performance(
+                            current_algorithm.algorithm_id, results
+                        )
+
+                        logger.debug(f"Updated evolution system with game result for {current_algorithm.algorithm_id}")
+
+                except Exception as e:
+                    logger.error(f"Failed to update evolution system: {e}")
+
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, Actions: {action_count}")
             return results
 
@@ -140,6 +210,28 @@ class GameplayEngine:
             Action to take
         """
         strategy = self.game_config.get('strategy', 'balanced')
+
+        # If using evolved strategy, set the current algorithm in ActionHandler
+        if strategy == 'evolved' and self.evolution_manager:
+            try:
+                current_algorithm = await self.evolution_manager.get_current_algorithm()
+                if current_algorithm:
+                    self.action_handler.set_evolved_algorithm(current_algorithm)
+
+                    # Update game context
+                    if self.game_context:
+                        self.game_context.current_score = game_state.score
+                        self.game_context.available_actions = game_state.available_actions
+                        self.action_handler.update_algorithm_context(game_state)
+
+                else:
+                    logger.warning("No current algorithm available, falling back to balanced strategy")
+                    strategy = 'balanced'
+
+            except Exception as e:
+                logger.error(f"Error setting evolved algorithm: {e}")
+                strategy = 'balanced'
+
         return await self.action_handler.smart_action_selection(game_state, strategy)
 
     async def _execute_action(self, action: str, game_state: GameState) -> GameState:
@@ -298,8 +390,59 @@ class GameplayEngine:
 
         return stats
 
+    def get_evolution_status(self) -> Dict[str, Any]:
+        """Get evolution system status and metrics.
+
+        Returns:
+            Evolution system status or None if not available
+        """
+        if self.evolution_manager:
+            try:
+                status = self.evolution_manager.get_system_status()
+                status['evolution_enabled'] = True
+                status['strategy'] = self.game_config.get('strategy', 'unknown')
+                return status
+            except Exception as e:
+                logger.error(f"Error getting evolution status: {e}")
+                return {'evolution_enabled': False, 'error': str(e)}
+        else:
+            return {'evolution_enabled': False, 'reason': 'Evolution system not initialized'}
+
+    async def force_evolution(self) -> Dict[str, Any]:
+        """Force evolution to occur immediately.
+
+        Returns:
+            Evolution results
+        """
+        if self.evolution_manager:
+            try:
+                return await self.evolution_manager.evolve_population()
+            except Exception as e:
+                logger.error(f"Error forcing evolution: {e}")
+                return {'error': str(e)}
+        else:
+            return {'error': 'Evolution system not available'}
+
+    def get_algorithm_recommendations(self) -> List[Dict[str, Any]]:
+        """Get algorithm recommendations from evolution system.
+
+        Returns:
+            List of algorithm recommendations
+        """
+        if self.evolution_manager:
+            try:
+                return self.evolution_manager.get_algorithm_recommendations()
+            except Exception as e:
+                logger.error(f"Error getting algorithm recommendations: {e}")
+                return []
+        else:
+            return []
+
     async def __aenter__(self):
         """Async context manager entry."""
+        # Initialize evolution system if available
+        if self.evolution_manager:
+            await self.initialize_evolution_system()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

@@ -180,3 +180,134 @@ SELECT
 FROM action_effectiveness
 GROUP BY action_number
 ORDER BY avg_success_rate DESC;
+
+-- ============================================================================
+-- ALGORITHMIC EVOLUTION SYSTEM TABLES
+-- ============================================================================
+
+-- Algorithm Population Storage
+CREATE TABLE IF NOT EXISTS algorithm_population (
+    algorithm_id TEXT PRIMARY KEY,
+    algorithm_type TEXT NOT NULL, -- 'GP', 'VAE_generated', 'hybrid'
+    algorithm_data TEXT NOT NULL, -- JSON serialized AST/DAG
+    generation INTEGER DEFAULT 0,
+    parent_ids TEXT, -- JSON array of parent algorithm IDs
+    fitness_score REAL DEFAULT 0.0,
+    games_evaluated INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_evaluated TIMESTAMP
+);
+
+-- Algorithm Performance Tracking
+CREATE TABLE IF NOT EXISTS algorithm_performance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    algorithm_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    final_score REAL NOT NULL,
+    actions_taken INTEGER NOT NULL,
+    win_detected BOOLEAN DEFAULT FALSE,
+    evaluation_context TEXT, -- JSON metadata
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (algorithm_id) REFERENCES algorithm_population(algorithm_id),
+    FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
+);
+
+-- VAE Model States
+CREATE TABLE IF NOT EXISTS vae_models (
+    model_id TEXT PRIMARY KEY,
+    model_state BLOB, -- Serialized model weights
+    latent_dimensions INTEGER NOT NULL,
+    training_epoch INTEGER DEFAULT 0,
+    validation_loss REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Multi-Armed Bandit Arms
+CREATE TABLE IF NOT EXISTS mab_arms (
+    arm_id TEXT PRIMARY KEY,
+    algorithm_id TEXT NOT NULL,
+    total_pulls INTEGER DEFAULT 0,
+    total_reward REAL DEFAULT 0.0,
+    avg_reward REAL DEFAULT 0.0,
+    confidence_interval REAL DEFAULT 1.0,
+    last_pulled TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (algorithm_id) REFERENCES algorithm_population(algorithm_id)
+);
+
+-- Evolution History Tracking
+CREATE TABLE IF NOT EXISTS evolution_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    generation INTEGER NOT NULL,
+    population_size INTEGER NOT NULL,
+    best_fitness REAL NOT NULL,
+    avg_fitness REAL NOT NULL,
+    diversity_metric REAL,
+    operations_performed TEXT, -- JSON array of GP operations
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================================
+-- EVOLUTION SYSTEM INDEXES
+-- ============================================================================
+
+-- Algorithm population indexes
+CREATE INDEX IF NOT EXISTS idx_algorithm_population_type ON algorithm_population(algorithm_type);
+CREATE INDEX IF NOT EXISTS idx_algorithm_population_generation ON algorithm_population(generation);
+CREATE INDEX IF NOT EXISTS idx_algorithm_population_fitness ON algorithm_population(fitness_score);
+CREATE INDEX IF NOT EXISTS idx_algorithm_population_evaluated ON algorithm_population(last_evaluated);
+
+-- Algorithm performance indexes
+CREATE INDEX IF NOT EXISTS idx_algorithm_performance_algorithm_id ON algorithm_performance(algorithm_id);
+CREATE INDEX IF NOT EXISTS idx_algorithm_performance_game_id ON algorithm_performance(game_id);
+CREATE INDEX IF NOT EXISTS idx_algorithm_performance_session_id ON algorithm_performance(session_id);
+CREATE INDEX IF NOT EXISTS idx_algorithm_performance_timestamp ON algorithm_performance(timestamp);
+
+-- VAE models indexes
+CREATE INDEX IF NOT EXISTS idx_vae_models_epoch ON vae_models(training_epoch);
+CREATE INDEX IF NOT EXISTS idx_vae_models_created ON vae_models(created_at);
+
+-- MAB arms indexes
+CREATE INDEX IF NOT EXISTS idx_mab_arms_algorithm_id ON mab_arms(algorithm_id);
+CREATE INDEX IF NOT EXISTS idx_mab_arms_avg_reward ON mab_arms(avg_reward);
+CREATE INDEX IF NOT EXISTS idx_mab_arms_last_pulled ON mab_arms(last_pulled);
+
+-- Evolution history indexes
+CREATE INDEX IF NOT EXISTS idx_evolution_history_generation ON evolution_history(generation);
+CREATE INDEX IF NOT EXISTS idx_evolution_history_timestamp ON evolution_history(timestamp);
+
+-- ============================================================================
+-- EVOLUTION SYSTEM VIEWS
+-- ============================================================================
+
+-- Top performing algorithms view
+CREATE VIEW IF NOT EXISTS top_algorithms AS
+SELECT
+    ap.algorithm_id,
+    ap.algorithm_type,
+    ap.generation,
+    ap.fitness_score,
+    ap.games_evaluated,
+    COUNT(perf.id) as total_evaluations,
+    AVG(perf.final_score) as avg_score,
+    SUM(CASE WHEN perf.win_detected THEN 1 ELSE 0 END) as wins,
+    (SUM(CASE WHEN perf.win_detected THEN 1 ELSE 0 END) * 1.0 / COUNT(perf.id)) as win_rate
+FROM algorithm_population ap
+LEFT JOIN algorithm_performance perf ON ap.algorithm_id = perf.algorithm_id
+GROUP BY ap.algorithm_id
+HAVING COUNT(perf.id) >= 5  -- Only algorithms with sufficient evaluations
+ORDER BY ap.fitness_score DESC, win_rate DESC;
+
+-- Recent evolution progress view
+CREATE VIEW IF NOT EXISTS evolution_progress AS
+SELECT
+    generation,
+    population_size,
+    best_fitness,
+    avg_fitness,
+    diversity_metric,
+    timestamp
+FROM evolution_history
+WHERE timestamp >= datetime('now', '-30 days')
+ORDER BY generation DESC;

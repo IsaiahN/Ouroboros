@@ -513,3 +513,299 @@ class DatabaseInterface:
             stats['games_last_24h'] = cursor.fetchone()[0]
 
             return stats
+
+    # ========================================================================
+    # ALGORITHMIC EVOLUTION SYSTEM METHODS
+    # ========================================================================
+
+    def save_algorithm(self, algorithm_id: str, algorithm_type: str,
+                      algorithm_data: str, generation: int = 0,
+                      parent_ids: List[str] = None, fitness_score: float = 0.0):
+        """Save an algorithm to the population.
+
+        Args:
+            algorithm_id: Unique algorithm identifier
+            algorithm_type: Type of algorithm ('GP', 'VAE_generated', 'hybrid')
+            algorithm_data: JSON serialized algorithm representation
+            generation: Generation number
+            parent_ids: List of parent algorithm IDs
+            fitness_score: Current fitness score
+        """
+        import json
+
+        parent_ids_json = json.dumps(parent_ids) if parent_ids else None
+
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO algorithm_population (
+                    algorithm_id, algorithm_type, algorithm_data, generation,
+                    parent_ids, fitness_score, games_evaluated, last_evaluated
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+            """, (algorithm_id, algorithm_type, algorithm_data, generation,
+                 parent_ids_json, fitness_score, datetime.now()))
+            conn.commit()
+
+    def get_algorithms(self, algorithm_type: str = None, generation: int = None,
+                      limit: int = None, min_fitness: float = None) -> List[Dict[str, Any]]:
+        """Retrieve algorithms from population.
+
+        Args:
+            algorithm_type: Filter by algorithm type
+            generation: Filter by generation
+            limit: Maximum number of algorithms to return
+            min_fitness: Minimum fitness score filter
+
+        Returns:
+            List of algorithm dictionaries
+        """
+        import json
+
+        query = "SELECT * FROM algorithm_population WHERE 1=1"
+        params = []
+
+        if algorithm_type:
+            query += " AND algorithm_type = ?"
+            params.append(algorithm_type)
+
+        if generation is not None:
+            query += " AND generation = ?"
+            params.append(generation)
+
+        if min_fitness is not None:
+            query += " AND fitness_score >= ?"
+            params.append(min_fitness)
+
+        query += " ORDER BY fitness_score DESC"
+
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(query, params)
+            results = []
+            for row in cursor.fetchall():
+                algorithm = dict(row)
+                if algorithm['parent_ids']:
+                    algorithm['parent_ids'] = json.loads(algorithm['parent_ids'])
+                results.append(algorithm)
+            return results
+
+    def update_algorithm_fitness(self, algorithm_id: str, fitness_score: float):
+        """Update algorithm fitness score.
+
+        Args:
+            algorithm_id: Algorithm identifier
+            fitness_score: New fitness score
+        """
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE algorithm_population
+                SET fitness_score = ?, last_evaluated = ?, games_evaluated = games_evaluated + 1
+                WHERE algorithm_id = ?
+            """, (fitness_score, datetime.now(), algorithm_id))
+            conn.commit()
+
+    def save_algorithm_performance(self, algorithm_id: str, game_id: str,
+                                 session_id: str, final_score: float,
+                                 actions_taken: int, win_detected: bool,
+                                 evaluation_context: Dict[str, Any] = None):
+        """Save algorithm performance for a specific game.
+
+        Args:
+            algorithm_id: Algorithm identifier
+            game_id: Game identifier
+            session_id: Session identifier
+            final_score: Final game score
+            actions_taken: Number of actions taken
+            win_detected: Whether the game was won
+            evaluation_context: Additional evaluation metadata
+        """
+        import json
+
+        context_json = json.dumps(evaluation_context) if evaluation_context else None
+
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO algorithm_performance (
+                    algorithm_id, game_id, session_id, final_score,
+                    actions_taken, win_detected, evaluation_context
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (algorithm_id, game_id, session_id, final_score,
+                 actions_taken, win_detected, context_json))
+            conn.commit()
+
+    def get_algorithm_performance(self, algorithm_id: str = None,
+                                game_id: str = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get algorithm performance data.
+
+        Args:
+            algorithm_id: Filter by algorithm ID
+            game_id: Filter by game ID
+            limit: Maximum number of records
+
+        Returns:
+            List of performance records
+        """
+        import json
+
+        query = "SELECT * FROM algorithm_performance WHERE 1=1"
+        params = []
+
+        if algorithm_id:
+            query += " AND algorithm_id = ?"
+            params.append(algorithm_id)
+
+        if game_id:
+            query += " AND game_id = ?"
+            params.append(game_id)
+
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(query, params)
+            results = []
+            for row in cursor.fetchall():
+                record = dict(row)
+                if record['evaluation_context']:
+                    record['evaluation_context'] = json.loads(record['evaluation_context'])
+                results.append(record)
+            return results
+
+    def save_mab_arm(self, arm_id: str, algorithm_id: str):
+        """Create a new MAB arm for an algorithm.
+
+        Args:
+            arm_id: Unique arm identifier
+            algorithm_id: Associated algorithm identifier
+        """
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO mab_arms (
+                    arm_id, algorithm_id, total_pulls, total_reward,
+                    avg_reward, confidence_interval
+                ) VALUES (?, ?, 0, 0.0, 0.0, 1.0)
+            """, (arm_id, algorithm_id))
+            conn.commit()
+
+    def update_mab_arm(self, arm_id: str, reward: float):
+        """Update MAB arm with new reward observation.
+
+        Args:
+            arm_id: Arm identifier
+            reward: Reward value from this pull
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT total_pulls, total_reward FROM mab_arms WHERE arm_id = ?
+            """, (arm_id,))
+
+            row = cursor.fetchone()
+            if row:
+                total_pulls = row[0] + 1
+                total_reward = row[1] + reward
+                avg_reward = total_reward / total_pulls
+
+                # Calculate UCB confidence interval (simplified)
+                import math
+                confidence_interval = math.sqrt(2 * math.log(total_pulls + 1) / total_pulls)
+
+                conn.execute("""
+                    UPDATE mab_arms
+                    SET total_pulls = ?, total_reward = ?, avg_reward = ?,
+                        confidence_interval = ?, last_pulled = ?
+                    WHERE arm_id = ?
+                """, (total_pulls, total_reward, avg_reward, confidence_interval,
+                     datetime.now(), arm_id))
+                conn.commit()
+
+    def get_mab_arms(self, algorithm_id: str = None) -> List[Dict[str, Any]]:
+        """Get MAB arms data.
+
+        Args:
+            algorithm_id: Filter by algorithm ID
+
+        Returns:
+            List of MAB arm records
+        """
+        query = "SELECT * FROM mab_arms"
+        params = []
+
+        if algorithm_id:
+            query += " WHERE algorithm_id = ?"
+            params.append(algorithm_id)
+
+        query += " ORDER BY avg_reward DESC"
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def save_evolution_history(self, generation: int, population_size: int,
+                             best_fitness: float, avg_fitness: float,
+                             diversity_metric: float = None,
+                             operations_performed: List[str] = None):
+        """Save evolution history record.
+
+        Args:
+            generation: Generation number
+            population_size: Size of population
+            best_fitness: Best fitness in generation
+            avg_fitness: Average fitness in generation
+            diversity_metric: Population diversity measure
+            operations_performed: List of GP operations performed
+        """
+        import json
+
+        operations_json = json.dumps(operations_performed) if operations_performed else None
+
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO evolution_history (
+                    generation, population_size, best_fitness, avg_fitness,
+                    diversity_metric, operations_performed
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (generation, population_size, best_fitness, avg_fitness,
+                 diversity_metric, operations_json))
+            conn.commit()
+
+    def get_evolution_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get evolution history.
+
+        Args:
+            limit: Maximum number of records
+
+        Returns:
+            List of evolution history records
+        """
+        import json
+
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM evolution_history
+                ORDER BY generation DESC LIMIT ?
+            """, (limit,))
+
+            results = []
+            for row in cursor.fetchall():
+                record = dict(row)
+                if record['operations_performed']:
+                    record['operations_performed'] = json.loads(record['operations_performed'])
+                results.append(record)
+            return results
+
+    def get_top_algorithms(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get top performing algorithms using the database view.
+
+        Args:
+            limit: Maximum number of algorithms
+
+        Returns:
+            List of top algorithm records
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM top_algorithms LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
