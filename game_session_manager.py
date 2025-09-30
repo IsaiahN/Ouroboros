@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class GameSessionManager:
     """Manages game sessions and handles graceful shutdown."""
 
-    def __init__(self, api_key: str = None, db_path: str = "core_game_mechanics.db"):
+    def __init__(self, api_key: str = None, db_path: str = "core_data.db"):
         """Initialize the session manager.
 
         Args:

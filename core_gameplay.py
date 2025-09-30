@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class GameplayEngine:
     """Core engine for playing ARC games."""
 
-    def __init__(self, api_key: str = None, db_path: str = "core_game_mechanics.db"):
+    def __init__(self, api_key: str = None, db_path: str = "core_data.db"):
         """Initialize gameplay engine.
 
         Args:

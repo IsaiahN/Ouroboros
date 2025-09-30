@@ -94,6 +94,23 @@ CREATE TABLE IF NOT EXISTS global_counters (
     description TEXT
 );
 
+-- System logs table for all application logging
+CREATE TABLE IF NOT EXISTS system_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    level TEXT NOT NULL,
+    logger_name TEXT NOT NULL,
+    message TEXT NOT NULL,
+    module TEXT,
+    function_name TEXT,
+    line_number INTEGER,
+    session_id TEXT,
+    game_id TEXT,
+    process_id INTEGER,
+    thread_id INTEGER,
+    extra_data TEXT -- JSON for additional context
+);
+
 -- ============================================================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================================================
@@ -122,6 +139,13 @@ CREATE INDEX IF NOT EXISTS idx_action_effectiveness_success_rate ON action_effec
 CREATE INDEX IF NOT EXISTS idx_score_history_session_id ON score_history(session_id);
 CREATE INDEX IF NOT EXISTS idx_score_history_game_id ON score_history(game_id);
 CREATE INDEX IF NOT EXISTS idx_score_history_timestamp ON score_history(timestamp);
+
+-- System logs indexes
+CREATE INDEX IF NOT EXISTS idx_system_logs_timestamp ON system_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs(level);
+CREATE INDEX IF NOT EXISTS idx_system_logs_logger_name ON system_logs(logger_name);
+CREATE INDEX IF NOT EXISTS idx_system_logs_session_id ON system_logs(session_id);
+CREATE INDEX IF NOT EXISTS idx_system_logs_game_id ON system_logs(game_id);
 
 -- ============================================================================
 -- VIEWS FOR COMMON QUERIES

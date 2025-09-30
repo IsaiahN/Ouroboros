@@ -14,11 +14,19 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, fall back to system environment variables
+    pass
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # API Configuration
-DEFAULT_BASE_URL = "https://arc-agi3-production.up.railway.app"
+DEFAULT_BASE_URL = os.getenv('ARC_BASE_URL', "https://arc-agi3-production.up.railway.app")
 GAMES_ENDPOINT = f"{DEFAULT_BASE_URL}/games"
 SCORECARD_OPEN_ENDPOINT = f"{DEFAULT_BASE_URL}/scorecard/open"
 SCORECARD_CLOSE_ENDPOINT = f"{DEFAULT_BASE_URL}/scorecard/close"
@@ -254,8 +262,38 @@ class ARCClient:
         """Generate tags for scorecard identification."""
         import threading
         import platform
+        import subprocess
 
-        tags = ["core_game_mechanics"]
+        tags = ["BitterLesson"]
+
+        # Add Git information
+        git_available = False
+        try:
+            # Get current git branch
+            branch_result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=5
+            )
+            if branch_result.returncode == 0:
+                branch_name = branch_result.stdout.strip()
+                tags.append(f"branch_{branch_name}")
+                git_available = True
+
+            # Get last commit ID (short hash)
+            commit_result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=5
+            )
+            if commit_result.returncode == 0:
+                commit_id = commit_result.stdout.strip()
+                tags.append(f"commit_{commit_id}")
+                git_available = True
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            # Git not available or not a git repository
+            pass
+
+        if not git_available:
+            tags.append("git_unavailable")
 
         # Add Process ID
         pid = os.getpid()

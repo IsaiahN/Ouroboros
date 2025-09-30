@@ -13,24 +13,27 @@ import os
 from typing import Optional
 import json
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, fall back to system environment variables
+    pass
+
 from .core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
 from .database_interface import DatabaseInterface
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('core_game_mechanics.log')
-    ]
-)
+# Configure database logging
+from database_logger import setup_database_logging
 
+# Set up database logging instead of file logging
+db_handler = setup_database_logging()
 logger = logging.getLogger(__name__)
 
 
 async def run_single_game(game_id: str, api_key: str, strategy: str = "balanced",
-                         db_path: str = "core_game_mechanics.db") -> dict:
+                         db_path: str = None) -> dict:
     """Run a single game.
 
     Args:
@@ -42,6 +45,9 @@ async def run_single_game(game_id: str, api_key: str, strategy: str = "balanced"
     Returns:
         Game results
     """
+    if db_path is None:
+        db_path = os.getenv('DATABASE_PATH', 'core_data.db')
+
     async with GameplayEngine(api_key, db_path) as engine:
         engine.configure(strategy=strategy)
 
@@ -60,7 +66,7 @@ async def run_single_game(game_id: str, api_key: str, strategy: str = "balanced"
 
 async def run_session(max_games: Optional[int] = None, api_key: str = None,
                      strategy: str = "balanced", mode: str = "gameplay",
-                     db_path: str = "core_game_mechanics.db") -> dict:
+                     db_path: str = "core_data.db") -> dict:
     """Run a gaming session.
 
     Args:
@@ -79,7 +85,7 @@ async def run_session(max_games: Optional[int] = None, api_key: str = None,
         return result
 
 
-def show_stats(db_path: str = "core_game_mechanics.db", session_id: str = None):
+def show_stats(db_path: str = "core_data.db", session_id: str = None):
     """Show performance statistics.
 
     Args:
@@ -160,7 +166,7 @@ def main():
     play_parser.add_argument('--api-key', help='ARC API key (or set ARC_API_KEY env var)')
     play_parser.add_argument('--strategy', choices=['balanced', 'random', 'conservative', 'exploration'],
                            default='balanced', help='Strategy to use')
-    play_parser.add_argument('--db-path', default='core_game_mechanics.db',
+    play_parser.add_argument('--db-path', default='core_data.db',
                            help='Database file path')
 
     # Run session
@@ -170,12 +176,12 @@ def main():
     session_parser.add_argument('--strategy', choices=['balanced', 'random', 'conservative', 'exploration'],
                               default='balanced', help='Strategy to use')
     session_parser.add_argument('--mode', default='gameplay', help='Session mode')
-    session_parser.add_argument('--db-path', default='core_game_mechanics.db',
+    session_parser.add_argument('--db-path', default='core_data.db',
                               help='Database file path')
 
     # Show stats
     stats_parser = subparsers.add_parser('stats', help='Show performance statistics')
-    stats_parser.add_argument('--db-path', default='core_game_mechanics.db',
+    stats_parser.add_argument('--db-path', default='core_data.db',
                             help='Database file path')
     stats_parser.add_argument('--session-id', help='Filter by session ID')
 
