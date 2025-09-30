@@ -262,8 +262,38 @@ class ARCClient:
         """Generate tags for scorecard identification."""
         import threading
         import platform
+        import subprocess
 
-        tags = ["core_game_mechanics"]
+        tags = ["BitterLesson"]
+
+        # Add Git information
+        git_available = False
+        try:
+            # Get current git branch
+            branch_result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=5
+            )
+            if branch_result.returncode == 0:
+                branch_name = branch_result.stdout.strip()
+                tags.append(f"branch_{branch_name}")
+                git_available = True
+
+            # Get last commit ID (short hash)
+            commit_result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True, text=True, timeout=5
+            )
+            if commit_result.returncode == 0:
+                commit_id = commit_result.stdout.strip()
+                tags.append(f"commit_{commit_id}")
+                git_available = True
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            # Git not available or not a git repository
+            pass
+
+        if not git_available:
+            tags.append("git_unavailable")
 
         # Add Process ID
         pid = os.getpid()

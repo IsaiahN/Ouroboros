@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import threading
 import uuid
+import shutil
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 class DatabaseInterface:
     """Core database interface for game mechanics."""
 
-    def __init__(self, db_path: str = "core_game_mechanics.db"):
+    def __init__(self, db_path: str = "core_data.db"):
         """Initialize database interface.
 
         Args:
@@ -29,7 +31,7 @@ class DatabaseInterface:
         """
         self.db_path = db_path
         self._local = threading.local()
-        self._ensure_database_exists()
+        self._initialize_database_from_template()
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
@@ -44,9 +46,20 @@ class DatabaseInterface:
             self._local.connection.execute("PRAGMA journal_mode=WAL")
         return self._local.connection
 
-    def _ensure_database_exists(self):
-        """Ensure database exists and is initialized with schema."""
+    def _initialize_database_from_template(self):
+        """Initialize database from schema if it doesn't exist."""
+        if not os.path.exists(self.db_path):
+            # Create database from schema file
+            self._create_database_from_schema()
+        else:
+            logger.debug(f"Database already exists: {self.db_path}")
+
+    def _create_database_from_schema(self):
+        """Create database using the schema file."""
         schema_path = Path(__file__).parent / "core_database_schema.sql"
+
+        if not os.path.exists(schema_path):
+            raise FileNotFoundError(f"Database schema file not found: {schema_path}")
 
         with self._get_connection() as conn:
             # Read and execute schema
@@ -55,7 +68,11 @@ class DatabaseInterface:
             conn.executescript(schema)
             conn.commit()
 
-        logger.info(f"Database initialized at: {self.db_path}")
+        logger.info(f"Database initialized from schema: {self.db_path}")
+
+    def _ensure_database_exists(self):
+        """Ensure database exists with schema (maintained for backward compatibility)."""
+        self._create_database_from_schema()
 
     def close(self):
         """Close database connections."""

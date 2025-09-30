@@ -15,9 +15,10 @@ A clean, modular implementation of essential ARC-AGI-3 game functionality. This 
 
 ### ARCClient
 - Connect to ARC-AGI-3 API
-- Manage scorecards and game state
+- Manage scorecards and game state with automatic tagging
 - Send actions with retry logic and error handling
 - Handle authentication and rate limiting
+- Generate automatic tags including "BitterLesson", git branch, and commit ID
 
 ### GameSessionManager
 - Manage session lifecycle (start/shutdown)
@@ -93,11 +94,10 @@ cp .env.example .env
 ARC_API_KEY=your_actual_api_key_here
 
 # Optional: Database Configuration
-DATABASE_PATH=core_game_mechanics.db
+DATABASE_PATH=core_data.db
 
 # Optional: Logging Configuration
 LOG_LEVEL=INFO
-LOG_FILE=core_game_mechanics.log
 
 # Optional: API Configuration
 ARC_BASE_URL=https://arc-agi3-production.up.railway.app
@@ -204,6 +204,38 @@ engine.configure(
 )
 ```
 
+## Scorecard Tagging
+
+### Automatic Tag Generation
+
+The ARCClient automatically generates identifying tags for each scorecard created with the ARC-AGI-3 API:
+
+**Core Tags:**
+- `core_game_mechanics` - Identifies this module
+- `BitterLesson` - Project identifier
+
+**Git Information** (when available):
+- `branch_{branch_name}` - Current git branch (e.g., `branch_v1.0.1`)
+- `commit_{short_hash}` - Short commit hash (e.g., `commit_2506d85`)
+- `git_unavailable` - Fallback when git is not available
+
+**Runtime Information:**
+- `pid_{process_id}` - Process identifier
+- `thread_{thread_id}` - Thread identifier
+- `session_{session_id}` - Session identifier (first 8 characters)
+- `game_{game_id}` - Game identifier
+- `ts_{timestamp}` - Timestamp (HHMMSS format)
+- `sys_{system}` - Operating system (windows, linux, darwin)
+
+**Example Tags:**
+```
+["core_game_mechanics", "BitterLesson", "branch_v1.0.1", "commit_2506d85",
+ "pid_12345", "thread_67890", "session_abc12345", "game_test_001",
+ "ts_143022", "sys_windows"]
+```
+
+This tagging system helps track and identify game sessions across different environments and git states.
+
 ## Python Configuration
 
 ### Disabling Python Bytecode Files
@@ -246,16 +278,39 @@ The module includes comprehensive error handling:
 - Database transaction safety
 - Graceful shutdown on interruption
 
-## Logging
+## Database Logging
 
-Comprehensive logging is built-in:
+All application logs are stored in the database instead of files for better organization and queryability:
 
 ```python
-import logging
-logging.basicConfig(level=logging.INFO)
+from database_logger import setup_database_logging
 
-# Logs are written to both console and 'core_game_mechanics.log'
+# Set up database logging (automatic in all modules)
+db_handler = setup_database_logging()
+
+# Logs are written to both console and database 'system_logs' table
+# Log level controlled by LOG_LEVEL environment variable
 ```
+
+### Viewing Logs
+
+```python
+from database_logger import get_recent_logs
+
+# Get recent logs from database
+logs = get_recent_logs(limit=50, level='INFO')
+
+# Filter by session or game
+session_logs = get_recent_logs(session_id='session_123')
+game_logs = get_recent_logs(game_id='game_456')
+```
+
+**Benefits of Database Logging:**
+- No log files cluttering the filesystem
+- Structured, queryable log data
+- Session and game context tracking
+- Automatic cleanup and organization
+- Enhanced searching and filtering
 
 ## File Structure
 
