@@ -14,11 +14,19 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, fall back to system environment variables
+    pass
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # API Configuration
-DEFAULT_BASE_URL = "https://arc-agi3-production.up.railway.app"
+DEFAULT_BASE_URL = os.getenv('ARC_BASE_URL', "https://arc-agi3-production.up.railway.app")
 GAMES_ENDPOINT = f"{DEFAULT_BASE_URL}/games"
 SCORECARD_OPEN_ENDPOINT = f"{DEFAULT_BASE_URL}/scorecard/open"
 SCORECARD_CLOSE_ENDPOINT = f"{DEFAULT_BASE_URL}/scorecard/close"

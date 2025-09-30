@@ -13,16 +13,27 @@ import os
 from typing import Optional
 import json
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, fall back to system environment variables
+    pass
+
 from .core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
 from .database_interface import DatabaseInterface
 
-# Configure logging
+# Configure logging using environment variables
+log_level = getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper())
+log_file = os.getenv('LOG_FILE', 'core_game_mechanics.log')
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('core_game_mechanics.log')
+        logging.FileHandler(log_file)
     ]
 )
 
@@ -30,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_single_game(game_id: str, api_key: str, strategy: str = "balanced",
-                         db_path: str = "core_game_mechanics.db") -> dict:
+                         db_path: str = None) -> dict:
     """Run a single game.
 
     Args:
@@ -42,6 +53,9 @@ async def run_single_game(game_id: str, api_key: str, strategy: str = "balanced"
     Returns:
         Game results
     """
+    if db_path is None:
+        db_path = os.getenv('DATABASE_PATH', 'core_game_mechanics.db')
+
     async with GameplayEngine(api_key, db_path) as engine:
         engine.configure(strategy=strategy)
 

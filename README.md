@@ -80,6 +80,35 @@ python -m CORE_GAME_MECHANICS.main_runner list --api-key YOUR_KEY
 
 ### Environment Setup
 
+#### Option 1: Using .env file (Recommended)
+
+1. Copy the example environment file:
+```bash
+cp .env.example .env
+```
+
+2. Edit `.env` and add your ARC-AGI-3 API key:
+```bash
+# ARC-AGI-3 API Configuration (REQUIRED)
+ARC_API_KEY=your_actual_api_key_here
+
+# Optional: Database Configuration
+DATABASE_PATH=core_game_mechanics.db
+
+# Optional: Logging Configuration
+LOG_LEVEL=INFO
+LOG_FILE=core_game_mechanics.log
+
+# Optional: API Configuration
+ARC_BASE_URL=https://arc-agi3-production.up.railway.app
+
+# Python Configuration
+# Disable Python bytecode (.pyc) file generation
+PYTHONDONTWRITEBYTECODE=1
+```
+
+#### Option 2: Using environment variables
+
 ```bash
 export ARC_API_KEY="your_arc_api_key_here"
 ```
@@ -175,6 +204,31 @@ engine.configure(
 )
 ```
 
+## Python Configuration
+
+### Disabling Python Bytecode Files
+
+The project is configured to disable Python bytecode (`.pyc`) file generation to keep the workspace clean:
+
+- **Environment Variable**: `PYTHONDONTWRITEBYTECODE=1` (set in `.env` file)
+- **Command Line**: Use `python -B` to run scripts with bytecode generation disabled
+- **Git**: `__pycache__/` directories are automatically ignored via `.gitignore`
+
+**Benefits:**
+- Cleaner project directory without `__pycache__` folders
+- Reduced file system clutter during development
+- Simplified version control (no bytecode files to track)
+
+**Alternative Methods:**
+```bash
+# Run with bytecode disabled
+python -B main_runner.py
+
+# Or set environment variable manually
+export PYTHONDONTWRITEBYTECODE=1
+python main_runner.py
+```
+
 ## Built-in Strategies
 
 - **balanced**: Uses action effectiveness data when available, falls back to random
@@ -224,13 +278,14 @@ CORE_GAME_MECHANICS/
 - Python 3.7+
 - aiohttp
 - sqlite3 (built-in)
+- python-dotenv (optional, for .env file support)
 - ARC-AGI-3 API key
 
 ## Installation
 
 1. Copy the `CORE_GAME_MECHANICS` folder to your project
-2. Install dependencies: `pip install aiohttp`
-3. Set your API key: `export ARC_API_KEY="your_key"`
+2. Install dependencies: `pip install aiohttp python-dotenv`
+3. Set up environment variables (see Environment Setup section above)
 4. Run examples: `python -m CORE_GAME_MECHANICS.example_usage`
 
 ## Examples

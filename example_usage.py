@@ -9,6 +9,14 @@ import os
 import logging
 from typing import Dict, Any
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv not installed, fall back to system environment variables
+    pass
+
 from . import GameplayEngine, ARCClient, GameSessionManager, ActionHandler
 from . import random_strategy, conservative_strategy, exploration_strategy
 
