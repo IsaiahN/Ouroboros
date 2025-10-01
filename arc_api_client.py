@@ -26,18 +26,18 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # API Configuration
-DEFAULT_BASE_URL = os.getenv('ARC_BASE_URL', "https://arc-agi3-production.up.railway.app")
-GAMES_ENDPOINT = f"{DEFAULT_BASE_URL}/games"
-SCORECARD_OPEN_ENDPOINT = f"{DEFAULT_BASE_URL}/scorecard/open"
-SCORECARD_CLOSE_ENDPOINT = f"{DEFAULT_BASE_URL}/scorecard/close"
-RESET_ENDPOINT = f"{DEFAULT_BASE_URL}/reset"
-ACTION1_ENDPOINT = f"{DEFAULT_BASE_URL}/action/1"
-ACTION2_ENDPOINT = f"{DEFAULT_BASE_URL}/action/2"
-ACTION3_ENDPOINT = f"{DEFAULT_BASE_URL}/action/3"
-ACTION4_ENDPOINT = f"{DEFAULT_BASE_URL}/action/4"
-ACTION5_ENDPOINT = f"{DEFAULT_BASE_URL}/action/5"
-ACTION6_ENDPOINT = f"{DEFAULT_BASE_URL}/action/6"
-ACTION7_ENDPOINT = f"{DEFAULT_BASE_URL}/action/7"
+DEFAULT_BASE_URL = os.getenv('ARC_BASE_URL', "https://three.arcprize.org")
+GAMES_ENDPOINT = f"{DEFAULT_BASE_URL}/api/games"
+SCORECARD_OPEN_ENDPOINT = f"{DEFAULT_BASE_URL}/api/scorecard/open"
+SCORECARD_CLOSE_ENDPOINT = f"{DEFAULT_BASE_URL}/api/scorecard/close"
+RESET_ENDPOINT = f"{DEFAULT_BASE_URL}/api/cmd/RESET"
+ACTION1_ENDPOINT = f"{DEFAULT_BASE_URL}/api/cmd/ACTION1"
+ACTION2_ENDPOINT = f"{DEFAULT_BASE_URL}/api/cmd/ACTION2"
+ACTION3_ENDPOINT = f"{DEFAULT_BASE_URL}/api/cmd/ACTION3"
+ACTION4_ENDPOINT = f"{DEFAULT_BASE_URL}/api/cmd/ACTION4"
+ACTION5_ENDPOINT = f"{DEFAULT_BASE_URL}/api/cmd/ACTION5"
+ACTION6_ENDPOINT = f"{DEFAULT_BASE_URL}/api/cmd/ACTION6"
+ACTION7_ENDPOINT = f"{DEFAULT_BASE_URL}/api/cmd/ACTION7"
 
 
 @dataclass
@@ -329,9 +329,14 @@ class ARCClient:
         Returns:
             Scorecard: The opened scorecard
         """
-        payload = {}
-        if tags:
-            payload["tags"] = tags
+        payload = {
+            "source_url": "https://github.com/BitterTruth-AI/arc-agi-player",
+            "tags": tags or ["BitterTruth-AI", "evolved-algorithms"],
+            "opaque": {
+                "model": "BitterTruth-AI-Evolution-System",
+                "temperature": 0.25
+            }
+        }
 
         response = await self._make_request("POST", SCORECARD_OPEN_ENDPOINT, json=payload)
 
