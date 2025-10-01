@@ -800,3 +800,494 @@ class EvolutionManager:
             })
 
         return recommendations
+
+    # ========================================================================
+    # SEEDED ALGORITHMS AND ROUTINES INTEGRATION
+    # ========================================================================
+
+    def initialize_seeded_algorithms(self) -> Dict[str, Any]:
+        """Initialize seeded algorithms from the builder.
+        
+        Returns:
+            Dictionary containing initialization results
+        """
+        try:
+            from seeded_algorithm_builders import SeededAlgorithmBuilder
+            from routine_manager import RoutineManager
+            
+            # Initialize routine manager
+            self.routine_manager = RoutineManager(self.db)
+            
+            builder = SeededAlgorithmBuilder()
+            seeded_count = 0
+            errors = []
+            
+            # Get all algorithm building methods from SeededAlgorithmBuilder
+            algorithm_methods = [method for method in dir(builder) 
+                               if method.startswith('create_') and callable(getattr(builder, method))]
+            
+            logger.info(f"Found {len(algorithm_methods)} seeded algorithm builders")
+            
+            for method_name in algorithm_methods:
+                try:
+                    # Get algorithm representation
+                    algorithm_method = getattr(builder, method_name)
+                    algorithm_repr = algorithm_method()
+                    
+                    if algorithm_repr:
+                        # Save to population
+                        algorithm_data = algorithm_repr.to_json()
+                        self.db.save_algorithm(
+                            algorithm_id=algorithm_repr.algorithm_id,
+                            algorithm_type="seeded",
+                            algorithm_data=algorithm_data,
+                            generation=0
+                        )
+                        
+                        # Save metadata
+                        original_name = algorithm_repr.name.replace('_', ' ').title()
+                        category = self._extract_category_from_method(method_name)
+                        adaptability_score = self._estimate_adaptability(algorithm_repr)
+                        complexity_level = self._estimate_complexity(algorithm_repr)
+                        
+                        self.db.save_seeded_algorithm_meta(
+                            algorithm_id=algorithm_repr.algorithm_id,
+                            original_name=original_name,
+                            category=category,
+                            adaptability_score=adaptability_score,
+                            complexity_level=complexity_level,
+                            adaptation_notes=f"Adapted from {original_name} algorithm"
+                        )
+                        
+                        # Add to active population if space available
+                        if len(self.active_population) < self.config.population_size:
+                            self.active_population.append(algorithm_repr)
+                        
+                        seeded_count += 1
+                        logger.debug(f"Seeded algorithm: {algorithm_repr.algorithm_id} ({original_name})")
+                        
+                except Exception as e:
+                    error_msg = f"Failed to create {method_name}: {e}"
+                    errors.append(error_msg)
+                    logger.warning(error_msg)
+            
+            result = {
+                'seeded_count': seeded_count,
+                'total_methods': len(algorithm_methods),
+                'errors': errors,
+                'population_size': len(self.active_population)
+            }
+            
+            logger.info(f"Seeded algorithm initialization complete: {seeded_count}/{len(algorithm_methods)} algorithms")
+            return result
+            
+        except ImportError as e:
+            error_msg = f"Failed to import seeded algorithm components: {e}"
+            logger.error(error_msg)
+            return {'error': error_msg, 'seeded_count': 0}
+        except Exception as e:
+            error_msg = f"Seeded algorithm initialization failed: {e}"
+            logger.error(error_msg)
+            return {'error': error_msg, 'seeded_count': 0}
+
+    def _extract_category_from_method(self, method_name: str) -> str:
+        """Extract algorithm category from method name."""
+        # Map method names to categories
+        category_mapping = {
+            'astar': 'Search & Optimization',
+            'dijkstra': 'Graph & Network Algorithms',
+            'bfs': 'Search & Optimization',
+            'dfs': 'Search & Optimization',
+            'hill_climbing': 'Search & Optimization',
+            'simulated_annealing': 'Search & Optimization',
+            'gradient_descent': 'Search & Optimization',
+            'decision_tree': 'Machine Learning',
+            'knn': 'Machine Learning',
+            'kmeans': 'Machine Learning',
+            'quick_sort': 'Sorting & Ordering',
+            'merge_sort': 'Sorting & Ordering',
+            'binary_search': 'Search & Optimization',
+            'pagerank': 'Graph & Network Algorithms',
+            'rsa': 'Cryptography & Hashing',
+            'bloom_filter': 'Cryptography & Hashing',
+        }
+        
+        method_lower = method_name.lower()
+        for key, category in category_mapping.items():
+            if key in method_lower:
+                return category
+        
+        return 'General Purpose'
+
+    def _estimate_adaptability(self, algorithm: 'AlgorithmRepresentation') -> float:
+        """Estimate how well an algorithm can adapt to game scenarios."""
+        # Simple heuristic based on algorithm structure
+        adaptability = 0.5  # Base score
+        
+        # Count decision points (increases adaptability)
+        if hasattr(algorithm, 'root_node'):
+            decision_count = self._count_decision_nodes(algorithm.root_node)
+            adaptability += min(decision_count * 0.1, 0.3)
+        
+        # Complexity penalty (very complex algorithms are harder to adapt)
+        complexity = len(str(algorithm)) / 1000.0  # Rough measure
+        adaptability -= min(complexity * 0.1, 0.2)
+        
+        return max(0.1, min(1.0, adaptability))
+
+    def _estimate_complexity(self, algorithm: 'AlgorithmRepresentation') -> str:
+        """Estimate algorithm complexity level."""
+        if hasattr(algorithm, 'root_node'):
+            node_count = self._count_total_nodes(algorithm.root_node)
+            if node_count < 5:
+                return 'simple'
+            elif node_count < 15:
+                return 'moderate'
+            else:
+                return 'complex'
+        return 'moderate'
+
+    def _count_decision_nodes(self, node) -> int:
+        """Count decision/conditional nodes in algorithm tree."""
+        count = 0
+        if hasattr(node, 'node_type') and 'condition' in node.node_type.lower():
+            count = 1
+        
+        if hasattr(node, 'children'):
+            for child in node.children:
+                count += self._count_decision_nodes(child)
+        
+        return count
+
+    def _count_total_nodes(self, node) -> int:
+        """Count total nodes in algorithm tree."""
+        count = 1
+        if hasattr(node, 'children'):
+            for child in node.children:
+                count += self._count_total_nodes(child)
+        return count
+
+    def get_routine_for_game(self, game_id: str) -> Optional['AlgorithmRoutine']:
+        """Get the best routine for a specific game.
+        
+        Args:
+            game_id: Game identifier
+            
+        Returns:
+            Best routine for the game type or None
+        """
+        if not hasattr(self, 'routine_manager'):
+            return None
+            
+        game_type = self.routine_manager.extract_game_type(game_id)
+        return self.routine_manager.get_best_routine_for_game_type(game_type)
+
+    def start_game_with_routine(self, game_id: str) -> Dict[str, Any]:
+        """Start a game with appropriate routine selection.
+        
+        Args:
+            game_id: Game identifier
+            
+        Returns:
+            Dictionary with routine and algorithm information
+        """
+        if not hasattr(self, 'routine_manager'):
+            return {'error': 'Routine manager not initialized'}
+            
+        try:
+            # Get best routine for game type
+            routine = self.get_routine_for_game(game_id)
+            
+            if not routine:
+                # Create default routine from available algorithms
+                game_type = self.routine_manager.extract_game_type(game_id)
+                available_algorithms = [algo.algorithm_id for algo in self.active_population[:4]]
+                
+                if available_algorithms:
+                    routine = self.routine_manager.create_default_routine(game_type, available_algorithms)
+                    self.routine_manager.save_routine(routine)
+                    logger.info(f"Created default routine for game type {game_type}")
+                else:
+                    return {'error': 'No algorithms available for routine creation'}
+            
+            # Start the routine
+            routine_state = self.routine_manager.start_routine(game_id, routine)
+            
+            # Get initial algorithm
+            current_algorithm_id = self.routine_manager.get_current_algorithm(game_id)
+            current_algorithm = self._find_algorithm_by_id(current_algorithm_id)
+            
+            return {
+                'routine': routine,
+                'current_algorithm': current_algorithm,
+                'routine_state': routine_state,
+                'game_type': routine.game_type
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to start game with routine: {e}")
+            return {'error': str(e)}
+
+    def _find_algorithm_by_id(self, algorithm_id: str) -> Optional['AlgorithmRepresentation']:
+        """Find algorithm in active population by ID."""
+        for algorithm in self.active_population:
+            if algorithm.algorithm_id == algorithm_id:
+                return algorithm
+        return None
+
+    def update_routine_context(self, game_id: str, current_score: float, 
+                             actions_taken: int) -> Optional['AlgorithmRepresentation']:
+        """Update routine context and check for algorithm switching.
+        
+        Args:
+            game_id: Game identifier
+            current_score: Current game score
+            actions_taken: Number of actions taken
+            
+        Returns:
+            New algorithm if switch occurred, None otherwise
+        """
+        if not hasattr(self, 'routine_manager'):
+            return None
+            
+        try:
+            # Check if we should switch algorithms
+            should_switch, reason = self.routine_manager.should_switch_algorithm(
+                game_id, current_score, actions_taken
+            )
+            
+            if should_switch:
+                # Switch to next algorithm in routine
+                new_algorithm_id = self.routine_manager.switch_to_next_algorithm(game_id)
+                logger.info(f"Switched algorithm for game {game_id}: {reason}")
+                
+                if new_algorithm_id:
+                    new_algorithm = self._find_algorithm_by_id(new_algorithm_id)
+                    if new_algorithm:
+                        self.current_algorithm = new_algorithm
+                        return new_algorithm
+                    else:
+                        logger.warning(f"Algorithm {new_algorithm_id} not found in active population")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to update routine context: {e}")
+            return None
+
+    def complete_game_with_routine(self, game_id: str, final_score: float,
+                                 actions_taken: int, levels_completed: int,
+                                 win_detected: bool) -> None:
+        """Complete a game and update routine performance.
+        
+        Args:
+            game_id: Game identifier
+            final_score: Final game score
+            actions_taken: Total actions taken
+            levels_completed: Number of levels completed
+            win_detected: Whether the game was won
+        """
+        if not hasattr(self, 'routine_manager'):
+            return
+            
+        try:
+            # Update routine performance
+            self.routine_manager.update_routine_performance(
+                game_id, final_score, actions_taken, levels_completed, win_detected
+            )
+            
+            # Update seeded algorithm performance if applicable
+            current_algorithm_id = self.routine_manager.get_current_algorithm(game_id)
+            if current_algorithm_id:
+                # Calculate performance score
+                performance_score = self._calculate_performance_score(
+                    final_score, actions_taken, levels_completed, win_detected
+                )
+                
+                self.db.update_seeded_algorithm_performance(
+                    current_algorithm_id, performance_score
+                )
+                
+                # Save game type performance
+                game_type = self.routine_manager.extract_game_type(game_id)
+                success_rate = 1.0 if win_detected else min(levels_completed / 10.0, 0.8)
+                
+                self.db.save_game_type_performance(
+                    game_type=game_type,
+                    algorithm_id=current_algorithm_id,
+                    levels_completed=levels_completed,
+                    total_actions=actions_taken,
+                    success_rate=success_rate
+                )
+            
+            logger.info(f"Completed game {game_id} with routine performance update")
+            
+        except Exception as e:
+            logger.error(f"Failed to complete game with routine: {e}")
+
+    def _calculate_performance_score(self, final_score: float, actions_taken: int,
+                                   levels_completed: int, win_detected: bool) -> float:
+        """Calculate normalized performance score for seeded algorithms."""
+        # Base score from win/completion
+        if win_detected:
+            base_score = 1.0
+        elif levels_completed > 0:
+            base_score = min(levels_completed / 10.0, 0.8)  # Max 0.8 for partial completion
+        else:
+            base_score = 0.1  # Minimum for attempting
+        
+        # Efficiency bonus (fewer actions = better)
+        if levels_completed > 0:
+            actions_per_level = actions_taken / levels_completed
+            efficiency_bonus = max(0, (50 - actions_per_level) / 50 * 0.2)  # Up to 0.2 bonus
+            base_score += efficiency_bonus
+        
+        # Score bonus (higher scores = better)
+        score_bonus = min(final_score / 1000.0, 0.1)  # Up to 0.1 bonus
+        base_score += score_bonus
+        
+        return max(0.0, min(1.0, base_score))
+
+    def create_hybrid_algorithm(self, parent_algorithms: List['AlgorithmRepresentation'],
+                              mutation_rate: float = 0.1) -> Optional['AlgorithmRepresentation']:
+        """Create a hybrid algorithm from multiple parents with proper inheritance naming.
+        
+        Args:
+            parent_algorithms: List of parent algorithms
+            mutation_rate: Rate of mutation for the hybrid
+            
+        Returns:
+            New hybrid algorithm with inheritance naming
+        """
+        if len(parent_algorithms) < 2:
+            return None
+            
+        try:
+            # Use genetic programming to create hybrid
+            hybrid = self.gp_engine.crossover(parent_algorithms[0], parent_algorithms[1])
+            
+            if mutation_rate > 0:
+                hybrid = self.gp_engine.mutate(hybrid, mutation_rate)
+            
+            # Create inheritance naming
+            parent_ids = [algo.algorithm_id for algo in parent_algorithms]
+            original_names = []
+            
+            # Get original names from seeded algorithm metadata
+            for parent_id in parent_ids:
+                try:
+                    seeded_algos = self.db.get_seeded_algorithms()
+                    for seeded in seeded_algos:
+                        if seeded['algorithm_id'] == parent_id:
+                            original_names.append(seeded['original_name'].replace(' ', ''))
+                            break
+                    else:
+                        # Fallback to algorithm ID
+                        original_names.append(parent_id.split('_')[0])
+                except:
+                    original_names.append(parent_id.split('_')[0])
+            
+            # Create hybrid with inheritance naming
+            final_algorithm_id = self.db.create_algorithm_with_inheritance(
+                algorithm_id=hybrid.algorithm_id,
+                algorithm_type="hybrid",
+                algorithm_data=hybrid.to_json(),
+                parent_ids=parent_ids,
+                original_names=original_names
+            )
+            
+            # Update the algorithm ID
+            hybrid.algorithm_id = final_algorithm_id
+            
+            logger.info(f"Created hybrid algorithm: {final_algorithm_id} from parents: {parent_ids[:2]}")
+            return hybrid
+            
+        except Exception as e:
+            logger.error(f"Failed to create hybrid algorithm: {e}")
+            return None
+
+    def get_seeded_algorithm_recommendations(self, game_type: str = None,
+                                           category: str = None,
+                                           limit: int = 5) -> List[Dict[str, Any]]:
+        """Get recommended seeded algorithms based on performance.
+        
+        Args:
+            game_type: Filter by game type performance
+            category: Filter by algorithm category
+            limit: Maximum number of recommendations
+            
+        Returns:
+            List of algorithm recommendations
+        """
+        try:
+            recommendations = []
+            
+            # Get best seeded algorithms by category
+            if category:
+                seeded_algos = self.db.get_seeded_algorithms(category=category, limit=limit)
+            else:
+                seeded_algos = self.db.get_best_algorithms_by_category(limit=limit)
+            
+            for algo_data in seeded_algos:
+                recommendation = {
+                    'algorithm_id': algo_data['algorithm_id'],
+                    'original_name': algo_data['original_name'],
+                    'category': algo_data['category'],
+                    'adaptability_score': algo_data['adaptability_score'],
+                    'avg_performance': algo_data['avg_performance'],
+                    'fitness_score': algo_data['fitness_score'],
+                    'games_evaluated': algo_data['games_evaluated']
+                }
+                
+                # Add game type specific performance if available
+                if game_type:
+                    game_performance = self.db.get_game_type_performance(
+                        game_type=game_type,
+                        algorithm_id=algo_data['algorithm_id'],
+                        limit=1
+                    )
+                    if game_performance:
+                        recommendation['game_type_performance'] = game_performance[0]
+                
+                recommendations.append(recommendation)
+            
+            return recommendations[:limit]
+            
+        except Exception as e:
+            logger.error(f"Failed to get seeded algorithm recommendations: {e}")
+            return []
+
+    def get_seeded_system_status(self) -> Dict[str, Any]:
+        """Get comprehensive status of the seeded algorithm system.
+        
+        Returns:
+            Dictionary containing seeded system statistics
+        """
+        try:
+            status = {}
+            
+            # Get seeded algorithm statistics
+            status['seeded_algorithms'] = self.db.get_seeded_algorithm_stats()
+            
+            # Get routine manager status
+            if hasattr(self, 'routine_manager'):
+                status['routines'] = self.routine_manager.get_system_status()
+            else:
+                status['routines'] = {'error': 'Routine manager not initialized'}
+            
+            # Get algorithm inheritance information
+            total_algorithms = len(self.active_population)
+            hybrid_count = sum(1 for algo in self.active_population 
+                             if hasattr(algo, 'algorithm_type') and algo.algorithm_type == 'hybrid')
+            
+            status['population'] = {
+                'total_algorithms': total_algorithms,
+                'hybrid_algorithms': hybrid_count,
+                'seeded_algorithms': total_algorithms - hybrid_count
+            }
+            
+            return status
+            
+        except Exception as e:
+            logger.error(f"Failed to get seeded system status: {e}")
+            return {'error': str(e)}

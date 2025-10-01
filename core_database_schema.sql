@@ -311,3 +311,113 @@ SELECT
 FROM evolution_history
 WHERE timestamp >= datetime('now', '-30 days')
 ORDER BY generation DESC;
+
+-- ============================================================================
+-- SEEDED ALGORITHMS AND ROUTINES EXTENSION
+-- ============================================================================
+
+-- Add columns to existing algorithm_population table for seeded algorithms
+-- Note: These will be added via ALTER statements in database_interface.py for safety
+
+-- Algorithm routines for game-type specific sequences
+CREATE TABLE IF NOT EXISTS algorithm_routines (
+    routine_id TEXT PRIMARY KEY,
+    game_type TEXT NOT NULL, -- Extracted from game_id prefix (e.g., "vc33")
+    routine_name TEXT NOT NULL,
+    algorithm_sequence TEXT NOT NULL, -- JSON array of algorithm_ids in execution order
+    switch_conditions TEXT, -- JSON array of conditions for switching algorithms
+    success_rate REAL DEFAULT 0.0,
+    games_tested INTEGER DEFAULT 0,
+    levels_completed INTEGER DEFAULT 0,
+    avg_actions_per_level REAL DEFAULT 0.0,
+    last_used TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Seeded algorithm metadata for tracking adaptation quality
+CREATE TABLE IF NOT EXISTS seeded_algorithms_meta (
+    algorithm_id TEXT PRIMARY KEY,
+    original_name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    adaptability_score REAL DEFAULT 0.5, -- How well we expect it to adapt (0-1)
+    complexity_level TEXT DEFAULT 'moderate', -- 'simple', 'moderate', 'complex'
+    adaptation_notes TEXT,
+    games_tested INTEGER DEFAULT 0,
+    avg_performance REAL DEFAULT 0.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (algorithm_id) REFERENCES algorithm_population(algorithm_id)
+);
+
+-- Game type performance tracking
+CREATE TABLE IF NOT EXISTS game_type_performance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    algorithm_id TEXT,
+    routine_id TEXT,
+    levels_completed INTEGER DEFAULT 0,
+    total_actions INTEGER DEFAULT 0,
+    avg_actions_per_level REAL DEFAULT 0.0,
+    success_rate REAL DEFAULT 0.0,
+    games_played INTEGER DEFAULT 1,
+    last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (algorithm_id) REFERENCES algorithm_population(algorithm_id),
+    FOREIGN KEY (routine_id) REFERENCES algorithm_routines(routine_id)
+);
+
+-- ============================================================================
+-- SEEDED ALGORITHMS INDEXES
+-- ============================================================================
+
+-- Algorithm routines indexes
+CREATE INDEX IF NOT EXISTS idx_algorithm_routines_game_type ON algorithm_routines(game_type);
+CREATE INDEX IF NOT EXISTS idx_algorithm_routines_success_rate ON algorithm_routines(success_rate);
+CREATE INDEX IF NOT EXISTS idx_algorithm_routines_last_used ON algorithm_routines(last_used);
+
+-- Seeded algorithms meta indexes
+CREATE INDEX IF NOT EXISTS idx_seeded_algorithms_category ON seeded_algorithms_meta(category);
+CREATE INDEX IF NOT EXISTS idx_seeded_algorithms_adaptability ON seeded_algorithms_meta(adaptability_score);
+CREATE INDEX IF NOT EXISTS idx_seeded_algorithms_performance ON seeded_algorithms_meta(avg_performance);
+
+-- Game type performance indexes
+CREATE INDEX IF NOT EXISTS idx_game_type_performance_type ON game_type_performance(game_type);
+CREATE INDEX IF NOT EXISTS idx_game_type_performance_algorithm ON game_type_performance(algorithm_id);
+CREATE INDEX IF NOT EXISTS idx_game_type_performance_routine ON game_type_performance(routine_id);
+CREATE INDEX IF NOT EXISTS idx_game_type_performance_success ON game_type_performance(success_rate);
+
+-- ============================================================================
+-- SEEDED ALGORITHMS VIEWS
+-- ============================================================================
+
+-- Best performing algorithms by category
+CREATE VIEW IF NOT EXISTS top_seeded_algorithms AS
+SELECT
+    sam.algorithm_id,
+    sam.original_name,
+    sam.category,
+    sam.adaptability_score,
+    sam.avg_performance,
+    ap.fitness_score,
+    ap.generation,
+    COUNT(gtp.id) as games_tested_total
+FROM seeded_algorithms_meta sam
+JOIN algorithm_population ap ON sam.algorithm_id = ap.algorithm_id
+LEFT JOIN game_type_performance gtp ON sam.algorithm_id = gtp.algorithm_id
+GROUP BY sam.algorithm_id
+ORDER BY sam.avg_performance DESC, ap.fitness_score DESC;
+
+-- Best routines by game type
+CREATE VIEW IF NOT EXISTS top_game_routines AS
+SELECT
+    ar.game_type,
+    ar.routine_id,
+    ar.routine_name,
+    ar.success_rate,
+    ar.games_tested,
+    ar.levels_completed,
+    ar.avg_actions_per_level,
+    COUNT(gtp.id) as performance_records
+FROM algorithm_routines ar
+LEFT JOIN game_type_performance gtp ON ar.routine_id = gtp.routine_id
+GROUP BY ar.routine_id
+HAVING ar.games_tested >= 3  -- Only routines with sufficient testing
+ORDER BY ar.success_rate DESC, ar.avg_actions_per_level ASC;

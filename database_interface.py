@@ -809,3 +809,435 @@ class DatabaseInterface:
                 SELECT * FROM top_algorithms LIMIT ?
             """, (limit,))
             return [dict(row) for row in cursor.fetchall()]
+
+    # ========================================================================
+    # SEEDED ALGORITHMS AND ROUTINES METHODS
+    # ========================================================================
+
+    def save_seeded_algorithm_meta(self, algorithm_id: str, original_name: str,
+                                 category: str, adaptability_score: float = 0.5,
+                                 complexity_level: str = 'moderate',
+                                 adaptation_notes: str = None):
+        """Save seeded algorithm metadata.
+
+        Args:
+            algorithm_id: Algorithm identifier (must exist in algorithm_population)
+            original_name: Original algorithm name (e.g., "A* Search")
+            category: Algorithm category (e.g., "Search & Optimization")
+            adaptability_score: Expected adaptation quality (0-1)
+            complexity_level: Algorithm complexity ('simple', 'moderate', 'complex')
+            adaptation_notes: Notes about the adaptation process
+        """
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO seeded_algorithms_meta (
+                    algorithm_id, original_name, category, adaptability_score,
+                    complexity_level, adaptation_notes, games_tested, avg_performance
+                ) VALUES (?, ?, ?, ?, ?, ?, 0, 0.0)
+            """, (algorithm_id, original_name, category, adaptability_score,
+                 complexity_level, adaptation_notes))
+            conn.commit()
+
+        logger.info(f"Saved seeded algorithm metadata: {algorithm_id} ({original_name})")
+
+    def get_seeded_algorithms(self, category: str = None,
+                            min_adaptability: float = None,
+                            limit: int = None) -> List[Dict[str, Any]]:
+        """Get seeded algorithms with metadata.
+
+        Args:
+            category: Filter by category
+            min_adaptability: Minimum adaptability score
+            limit: Maximum number of results
+
+        Returns:
+            List of seeded algorithm records with metadata
+        """
+        query = """
+            SELECT sam.*, ap.algorithm_type, ap.generation, ap.fitness_score,
+                   ap.games_evaluated, ap.last_evaluated
+            FROM seeded_algorithms_meta sam
+            JOIN algorithm_population ap ON sam.algorithm_id = ap.algorithm_id
+            WHERE 1=1
+        """
+        params = []
+
+        if category:
+            query += " AND sam.category = ?"
+            params.append(category)
+
+        if min_adaptability is not None:
+            query += " AND sam.adaptability_score >= ?"
+            params.append(min_adaptability)
+
+        query += " ORDER BY sam.avg_performance DESC, ap.fitness_score DESC"
+
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def update_seeded_algorithm_performance(self, algorithm_id: str,
+                                          performance_score: float,
+                                          games_tested_increment: int = 1):
+        """Update seeded algorithm performance tracking.
+
+        Args:
+            algorithm_id: Algorithm identifier
+            performance_score: Latest performance score (0-1)
+            games_tested_increment: Number of games to add to count
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT games_tested, avg_performance
+                FROM seeded_algorithms_meta
+                WHERE algorithm_id = ?
+            """, (algorithm_id,))
+
+            row = cursor.fetchone()
+            if row:
+                current_games = row[0]
+                current_avg = row[1]
+
+                new_games = current_games + games_tested_increment
+                new_avg = ((current_avg * current_games) + performance_score) / new_games
+
+                conn.execute("""
+                    UPDATE seeded_algorithms_meta
+                    SET games_tested = ?, avg_performance = ?
+                    WHERE algorithm_id = ?
+                """, (new_games, new_avg, algorithm_id))
+                conn.commit()
+
+                logger.debug(f"Updated seeded algorithm {algorithm_id} performance: "
+                           f"{new_avg:.3f} (from {new_games} games)")
+
+    def save_algorithm_routine(self, routine_id: str, game_type: str,
+                             routine_name: str, algorithm_sequence: List[str],
+                             switch_conditions: List[Dict] = None,
+                             success_rate: float = 0.0, games_tested: int = 0,
+                             levels_completed: int = 0,
+                             avg_actions_per_level: float = 0.0):
+        """Save an algorithm routine for a specific game type.
+
+        Args:
+            routine_id: Unique routine identifier
+            game_type: Game type (extracted from game_id prefix)
+            routine_name: Human-readable routine name
+            algorithm_sequence: List of algorithm IDs in execution order
+            switch_conditions: List of condition dictionaries for algorithm switching
+            success_rate: Current success rate (0-1)
+            games_tested: Number of games tested with this routine
+            levels_completed: Total levels completed
+            avg_actions_per_level: Average actions required per level
+        """
+        import json
+
+        switch_conditions_json = json.dumps(switch_conditions) if switch_conditions else None
+        algorithm_sequence_json = json.dumps(algorithm_sequence)
+
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO algorithm_routines (
+                    routine_id, game_type, routine_name, algorithm_sequence,
+                    switch_conditions, success_rate, games_tested,
+                    levels_completed, avg_actions_per_level, last_used
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (routine_id, game_type, routine_name, algorithm_sequence_json,
+                 switch_conditions_json, success_rate, games_tested,
+                 levels_completed, avg_actions_per_level, datetime.now()))
+            conn.commit()
+
+        logger.info(f"Saved algorithm routine: {routine_id} for game type {game_type}")
+
+    def get_algorithm_routines(self, game_type: str = None,
+                             min_success_rate: float = None,
+                             limit: int = None) -> List[Dict[str, Any]]:
+        """Get algorithm routines.
+
+        Args:
+            game_type: Filter by game type
+            min_success_rate: Minimum success rate filter
+            limit: Maximum number of results
+
+        Returns:
+            List of algorithm routine records
+        """
+        import json
+
+        query = "SELECT * FROM algorithm_routines WHERE 1=1"
+        params = []
+
+        if game_type:
+            query += " AND game_type = ?"
+            params.append(game_type)
+
+        if min_success_rate is not None:
+            query += " AND success_rate >= ?"
+            params.append(min_success_rate)
+
+        query += " ORDER BY success_rate DESC, avg_actions_per_level ASC"
+
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(query, params)
+            results = []
+            for row in cursor.fetchall():
+                routine = dict(row)
+                # Parse JSON fields
+                routine['algorithm_sequence'] = json.loads(routine['algorithm_sequence'])
+                if routine['switch_conditions']:
+                    routine['switch_conditions'] = json.loads(routine['switch_conditions'])
+                results.append(routine)
+            return results
+
+    def update_routine_performance(self, routine_id: str, success_rate: float,
+                                 games_tested: int, levels_completed: int,
+                                 avg_actions_per_level: float):
+        """Update routine performance metrics.
+
+        Args:
+            routine_id: Routine identifier
+            success_rate: Updated success rate
+            games_tested: Total games tested
+            levels_completed: Total levels completed
+            avg_actions_per_level: Average actions per level
+        """
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE algorithm_routines
+                SET success_rate = ?, games_tested = ?, levels_completed = ?,
+                    avg_actions_per_level = ?, last_used = ?
+                WHERE routine_id = ?
+            """, (success_rate, games_tested, levels_completed,
+                 avg_actions_per_level, datetime.now(), routine_id))
+            conn.commit()
+
+        logger.debug(f"Updated routine {routine_id} performance: "
+                    f"success_rate={success_rate:.3f}, avg_actions={avg_actions_per_level:.1f}")
+
+    def save_game_type_performance(self, game_type: str, algorithm_id: str = None,
+                                 routine_id: str = None, levels_completed: int = 0,
+                                 total_actions: int = 0, success_rate: float = 0.0):
+        """Save game type performance record.
+
+        Args:
+            game_type: Game type identifier
+            algorithm_id: Algorithm used (optional)
+            routine_id: Routine used (optional)
+            levels_completed: Number of levels completed
+            total_actions: Total actions taken
+            success_rate: Success rate for this game
+        """
+        avg_actions_per_level = total_actions / max(levels_completed, 1)
+
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO game_type_performance (
+                    game_type, algorithm_id, routine_id, levels_completed,
+                    total_actions, avg_actions_per_level, success_rate, games_played
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            """, (game_type, algorithm_id, routine_id, levels_completed,
+                 total_actions, avg_actions_per_level, success_rate))
+            conn.commit()
+
+    def get_game_type_performance(self, game_type: str = None,
+                                algorithm_id: str = None,
+                                limit: int = 100) -> List[Dict[str, Any]]:
+        """Get game type performance data.
+
+        Args:
+            game_type: Filter by game type
+            algorithm_id: Filter by algorithm ID
+            limit: Maximum number of records
+
+        Returns:
+            List of game type performance records
+        """
+        query = "SELECT * FROM game_type_performance WHERE 1=1"
+        params = []
+
+        if game_type:
+            query += " AND game_type = ?"
+            params.append(game_type)
+
+        if algorithm_id:
+            query += " AND algorithm_id = ?"
+            params.append(algorithm_id)
+
+        query += " ORDER BY last_played DESC LIMIT ?"
+        params.append(limit)
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_best_algorithms_by_category(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get best performing algorithms grouped by category.
+
+        Args:
+            limit: Maximum algorithms per category
+
+        Returns:
+            List of top algorithm records by category
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM top_seeded_algorithms
+                ORDER BY category, avg_performance DESC, fitness_score DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_best_routines_by_game_type(self, limit: int = 3) -> List[Dict[str, Any]]:
+        """Get best performing routines by game type.
+
+        Args:
+            limit: Maximum routines per game type
+
+        Returns:
+            List of top routine records by game type
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM top_game_routines
+                ORDER BY game_type, success_rate DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_algorithm_inheritance_chain(self, algorithm_id: str) -> List[str]:
+        """Get the inheritance chain for an algorithm.
+
+        Args:
+            algorithm_id: Algorithm identifier
+
+        Returns:
+            List of ancestor algorithm IDs
+        """
+        import json
+
+        inheritance_chain = []
+        current_id = algorithm_id
+
+        # Prevent infinite loops
+        max_depth = 10
+        depth = 0
+
+        while current_id and depth < max_depth:
+            with self._get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT parent_ids FROM algorithm_population
+                    WHERE algorithm_id = ?
+                """, (current_id,))
+
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    break
+
+                parent_ids = json.loads(row[0])
+                if not parent_ids:
+                    break
+
+                inheritance_chain.extend(parent_ids)
+                # Follow the first parent for the main chain
+                current_id = parent_ids[0] if parent_ids else None
+                depth += 1
+
+        return inheritance_chain
+
+    def create_algorithm_with_inheritance(self, algorithm_id: str, algorithm_type: str,
+                                        algorithm_data: str, parent_ids: List[str],
+                                        original_names: List[str] = None) -> str:
+        """Create an algorithm with proper inheritance naming.
+
+        Args:
+            algorithm_id: Base algorithm identifier
+            algorithm_type: Type of algorithm
+            algorithm_data: JSON serialized algorithm representation
+            parent_ids: List of parent algorithm IDs
+            original_names: List of original algorithm names for naming
+
+        Returns:
+            Final algorithm ID with inheritance naming
+        """
+        import json
+
+        # Create inheritance name if we have original names
+        if original_names and len(original_names) > 1:
+            # Create compound name like "A*_Dijkstra_BFS_abc123"
+            base_name = "_".join(original_names[:3])  # Limit to 3 names
+            random_suffix = algorithm_id.split('_')[-1] if '_' in algorithm_id else algorithm_id[-8:]
+            final_algorithm_id = f"{base_name}_{random_suffix}"
+        else:
+            final_algorithm_id = algorithm_id
+
+        # Save the algorithm with inheritance information
+        self.save_algorithm(
+            algorithm_id=final_algorithm_id,
+            algorithm_type=algorithm_type,
+            algorithm_data=algorithm_data,
+            parent_ids=parent_ids,
+            fitness_score=0.0
+        )
+
+        logger.info(f"Created algorithm with inheritance: {final_algorithm_id} "
+                   f"(parents: {parent_ids[:2]}{'...' if len(parent_ids) > 2 else ''})")
+
+        return final_algorithm_id
+
+    def get_seeded_algorithm_stats(self) -> Dict[str, Any]:
+        """Get comprehensive seeded algorithm system statistics.
+
+        Returns:
+            Dictionary containing system statistics
+        """
+        with self._get_connection() as conn:
+            stats = {}
+
+            # Seeded algorithms count by category
+            cursor = conn.execute("""
+                SELECT category, COUNT(*) as count,
+                       AVG(adaptability_score) as avg_adaptability,
+                       AVG(avg_performance) as avg_performance
+                FROM seeded_algorithms_meta
+                GROUP BY category
+                ORDER BY avg_performance DESC
+            """)
+            stats['categories'] = [dict(row) for row in cursor.fetchall()]
+
+            # Routine statistics by game type
+            cursor = conn.execute("""
+                SELECT game_type, COUNT(*) as routine_count,
+                       AVG(success_rate) as avg_success_rate,
+                       SUM(games_tested) as total_games
+                FROM algorithm_routines
+                GROUP BY game_type
+                ORDER BY avg_success_rate DESC
+            """)
+            stats['game_types'] = [dict(row) for row in cursor.fetchall()]
+
+            # Overall performance metrics
+            cursor = conn.execute("""
+                SELECT COUNT(*) as total_seeded_algorithms,
+                       AVG(avg_performance) as overall_avg_performance,
+                       MAX(avg_performance) as best_performance
+                FROM seeded_algorithms_meta
+            """)
+            row = cursor.fetchone()
+            stats['overall'] = dict(row) if row else {}
+
+            # Algorithm inheritance statistics
+            cursor = conn.execute("""
+                SELECT COUNT(*) as algorithms_with_parents
+                FROM algorithm_population
+                WHERE parent_ids IS NOT NULL AND parent_ids != '[]'
+            """)
+            row = cursor.fetchone()
+            stats['inheritance'] = {'algorithms_with_parents': row[0] if row else 0}
+
+            return stats
