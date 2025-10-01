@@ -11,9 +11,15 @@ from typing import Dict, Any, List, Optional, Callable
 import random
 from datetime import datetime
 
-from .game_session_manager import GameSessionManager
-from .action_handler import ActionHandler
-from .arc_api_client import GameState
+try:
+    from .game_session_manager import GameSessionManager
+    from .action_handler import ActionHandler
+    from .arc_api_client import GameState
+except ImportError:
+    # Fallback for standalone execution
+    from game_session_manager import GameSessionManager
+    from action_handler import ActionHandler
+    from arc_api_client import GameState
 
 # Import evolution system components
 try:

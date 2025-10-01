@@ -1,15 +1,16 @@
-# Core Game Mechanics
+# BitterTruth-AI
 
-A clean, modular implementation of essential ARC-AGI-3 game functionality. This module contains only the core mechanics needed to play games without the complexity of architect, governor, or director systems.
+A sophisticated ARC-AGI-3 game player with **evolved algorithmic intelligence**. Features a comprehensive evolution system that learns and adapts strategies using real-world algorithms, genetic programming, and multi-armed bandits.
 
 ## Features
 
-- **Clean ARC API Client**: Simple interface for interacting with ARC-AGI-3 API
-- **Session Management**: Handle game sessions with graceful startup and shutdown
-- **Action Handling**: Send and validate game actions with automatic tracing
-- **Database Persistence**: Store game data, action traces, and performance metrics
-- **Gameplay Engine**: Complete game playing logic with multiple strategies
-- **Performance Tracking**: Built-in statistics and effectiveness analysis
+- **🧬 Evolved Algorithm System**: 25+ real-world algorithms adapted for gameplay
+- **🎯 Intelligent Action Selection**: Algorithms learn and improve over time
+- **📊 Performance Analytics**: Comprehensive tracking and evolution metrics
+- **🔄 Algorithm Inheritance**: Multi-parent evolution with proper lineage tracking
+- **🎮 Multiple Strategies**: From simple random to sophisticated evolved intelligence
+- **💾 Database Persistence**: Complete game history and algorithm performance data
+- **🏷️ Smart Tagging**: Automatic BitterLesson tagging with git integration
 
 ## Core Components
 
@@ -67,16 +68,24 @@ asyncio.run(play_game())
 
 ```bash
 # Play a single game
-python -m CORE_GAME_MECHANICS.main_runner play game_123 --api-key YOUR_KEY
+python main_runner.py play game_123 --api-key YOUR_KEY
 
-# Run a gaming session
-python -m CORE_GAME_MECHANICS.main_runner session --max-games 5 --strategy balanced
+# Run a gaming session with evolved strategy
+python main_runner.py session --max-games 5 --strategy evolved
+
+# Run with traditional strategies
+python main_runner.py session --max-games 5 --strategy balanced
 
 # Show statistics
-python -m CORE_GAME_MECHANICS.main_runner stats
+python main_runner.py stats
 
 # List available games
-python -m CORE_GAME_MECHANICS.main_runner list --api-key YOUR_KEY
+python main_runner.py list --api-key YOUR_KEY
+
+# Evolution system management
+python main_runner.py evolution manage init     # Initialize evolution system
+python main_runner.py evolution stats           # Show evolution statistics
+python main_runner.py evolution status          # Show system status
 ```
 
 ### Environment Setup
@@ -115,6 +124,22 @@ export ARC_API_KEY="your_arc_api_key_here"
 
 ## Advanced Usage
 
+### Evolution System
+
+```bash
+# Initialize the evolution system with seeded algorithms
+python main_runner.py evolution manage init
+
+# Run games with evolved strategy (uses best performing algorithms)
+python main_runner.py session --strategy evolved --max-games 10
+
+# View evolution statistics
+python main_runner.py evolution stats
+
+# Check system status
+python main_runner.py evolution status
+```
+
 ### Custom Strategy
 
 ```python
@@ -134,10 +159,11 @@ async with GameplayEngine() as engine:
 ### Manual Session Management
 
 ```python
-from CORE_GAME_MECHANICS import GameSessionManager, ActionHandler
+import game_session_manager
+import action_handler
 
-session_manager = GameSessionManager()
-action_handler = ActionHandler(session_manager)
+session_manager = game_session_manager.GameSessionManager()
+action_handler_instance = action_handler.ActionHandler(session_manager)
 
 try:
     # Start session
@@ -147,8 +173,8 @@ try:
     game_data = await session_manager.create_game("game_123")
 
     # Send actions
-    game_state = await action_handler.send_action_1()
-    game_state = await action_handler.send_action_6(x=5, y=3, frame=game_state.frame)
+    game_state = await action_handler_instance.send_action_1()
+    game_state = await action_handler_instance.send_action_6(x=5, y=3, frame=game_state.frame)
 
     # Finish game
     await session_manager.finish_game(game_state.state, game_state.score)
@@ -160,9 +186,9 @@ finally:
 ### Database Operations
 
 ```python
-from CORE_GAME_MECHANICS import DatabaseInterface
+import database_interface
 
-db = DatabaseInterface("my_games.db")
+db = database_interface.DatabaseInterface("my_games.db")
 
 # Get performance statistics
 stats = db.get_database_stats()
@@ -183,12 +209,21 @@ for action in effectiveness:
 
 The module creates the following core tables:
 
+**Core Game Tables:**
 - **training_sessions**: Session metadata and statistics
 - **game_results**: Individual game outcomes
 - **action_traces**: Detailed action logging
 - **action_effectiveness**: Action performance tracking
 - **score_history**: Score progression over time
 - **global_counters**: System state counters
+
+**Evolution System Tables:**
+- **algorithms**: Algorithm definitions and AST representations
+- **algorithm_performance**: Performance tracking and fitness scores
+- **evolution_generations**: Generation-by-generation evolution tracking
+- **algorithm_routines**: Game-type specific algorithm sequences
+- **seeded_algorithms_meta**: Metadata for real-world algorithm adaptations
+- **game_type_performance**: Performance metrics by game type prefix
 
 ## Configuration
 
@@ -198,7 +233,7 @@ The `GameplayEngine` can be configured with various parameters:
 engine.configure(
     max_actions_per_game=100,      # Maximum actions per game
     action_timeout=30.0,           # Timeout for actions
-    strategy='balanced',           # Default strategy
+    strategy='evolved',            # Default strategy (evolved recommended)
     enable_random_exploration=True, # Allow random exploration
     coordinate_retry_limit=3       # Retries for ACTION6
 )
@@ -263,6 +298,7 @@ python main_runner.py
 
 ## Built-in Strategies
 
+- **evolved**: Uses the algorithmic evolution system with 25+ real-world algorithms (recommended)
 - **balanced**: Uses action effectiveness data when available, falls back to random
 - **random**: Random action selection
 - **conservative**: Avoids ACTION6, prefers "safe" actions
@@ -315,17 +351,22 @@ game_logs = get_recent_logs(game_id='game_456')
 ## File Structure
 
 ```
-CORE_GAME_MECHANICS/
-├── __init__.py                 # Module initialization and exports
-├── arc_api_client.py          # ARC-AGI-3 API client
-├── database_interface.py      # Database operations
-├── game_session_manager.py    # Session lifecycle management
-├── action_handler.py          # Action sending and validation
-├── core_gameplay.py           # Main gameplay engine
-├── main_runner.py             # Command-line interface
-├── example_usage.py           # Usage examples
-├── core_database_schema.sql   # Database schema
-└── README.md                  # This file
+BitterTruth-AI/
+├── main_runner.py                    # Primary entry point and CLI
+├── start_game.py                     # Alternative simple game starter
+├── core_gameplay.py                  # Main gameplay engine
+├── game_session_manager.py           # Session lifecycle management
+├── action_handler.py                 # Action sending and validation
+├── arc_api_client.py                 # ARC-AGI-3 API client
+├── database_interface.py             # Database operations
+├── evolution_manager.py              # Evolution system orchestrator
+├── routine_manager.py                # Game-type specific algorithm routines
+├── seeded_algorithm_builders.py      # Real-world algorithm adaptations
+├── algorithm_representations.py      # AST and algorithm structures
+├── core_database_schema.sql          # Database schema with evolution tables
+├── algorithms-list.md                # List of implemented algorithms
+├── .env.example                      # Environment configuration template
+└── README.md                         # This file
 ```
 
 ## Requirements
@@ -338,14 +379,15 @@ CORE_GAME_MECHANICS/
 
 ## Installation
 
-1. Copy the `CORE_GAME_MECHANICS` folder to your project
+1. Clone the repository: `git clone <repository_url>`
 2. Install dependencies: `pip install aiohttp python-dotenv`
 3. Set up environment variables (see Environment Setup section above)
-4. Run examples: `python -m CORE_GAME_MECHANICS.example_usage`
+4. Initialize evolution system: `python main_runner.py evolution manage init`
+5. Run your first game: `python main_runner.py session --strategy evolved --max-games 1`
 
 ## Examples
 
-See `example_usage.py` for comprehensive examples of all functionality.
+See `start_game.py` for a simple standalone game example, or use `main_runner.py` for full functionality including the evolution system.
 
 ## License
 

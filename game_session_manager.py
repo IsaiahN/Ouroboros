@@ -18,8 +18,13 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 import uuid
 
-from .arc_api_client import ARCClient, GameState
-from .database_interface import DatabaseInterface
+try:
+    from .arc_api_client import ARCClient, GameState
+    from .database_interface import DatabaseInterface
+except ImportError:
+    # Fallback for standalone execution
+    from arc_api_client import ARCClient, GameState
+    from database_interface import DatabaseInterface
 
 logger = logging.getLogger(__name__)
 

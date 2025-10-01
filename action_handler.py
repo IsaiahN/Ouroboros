@@ -9,7 +9,11 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 import random
 
-from .arc_api_client import GameState
+try:
+    from .arc_api_client import GameState
+except ImportError:
+    # Fallback for standalone execution
+    from arc_api_client import GameState
 
 # Import algorithm evaluator for evolved strategies
 try:
