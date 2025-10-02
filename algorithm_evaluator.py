@@ -43,6 +43,12 @@ class GameContext:
     action6_attempts: int = 0
     successful_action6_attempts: int = 0
 
+    # Meta strategy support
+    previous_frame: List[List[int]] = None
+    frame_changes: List = None  # List of FrameChange objects
+    successful_actions: List[Dict[str, Any]] = None
+    last_successful_coordinates: Optional[Tuple[int, int]] = None
+
     def __post_init__(self):
         if self.available_actions is None:
             self.available_actions = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION6", "ACTION7"]
@@ -54,6 +60,25 @@ class GameContext:
             self.successful_coordinates = []
         if self.coordinate_strategy_history is None:
             self.coordinate_strategy_history = []
+        if self.frame_changes is None:
+            self.frame_changes = []
+        if self.successful_actions is None:
+            self.successful_actions = []
+
+    def update_frame(self, new_frame: List[List[int]]):
+        """Update frame and detect changes."""
+        if self.frame and new_frame:
+            # Detect frame changes for meta strategies
+            from meta_strategies import meta_strategy_engine
+            changes = meta_strategy_engine.detect_frame_changes(self.frame, new_frame)
+            self.frame_changes.extend(changes)
+            
+            # Keep only recent changes (last 100)
+            if len(self.frame_changes) > 100:
+                self.frame_changes = self.frame_changes[-100:]
+
+        self.previous_frame = self.frame
+        self.frame = new_frame
 
     def track_action6_usage(self, coordinates: Tuple[int, int], strategy: str = None):
         """Track ACTION6 coordinate usage."""
@@ -70,10 +95,23 @@ class GameContext:
         if self.last_action6_coordinates and score_improvement > 0:
             self.successful_coordinates.append(self.last_action6_coordinates)
             self.successful_action6_attempts += 1
+            self.last_successful_coordinates = self.last_action6_coordinates
+
+            # Add to successful actions list for meta strategies
+            self.successful_actions.append({
+                'action': 'ACTION6',
+                'coordinates': self.last_action6_coordinates,
+                'score_improvement': score_improvement,
+                'actions_taken': self.actions_taken
+            })
 
             # Keep only last 50 successful coordinates
             if len(self.successful_coordinates) > 50:
                 self.successful_coordinates = self.successful_coordinates[-50:]
+
+            # Keep only last 20 successful actions
+            if len(self.successful_actions) > 20:
+                self.successful_actions = self.successful_actions[-20:]
 
             # Update success rate
             if self.action6_attempts > 0:
@@ -87,7 +125,9 @@ class GameContext:
             'coordinate_success_rate': self.coordinate_success_rate,
             'unique_successful_coordinates': len(set(self.successful_coordinates)),
             'last_coordinates': self.last_action6_coordinates,
-            'recent_strategies': self.coordinate_strategy_history[-5:] if self.coordinate_strategy_history else []
+            'recent_strategies': self.coordinate_strategy_history[-5:] if self.coordinate_strategy_history else [],
+            'frame_changes_count': len(self.frame_changes),
+            'successful_actions_count': len(self.successful_actions)
         }
 
 
@@ -191,20 +231,46 @@ class AlgorithmEvaluator:
         """Evaluate an action node."""
         action = node.action_type
 
-        # Check if action is available
-        if action not in context.available_actions:
+        # Check if action is available (fix type mismatch - convert action string to int)
+        action_num = int(action.replace("ACTION", ""))
+        if action_num not in context.available_actions:
             # Find a similar available action
-            action_num = int(action.replace("ACTION", ""))
-            for alt_num in range(1, 8):
-                alt_action = f"ACTION{alt_num}"
-                if alt_action in context.available_actions:
-                    action = alt_action
-                    break
+            for alt_num in context.available_actions:
+                action = f"ACTION{alt_num}"
+                action_num = alt_num
+                break
+            else:
+                # If no available actions, fallback to first available
+                if context.available_actions:
+                    action_num = context.available_actions[0]
+                    action = f"ACTION{action_num}"
 
         coordinates = None
         confidence = 1.0
 
         if action == "ACTION6":
+            # CRITICAL FIX: Ensure scores are numeric before passing to coordinate generation
+            current_score = getattr(context, 'current_score', 0.0)
+            previous_score = getattr(context, 'previous_score', 0.0)
+            
+            # Type check current_score
+            if isinstance(current_score, (list, tuple)):
+                logger.warning(f"[EVALUATOR] Current score is list/tuple: {current_score}, taking first element")
+                current_score = current_score[0] if len(current_score) > 0 else 0.0
+            elif not isinstance(current_score, (int, float)):
+                logger.warning(f"[EVALUATOR] Current score is not numeric: {type(current_score)} {current_score}, using 0.0")
+                current_score = 0.0
+            current_score = float(current_score)
+            
+            # Type check previous_score
+            if isinstance(previous_score, (list, tuple)):
+                logger.warning(f"[EVALUATOR] Previous score is list/tuple: {previous_score}, taking first element")
+                previous_score = previous_score[0] if len(previous_score) > 0 else 0.0
+            elif not isinstance(previous_score, (int, float)):
+                logger.warning(f"[EVALUATOR] Previous score is not numeric: {type(previous_score)} {previous_score}, using 0.0")
+                previous_score = 0.0
+            previous_score = float(previous_score)
+
             # Use dynamic coordinate generation if strategy specified
             if node.coordinate_strategy:
                 try:
@@ -213,18 +279,31 @@ class AlgorithmEvaluator:
                     # Parse strategy
                     strategy = CoordinateStrategy(node.coordinate_strategy)
 
-                    # Generate coordinates using advanced strategies
+                    # Generate base coordinates using advanced strategies with safe scores
                     x, y = generate_action6_coordinates(
                         algorithm_id=getattr(context, 'algorithm_id', ''),
-                        current_score=context.current_score,
-                        previous_score=getattr(context, 'previous_score', 0.0),
+                        current_score=current_score,
+                        previous_score=previous_score,
                         actions_taken=context.actions_taken,
                         frame=getattr(context, 'frame', None),
                         strategy=strategy
                     )
 
+                    # Apply meta strategy to enhance coordinates
+                    try:
+                        from meta_strategies import meta_strategy_engine
+                        meta_strategy = meta_strategy_engine.select_meta_strategy(
+                            context.algorithm_id, context
+                        )
+                        x, y = meta_strategy_engine.apply_meta_strategy(
+                            meta_strategy, (x, y), context
+                        )
+                        confidence = 0.9  # Higher confidence for meta-enhanced coordinates
+                    except Exception as e:
+                        logger.warning(f"Meta strategy application failed: {e}")
+                        confidence = 0.8  # Still good confidence for strategic coordinates
+
                     coordinates = {"x": x, "y": y}
-                    confidence = 0.8  # Higher confidence for strategic coordinates
 
                 except Exception as e:
                     logger.warning(f"Dynamic coordinate generation failed: {e}")
@@ -232,28 +311,57 @@ class AlgorithmEvaluator:
                     if node.coordinates:
                         coordinates = node.coordinates.copy()
                     else:
-                        coordinates = {"x": random.randint(0, 64), "y": random.randint(0, 64)}
+                        coordinates = {"x": random.randint(0, 63), "y": random.randint(0, 63)}
                     confidence = 0.5
 
             elif node.coordinates:
                 coordinates = node.coordinates.copy()
-                confidence = 0.6  # Medium confidence for static coordinates
+                
+                # Apply meta strategy to static coordinates too
+                try:
+                    from meta_strategies import meta_strategy_engine
+                    meta_strategy = meta_strategy_engine.select_meta_strategy(
+                        context.algorithm_id, context
+                    )
+                    x, y = meta_strategy_engine.apply_meta_strategy(
+                        meta_strategy, (coordinates["x"], coordinates["y"]), context
+                    )
+                    coordinates = {"x": x, "y": y}
+                    confidence = 0.7  # Medium-high confidence for meta-enhanced static coordinates
+                except Exception as e:
+                    logger.warning(f"Meta strategy application to static coordinates failed: {e}")
+                    confidence = 0.6  # Medium confidence for static coordinates
             else:
                 # Fallback to intelligent random coordinates
                 try:
                     from coordinate_strategies import generate_action6_coordinates
 
+                    # Use safe scores for fallback coordinate generation
                     x, y = generate_action6_coordinates(
                         algorithm_id=getattr(context, 'algorithm_id', ''),
-                        current_score=context.current_score,
+                        current_score=current_score,
+                        previous_score=previous_score,
                         actions_taken=context.actions_taken
                     )
+                    
+                    # Apply meta strategy to fallback coordinates
+                    try:
+                        from meta_strategies import meta_strategy_engine
+                        meta_strategy = meta_strategy_engine.select_meta_strategy(
+                            context.algorithm_id, context
+                        )
+                        x, y = meta_strategy_engine.apply_meta_strategy(
+                            meta_strategy, (x, y), context
+                        )
+                        confidence = 0.5  # Medium confidence for meta-enhanced fallback
+                    except Exception:
+                        confidence = 0.4  # Lower confidence for fallback
+
                     coordinates = {"x": x, "y": y}
-                    confidence = 0.4  # Lower confidence for fallback
 
                 except Exception:
-                    # Final fallback to random
-                    coordinates = {"x": random.randint(0, 64), "y": random.randint(0, 64)}
+                    # Final fallback to random (FIXED BOUNDS)
+                    coordinates = {"x": random.randint(0, 63), "y": random.randint(0, 63)}
                     confidence = 0.3
 
             # Adjust confidence based on coordinate success rate

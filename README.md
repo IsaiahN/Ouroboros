@@ -314,6 +314,104 @@ The module includes comprehensive error handling:
 - Database transaction safety
 - Graceful shutdown on interruption
 
+## Recent Improvements (v1.0.1)
+
+### Critical Bug Fixes
+
+**List Subtraction Error Resolution**
+- Fixed "unsupported operand type(s) for -: 'list' and 'list'" error that was causing evolution system failures
+- Added comprehensive type checking for all score operations in:
+  - `main_runner.py`: Score handling in evolved_strategy function
+  - `algorithm_evaluator.py`: Score validation in _evaluate_action_node method
+  - `coordinate_strategies.py`: Score type safety in generate_action6_coordinates
+  - `start_game.py`: Score normalization during game context updates
+  - `evolution_manager.py`: Score validation in routine context updates
+
+**Enhanced Error Logging**
+- Added detailed warning messages when list scores are detected and converted
+- Implemented defensive programming with try-catch blocks around all score arithmetic
+- Added comprehensive logging with type information for debugging
+
+### Algorithm System Enhancements
+
+**Coordinate Generation Improvements**
+- Fixed coordinate bounds to properly use 0-63 range for ACTION6
+- Enhanced 8-strategy coordinate generation system:
+  - Random uniform distribution across full coordinate space
+  - Systematic grid exploration (8x8 grid)
+  - Spiral outward pattern from center
+  - Corner-focused exploration with center variance
+  - Edge-focused coordinate selection
+  - Gradient-following based on successful coordinates
+  - Clustered exploration around success zones
+  - Frame analysis for activity-based coordinate selection
+
+**Meta Strategy System**
+- Implemented 4 comprehensive meta strategies:
+  - `FRAME_AVOID`: Avoid coordinates where frame changes occurred
+  - `FRAME_TARGET`: Target coordinates near recent frame changes
+  - `ACTION_REPEAT`: Repeat coordinates from recent successful actions
+  - `ACTION_NEARBY`: Explore coordinates near recent successes
+- Algorithm-specific meta strategy pairing for optimal performance
+- Frame change detection and analysis for intelligent coordinate enhancement
+
+**Evolution System Stability**
+- Fixed algorithm switching logic to trigger based on performance conditions
+- Enhanced Multi-Armed Bandit (MAB) algorithm selection
+- Improved evolution triggering based on:
+  - Frequency-based evolution (every N games)
+  - Performance stagnation detection
+  - Population depletion protection
+- Added comprehensive algorithm performance tracking and fitness calculation
+
+### Performance & Reliability
+
+**API Rate Limiting**
+- Added 1-2 second delays between API actions to prevent overwhelming the server
+- Implemented exponential backoff for failed requests
+- Enhanced retry logic with proper error handling
+
+**Python Environment Optimization**
+- Disabled Python bytecode (.pyc) file generation globally with multiple methods:
+  - Environment variable `PYTHONDONTWRITEBYTECODE=1`
+  - Programmatic `sys.dont_write_bytecode = True`
+  - Command-line flag `-B` in execution scripts
+- Automatic __pycache__ directory cleanup
+
+**Console Output Enhancements**
+- Added algorithm visibility showing which algorithm makes each decision
+- Enhanced coordinate information display for ACTION6
+- Improved error messages with detailed type information
+- Real-time algorithm switching notifications
+
+### Development Improvements
+
+**Database Integration**
+- Enhanced algorithm performance persistence
+- Improved evolution history tracking
+- Better session and game result management
+- Comprehensive seeded algorithm metadata storage
+
+**Code Quality**
+- Added comprehensive type checking throughout the codebase
+- Improved error handling with graceful fallbacks
+- Enhanced logging with detailed debugging information
+- Better separation of concerns in algorithm evaluation
+
+### Known Issues Resolved
+
+- ✅ **Fixed**: List subtraction errors in evolution system
+- ✅ **Fixed**: Algorithm switching not occurring during gameplay
+- ✅ **Fixed**: Hardcoded coordinates in ACTION6 instead of dynamic generation
+- ✅ **Fixed**: Evolution system not triggering at game completion
+- ✅ **Fixed**: Coordinate bounds validation errors
+- ✅ **Fixed**: Python bytecode file generation issues
+- ✅ **Fixed**: Action selection logic choosing unavailable actions
+
+### Migration Notes
+
+No breaking changes - existing databases and configurations remain compatible. The system will automatically apply the new type checking and error handling improvements.
+
 ## Database Logging
 
 All application logs are stored in the database instead of files for better organization and queryability:

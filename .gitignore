@@ -4,11 +4,16 @@
 #serena
 .serena
 
-# Python
+# Python bytecode cache files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+# Additional Python cache patterns
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .Python
 build/
 develop-eggs/

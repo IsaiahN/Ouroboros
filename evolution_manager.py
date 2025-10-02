@@ -176,9 +176,20 @@ class EvolutionManager:
             game_result: Game result dictionary
         """
         try:
+            # Find the algorithm object by ID
+            algorithm = None
+            for alg in self.active_population:
+                if alg.algorithm_id == algorithm_id:
+                    algorithm = alg
+                    break
+
+            if algorithm is None:
+                logger.warning(f"Algorithm {algorithm_id} not found in active population")
+                return
+
             # Calculate fitness from game result
             fitness = self.evaluator.calculate_fitness(
-                None, [game_result]  # Single game result
+                algorithm, [game_result]  # Pass the actual algorithm object
             )
 
             # Update performance history
@@ -191,10 +202,7 @@ class EvolutionManager:
             self.mab.update_reward(algorithm_id, reward, {"game_result": game_result})
 
             # Update algorithm fitness in population
-            for algorithm in self.active_population:
-                if algorithm.algorithm_id == algorithm_id:
-                    algorithm.fitness_score = fitness
-                    break
+            algorithm.fitness_score = fitness
 
             # Save performance to database
             if self.db:
@@ -215,6 +223,8 @@ class EvolutionManager:
 
         except Exception as e:
             logger.error(f"Error updating algorithm performance: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     async def _check_evolution_triggers(self):
         """Check if evolution should be triggered based on current conditions."""
@@ -1052,6 +1062,15 @@ class EvolutionManager:
             return None
             
         try:
+            # CRITICAL FIX: Ensure current_score is numeric before passing to routine manager
+            if isinstance(current_score, (list, tuple)):
+                logger.warning(f"[EVOLUTION] Current score is list/tuple: {current_score}, taking first element")
+                current_score = current_score[0] if len(current_score) > 0 else 0.0
+            elif not isinstance(current_score, (int, float)):
+                logger.warning(f"[EVOLUTION] Current score is not numeric: {type(current_score)} {current_score}, using 0.0")
+                current_score = 0.0
+            current_score = float(current_score)
+            
             # Check if we should switch algorithms
             should_switch, reason = self.routine_manager.should_switch_algorithm(
                 game_id, current_score, actions_taken

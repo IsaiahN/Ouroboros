@@ -5,6 +5,12 @@ Entry point for running ARC games using the core game mechanics.
 Provides command-line interface for playing games.
 """
 
+# Disable Python bytecode compilation
+import os
+import sys
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+sys.dont_write_bytecode = True
+
 import asyncio
 import argparse
 import logging
@@ -13,6 +19,9 @@ import os
 import subprocess
 import platform
 from typing import Optional
+
+# Disable Python bytecode compilation
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 import json
 from datetime import datetime
 
@@ -93,7 +102,7 @@ async def evolved_strategy(game_state, action_handler, evolution_manager=None, g
     """Evolved algorithm strategy using the seeded algorithm system."""
     if not EVOLUTION_AVAILABLE or not evolution_manager:
         logger.warning("Evolution system not available, falling back to random strategy")
-        return await random_strategy(game_state, action_handler)
+        return {"action": await random_strategy(game_state, action_handler), "algorithm_id": "random_fallback"}
 
     try:
         # Update game context with current state
@@ -101,17 +110,44 @@ async def evolved_strategy(game_state, action_handler, evolution_manager=None, g
             # Track score changes for coordinate success analysis
             previous_score = game_context.current_score
             game_context.previous_score = previous_score
-            game_context.current_score = game_state.score
-            game_context.actions_taken = getattr(game_state, 'actions_taken', 0)
+            
+            # CRITICAL FIX: Ensure game_state.score is always a number, not a list
+            current_score = game_state.score
+            if isinstance(current_score, (list, tuple)):
+                logger.warning(f"Score is list/tuple: {current_score}, taking first element")
+                current_score = current_score[0] if len(current_score) > 0 else 0.0
+            elif not isinstance(current_score, (int, float)):
+                logger.warning(f"Score is not numeric: {type(current_score)} {current_score}, using 0.0")
+                current_score = 0.0
+            
+            game_context.current_score = float(current_score)
+            
+            # actions_taken should be passed from the calling context, not from game_state
+            # Keep existing value if already set, otherwise default to 0
+            if not hasattr(game_context, 'actions_taken') or game_context.actions_taken is None:
+                game_context.actions_taken = 0
             game_context.available_actions = game_state.available_actions
             game_context.game_id = getattr(game_state, 'game_id', 'unknown')
             game_context.frame = getattr(game_state, 'frame', None)
 
             # Track ACTION6 success based on score improvement
             if hasattr(game_context, 'track_action6_success'):
-                score_improvement = game_context.current_score - previous_score
-                if score_improvement > 0:
-                    game_context.track_action6_success(score_improvement)
+                try:
+                    # CRITICAL FIX: Ensure both scores are numbers before subtraction
+                    if isinstance(previous_score, (list, tuple)):
+                        logger.warning(f"Previous score is list/tuple: {previous_score}, taking first element")
+                        previous_score = previous_score[0] if len(previous_score) > 0 else 0.0
+                    elif not isinstance(previous_score, (int, float)):
+                        logger.warning(f"Previous score is not numeric: {type(previous_score)} {previous_score}, using 0.0")
+                        previous_score = 0.0
+                    
+                    score_improvement = float(game_context.current_score) - float(previous_score)
+                    if score_improvement > 0:
+                        game_context.track_action6_success(score_improvement)
+                except (TypeError, ValueError) as e:
+                    logger.warning(f"Score improvement calculation failed: {e}")
+                    logger.warning(f"Current: {type(game_context.current_score)} {game_context.current_score}")
+                    logger.warning(f"Previous: {type(previous_score)} {previous_score}")
 
         # Check for mid-game algorithm switching based on level performance
         if hasattr(evolution_manager, 'routine_manager') and game_context:
@@ -123,8 +159,8 @@ async def evolved_strategy(game_state, action_handler, evolution_manager=None, g
             if new_algorithm:
                 logger.info(f"Switched algorithm mid-game: {new_algorithm.algorithm_id}")
 
-        # Get current algorithm from evolution manager
-        current_algorithm = evolution_manager.get_current_algorithm()
+        # Get current algorithm from evolution manager (AWAIT added)
+        current_algorithm = await evolution_manager.get_current_algorithm()
 
         if current_algorithm:
             # Update game context with algorithm information
@@ -143,15 +179,15 @@ async def evolved_strategy(game_state, action_handler, evolution_manager=None, g
 
             # Convert action result to action handler call
             if result.action == "ACTION1":
-                return "ACTION1"
+                return {"action": "ACTION1", "algorithm_id": current_algorithm.algorithm_id}
             elif result.action == "ACTION2":
-                return "ACTION2"
+                return {"action": "ACTION2", "algorithm_id": current_algorithm.algorithm_id}
             elif result.action == "ACTION3":
-                return "ACTION3"
+                return {"action": "ACTION3", "algorithm_id": current_algorithm.algorithm_id}
             elif result.action == "ACTION4":
-                return "ACTION4"
+                return {"action": "ACTION4", "algorithm_id": current_algorithm.algorithm_id}
             elif result.action == "ACTION5":
-                return "ACTION5"
+                return {"action": "ACTION5", "algorithm_id": current_algorithm.algorithm_id}
             elif result.action == "ACTION6" and result.coordinates:
                 # For ACTION6, we need to return a custom action
                 async def action6_with_coords():
@@ -160,19 +196,23 @@ async def evolved_strategy(game_state, action_handler, evolution_manager=None, g
                         result.coordinates.get('y', 32),
                         game_state.frame
                     )
-                return action6_with_coords
+                return {
+                    "action": action6_with_coords, 
+                    "algorithm_id": current_algorithm.algorithm_id,
+                    "coordinates": result.coordinates
+                }
             elif result.action == "ACTION7":
-                return "ACTION7"
+                return {"action": "ACTION7", "algorithm_id": current_algorithm.algorithm_id}
             else:
                 logger.warning(f"Unknown action from evolved algorithm: {result.action}")
-                return await random_strategy(game_state, action_handler)
+                return {"action": await random_strategy(game_state, action_handler), "algorithm_id": "unknown_fallback"}
         else:
             logger.warning("No current algorithm available, using random fallback")
-            return await random_strategy(game_state, action_handler)
+            return {"action": await random_strategy(game_state, action_handler), "algorithm_id": "no_algorithm"}
 
     except Exception as e:
         logger.error(f"Error in evolved strategy: {e}")
-        return await random_strategy(game_state, action_handler)
+        return {"action": await random_strategy(game_state, action_handler), "algorithm_id": "error_fallback"}
 
 
 async def run_single_game(game_id: str, api_key: str, strategy: str = "balanced",

@@ -68,7 +68,15 @@ class ActionHandler:
         if not frame or not frame[0]:
             return False
 
-        return 0 <= y < len(frame) and 0 <= x < len(frame[0])
+        frame_height = len(frame)
+        frame_width = len(frame[0])
+        
+        # Log frame dimensions for debugging
+        logger.debug(f"Validating coordinates ({x}, {y}) against frame size {frame_height}x{frame_width}")
+        
+        # For ARC-AGI-3, coordinates should be within 64x64 bounds regardless of actual frame size
+        # The API expects coordinates in this range even if the visible frame is smaller
+        return 0 <= x < 64 and 0 <= y < 64
 
     def _detect_frame_changes(self, old_frame: List[List[int]],
                             new_frame: List[List[int]]) -> Tuple[bool, int]:
@@ -166,8 +174,8 @@ class ActionHandler:
         """
         # Validate coordinates if frame is provided
         if frame and not self._validate_coordinates(x, y, frame):
-            logger.warning(f"Invalid coordinates ({x}, {y}) for frame size {len(frame)}x{len(frame[0]) if frame else 0}")
-            raise ValueError(f"Coordinates ({x}, {y}) are outside frame bounds")
+            logger.warning(f"Invalid coordinates ({x}, {y}) - must be within 0-63 range for 64x64 grid")
+            raise ValueError(f"Coordinates ({x}, {y}) are outside valid 64x64 bounds")
 
         return await self._send_action_with_context("ACTION6", x=x, y=y, coordinates=[x, y])
 

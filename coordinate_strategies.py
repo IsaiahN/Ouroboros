@@ -113,7 +113,7 @@ class CoordinateGenerator:
 
     def _random_uniform(self) -> Tuple[int, int]:
         """Random uniform distribution across coordinate space."""
-        return random.randint(0, 64), random.randint(0, 64)
+        return random.randint(0, 63), random.randint(0, 63)
 
     def _systematic_grid(self, context: CoordinateContext) -> Tuple[int, int]:
         """Systematic grid exploration (8x8 grid)."""
@@ -167,11 +167,14 @@ class CoordinateGenerator:
             x = center_x - layer
             y = center_y + layer - (position_in_layer - layer * 6)
 
+        # Clamp to valid bounds
+        x = min(max(x, 0), 63)
+        y = min(max(y, 0), 63)
         return x, y
 
     def _corner_focused(self, context: CoordinateContext) -> Tuple[int, int]:
         """Focus on corners with occasional center exploration."""
-        corners = [(0, 0), (0, 64), (64, 0), (64, 64)]
+        corners = [(0, 0), (0, 63), (63, 0), (63, 63)]
         center_points = [(32, 32), (16, 16), (48, 48), (16, 48), (48, 16)]
 
         # 70% corners, 30% center exploration
@@ -185,13 +188,13 @@ class CoordinateGenerator:
         edge_choice = random.randint(0, 3)
 
         if edge_choice == 0:  # Top edge
-            return random.randint(0, 64), 0
+            return random.randint(0, 63), 0
         elif edge_choice == 1:  # Bottom edge
-            return random.randint(0, 64), 64
+            return random.randint(0, 63), 63
         elif edge_choice == 2:  # Left edge
-            return 0, random.randint(0, 64)
+            return 0, random.randint(0, 63)
         else:  # Right edge
-            return 64, random.randint(0, 64)
+            return 63, random.randint(0, 63)
 
     def _gradient_following(self, context: CoordinateContext) -> Tuple[int, int]:
         """Follow score gradients by analyzing recent successful coordinates."""
@@ -204,6 +207,10 @@ class CoordinateGenerator:
                 variation = 8  # 8-unit variation
                 x = base_x + random.randint(-variation, variation)
                 y = base_y + random.randint(-variation, variation)
+                
+                # Clamp to valid bounds
+                x = min(max(x, 0), 63)
+                y = min(max(y, 0), 63)
                 return x, y
 
         # No gradient info - use systematic exploration
@@ -226,6 +233,9 @@ class CoordinateGenerator:
             x = cluster_center[0] + int(distance * math.cos(angle))
             y = cluster_center[1] + int(distance * math.sin(angle))
 
+            # Clamp to valid bounds
+            x = min(max(x, 0), 63)
+            y = min(max(y, 0), 63)
             return x, y
 
         # No clusters yet - random exploration
@@ -350,6 +360,28 @@ def generate_action6_coordinates(algorithm_id: str = "",
     Returns:
         Tuple of (x, y) coordinates
     """
+    # CRITICAL FIX: Ensure scores are numeric, not lists
+    try:
+        if isinstance(current_score, (list, tuple)):
+            logger.warning(f"Current score is list/tuple: {current_score}, taking first element")
+            current_score = current_score[0] if len(current_score) > 0 else 0.0
+        elif not isinstance(current_score, (int, float)):
+            logger.warning(f"Current score is not numeric: {type(current_score)} {current_score}, using 0.0")
+            current_score = 0.0
+        current_score = float(current_score)
+        
+        if isinstance(previous_score, (list, tuple)):
+            logger.warning(f"Previous score is list/tuple: {previous_score}, taking first element")
+            previous_score = previous_score[0] if len(previous_score) > 0 else 0.0
+        elif not isinstance(previous_score, (int, float)):
+            logger.warning(f"Previous score is not numeric: {type(previous_score)} {previous_score}, using 0.0")
+            previous_score = 0.0
+        previous_score = float(previous_score)
+    except (TypeError, ValueError, IndexError) as e:
+        logger.warning(f"Score type conversion failed: {e}")
+        current_score = 0.0
+        previous_score = 0.0
+    
     context = CoordinateContext(
         current_score=current_score,
         previous_score=previous_score,
@@ -364,7 +396,13 @@ def generate_action6_coordinates(algorithm_id: str = "",
     coordinates = coordinate_generator.generate_coordinates(strategy, context)
 
     # Track success if score improved
-    if current_score > previous_score:
-        coordinate_generator.update_success(algorithm_id, coordinates, current_score - previous_score)
+    try:
+        if current_score > previous_score:
+            score_improvement = current_score - previous_score
+            coordinate_generator.update_success(algorithm_id, coordinates, score_improvement)
+    except TypeError as e:
+        logger.warning(f"Score comparison failed - current_score: {type(current_score)} {current_score}, previous_score: {type(previous_score)} {previous_score}. Error: {e}")
+    except Exception as e:
+        logger.warning(f"Unexpected error in score tracking: {e}")
 
     return coordinates

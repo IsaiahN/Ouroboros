@@ -5,10 +5,15 @@ Quick Game Starter Script for BitterTruth-AI
 Standalone script to start a game without module import issues.
 """
 
-import asyncio
+# Disable Python bytecode compilation
 import os
 import sys
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+sys.dont_write_bytecode = True
+
+import asyncio
 import logging
+
 
 # Load environment variables from .env file
 try:
@@ -111,11 +116,16 @@ async def start_single_game(max_actions: int = None):
 
                 # Use evolved strategy system for intelligent action selection
                 action_taken = None
-                try:
-                    if EVOLUTION_AVAILABLE:
+                evolution_success = False
+
+                # Try evolution system first
+                if EVOLUTION_AVAILABLE:
+                    try:
                         # Initialize evolution system if not already done
                         if not hasattr(start_single_game, '_evolution_manager'):
                             print("Initializing evolution system...")
+                            # Create database interface
+                            db = database_interface.DatabaseInterface()
                             config = evolution_manager.EvolutionConfig(population_size=15, evolution_frequency=3)
                             evo_manager = evolution_manager.EvolutionManager(config, db)
 
@@ -139,10 +149,21 @@ async def start_single_game(max_actions: int = None):
 
                         # Update game context
                         context = start_single_game._game_context
-                        context.current_score = game_state.score
+
+                        # CRITICAL FIX: Ensure score is numeric, not a list
+                        current_score = game_state.score
+                        if isinstance(current_score, (list, tuple)):
+                            print(f"[WARN] Score is list/tuple: {current_score}, taking first element")
+                            current_score = current_score[0] if len(current_score) > 0 else 0.0
+                        elif not isinstance(current_score, (int, float)):
+                            print(f"[WARN] Score is not numeric: {type(current_score)} {current_score}, using 0.0")
+                            current_score = 0.0
+                        context.current_score = float(current_score)
                         context.actions_taken = actions_taken
-                        context.available_actions = [f"ACTION{i}" for i in game_state.available_actions]
-                        context.frame = game_state.frame
+                        context.available_actions = game_state.available_actions
+
+                        # Update frame and detect changes for meta strategies
+                        context.update_frame(game_state.frame)
 
                         # Use evolved strategy to select action
                         action_result = await main_runner.evolved_strategy(
@@ -150,48 +171,78 @@ async def start_single_game(max_actions: int = None):
                             start_single_game._evolution_manager, context
                         )
 
-                        # Execute the selected action
-                        if isinstance(action_result, str):
+                        # Execute the selected action (now handles dict format with algorithm info)
+                        if isinstance(action_result, dict):
+                            action_name = action_result.get("action")
+                            algorithm_id = action_result.get("algorithm_id", "unknown")
+                            coordinates = action_result.get("coordinates", {})
+
+                            if isinstance(action_name, str):
+                                if action_name == "ACTION1":
+                                    print(f"Taking ACTION1 (algorithm: {algorithm_id})...")
+                                    game_state = await action_handler_instance.send_action_1()
+                                    action_taken = "ACTION1"
+                                    evolution_success = True
+                                elif action_name == "ACTION2":
+                                    print(f"Taking ACTION2 (algorithm: {algorithm_id})...")
+                                    game_state = await action_handler_instance.send_action_2()
+                                    action_taken = "ACTION2"
+                                    evolution_success = True
+                                elif action_name == "ACTION3":
+                                    print(f"Taking ACTION3 (algorithm: {algorithm_id})...")
+                                    game_state = await action_handler_instance.send_action_3()
+                                    action_taken = "ACTION3"
+                                    evolution_success = True
+                                elif action_name == "ACTION4":
+                                    print(f"Taking ACTION4 (algorithm: {algorithm_id})...")
+                                    game_state = await action_handler_instance.send_action_4()
+                                    action_taken = "ACTION4"
+                                    evolution_success = True
+                                elif action_name == "ACTION5":
+                                    print(f"Taking ACTION5 (algorithm: {algorithm_id})...")
+                                    game_state = await action_handler_instance.send_action_5()
+                                    action_taken = "ACTION5"
+                                    evolution_success = True
+                                elif action_name == "ACTION7":
+                                    print(f"Taking ACTION7 (algorithm: {algorithm_id})...")
+                                    game_state = await action_handler_instance.send_action_7()
+                                    action_taken = "ACTION7"
+                                    evolution_success = True
+                            elif callable(action_name):
+                                # ACTION6 with dynamic coordinates
+                                x = coordinates.get('x', 'dynamic')
+                                y = coordinates.get('y', 'dynamic')
+                                print(f"Taking ACTION6 (algorithm: {algorithm_id}) at ({x}, {y})...")
+                                game_state = await action_name()
+                                action_taken = f"ACTION6(x={x}, y={y})"
+                                evolution_success = True
+                        elif isinstance(action_result, str):
+                            # Backward compatibility for old string format
                             action_name = action_result
                             if action_name == "ACTION1":
                                 print("Taking ACTION1 (evolved)...")
                                 game_state = await action_handler_instance.send_action_1()
                                 action_taken = "ACTION1"
-                            elif action_name == "ACTION2":
-                                print("Taking ACTION2 (evolved)...")
-                                game_state = await action_handler_instance.send_action_2()
-                                action_taken = "ACTION2"
-                            elif action_name == "ACTION3":
-                                print("Taking ACTION3 (evolved)...")
-                                game_state = await action_handler_instance.send_action_3()
-                                action_taken = "ACTION3"
-                            elif action_name == "ACTION4":
-                                print("Taking ACTION4 (evolved)...")
-                                game_state = await action_handler_instance.send_action_4()
-                                action_taken = "ACTION4"
-                            elif action_name == "ACTION5":
-                                print("Taking ACTION5 (evolved)...")
-                                game_state = await action_handler_instance.send_action_5()
-                                action_taken = "ACTION5"
-                            elif action_name == "ACTION7":
-                                print("Taking ACTION7 (evolved)...")
-                                game_state = await action_handler_instance.send_action_7()
-                                action_taken = "ACTION7"
+                                evolution_success = True
+                            # ... other actions with old format
                         elif callable(action_result):
-                            # ACTION6 with dynamic coordinates
+                            # Backward compatibility for old callable format
                             print("Taking ACTION6 (evolved with dynamic coordinates)...")
                             game_state = await action_result()
                             # Extract coordinates from result if available
                             x, y = getattr(action_result, 'x', 'dynamic'), getattr(action_result, 'y', 'dynamic')
                             action_taken = f"ACTION6(x={x}, y={y})"
-                        else:
-                            print("[WARN] Unknown action result from evolved strategy, falling back")
-                            EVOLUTION_AVAILABLE = False
+                            evolution_success = True
 
-                    # Fallback to simple action logic if evolution not available
-                    if not EVOLUTION_AVAILABLE:
+                    except Exception as e:
+                        print(f"[WARN] Evolution strategy failed: {e}")
+                        evolution_success = False
+
+                # Fallback to simple action logic if evolution not successful
+                if not evolution_success:
+                    try:
                         if 1 in game_state.available_actions:
-                            print("Taking ACTION1...")
+                            print("Taking ACTION1 (fallback)...")
                             game_state = await action_handler_instance.send_action_1()
                             action_taken = "ACTION1"
                         elif 6 in game_state.available_actions:
@@ -201,13 +252,18 @@ async def start_single_game(max_actions: int = None):
                                 x, y = coordinate_strategies.generate_action6_coordinates('fallback_algo', actions_taken=actions_taken)
                             except ImportError:
                                 x, y = 32, 32  # Final fallback
-                            print(f"Taking ACTION6(x={x}, y={y})...")
+                            print(f"Taking ACTION6(x={x}, y={y}) (fallback)...")
                             game_state = await action_handler_instance.send_action_6(x=x, y=y)
                             action_taken = f"ACTION6(x={x}, y={y})"
                         else:
                             print("[FAIL] No available actions to take")
                             break
+                    except Exception as e:
+                        print(f"[FAIL] Fallback action failed: {e}")
+                        break
 
+                # Update action counter and print status (for both evolution and fallback success)
+                if evolution_success or action_taken:
                     actions_taken += 1
                     print(f"[PASS] Successfully executed {action_taken}")
                     print(f"New Score: {game_state.score} / {game_state.win_score}")
@@ -217,15 +273,6 @@ async def start_single_game(max_actions: int = None):
                     if game_state.state != "NOT_FINISHED":
                         print(f"\n[GAME] Game ended with state: {game_state.state}")
                         break
-
-                except Exception as e:
-                    print(f"[FAIL] Action {action_taken or 'unknown'} failed: {e}")
-                    # Check if session is still active before breaking
-                    if "NoneType" in str(e) or "Session not initialized" in str(e):
-                        print("[INFO] Session disconnected - ending game gracefully")
-                        break
-                    # For other errors, continue trying
-                    continue
 
             # Finish the game (with error handling)
             try:
@@ -245,6 +292,51 @@ async def start_single_game(max_actions: int = None):
                 print("[GAME_OVER] Game over - better luck next time!")
             elif game_state.state == 'CANCELLED':
                 print("[CANCELLED] Game cancelled gracefully")
+
+            # CRITICAL: Update evolution system with game results
+            if (EVOLUTION_AVAILABLE and
+                hasattr(start_single_game, '_evolution_manager') and
+                start_single_game._evolution_manager):
+
+                try:
+                    print("Updating evolution system with game results...")
+
+                    # Package game results
+                    # CRITICAL FIX: Ensure final score is numeric, not a list
+                    final_score = game_state.score
+                    if isinstance(final_score, (list, tuple)):
+                        print(f"[WARN] Final score is list/tuple: {final_score}, taking first element")
+                        final_score = final_score[0] if len(final_score) > 0 else 0.0
+                    elif not isinstance(final_score, (int, float)):
+                        print(f"[WARN] Final score is not numeric: {type(final_score)} {final_score}, using 0.0")
+                        final_score = 0.0
+                    final_score = float(final_score)
+
+                    game_result = {
+                        'game_id': first_game_id,
+                        'session_id': session_manager.session_id if hasattr(session_manager, 'session_id') else 'unknown',
+                        'final_score': final_score,
+                        'win_score': float(game_state.win_score) if isinstance(game_state.win_score, (int, float)) else 0.0,
+                        'actions_taken': actions_taken,
+                        'final_state': game_state.state,
+                        'win_detected': game_state.state == 'WIN'
+                    }
+
+                    # Update algorithm performance (this triggers evolution check)
+                    if hasattr(start_single_game, '_game_context') and start_single_game._game_context:
+                        current_algorithm_id = getattr(start_single_game._game_context, 'algorithm_id', None)
+                        if current_algorithm_id:
+                            await start_single_game._evolution_manager.update_algorithm_performance(
+                                current_algorithm_id, game_result
+                            )
+                            print(f"Updated performance for algorithm: {current_algorithm_id}")
+                        else:
+                            print("No algorithm ID found - skipping performance update")
+                    else:
+                        print("No game context found - skipping performance update")
+
+                except Exception as e:
+                    print(f"Warning: Error updating evolution system: {e}")
 
         # Shutdown session (with error handling)
         try:
