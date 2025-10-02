@@ -173,6 +173,10 @@ class GameSessionManager:
         action_number = int(action.replace('ACTION', '')) if action.startswith('ACTION') else 0
 
         try:
+            # Add delay between API actions to avoid overwhelming the server
+            import asyncio
+            await asyncio.sleep(1.5)  # 1.5 second delay between actions
+
             # Send action via API
             game_state = await self.client.send_action(action, **kwargs)
 

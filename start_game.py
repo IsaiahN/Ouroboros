@@ -25,6 +25,16 @@ import action_handler
 import database_interface
 import core_gameplay
 
+# Try to import evolution system
+try:
+    import evolution_manager
+    import algorithm_evaluator
+    import main_runner
+    EVOLUTION_AVAILABLE = True
+except ImportError as e:
+    print(f"Evolution system not available: {e}")
+    EVOLUTION_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -99,42 +109,104 @@ async def start_single_game(max_actions: int = None):
                 print(f"Game State: {game_state.state}")
                 print(f"Available Actions: {game_state.available_actions}")
 
-                # Try to use available actions intelligently
+                # Use evolved strategy system for intelligent action selection
                 action_taken = None
                 try:
-                    if 1 in game_state.available_actions:
-                        print("Taking ACTION1...")
-                        game_state = await action_handler_instance.send_action_1()
-                        action_taken = "ACTION1"
-                    elif 2 in game_state.available_actions:
-                        print("Taking ACTION2...")
-                        game_state = await action_handler_instance.send_action_2()
-                        action_taken = "ACTION2"
-                    elif 3 in game_state.available_actions:
-                        print("Taking ACTION3...")
-                        game_state = await action_handler_instance.send_action_3()
-                        action_taken = "ACTION3"
-                    elif 4 in game_state.available_actions:
-                        print("Taking ACTION4...")
-                        game_state = await action_handler_instance.send_action_4()
-                        action_taken = "ACTION4"
-                    elif 5 in game_state.available_actions:
-                        print("Taking ACTION5...")
-                        game_state = await action_handler_instance.send_action_5()
-                        action_taken = "ACTION5"
-                    elif 6 in game_state.available_actions:
-                        # ACTION6 needs coordinates - try center of grid
-                        x, y = 32, 32
-                        print(f"Taking ACTION6(x={x}, y={y})...")
-                        game_state = await action_handler_instance.send_action_6(x=x, y=y)
-                        action_taken = f"ACTION6(x={x}, y={y})"
-                    elif 7 in game_state.available_actions:
-                        print("Taking ACTION7...")
-                        game_state = await action_handler_instance.send_action_7()
-                        action_taken = "ACTION7"
-                    else:
-                        print("[FAIL] No available actions to take")
-                        break
+                    if EVOLUTION_AVAILABLE:
+                        # Initialize evolution system if not already done
+                        if not hasattr(start_single_game, '_evolution_manager'):
+                            print("Initializing evolution system...")
+                            config = evolution_manager.EvolutionConfig(population_size=15, evolution_frequency=3)
+                            evo_manager = evolution_manager.EvolutionManager(config, db)
+
+                            # Initialize seeded algorithms
+                            init_result = evo_manager.initialize_seeded_algorithms()
+                            print(f"Loaded {init_result['seeded_count']} evolved algorithms")
+
+                            # Initialize routine manager and create level-based routine
+                            if hasattr(evo_manager, 'routine_manager'):
+                                algorithms = [alg.algorithm_id for alg in evo_manager.active_population[:4]]
+                                if algorithms:
+                                    routine = evo_manager.routine_manager.create_level_based_routine(
+                                        first_game_id.split('-')[0], algorithms, aggressive_switching=True
+                                    )
+                                    evo_manager.routine_manager.start_routine(first_game_id, routine)
+                                    print(f"Started level-based switching routine with {len(algorithms)} algorithms")
+
+                            start_single_game._evolution_manager = evo_manager
+                            start_single_game._game_context = algorithm_evaluator.GameContext()
+                            start_single_game._game_context.game_id = first_game_id
+
+                        # Update game context
+                        context = start_single_game._game_context
+                        context.current_score = game_state.score
+                        context.actions_taken = actions_taken
+                        context.available_actions = [f"ACTION{i}" for i in game_state.available_actions]
+                        context.frame = game_state.frame
+
+                        # Use evolved strategy to select action
+                        action_result = await main_runner.evolved_strategy(
+                            game_state, action_handler_instance,
+                            start_single_game._evolution_manager, context
+                        )
+
+                        # Execute the selected action
+                        if isinstance(action_result, str):
+                            action_name = action_result
+                            if action_name == "ACTION1":
+                                print("Taking ACTION1 (evolved)...")
+                                game_state = await action_handler_instance.send_action_1()
+                                action_taken = "ACTION1"
+                            elif action_name == "ACTION2":
+                                print("Taking ACTION2 (evolved)...")
+                                game_state = await action_handler_instance.send_action_2()
+                                action_taken = "ACTION2"
+                            elif action_name == "ACTION3":
+                                print("Taking ACTION3 (evolved)...")
+                                game_state = await action_handler_instance.send_action_3()
+                                action_taken = "ACTION3"
+                            elif action_name == "ACTION4":
+                                print("Taking ACTION4 (evolved)...")
+                                game_state = await action_handler_instance.send_action_4()
+                                action_taken = "ACTION4"
+                            elif action_name == "ACTION5":
+                                print("Taking ACTION5 (evolved)...")
+                                game_state = await action_handler_instance.send_action_5()
+                                action_taken = "ACTION5"
+                            elif action_name == "ACTION7":
+                                print("Taking ACTION7 (evolved)...")
+                                game_state = await action_handler_instance.send_action_7()
+                                action_taken = "ACTION7"
+                        elif callable(action_result):
+                            # ACTION6 with dynamic coordinates
+                            print("Taking ACTION6 (evolved with dynamic coordinates)...")
+                            game_state = await action_result()
+                            # Extract coordinates from result if available
+                            x, y = getattr(action_result, 'x', 'dynamic'), getattr(action_result, 'y', 'dynamic')
+                            action_taken = f"ACTION6(x={x}, y={y})"
+                        else:
+                            print("[WARN] Unknown action result from evolved strategy, falling back")
+                            EVOLUTION_AVAILABLE = False
+
+                    # Fallback to simple action logic if evolution not available
+                    if not EVOLUTION_AVAILABLE:
+                        if 1 in game_state.available_actions:
+                            print("Taking ACTION1...")
+                            game_state = await action_handler_instance.send_action_1()
+                            action_taken = "ACTION1"
+                        elif 6 in game_state.available_actions:
+                            # Use dynamic coordinates for fallback ACTION6
+                            try:
+                                import coordinate_strategies
+                                x, y = coordinate_strategies.generate_action6_coordinates('fallback_algo', actions_taken=actions_taken)
+                            except ImportError:
+                                x, y = 32, 32  # Final fallback
+                            print(f"Taking ACTION6(x={x}, y={y})...")
+                            game_state = await action_handler_instance.send_action_6(x=x, y=y)
+                            action_taken = f"ACTION6(x={x}, y={y})"
+                        else:
+                            print("[FAIL] No available actions to take")
+                            break
 
                     actions_taken += 1
                     print(f"[PASS] Successfully executed {action_taken}")
