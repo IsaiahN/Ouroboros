@@ -901,6 +901,7 @@ class EvolutionManager:
             'hill_climbing': 'Search & Optimization',
             'simulated_annealing': 'Search & Optimization',
             'gradient_descent': 'Search & Optimization',
+            'gradient_ascent': 'Search & Optimization',
             'decision_tree': 'Machine Learning',
             'knn': 'Machine Learning',
             'kmeans': 'Machine Learning',

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SwitchCondition:
     """Defines when to switch between algorithms in a routine."""
-    condition_type: str  # 'score_threshold', 'action_count', 'time_limit', 'performance_drop'
+    condition_type: str  # 'score_threshold', 'action_count', 'time_limit', 'performance_drop', 'level_stagnation', 'score_plateau', 'level_completion', 'efficiency_drop'
     threshold: float
     operator: str  # 'greater_than', 'less_than', 'equal_to'
     consecutive_failures: int = 0
@@ -244,7 +244,14 @@ class RoutineManager:
             'consecutive_failures': 0,
             'total_actions': 0,
             'levels_completed': 0,
-            'game_start_time': datetime.now()
+            'game_start_time': datetime.now(),
+            # Level-based switching state
+            'actions_since_last_score_increase': 0,
+            'score_plateau_counter': 0,
+            'last_level_score': 0.0,
+            'last_score': 0.0,
+            'algorithm_switches': 0,
+            'score_history': []
         }
 
         self.current_routine_state[game_id] = routine_state
@@ -275,6 +282,9 @@ class RoutineManager:
 
         state = self.current_routine_state[game_id]
         routine = state['routine']
+
+        # Update level-based tracking state
+        self._update_level_tracking_state(state, current_score)
 
         if state['current_step'] >= len(routine.steps):
             return False, "Routine completed"
@@ -311,6 +321,29 @@ class RoutineManager:
             # For performance drop, we want to switch if improvement is below threshold
             if condition.operator == "greater_than":
                 return score_improvement < condition.threshold
+        elif condition.condition_type == "level_stagnation":
+            # Switch if no level advancement after X actions
+            actions_since_score_increase = state.get('actions_since_last_score_increase', 0)
+            return actions_since_score_increase > condition.threshold
+        elif condition.condition_type == "score_plateau":
+            # Switch if score hasn't changed for X actions
+            score_plateau_actions = state.get('score_plateau_counter', 0)
+            return score_plateau_actions > condition.threshold
+        elif condition.condition_type == "level_completion":
+            # Switch when significant score increase detected (level completed)
+            score_increase = current_score - state.get('last_level_score', 0.0)
+            return score_increase >= condition.threshold
+        elif condition.condition_type == "efficiency_drop":
+            # Switch when actions per score point becomes inefficient
+            if state['actions_in_current_step'] > 0:
+                score_gain = current_score - state['step_start_score']
+                if score_gain > 0:
+                    actions_per_point = state['actions_in_current_step'] / score_gain
+                    return actions_per_point > condition.threshold
+                else:
+                    # No score gain - consider inefficient after threshold actions
+                    return state['actions_in_current_step'] > condition.threshold
+            return False
         else:
             return False
 
@@ -322,6 +355,66 @@ class RoutineManager:
             return abs(value - condition.threshold) < 0.001
 
         return False
+
+    def _update_level_tracking_state(self, state: Dict, current_score: float) -> None:
+        """Update level-based tracking state variables."""
+        # Update score history
+        state['score_history'].append(current_score)
+        if len(state['score_history']) > 100:  # Keep only last 100 scores
+            state['score_history'] = state['score_history'][-100:]
+
+        # Check for score increases (level progress)
+        if current_score > state['last_score']:
+            # Score increased - reset stagnation counters
+            state['actions_since_last_score_increase'] = 0
+            state['score_plateau_counter'] = 0
+            state['last_level_score'] = state['last_score']  # Mark previous score as level completion
+
+            # Update coordinate success tracking
+            self._update_coordinate_success_tracking(state, current_score - state['last_score'])
+        else:
+            # No score increase - increment counters
+            state['actions_since_last_score_increase'] += 1
+            state['score_plateau_counter'] += 1
+
+        # Update last score
+        state['last_score'] = current_score
+
+    def _update_coordinate_success_tracking(self, state: Dict, score_improvement: float) -> None:
+        """Update coordinate success tracking for the routine."""
+        # Initialize coordinate tracking if not present
+        if 'coordinate_success_history' not in state:
+            state['coordinate_success_history'] = []
+            state['last_action6_coordinates'] = None
+            state['coordinate_success_rate'] = 0.0
+            state['total_action6_attempts'] = 0
+            state['successful_action6_attempts'] = 0
+
+        # If we have recent ACTION6 coordinates and score improved, mark as successful
+        if state['last_action6_coordinates'] and score_improvement > 0:
+            state['coordinate_success_history'].append({
+                'coordinates': state['last_action6_coordinates'],
+                'score_improvement': score_improvement,
+                'algorithm_id': state.get('current_algorithm_id', 'unknown')
+            })
+            state['successful_action6_attempts'] += 1
+
+            # Limit history size
+            if len(state['coordinate_success_history']) > 50:
+                state['coordinate_success_history'] = state['coordinate_success_history'][-50:]
+
+            # Update global coordinate generator with success
+            if hasattr(self, '_coordinate_generator'):
+                from coordinate_strategies import coordinate_generator
+                coordinate_generator.update_success(
+                    state.get('current_algorithm_id', 'routine'),
+                    state['last_action6_coordinates'],
+                    score_improvement
+                )
+
+        # Update success rate
+        if state['total_action6_attempts'] > 0:
+            state['coordinate_success_rate'] = state['successful_action6_attempts'] / state['total_action6_attempts']
 
     def switch_to_next_algorithm(self, game_id: str) -> Optional[str]:
         """Switch to the next algorithm in the routine."""
@@ -335,6 +428,10 @@ class RoutineManager:
         state['current_step'] += 1
         state['actions_in_current_step'] = 0
         state['consecutive_failures'] = 0
+        state['algorithm_switches'] += 1
+
+        # Reset step-specific tracking
+        state['step_start_score'] = state['last_score']
 
         if state['current_step'] >= len(routine.steps):
             logger.info(f"Routine {routine.routine_id} completed for game {game_id}")
@@ -494,4 +591,149 @@ class RoutineManager:
                 'active_routines': len(self.active_routines),
                 'cached_game_types': len(self.game_type_cache),
                 'error': str(e)
+            }
+
+    def create_level_based_routine(self, game_type: str, available_algorithms: List[str],
+                                 aggressive_switching: bool = True) -> AlgorithmRoutine:
+        """Create a routine optimized for level-based algorithm switching.
+
+        Args:
+            game_type: The game type to create routine for
+            available_algorithms: List of algorithm IDs to use
+            aggressive_switching: If True, use more aggressive switching conditions
+
+        Returns:
+            AlgorithmRoutine with level-based switching configured
+        """
+        routine_id = f"{game_type}_level_based_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        # Define switching conditions based on aggressiveness
+        if aggressive_switching:
+            # Aggressive switching - change algorithms frequently
+            switch_conditions = [
+                # Switch if no score improvement in 100 actions
+                SwitchCondition("level_stagnation", 100, "greater_than"),
+                # Switch if score plateau for 75 actions
+                SwitchCondition("score_plateau", 75, "greater_than"),
+                # Switch when level completed (score increase >= 1.0)
+                SwitchCondition("level_completion", 1.0, "greater_than"),
+                # Switch if efficiency drops (>150 actions per score point)
+                SwitchCondition("efficiency_drop", 150, "greater_than"),
+                # Max 200 actions per algorithm
+                SwitchCondition("action_count", 200, "greater_than")
+            ]
+            max_actions_per_step = 200
+        else:
+            # Conservative switching - give algorithms more time
+            switch_conditions = [
+                # Switch if no score improvement in 200 actions
+                SwitchCondition("level_stagnation", 200, "greater_than"),
+                # Switch if score plateau for 150 actions
+                SwitchCondition("score_plateau", 150, "greater_than"),
+                # Switch when level completed (score increase >= 1.0)
+                SwitchCondition("level_completion", 1.0, "greater_than"),
+                # Switch if efficiency drops (>300 actions per score point)
+                SwitchCondition("efficiency_drop", 300, "greater_than"),
+                # Max 400 actions per algorithm
+                SwitchCondition("action_count", 400, "greater_than")
+            ]
+            max_actions_per_step = 400
+
+        # Create routine steps for each algorithm
+        steps = []
+        for i, algorithm_id in enumerate(available_algorithms):
+            step = RoutineStep(
+                algorithm_id=algorithm_id,
+                max_actions=max_actions_per_step,
+                switch_conditions=switch_conditions.copy(),
+                priority=len(available_algorithms) - i  # Higher priority for earlier algorithms
+            )
+            steps.append(step)
+
+        # Create the routine
+        routine = AlgorithmRoutine(
+            routine_id=routine_id,
+            game_type=game_type,
+            routine_name=f"Level-Based {'Aggressive' if aggressive_switching else 'Conservative'} Routine",
+            steps=steps,
+            success_rate=0.0,
+            games_tested=0,
+            levels_completed=0,
+            avg_actions_per_level=0.0
+        )
+
+        logger.info(f"Created level-based routine {routine_id} with {len(steps)} algorithms")
+        return routine
+
+    def track_action6_usage(self, game_id: str, coordinates: tuple, algorithm_id: str = None) -> None:
+        """Track ACTION6 coordinate usage for success rate analysis.
+
+        Args:
+            game_id: Game identifier
+            coordinates: (x, y) coordinates used
+            algorithm_id: ID of algorithm that generated the coordinates
+        """
+        if game_id not in self.current_routine_state:
+            return
+
+        state = self.current_routine_state[game_id]
+
+        # Initialize coordinate tracking if needed
+        if 'coordinate_success_history' not in state:
+            state['coordinate_success_history'] = []
+            state['last_action6_coordinates'] = None
+            state['coordinate_success_rate'] = 0.0
+            state['total_action6_attempts'] = 0
+            state['successful_action6_attempts'] = 0
+
+        # Track the coordinates and algorithm
+        state['last_action6_coordinates'] = coordinates
+        state['current_algorithm_id'] = algorithm_id
+        state['total_action6_attempts'] += 1
+
+        logger.debug(f"Tracked ACTION6({coordinates[0]}, {coordinates[1]}) for {algorithm_id}")
+
+    def get_coordinate_statistics(self, game_id: str = None) -> Dict[str, Any]:
+        """Get coordinate usage statistics.
+
+        Args:
+            game_id: Specific game ID, or None for all games
+
+        Returns:
+            Dictionary containing coordinate statistics
+        """
+        if game_id and game_id in self.current_routine_state:
+            # Single game statistics
+            state = self.current_routine_state[game_id]
+            return {
+                'game_id': game_id,
+                'total_action6_attempts': state.get('total_action6_attempts', 0),
+                'successful_action6_attempts': state.get('successful_action6_attempts', 0),
+                'coordinate_success_rate': state.get('coordinate_success_rate', 0.0),
+                'successful_coordinates': [
+                    entry['coordinates'] for entry in state.get('coordinate_success_history', [])
+                ]
+            }
+        else:
+            # Aggregate statistics across all active games
+            total_attempts = 0
+            total_successes = 0
+            all_successful_coords = []
+
+            for state in self.current_routine_state.values():
+                total_attempts += state.get('total_action6_attempts', 0)
+                total_successes += state.get('successful_action6_attempts', 0)
+                all_successful_coords.extend([
+                    entry['coordinates'] for entry in state.get('coordinate_success_history', [])
+                ])
+
+            overall_success_rate = total_successes / total_attempts if total_attempts > 0 else 0.0
+
+            return {
+                'total_games': len(self.current_routine_state),
+                'total_action6_attempts': total_attempts,
+                'successful_action6_attempts': total_successes,
+                'overall_coordinate_success_rate': overall_success_rate,
+                'unique_successful_coordinates': len(set(all_successful_coords)),
+                'coordinate_coverage': len(set(all_successful_coords)) / (65 * 65) if all_successful_coords else 0.0
             }

@@ -28,7 +28,9 @@ class AlgorithmNode:
 class ActionNode(AlgorithmNode):
     """Represents a specific game action."""
     action_type: str = "ACTION1"  # Default to ACTION1, can be "ACTION1"-"ACTION7"
-    coordinates: Optional[Dict[str, int]] = None  # For ACTION6
+    coordinates: Optional[Dict[str, int]] = None  # For ACTION6 - static coordinates
+    coordinate_strategy: Optional[str] = None  # For ACTION6 - dynamic coordinate strategy
+    coordinate_params: Optional[Dict[str, Any]] = None  # Parameters for coordinate generation
 
     def __post_init__(self):
         super().__post_init__()

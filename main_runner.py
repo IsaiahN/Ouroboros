@@ -98,20 +98,48 @@ async def evolved_strategy(game_state, action_handler, evolution_manager=None, g
     try:
         # Update game context with current state
         if game_context:
+            # Track score changes for coordinate success analysis
+            previous_score = game_context.current_score
+            game_context.previous_score = previous_score
             game_context.current_score = game_state.score
             game_context.actions_taken = getattr(game_state, 'actions_taken', 0)
             game_context.available_actions = game_state.available_actions
             game_context.game_id = getattr(game_state, 'game_id', 'unknown')
+            game_context.frame = getattr(game_state, 'frame', None)
+
+            # Track ACTION6 success based on score improvement
+            if hasattr(game_context, 'track_action6_success'):
+                score_improvement = game_context.current_score - previous_score
+                if score_improvement > 0:
+                    game_context.track_action6_success(score_improvement)
+
+        # Check for mid-game algorithm switching based on level performance
+        if hasattr(evolution_manager, 'routine_manager') and game_context:
+            new_algorithm = evolution_manager.update_routine_context(
+                game_context.game_id,
+                game_state.score,
+                game_context.actions_taken
+            )
+            if new_algorithm:
+                logger.info(f"Switched algorithm mid-game: {new_algorithm.algorithm_id}")
 
         # Get current algorithm from evolution manager
         current_algorithm = evolution_manager.get_current_algorithm()
 
         if current_algorithm:
+            # Update game context with algorithm information
+            if game_context:
+                game_context.algorithm_id = current_algorithm.algorithm_id
+
             # Use algorithm evaluator to determine action
             evaluator = AlgorithmEvaluator()
             result = evaluator.evaluate_algorithm(current_algorithm, game_context or GameContext())
 
-            logger.info(f"Evolved algorithm selected: {result.action} (confidence: {result.confidence:.2f})")
+            # Log action with coordinate information
+            coord_info = ""
+            if result.coordinates:
+                coord_info = f" at ({result.coordinates['x']}, {result.coordinates['y']})"
+            logger.info(f"Evolved algorithm selected: {result.action}{coord_info} (confidence: {result.confidence:.2f})")
 
             # Convert action result to action handler call
             if result.action == "ACTION1":

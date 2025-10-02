@@ -33,6 +33,16 @@ class GameContext:
     session_id: str = ""
     game_id: str = ""
 
+    # Enhanced coordinate tracking
+    algorithm_id: str = ""
+    previous_score: float = 0.0
+    frame: List[List[int]] = None
+    last_action6_coordinates: Optional[Tuple[int, int]] = None
+    successful_coordinates: List[Tuple[int, int]] = None
+    coordinate_strategy_history: List[str] = None
+    action6_attempts: int = 0
+    successful_action6_attempts: int = 0
+
     def __post_init__(self):
         if self.available_actions is None:
             self.available_actions = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION6", "ACTION7"]
@@ -40,6 +50,45 @@ class GameContext:
             self.frame_changed_history = []
         if self.last_action_results is None:
             self.last_action_results = []
+        if self.successful_coordinates is None:
+            self.successful_coordinates = []
+        if self.coordinate_strategy_history is None:
+            self.coordinate_strategy_history = []
+
+    def track_action6_usage(self, coordinates: Tuple[int, int], strategy: str = None):
+        """Track ACTION6 coordinate usage."""
+        self.last_action6_coordinates = coordinates
+        self.action6_attempts += 1
+        if strategy:
+            self.coordinate_strategy_history.append(strategy)
+            # Keep only last 20 strategies
+            if len(self.coordinate_strategy_history) > 20:
+                self.coordinate_strategy_history = self.coordinate_strategy_history[-20:]
+
+    def track_action6_success(self, score_improvement: float):
+        """Track successful ACTION6 usage."""
+        if self.last_action6_coordinates and score_improvement > 0:
+            self.successful_coordinates.append(self.last_action6_coordinates)
+            self.successful_action6_attempts += 1
+
+            # Keep only last 50 successful coordinates
+            if len(self.successful_coordinates) > 50:
+                self.successful_coordinates = self.successful_coordinates[-50:]
+
+            # Update success rate
+            if self.action6_attempts > 0:
+                self.coordinate_success_rate = self.successful_action6_attempts / self.action6_attempts
+
+    def get_coordinate_statistics(self) -> Dict[str, Any]:
+        """Get coordinate usage statistics for this game context."""
+        return {
+            'total_action6_attempts': self.action6_attempts,
+            'successful_action6_attempts': self.successful_action6_attempts,
+            'coordinate_success_rate': self.coordinate_success_rate,
+            'unique_successful_coordinates': len(set(self.successful_coordinates)),
+            'last_coordinates': self.last_action6_coordinates,
+            'recent_strategies': self.coordinate_strategy_history[-5:] if self.coordinate_strategy_history else []
+        }
 
 
 @dataclass
@@ -156,17 +205,66 @@ class AlgorithmEvaluator:
         confidence = 1.0
 
         if action == "ACTION6":
-            if node.coordinates:
+            # Use dynamic coordinate generation if strategy specified
+            if node.coordinate_strategy:
+                try:
+                    from coordinate_strategies import generate_action6_coordinates, CoordinateStrategy
+
+                    # Parse strategy
+                    strategy = CoordinateStrategy(node.coordinate_strategy)
+
+                    # Generate coordinates using advanced strategies
+                    x, y = generate_action6_coordinates(
+                        algorithm_id=getattr(context, 'algorithm_id', ''),
+                        current_score=context.current_score,
+                        previous_score=getattr(context, 'previous_score', 0.0),
+                        actions_taken=context.actions_taken,
+                        frame=getattr(context, 'frame', None),
+                        strategy=strategy
+                    )
+
+                    coordinates = {"x": x, "y": y}
+                    confidence = 0.8  # Higher confidence for strategic coordinates
+
+                except Exception as e:
+                    logger.warning(f"Dynamic coordinate generation failed: {e}")
+                    # Fallback to static or random
+                    if node.coordinates:
+                        coordinates = node.coordinates.copy()
+                    else:
+                        coordinates = {"x": random.randint(0, 64), "y": random.randint(0, 64)}
+                    confidence = 0.5
+
+            elif node.coordinates:
                 coordinates = node.coordinates.copy()
+                confidence = 0.6  # Medium confidence for static coordinates
             else:
-                # Generate random coordinates
-                coordinates = {
-                    "x": random.randint(0, 63),
-                    "y": random.randint(0, 63)
-                }
+                # Fallback to intelligent random coordinates
+                try:
+                    from coordinate_strategies import generate_action6_coordinates
+
+                    x, y = generate_action6_coordinates(
+                        algorithm_id=getattr(context, 'algorithm_id', ''),
+                        current_score=context.current_score,
+                        actions_taken=context.actions_taken
+                    )
+                    coordinates = {"x": x, "y": y}
+                    confidence = 0.4  # Lower confidence for fallback
+
+                except Exception:
+                    # Final fallback to random
+                    coordinates = {"x": random.randint(0, 64), "y": random.randint(0, 64)}
+                    confidence = 0.3
 
             # Adjust confidence based on coordinate success rate
-            confidence = max(0.3, context.coordinate_success_rate)
+            if hasattr(context, 'coordinate_success_rate'):
+                confidence = max(confidence, context.coordinate_success_rate)
+
+            # Track ACTION6 coordinate usage in context
+            if coordinates and hasattr(context, 'track_action6_usage'):
+                coord_tuple = (coordinates['x'], coordinates['y'])
+                strategy = node.coordinate_strategy if hasattr(node, 'coordinate_strategy') else None
+                context.track_action6_usage(coord_tuple, strategy)
 
         return EvaluationResult(
             action=action,

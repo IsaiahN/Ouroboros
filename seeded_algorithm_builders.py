@@ -29,12 +29,10 @@ class SeededAlgorithmBuilder:
             parameters={"threshold": 50, "operator": "greater_than"}
         )
 
-        # Exploration action (ACTION6) with strategic coordinates
-        explore_action = ActionNode(
-            "action",
-            action_type="ACTION6",
-            coordinates={"x": 32, "y": 32}  # Center exploration
-        )
+        # Exploration action (ACTION6) with systematic coordinate exploration
+        from action6_helpers import create_systematic_action6
+
+        explore_action = create_systematic_action6()  # Dynamic systematic exploration
 
         # Conservative building sequence for low scores
         conservative_sequence = SequenceNode("sequence", children=[
@@ -342,14 +340,15 @@ class SeededAlgorithmBuilder:
             repeat_count=2
         )
 
-        # Change direction (gradient step)
+        # Change direction (gradient step) using dynamic coordinates
+        from action6_helpers import create_gradient_action6
+
         gradient_step = RandomChoiceNode(
             "random_choice",
             choices=[
                 ActionNode("action", action_type="ACTION3"),
                 ActionNode("action", action_type="ACTION4"),
-                ActionNode("action", action_type="ACTION6",
-                          coordinates={"x": 32, "y": 32})
+                create_gradient_action6()  # Dynamic gradient descent coordinates
             ],
             weights=[0.3, 0.3, 0.4]
         )
@@ -367,6 +366,82 @@ class SeededAlgorithmBuilder:
             "original_name": "Gradient Descent",
             "category": "Search & Optimization",
             "adaptation_notes": "Iterative improvement with momentum"
+        }
+        return algorithm
+
+    @staticmethod
+    def create_gradient_ascent_algorithm() -> AlgorithmRepresentation:
+        """Gradient Ascent: Maximize score by following steepest ascent direction."""
+
+        # Check if recent actions increased score significantly
+        strong_improvement_condition = ConditionNode(
+            "condition",
+            condition_type="score_threshold",
+            parameters={"threshold": 1.0, "operator": "greater_than", "within_last_actions": 3}
+        )
+
+        # Aggressive upward movement when improvement detected
+        ascent_actions = SequenceNode("sequence", children=[
+            ActionNode("action", action_type="ACTION1"),  # Push forward
+            ActionNode("action", action_type="ACTION2"),  # Continue ascent
+            ActionNode("action", action_type="ACTION4"),  # Maximize gain
+        ])
+
+        # Exploration for new gradient when no strong improvement
+        exploration_condition = ConditionNode(
+            "condition",
+            condition_type="frame_changed",
+            parameters={"within_last_actions": 1}
+        )
+
+        # Small gradient steps to find direction using dynamic coordinates
+        from action6_helpers import create_gradient_action6, create_systematic_action6
+
+        gradient_search = RandomChoiceNode(
+            "random_choice",
+            choices=[
+                ActionNode("action", action_type="ACTION3"),
+                create_gradient_action6(),  # Dynamic gradient-following coordinates
+                create_systematic_action6(),  # Systematic exploration
+                ActionNode("action", action_type="ACTION5")
+            ],
+            weights=[0.3, 0.4, 0.2, 0.1]
+        )
+
+        # Random exploration when stuck using dynamic coordinates
+        from action6_helpers import create_random_action6
+
+        random_step = RandomChoiceNode(
+            "random_choice",
+            choices=[
+                ActionNode("action", action_type="ACTION1"),
+                ActionNode("action", action_type="ACTION2"),
+                ActionNode("action", action_type="ACTION3"),
+                create_random_action6()  # Dynamic random coordinates
+            ]
+        )
+
+        # Build conditional tree: Strong improvement -> Ascent, Some change -> Search, No change -> Random
+        gradient_exploration = ConditionalNode(
+            "conditional",
+            condition=exploration_condition,
+            true_branch=gradient_search,
+            false_branch=random_step
+        )
+
+        root = ConditionalNode(
+            "conditional",
+            condition=strong_improvement_condition,
+            true_branch=ascent_actions,
+            false_branch=gradient_exploration
+        )
+
+        algorithm = AlgorithmRepresentation(root)
+        algorithm.algorithm_id = "gradient_ascent_seed_001"
+        algorithm.metadata = {
+            "original_name": "Gradient Ascent",
+            "category": "Search & Optimization",
+            "adaptation_notes": "Maximize score by following steepest ascent direction with exploration"
         }
         return algorithm
 
@@ -556,6 +631,7 @@ class SeededAlgorithmBuilder:
             SeededAlgorithmBuilder.create_dfs_algorithm,
             SeededAlgorithmBuilder.create_simulated_annealing_algorithm,
             SeededAlgorithmBuilder.create_gradient_descent_algorithm,
+            SeededAlgorithmBuilder.create_gradient_ascent_algorithm,
             SeededAlgorithmBuilder.create_knn_algorithm,
             SeededAlgorithmBuilder.create_quick_sort_algorithm,
             SeededAlgorithmBuilder.create_binary_search_algorithm,
