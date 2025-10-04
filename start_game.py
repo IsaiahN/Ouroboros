@@ -122,12 +122,15 @@ async def start_single_game(max_actions: int = DEFAULT_ACTION_LIMIT):
             game_state = arc_api_client.GameState.from_dict(game_state_dict)
             actions_taken = 0
 
-            # Add infinite loop detection
+            # Add intelligent strategy switching when stuck
             consecutive_same_score = 0
             last_score = None
             fallback_action_rotation = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION6"]
             fallback_index = 0
-            max_consecutive_same_score = 15  # Break loop after 15 actions with no progress
+            strategy_escalation_level = 0
+            max_same_score_before_strategy_change = 8  # Change strategy after 8 actions with no progress
+            max_same_score_before_game_end = 25  # Only end game after 25 actions with no progress
+            force_evolution_bypass = False  # Force fallback mode when stuck
 
             # Continue until game ends naturally (WIN/GAME_OVER) or action limit reached
             while game_state.state == "NOT_FINISHED":
@@ -140,20 +143,46 @@ async def start_single_game(max_actions: int = DEFAULT_ACTION_LIMIT):
                 print(f"Game State: {game_state.state}")
                 print(f"Available Actions: {game_state.available_actions}")
 
-                # Infinite loop detection - check if score is improving
+                # Intelligent strategy switching when stuck
                 current_score = float(game_state.score if isinstance(game_state.score, (int, float)) else
                                     (game_state.score[0] if isinstance(game_state.score, (list, tuple)) and len(game_state.score) > 0 else 0.0))
 
                 if last_score is not None and abs(current_score - last_score) < 0.001:  # No significant progress
                     consecutive_same_score += 1
-                    if consecutive_same_score >= max_consecutive_same_score:
-                        print(f"\n[LOOP DETECTION] No progress after {consecutive_same_score} actions (score stuck at {current_score})")
-                        print("[LOOP DETECTION] Breaking infinite loop to prevent timeout")
+
+                    # Progressive strategy escalation instead of just stopping
+                    if consecutive_same_score >= max_same_score_before_game_end:
+                        print(f"\n[GAME END] No progress after {consecutive_same_score} actions (score stuck at {current_score})")
+                        print("[GAME END] Ending game - all strategies exhausted")
                         break
+                    elif consecutive_same_score >= max_same_score_before_strategy_change:
+                        strategy_escalation_level += 1
+                        force_evolution_bypass = True  # Force fallback mode
+
+                        if strategy_escalation_level == 1:
+                            print(f"\n[STRATEGY CHANGE] Level 1: Switching to aggressive fallback rotation after {consecutive_same_score} actions")
+                            # Randomize fallback order to try different patterns
+                            import random
+                            random.shuffle(fallback_action_rotation)
+                        elif strategy_escalation_level == 2:
+                            print(f"\n[STRATEGY CHANGE] Level 2: Adding coordinate randomization after {consecutive_same_score} actions")
+                            # Force more diverse ACTION6 coordinates
+                        elif strategy_escalation_level >= 3:
+                            print(f"\n[STRATEGY CHANGE] Level 3+: Maximum diversity mode after {consecutive_same_score} actions")
+                            # Try all available actions in sequence
+                            fallback_action_rotation = [f"ACTION{i}" for i in game_state.available_actions]
+
+                        # Reset consecutive counter to give new strategy a chance
+                        consecutive_same_score = max_same_score_before_strategy_change - 3
+
                     elif consecutive_same_score >= 5:
                         print(f"[WARN] No progress for {consecutive_same_score} actions - score stuck at {current_score}")
+                        if consecutive_same_score >= 6:
+                            force_evolution_bypass = True  # Start bypassing evolution when clearly stuck
                 else:
                     consecutive_same_score = 0  # Reset counter if score improved
+                    strategy_escalation_level = 0  # Reset escalation level
+                    force_evolution_bypass = False  # Re-enable evolution
 
                 last_score = current_score
 
@@ -163,8 +192,8 @@ async def start_single_game(max_actions: int = DEFAULT_ACTION_LIMIT):
                 action_start_time = time.time() if OPTIMIZER_AVAILABLE else None
                 algorithm_id = "unknown"
 
-                # Try evolution system first
-                if EVOLUTION_AVAILABLE:
+                # Try evolution system first (unless forced to bypass when stuck)
+                if EVOLUTION_AVAILABLE and not force_evolution_bypass:
                     try:
                         # Initialize evolution system if not already done
                         if not hasattr(start_single_game, '_evolution_manager'):
@@ -289,7 +318,7 @@ async def start_single_game(max_actions: int = DEFAULT_ACTION_LIMIT):
                         print(f"[WARN] Evolution strategy failed: {e}")
                         evolution_success = False
 
-                # Improved fallback with action rotation to avoid infinite loops
+                # Improved fallback with action rotation and coordinate diversity
                 if not evolution_success:
                     try:
                         # Rotate through different fallback actions to avoid getting stuck
@@ -320,13 +349,27 @@ async def start_single_game(max_actions: int = DEFAULT_ACTION_LIMIT):
                                 action_taken = "ACTION4"
                                 fallback_success = True
                             elif try_action == "ACTION6" and 6 in game_state.available_actions:
-                                # Use dynamic coordinates for fallback ACTION6
+                                # Use increasingly diverse coordinates based on strategy escalation level
                                 try:
                                     import coordinate_strategies
-                                    x, y = coordinate_strategies.generate_action6_coordinates('fallback_algo', actions_taken=actions_taken)
+                                    import random
+
+                                    if strategy_escalation_level >= 2:
+                                        # High diversity mode - completely random coordinates
+                                        x, y = random.randint(0, 63), random.randint(0, 63)
+                                        print(f"Taking ACTION6(x={x}, y={y}) (RANDOM fallback #{fallback_index + 1})...")
+                                    else:
+                                        # Normal coordinate generation
+                                        x, y = coordinate_strategies.generate_action6_coordinates('fallback_algo', actions_taken=actions_taken)
+                                        print(f"Taking ACTION6(x={x}, y={y}) (fallback #{fallback_index + 1})...")
                                 except ImportError:
-                                    x, y = 32, 32  # Final fallback
-                                print(f"Taking ACTION6(x={x}, y={y}) (fallback #{fallback_index + 1})...")
+                                    import random
+                                    if strategy_escalation_level >= 2:
+                                        x, y = random.randint(0, 63), random.randint(0, 63)
+                                    else:
+                                        x, y = 32, 32  # Final fallback
+                                    print(f"Taking ACTION6(x={x}, y={y}) (fallback #{fallback_index + 1})...")
+
                                 game_state = await action_handler_instance.send_action_6(x=x, y=y)
                                 action_taken = f"ACTION6(x={x}, y={y})"
                                 fallback_success = True
