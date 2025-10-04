@@ -415,7 +415,13 @@ class AlgorithmEvaluator:
                 elif operator == "less_than":
                     return context.current_score < threshold
                 elif operator == "equal":
-                    return abs(context.current_score - threshold) < 1.0
+                    # Ensure current_score is numeric for arithmetic
+                    current_score = context.current_score
+                    if isinstance(current_score, (list, tuple)):
+                        current_score = current_score[0] if len(current_score) > 0 else 0.0
+                    elif not isinstance(current_score, (int, float)):
+                        current_score = 0.0
+                    return abs(float(current_score) - threshold) < 1.0
 
             elif condition_type == "action_count":
                 count = parameters.get("count", 10)

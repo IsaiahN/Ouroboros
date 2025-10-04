@@ -134,14 +134,22 @@ async def evolved_strategy(game_state, action_handler, evolution_manager=None, g
             if hasattr(game_context, 'track_action6_success'):
                 try:
                     # CRITICAL FIX: Ensure both scores are numbers before subtraction
+                    current_score = game_context.current_score
+                    if isinstance(current_score, (list, tuple)):
+                        logger.warning(f"Current score is list/tuple: {current_score}, taking first element")
+                        current_score = current_score[0] if len(current_score) > 0 else 0.0
+                    elif not isinstance(current_score, (int, float)):
+                        logger.warning(f"Current score is not numeric: {type(current_score)} {current_score}, using 0.0")
+                        current_score = 0.0
+
                     if isinstance(previous_score, (list, tuple)):
                         logger.warning(f"Previous score is list/tuple: {previous_score}, taking first element")
                         previous_score = previous_score[0] if len(previous_score) > 0 else 0.0
                     elif not isinstance(previous_score, (int, float)):
                         logger.warning(f"Previous score is not numeric: {type(previous_score)} {previous_score}, using 0.0")
                         previous_score = 0.0
-                    
-                    score_improvement = float(game_context.current_score) - float(previous_score)
+
+                    score_improvement = float(current_score) - float(previous_score)
                     if score_improvement > 0:
                         game_context.track_action6_success(score_improvement)
                 except (TypeError, ValueError) as e:
@@ -151,9 +159,19 @@ async def evolved_strategy(game_state, action_handler, evolution_manager=None, g
 
         # Check for mid-game algorithm switching based on level performance
         if hasattr(evolution_manager, 'routine_manager') and game_context:
+            # CRITICAL FIX: Ensure score is numeric before passing to update_routine_context
+            routine_score = game_state.score
+            if isinstance(routine_score, (list, tuple)):
+                logger.warning(f"Routine score is list/tuple: {routine_score}, taking first element")
+                routine_score = routine_score[0] if len(routine_score) > 0 else 0.0
+            elif not isinstance(routine_score, (int, float)):
+                logger.warning(f"Routine score is not numeric: {type(routine_score)} {routine_score}, using 0.0")
+                routine_score = 0.0
+            routine_score = float(routine_score)
+
             new_algorithm = evolution_manager.update_routine_context(
                 game_context.game_id,
-                game_state.score,
+                routine_score,
                 game_context.actions_taken
             )
             if new_algorithm:
@@ -595,7 +613,7 @@ def main():
     play_parser = subparsers.add_parser('play', help='Play a single game')
     play_parser.add_argument('game_id', help='Game ID to play')
     play_parser.add_argument('--api-key', help='ARC API key (or set ARC_API_KEY env var)')
-    play_parser.add_argument('--strategy', choices=['balanced', 'random', 'conservative', 'exploration', 'evolved'],
+    play_parser.add_argument('--strategy', choices=['balanced', 'random', 'conservative', 'exploration', 'evolved', 'level_beating'],
                            default='balanced', help='Strategy to use')
     play_parser.add_argument('--db-path', default='core_data.db',
                            help='Database file path')
@@ -604,7 +622,7 @@ def main():
     session_parser = subparsers.add_parser('session', help='Run a gaming session')
     session_parser.add_argument('--max-games', type=int, help='Maximum number of games to play')
     session_parser.add_argument('--api-key', help='ARC API key (or set ARC_API_KEY env var)')
-    session_parser.add_argument('--strategy', choices=['balanced', 'random', 'conservative', 'exploration', 'evolved'],
+    session_parser.add_argument('--strategy', choices=['balanced', 'random', 'conservative', 'exploration', 'evolved', 'level_beating'],
                               default='balanced', help='Strategy to use')
     session_parser.add_argument('--mode', default='gameplay', help='Session mode')
     session_parser.add_argument('--db-path', default='core_data.db',

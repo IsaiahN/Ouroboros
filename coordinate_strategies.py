@@ -346,7 +346,8 @@ def generate_action6_coordinates(algorithm_id: str = "",
                                previous_score: float = 0.0,
                                actions_taken: int = 0,
                                frame: List[List[int]] = None,
-                               strategy: CoordinateStrategy = None) -> Tuple[int, int]:
+                               strategy: CoordinateStrategy = None,
+                               use_smart_engine: bool = True) -> Tuple[int, int]:
     """Convenience function to generate ACTION6 coordinates.
 
     Args:
@@ -356,6 +357,7 @@ def generate_action6_coordinates(algorithm_id: str = "",
         actions_taken: Number of actions taken so far
         frame: Current game frame (optional)
         strategy: Specific strategy to use (optional, auto-selected if None)
+        use_smart_engine: Enable revolutionary smart coordinate generation
 
     Returns:
         Tuple of (x, y) coordinates
@@ -369,7 +371,7 @@ def generate_action6_coordinates(algorithm_id: str = "",
             logger.warning(f"Current score is not numeric: {type(current_score)} {current_score}, using 0.0")
             current_score = 0.0
         current_score = float(current_score)
-        
+
         if isinstance(previous_score, (list, tuple)):
             logger.warning(f"Previous score is list/tuple: {previous_score}, taking first element")
             previous_score = previous_score[0] if len(previous_score) > 0 else 0.0
@@ -381,6 +383,36 @@ def generate_action6_coordinates(algorithm_id: str = "",
         logger.warning(f"Score type conversion failed: {e}")
         current_score = 0.0
         previous_score = 0.0
+
+    # ===== REVOLUTIONARY SMART COORDINATE GENERATION =====
+    if use_smart_engine:
+        try:
+            from smart_coordinate_engine import generate_smart_coordinates, update_smart_coordinate_performance
+
+            # Use the revolutionary smart coordinate engine
+            coordinates = generate_smart_coordinates(
+                algorithm_id=algorithm_id,
+                current_score=current_score,
+                previous_score=previous_score,
+                actions_taken=actions_taken
+            )
+
+            # Update performance tracking if score improved
+            if current_score > previous_score:
+                score_improvement = current_score - previous_score
+                update_smart_coordinate_performance(coordinates[0], coordinates[1], score_improvement)
+                logger.info(f"[SMART ENGINE] Coordinate success recorded: {coordinates}, improvement: {score_improvement:.3f}")
+            elif current_score <= previous_score and actions_taken > 0:
+                # Record failure/no improvement
+                update_smart_coordinate_performance(coordinates[0], coordinates[1], 0.0)
+
+            logger.info(f"[SMART ENGINE] Generated coordinates: {coordinates} for {algorithm_id}")
+            return coordinates
+
+        except ImportError:
+            logger.warning("Smart coordinate engine not available, falling back to legacy system")
+        except Exception as e:
+            logger.warning(f"Smart coordinate engine failed: {e}, falling back to legacy system")
     
     context = CoordinateContext(
         current_score=current_score,
@@ -397,10 +429,25 @@ def generate_action6_coordinates(algorithm_id: str = "",
 
     # Track success if score improved
     try:
-        if current_score > previous_score:
-            score_improvement = current_score - previous_score
+        # CRITICAL FIX: Ensure both scores are numbers before comparison/subtraction
+        if isinstance(current_score, (list, tuple)):
+            logger.warning(f"Current score is list/tuple: {current_score}, taking first element")
+            current_score = current_score[0] if len(current_score) > 0 else 0.0
+        elif not isinstance(current_score, (int, float)):
+            logger.warning(f"Current score is not numeric: {type(current_score)} {current_score}, using 0.0")
+            current_score = 0.0
+
+        if isinstance(previous_score, (list, tuple)):
+            logger.warning(f"Previous score is list/tuple: {previous_score}, taking first element")
+            previous_score = previous_score[0] if len(previous_score) > 0 else 0.0
+        elif not isinstance(previous_score, (int, float)):
+            logger.warning(f"Previous score is not numeric: {type(previous_score)} {previous_score}, using 0.0")
+            previous_score = 0.0
+
+        if float(current_score) > float(previous_score):
+            score_improvement = float(current_score) - float(previous_score)
             coordinate_generator.update_success(algorithm_id, coordinates, score_improvement)
-    except TypeError as e:
+    except (TypeError, ValueError) as e:
         logger.warning(f"Score comparison failed - current_score: {type(current_score)} {current_score}, previous_score: {type(previous_score)} {previous_score}. Error: {e}")
     except Exception as e:
         logger.warning(f"Unexpected error in score tracking: {e}")

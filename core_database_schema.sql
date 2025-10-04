@@ -421,3 +421,150 @@ LEFT JOIN game_type_performance gtp ON ar.routine_id = gtp.routine_id
 GROUP BY ar.routine_id
 HAVING ar.games_tested >= 3  -- Only routines with sufficient testing
 ORDER BY ar.success_rate DESC, ar.avg_actions_per_level ASC;
+
+-- ============================================================================
+-- LEVEL-BEATING STRATEGY SYSTEM TABLES
+-- ============================================================================
+
+-- Game State Analysis Storage
+CREATE TABLE IF NOT EXISTS game_state_analysis (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    action_number INTEGER NOT NULL,
+    score_momentum TEXT NOT NULL, -- 'increasing', 'decreasing', 'stable'
+    risk_level TEXT NOT NULL, -- 'low', 'medium', 'high'
+    opportunity_zones TEXT, -- JSON array of high-value coordinates
+    emergency_detected BOOLEAN DEFAULT FALSE,
+    analysis_context TEXT, -- JSON with detailed metrics
+    recommended_actions TEXT, -- JSON array of prioritized actions
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
+);
+
+-- Action Feedback Learning
+CREATE TABLE IF NOT EXISTS action_feedback_patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_sequence TEXT NOT NULL, -- JSON array of recent actions
+    pre_state_context TEXT NOT NULL, -- JSON game state before
+    post_state_context TEXT NOT NULL, -- JSON game state after
+    success_indicator BOOLEAN NOT NULL,
+    score_change REAL NOT NULL,
+    pattern_frequency INTEGER DEFAULT 1,
+    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    confidence_score REAL DEFAULT 0.5
+);
+
+-- Simple Heuristics Performance
+CREATE TABLE IF NOT EXISTS heuristic_performance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    heuristic_name TEXT NOT NULL,
+    condition_met TEXT NOT NULL, -- JSON describing when heuristic triggered
+    action_taken TEXT NOT NULL,
+    success_rate REAL DEFAULT 0.0,
+    avg_score_impact REAL DEFAULT 0.0,
+    usage_count INTEGER DEFAULT 1,
+    last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Game Type Detection and Classification
+CREATE TABLE IF NOT EXISTS game_type_detection (
+    game_id TEXT PRIMARY KEY,
+    detected_type TEXT NOT NULL, -- 'puzzle', 'action', 'strategy', 'unknown'
+    type_confidence REAL DEFAULT 0.5,
+    game_characteristics TEXT, -- JSON with pace, risk, complexity scores
+    strategy_mapping TEXT, -- JSON with recommended strategy config
+    detection_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Emergency Recovery Events
+CREATE TABLE IF NOT EXISTS emergency_recovery_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    trigger_condition TEXT NOT NULL,
+    recovery_action_taken TEXT NOT NULL,
+    pre_recovery_score REAL NOT NULL,
+    post_recovery_score REAL NOT NULL,
+    recovery_successful BOOLEAN DEFAULT FALSE,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pattern Matching Results
+CREATE TABLE IF NOT EXISTS successful_patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_signature TEXT NOT NULL, -- Hash of game state + action sequence
+    action_sequence TEXT NOT NULL, -- JSON array of actions
+    success_context TEXT NOT NULL, -- JSON with game state when pattern worked
+    win_rate REAL DEFAULT 0.0,
+    avg_score_improvement REAL DEFAULT 0.0,
+    pattern_length INTEGER NOT NULL,
+    recency_weight REAL DEFAULT 1.0,
+    last_successful TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Success Metrics Tracking
+CREATE TABLE IF NOT EXISTS success_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy_name TEXT NOT NULL,
+    game_type TEXT,
+    metric_name TEXT NOT NULL,
+    metric_value REAL NOT NULL,
+    measurement_context TEXT, -- JSON with additional data
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Difficulty Assessment Storage
+CREATE TABLE IF NOT EXISTS difficulty_assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    difficulty_level TEXT NOT NULL, -- 'easy', 'medium', 'hard', 'very_hard'
+    difficulty_score REAL NOT NULL, -- 0.0 to 1.0
+    assessment_factors TEXT, -- JSON with win rates, avg scores, etc
+    strategy_adjustments TEXT, -- JSON with recommended parameter changes
+    assessment_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================================
+-- LEVEL-BEATING STRATEGY INDEXES
+-- ============================================================================
+
+-- Game state analysis indexes
+CREATE INDEX IF NOT EXISTS idx_game_state_analysis_game_id ON game_state_analysis(game_id);
+CREATE INDEX IF NOT EXISTS idx_game_state_analysis_session_id ON game_state_analysis(session_id);
+CREATE INDEX IF NOT EXISTS idx_game_state_analysis_timestamp ON game_state_analysis(timestamp);
+CREATE INDEX IF NOT EXISTS idx_game_state_analysis_emergency ON game_state_analysis(emergency_detected);
+
+-- Action feedback patterns indexes
+CREATE INDEX IF NOT EXISTS idx_action_feedback_patterns_sequence ON action_feedback_patterns(action_sequence);
+CREATE INDEX IF NOT EXISTS idx_action_feedback_patterns_success ON action_feedback_patterns(success_indicator);
+CREATE INDEX IF NOT EXISTS idx_action_feedback_patterns_confidence ON action_feedback_patterns(confidence_score);
+
+-- Heuristic performance indexes
+CREATE INDEX IF NOT EXISTS idx_heuristic_performance_name ON heuristic_performance(heuristic_name);
+CREATE INDEX IF NOT EXISTS idx_heuristic_performance_success_rate ON heuristic_performance(success_rate);
+CREATE INDEX IF NOT EXISTS idx_heuristic_performance_last_used ON heuristic_performance(last_used);
+
+-- Game type detection indexes
+CREATE INDEX IF NOT EXISTS idx_game_type_detection_type ON game_type_detection(detected_type);
+CREATE INDEX IF NOT EXISTS idx_game_type_detection_confidence ON game_type_detection(type_confidence);
+
+-- Emergency recovery indexes
+CREATE INDEX IF NOT EXISTS idx_emergency_recovery_game_id ON emergency_recovery_events(game_id);
+CREATE INDEX IF NOT EXISTS idx_emergency_recovery_session_id ON emergency_recovery_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_emergency_recovery_success ON emergency_recovery_events(recovery_successful);
+
+-- Pattern matching indexes
+CREATE INDEX IF NOT EXISTS idx_successful_patterns_signature ON successful_patterns(pattern_signature);
+CREATE INDEX IF NOT EXISTS idx_successful_patterns_win_rate ON successful_patterns(win_rate);
+CREATE INDEX IF NOT EXISTS idx_successful_patterns_last_successful ON successful_patterns(last_successful);
+
+-- Success metrics indexes
+CREATE INDEX IF NOT EXISTS idx_success_metrics_strategy ON success_metrics(strategy_name);
+CREATE INDEX IF NOT EXISTS idx_success_metrics_game_type ON success_metrics(game_type);
+CREATE INDEX IF NOT EXISTS idx_success_metrics_timestamp ON success_metrics(timestamp);
+
+-- Difficulty assessment indexes
+CREATE INDEX IF NOT EXISTS idx_difficulty_assessments_game_id ON difficulty_assessments(game_id);
+CREATE INDEX IF NOT EXISTS idx_difficulty_assessments_level ON difficulty_assessments(difficulty_level);
+CREATE INDEX IF NOT EXISTS idx_difficulty_assessments_score ON difficulty_assessments(difficulty_score);

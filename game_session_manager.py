@@ -32,6 +32,22 @@ logger = logging.getLogger(__name__)
 class GameSessionManager:
     """Manages game sessions and handles graceful shutdown."""
 
+    def _safe_score_subtract(self, score1, score2):
+        """Safely subtract two scores, handling lists and non-numeric types"""
+        # Ensure first score is numeric
+        if isinstance(score1, (list, tuple)):
+            score1 = score1[0] if len(score1) > 0 else 0.0
+        elif not isinstance(score1, (int, float)):
+            score1 = 0.0
+
+        # Ensure second score is numeric
+        if isinstance(score2, (list, tuple)):
+            score2 = score2[0] if len(score2) > 0 else 0.0
+        elif not isinstance(score2, (int, float)):
+            score2 = 0.0
+
+        return float(score1) - float(score2)
+
     def __init__(self, api_key: str = None, db_path: str = "core_data.db"):
         """Initialize the session manager.
 
@@ -175,7 +191,7 @@ class GameSessionManager:
         try:
             # Add delay between API actions to avoid overwhelming the server
             import asyncio
-            await asyncio.sleep(1.5)  # 1.5 second delay between actions
+            await asyncio.sleep(0.33)  # 0.33 second delay between actions
 
             # Send action via API
             game_state = await self.client.send_action(action, **kwargs)
@@ -195,7 +211,7 @@ class GameSessionManager:
                 'frame_changed': kwargs.get('frame_changed', False),
                 'score_before': kwargs.get('score_before', 0.0),
                 'score_after': game_state.score,
-                'score_change': game_state.score - kwargs.get('score_before', 0.0),
+                'score_change': self._safe_score_subtract(game_state.score, kwargs.get('score_before', 0.0)),
                 'response_data': {
                     'action': action,
                     'state': game_state.state,
@@ -212,7 +228,7 @@ class GameSessionManager:
             )
 
             # Update action effectiveness
-            score_change = game_state.score - kwargs.get('score_before', 0.0)
+            score_change = self._safe_score_subtract(game_state.score, kwargs.get('score_before', 0.0))
             success = score_change > 0 or kwargs.get('frame_changed', False)
 
             self.db.update_action_effectiveness(

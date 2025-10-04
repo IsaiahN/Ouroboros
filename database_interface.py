@@ -1241,3 +1241,174 @@ class DatabaseInterface:
             stats['inheritance'] = {'algorithms_with_parents': row[0] if row else 0}
 
             return stats
+
+    # ========================================================================
+    # STRATEGY SYSTEM METHODS
+    # ========================================================================
+
+    def ensure_strategy_tables(self):
+        """Ensure strategy system tables exist"""
+        try:
+            with open('core_database_schema.sql', 'r') as f:
+                schema = f.read()
+
+            # Execute the schema (will create tables if they don't exist)
+            with self._get_connection() as conn:
+                conn.executescript(schema)
+
+        except Exception as e:
+            logger.error(f"Error ensuring strategy tables: {e}")
+
+    def save_strategy_data(self, strategy_name: str, data: dict):
+        """Save strategy-specific data to appropriate table"""
+        try:
+            # Route to appropriate table based on data type
+            if 'heuristic_name' in data:
+                self._save_heuristic_performance(data)
+            elif 'score_momentum' in data:
+                self._save_game_state_analysis(data)
+            elif 'pattern_signature' in data:
+                self._save_pattern_data(data)
+            elif 'metric_name' in data:
+                self._save_success_metric(data)
+            else:
+                logger.debug(f"Strategy data from {strategy_name}: {data}")
+
+        except Exception as e:
+            logger.error(f"Error saving strategy data: {e}")
+
+    def _save_heuristic_performance(self, data: dict):
+        """Save heuristic performance data"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO heuristic_performance
+                    (heuristic_name, condition_met, action_taken, success_rate,
+                     avg_score_impact, usage_count, last_used)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    data.get('heuristic_name', ''),
+                    json.dumps(data.get('condition_met', {})),
+                    data.get('action_taken', ''),
+                    data.get('success_rate', 0.0),
+                    data.get('avg_score_impact', 0.0),
+                    data.get('usage_count', 1),
+                    datetime.now()
+                ))
+        except Exception as e:
+            logger.error(f"Error saving heuristic performance: {e}")
+
+    def _save_game_state_analysis(self, data: dict):
+        """Save game state analysis data"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO game_state_analysis
+                    (game_id, session_id, action_number, score_momentum, risk_level,
+                     opportunity_zones, emergency_detected, analysis_context, recommended_actions)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    data.get('game_id', ''),
+                    data.get('session_id', ''),
+                    data.get('action_number', 0),
+                    data.get('score_momentum', 'stable'),
+                    data.get('risk_level', 'medium'),
+                    json.dumps(data.get('opportunity_zones', [])),
+                    data.get('emergency_detected', False),
+                    json.dumps(data.get('analysis_context', {})),
+                    json.dumps(data.get('recommended_actions', []))
+                ))
+        except Exception as e:
+            logger.error(f"Error saving game state analysis: {e}")
+
+    def _save_pattern_data(self, data: dict):
+        """Save pattern matching data"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO successful_patterns
+                    (pattern_signature, action_sequence, success_context, win_rate,
+                     avg_score_improvement, pattern_length, recency_weight, last_successful)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    data.get('pattern_signature', ''),
+                    json.dumps(data.get('action_sequence', [])),
+                    json.dumps(data.get('success_context', {})),
+                    data.get('win_rate', 0.0),
+                    data.get('avg_score_improvement', 0.0),
+                    data.get('pattern_length', 0),
+                    data.get('recency_weight', 1.0),
+                    datetime.now()
+                ))
+        except Exception as e:
+            logger.error(f"Error saving pattern data: {e}")
+
+    def _save_success_metric(self, data: dict):
+        """Save success tracking metric"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO success_metrics
+                    (strategy_name, game_type, metric_name, metric_value, measurement_context)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    data.get('strategy_name', ''),
+                    data.get('game_type', 'unknown'),
+                    data.get('metric_name', ''),
+                    data.get('metric_value', 0.0),
+                    json.dumps(data.get('measurement_context', {}))
+                ))
+        except Exception as e:
+            logger.error(f"Error saving success metric: {e}")
+
+    def get_strategy_performance_summary(self) -> Dict[str, Any]:
+        """Get overall strategy system performance summary"""
+        try:
+            with self._get_connection() as conn:
+                summary = {}
+
+                # Heuristic performance
+                cursor = conn.execute("""
+                    SELECT heuristic_name, AVG(success_rate) as avg_success_rate,
+                           SUM(usage_count) as total_usage
+                    FROM heuristic_performance
+                    GROUP BY heuristic_name
+                    ORDER BY avg_success_rate DESC
+                """)
+                summary['heuristics'] = [dict(row) for row in cursor.fetchall()]
+
+                # Game state analysis counts
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as total_analyses,
+                           SUM(CASE WHEN emergency_detected = 1 THEN 1 ELSE 0 END) as emergency_count
+                    FROM game_state_analysis
+                """)
+                row = cursor.fetchone()
+                summary['analysis'] = dict(row) if row else {}
+
+                # Pattern matching statistics
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as total_patterns,
+                           AVG(win_rate) as avg_pattern_win_rate,
+                           AVG(avg_score_improvement) as avg_improvement
+                    FROM successful_patterns
+                """)
+                row = cursor.fetchone()
+                summary['patterns'] = dict(row) if row else {}
+
+                # Success metrics overview
+                cursor = conn.execute("""
+                    SELECT strategy_name, COUNT(*) as metric_count,
+                           AVG(metric_value) as avg_performance
+                    FROM success_metrics
+                    WHERE metric_name = 'win_rate'
+                    GROUP BY strategy_name
+                    ORDER BY avg_performance DESC
+                """)
+                summary['strategies'] = [dict(row) for row in cursor.fetchall()]
+
+                return summary
+
+        except Exception as e:
+            logger.error(f"Error getting strategy performance summary: {e}")
+            return {'error': str(e)}

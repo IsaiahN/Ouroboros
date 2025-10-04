@@ -274,6 +274,16 @@ class RoutineManager:
 
         return routine.steps[state['current_step']].algorithm_id
 
+    def _ensure_numeric_score(self, score) -> float:
+        """Ensure score is numeric, handle lists and invalid types"""
+        if isinstance(score, (list, tuple)):
+            logger.warning(f"Score is list/tuple: {score}, taking first element")
+            return float(score[0]) if len(score) > 0 else 0.0
+        elif not isinstance(score, (int, float)):
+            logger.warning(f"Score is not numeric: {type(score)} {score}, using 0.0")
+            return 0.0
+        return float(score)
+
     def should_switch_algorithm(self, game_id: str, current_score: float,
                               actions_taken: int) -> Tuple[bool, str]:
         """Check if we should switch to the next algorithm in the routine."""
@@ -316,7 +326,9 @@ class RoutineManager:
             value = current_score
         elif condition.condition_type == "performance_drop":
             # Check if score hasn't improved in recent actions
-            score_improvement = current_score - state['step_start_score']
+            current_score_safe = self._ensure_numeric_score(current_score)
+            step_start_score_safe = self._ensure_numeric_score(state['step_start_score'])
+            score_improvement = current_score_safe - step_start_score_safe
             value = score_improvement
             # For performance drop, we want to switch if improvement is below threshold
             if condition.operator == "greater_than":
@@ -331,12 +343,16 @@ class RoutineManager:
             return score_plateau_actions > condition.threshold
         elif condition.condition_type == "level_completion":
             # Switch when significant score increase detected (level completed)
-            score_increase = current_score - state.get('last_level_score', 0.0)
+            current_score_safe = self._ensure_numeric_score(current_score)
+            last_level_score_safe = self._ensure_numeric_score(state.get('last_level_score', 0.0))
+            score_increase = current_score_safe - last_level_score_safe
             return score_increase >= condition.threshold
         elif condition.condition_type == "efficiency_drop":
             # Switch when actions per score point becomes inefficient
             if state['actions_in_current_step'] > 0:
-                score_gain = current_score - state['step_start_score']
+                current_score_safe = self._ensure_numeric_score(current_score)
+                step_start_score_safe = self._ensure_numeric_score(state['step_start_score'])
+                score_gain = current_score_safe - step_start_score_safe
                 if score_gain > 0:
                     actions_per_point = state['actions_in_current_step'] / score_gain
                     return actions_per_point > condition.threshold
@@ -358,27 +374,36 @@ class RoutineManager:
 
     def _update_level_tracking_state(self, state: Dict, current_score: float) -> None:
         """Update level-based tracking state variables."""
+        # Ensure score is numeric
+        current_score_safe = self._ensure_numeric_score(current_score)
+
         # Update score history
-        state['score_history'].append(current_score)
+        state['score_history'].append(current_score_safe)
         if len(state['score_history']) > 100:  # Keep only last 100 scores
             state['score_history'] = state['score_history'][-100:]
 
+        # Ensure last_score is also numeric
+        last_score_safe = self._ensure_numeric_score(state['last_score'])
+
         # Check for score increases (level progress)
-        if current_score > state['last_score']:
+        if current_score_safe > last_score_safe:
             # Score increased - reset stagnation counters
             state['actions_since_last_score_increase'] = 0
             state['score_plateau_counter'] = 0
-            state['last_level_score'] = state['last_score']  # Mark previous score as level completion
+            state['last_level_score'] = self._ensure_numeric_score(state['last_score'])  # Mark previous score as level completion
 
             # Update coordinate success tracking
-            self._update_coordinate_success_tracking(state, current_score - state['last_score'])
+            current_score_safe = self._ensure_numeric_score(current_score)
+            last_score_safe = self._ensure_numeric_score(state['last_score'])
+            score_improvement = current_score_safe - last_score_safe
+            self._update_coordinate_success_tracking(state, score_improvement)
         else:
             # No score increase - increment counters
             state['actions_since_last_score_increase'] += 1
             state['score_plateau_counter'] += 1
 
         # Update last score
-        state['last_score'] = current_score
+        state['last_score'] = current_score_safe
 
     def _update_coordinate_success_tracking(self, state: Dict, score_improvement: float) -> None:
         """Update coordinate success tracking for the routine."""
@@ -431,7 +456,7 @@ class RoutineManager:
         state['algorithm_switches'] += 1
 
         # Reset step-specific tracking
-        state['step_start_score'] = state['last_score']
+        state['step_start_score'] = self._ensure_numeric_score(state['last_score'])
 
         if state['current_step'] >= len(routine.steps):
             logger.info(f"Routine {routine.routine_id} completed for game {game_id}")

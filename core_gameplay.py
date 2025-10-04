@@ -32,6 +32,14 @@ except ImportError:
     GameContext = None
     EVOLUTION_AVAILABLE = False
 
+# Import level-beating strategy system
+try:
+    from strategies import LevelBeatingStrategy
+    LEVEL_BEATING_AVAILABLE = True
+except ImportError:
+    LevelBeatingStrategy = None
+    LEVEL_BEATING_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,6 +91,14 @@ class GameplayEngine:
                 self.game_context = None
                 # Fall back to balanced strategy
                 self.game_config['strategy'] = 'balanced'
+
+        # Initialize strategy system database tables
+        if LEVEL_BEATING_AVAILABLE:
+            try:
+                self.session_manager.db.ensure_strategy_tables()
+                logger.info("Strategy system tables initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize strategy tables: {e}")
 
     async def initialize_evolution_system(self):
         """Initialize the evolution system asynchronously."""
@@ -217,8 +233,20 @@ class GameplayEngine:
         """
         strategy = self.game_config.get('strategy', 'balanced')
 
+        # If using level-beating strategy, use the integrated strategy system
+        if strategy == 'level_beating' and LEVEL_BEATING_AVAILABLE:
+            try:
+                if not hasattr(self, '_level_beating_strategy'):
+                    self._level_beating_strategy = LevelBeatingStrategy(self.db)
+
+                return await self._level_beating_strategy.get_next_action(game_state, self.action_handler)
+
+            except Exception as e:
+                logger.error(f"Error using level-beating strategy: {e}")
+                strategy = 'balanced'
+
         # If using evolved strategy, set the current algorithm in ActionHandler
-        if strategy == 'evolved' and self.evolution_manager:
+        elif strategy == 'evolved' and self.evolution_manager:
             try:
                 current_algorithm = await self.evolution_manager.get_current_algorithm()
                 if current_algorithm:

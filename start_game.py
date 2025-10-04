@@ -30,6 +30,16 @@ import action_handler
 import database_interface
 import core_gameplay
 
+# Try to import real-time optimizer
+try:
+    import real_time_optimizer
+    import time
+    OPTIMIZER_AVAILABLE = True
+    print("Real-time optimizer loaded successfully")
+except ImportError as e:
+    print(f"Real-time optimizer not available: {e}")
+    OPTIMIZER_AVAILABLE = False
+
 # Try to import evolution system
 try:
     import evolution_manager
@@ -44,8 +54,11 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Configurable action limit - change this value to adjust the default limit
+DEFAULT_ACTION_LIMIT = 1500
 
-async def start_single_game(max_actions: int = None):
+
+async def start_single_game(max_actions: int = DEFAULT_ACTION_LIMIT):
     """Start and play a single game."""
     print("=== BitterLesson-AI Game Starter ===")
     print()
@@ -96,6 +109,12 @@ async def start_single_game(max_actions: int = None):
             # Create action handler
             action_handler_instance = action_handler.ActionHandler(session_manager)
 
+            # Initialize real-time performance optimization
+            if OPTIMIZER_AVAILABLE:
+                print("Starting real-time performance monitoring...")
+                real_time_optimizer.start_performance_monitoring()
+                previous_score = 0.0
+
             # Play some actions
             print("\nPlaying game...")
             # Extract game state from the dict
@@ -103,10 +122,17 @@ async def start_single_game(max_actions: int = None):
             game_state = arc_api_client.GameState.from_dict(game_state_dict)
             actions_taken = 0
 
-            # Continue until game ends naturally (WIN/GAME_OVER) or optional action limit
+            # Add infinite loop detection
+            consecutive_same_score = 0
+            last_score = None
+            fallback_action_rotation = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION6"]
+            fallback_index = 0
+            max_consecutive_same_score = 15  # Break loop after 15 actions with no progress
+
+            # Continue until game ends naturally (WIN/GAME_OVER) or action limit reached
             while game_state.state == "NOT_FINISHED":
-                # Check optional action limit
-                if max_actions and actions_taken >= max_actions:
+                # Check action limit (0 means unlimited)
+                if max_actions is not None and max_actions > 0 and actions_taken >= max_actions:
                     print(f"\nReached action limit of {max_actions} actions")
                     break
                 print(f"\n--- Action {actions_taken + 1} ---")
@@ -114,9 +140,28 @@ async def start_single_game(max_actions: int = None):
                 print(f"Game State: {game_state.state}")
                 print(f"Available Actions: {game_state.available_actions}")
 
+                # Infinite loop detection - check if score is improving
+                current_score = float(game_state.score if isinstance(game_state.score, (int, float)) else
+                                    (game_state.score[0] if isinstance(game_state.score, (list, tuple)) and len(game_state.score) > 0 else 0.0))
+
+                if last_score is not None and abs(current_score - last_score) < 0.001:  # No significant progress
+                    consecutive_same_score += 1
+                    if consecutive_same_score >= max_consecutive_same_score:
+                        print(f"\n[LOOP DETECTION] No progress after {consecutive_same_score} actions (score stuck at {current_score})")
+                        print("[LOOP DETECTION] Breaking infinite loop to prevent timeout")
+                        break
+                    elif consecutive_same_score >= 5:
+                        print(f"[WARN] No progress for {consecutive_same_score} actions - score stuck at {current_score}")
+                else:
+                    consecutive_same_score = 0  # Reset counter if score improved
+
+                last_score = current_score
+
                 # Use evolved strategy system for intelligent action selection
                 action_taken = None
                 evolution_success = False
+                action_start_time = time.time() if OPTIMIZER_AVAILABLE else None
+                algorithm_id = "unknown"
 
                 # Try evolution system first
                 if EVOLUTION_AVAILABLE:
@@ -176,6 +221,12 @@ async def start_single_game(max_actions: int = None):
                             action_name = action_result.get("action")
                             algorithm_id = action_result.get("algorithm_id", "unknown")
                             coordinates = action_result.get("coordinates", {})
+
+                            # Get adaptive parameters for decision making
+                            if OPTIMIZER_AVAILABLE:
+                                exploration_rate = real_time_optimizer.get_adaptive_parameter("coordinate_exploration_rate", 0.2)
+                                switching_threshold = real_time_optimizer.get_adaptive_parameter("algorithm_switching_threshold", 0.1)
+                                print(f"[OPTIMIZER] Adaptive params - exploration: {exploration_rate:.3f}, switching: {switching_threshold:.3f}")
 
                             if isinstance(action_name, str):
                                 if action_name == "ACTION1":
@@ -238,26 +289,55 @@ async def start_single_game(max_actions: int = None):
                         print(f"[WARN] Evolution strategy failed: {e}")
                         evolution_success = False
 
-                # Fallback to simple action logic if evolution not successful
+                # Improved fallback with action rotation to avoid infinite loops
                 if not evolution_success:
                     try:
-                        if 1 in game_state.available_actions:
-                            print("Taking ACTION1 (fallback)...")
-                            game_state = await action_handler_instance.send_action_1()
-                            action_taken = "ACTION1"
-                        elif 6 in game_state.available_actions:
-                            # Use dynamic coordinates for fallback ACTION6
-                            try:
-                                import coordinate_strategies
-                                x, y = coordinate_strategies.generate_action6_coordinates('fallback_algo', actions_taken=actions_taken)
-                            except ImportError:
-                                x, y = 32, 32  # Final fallback
-                            print(f"Taking ACTION6(x={x}, y={y}) (fallback)...")
-                            game_state = await action_handler_instance.send_action_6(x=x, y=y)
-                            action_taken = f"ACTION6(x={x}, y={y})"
-                        else:
-                            print("[FAIL] No available actions to take")
+                        # Rotate through different fallback actions to avoid getting stuck
+                        attempts = 0
+                        fallback_success = False
+
+                        while attempts < len(fallback_action_rotation) and not fallback_success:
+                            try_action = fallback_action_rotation[fallback_index % len(fallback_action_rotation)]
+
+                            if try_action == "ACTION1" and 1 in game_state.available_actions:
+                                print(f"Taking ACTION1 (fallback #{fallback_index + 1})...")
+                                game_state = await action_handler_instance.send_action_1()
+                                action_taken = "ACTION1"
+                                fallback_success = True
+                            elif try_action == "ACTION2" and 2 in game_state.available_actions:
+                                print(f"Taking ACTION2 (fallback #{fallback_index + 1})...")
+                                game_state = await action_handler_instance.send_action_2()
+                                action_taken = "ACTION2"
+                                fallback_success = True
+                            elif try_action == "ACTION3" and 3 in game_state.available_actions:
+                                print(f"Taking ACTION3 (fallback #{fallback_index + 1})...")
+                                game_state = await action_handler_instance.send_action_3()
+                                action_taken = "ACTION3"
+                                fallback_success = True
+                            elif try_action == "ACTION4" and 4 in game_state.available_actions:
+                                print(f"Taking ACTION4 (fallback #{fallback_index + 1})...")
+                                game_state = await action_handler_instance.send_action_4()
+                                action_taken = "ACTION4"
+                                fallback_success = True
+                            elif try_action == "ACTION6" and 6 in game_state.available_actions:
+                                # Use dynamic coordinates for fallback ACTION6
+                                try:
+                                    import coordinate_strategies
+                                    x, y = coordinate_strategies.generate_action6_coordinates('fallback_algo', actions_taken=actions_taken)
+                                except ImportError:
+                                    x, y = 32, 32  # Final fallback
+                                print(f"Taking ACTION6(x={x}, y={y}) (fallback #{fallback_index + 1})...")
+                                game_state = await action_handler_instance.send_action_6(x=x, y=y)
+                                action_taken = f"ACTION6(x={x}, y={y})"
+                                fallback_success = True
+
+                            fallback_index += 1
+                            attempts += 1
+
+                        if not fallback_success:
+                            print("[FAIL] No available fallback actions to take")
                             break
+
                     except Exception as e:
                         print(f"[FAIL] Fallback action failed: {e}")
                         break
@@ -268,6 +348,39 @@ async def start_single_game(max_actions: int = None):
                     print(f"[PASS] Successfully executed {action_taken}")
                     print(f"New Score: {game_state.score} / {game_state.win_score}")
                     print(f"New State: {game_state.state}")
+
+                    # Record performance metrics for real-time optimization
+                    if OPTIMIZER_AVAILABLE and action_start_time:
+                        # Calculate performance metrics
+                        current_score = float(game_state.score if isinstance(game_state.score, (int, float)) else
+                                            (game_state.score[0] if isinstance(game_state.score, (list, tuple)) and len(game_state.score) > 0 else 0.0))
+                        score_change = current_score - previous_score
+                        decision_time_ms = (time.time() - action_start_time) * 1000
+
+                        # Record the performance
+                        real_time_optimizer.record_action_performance(
+                            game_id=first_game_id,
+                            session_id=session_manager.session_id if hasattr(session_manager, 'session_id') else 'unknown',
+                            action_number=actions_taken,
+                            action_type=action_taken,
+                            algorithm_id=algorithm_id,
+                            score_change=score_change,
+                            decision_time_ms=decision_time_ms
+                        )
+
+                        previous_score = current_score
+
+                        # Print optimization status every 10 actions
+                        if actions_taken % 10 == 0:
+                            opt_status = real_time_optimizer.get_optimization_recommendations()
+                            print(f"[OPTIMIZER] Level: {opt_status['optimization_level']}, "
+                                  f"Efficiency: {opt_status['recent_avg_efficiency']:.4f}, "
+                                  f"Recommendations: {len(opt_status['active_recommendations'])}")
+
+                            # Show critical recommendations
+                            for rec in opt_status['active_recommendations']:
+                                if rec['urgency'] in ['critical', 'emergency']:
+                                    print(f"[OPTIMIZER-{rec['urgency'].upper()}] {rec['description']}")
 
                     # Check if game ended
                     if game_state.state != "NOT_FINISHED":
@@ -338,6 +451,28 @@ async def start_single_game(max_actions: int = None):
                 except Exception as e:
                     print(f"Warning: Error updating evolution system: {e}")
 
+            # Generate final optimization report
+            if OPTIMIZER_AVAILABLE:
+                try:
+                    print("\n=== REAL-TIME OPTIMIZATION REPORT ===")
+                    final_status = real_time_optimizer.get_optimization_recommendations()
+                    print(f"Final optimization level: {final_status['optimization_level']}")
+                    print(f"Actions analyzed: {final_status['recent_actions_analyzed']}")
+                    print(f"Average score efficiency: {final_status['recent_avg_efficiency']:.4f}")
+                    print(f"Total recommendations: {len(final_status['active_recommendations'])}")
+
+                    if final_status['active_recommendations']:
+                        print("\nKey optimization recommendations:")
+                        for rec in final_status['active_recommendations'][:3]:  # Show top 3
+                            print(f"  - [{rec['urgency']}] {rec['description']} (confidence: {rec['confidence']:.2f})")
+
+                    # Stop monitoring
+                    real_time_optimizer.stop_performance_monitoring()
+                    print("Real-time optimization monitoring stopped")
+
+                except Exception as e:
+                    print(f"Warning: Error generating optimization report: {e}")
+
         # Shutdown session (with error handling)
         try:
             await session_manager.shutdown()
@@ -350,5 +485,63 @@ async def start_single_game(max_actions: int = None):
         traceback.print_exc()
 
 
+async def start_continuous_games(max_actions: int = DEFAULT_ACTION_LIMIT):
+    """Start and play games continuously in a loop."""
+    print("=== BitterLesson-AI Continuous Game Mode ===")
+    print("Starting continuous game loop... Press Ctrl+C to stop")
+    print()
+    
+    game_count = 0
+    total_wins = 0
+    
+    try:
+        while True:
+            game_count += 1
+            print(f"\n{'='*60}")
+            print(f"STARTING GAME #{game_count}")
+            print(f"{'='*60}")
+            
+            try:
+                # Call the single game function
+                await start_single_game(max_actions)
+                print(f"\nGame #{game_count} completed successfully")
+                
+                # Brief pause between games
+                import asyncio
+                await asyncio.sleep(2)  # 2 second pause between games
+                
+            except KeyboardInterrupt:
+                print(f"\n\nContinuous game mode stopped by user after {game_count-1} games")
+                break
+            except Exception as e:
+                print(f"\nError in game #{game_count}: {e}")
+                print("Continuing to next game...")
+                # Brief pause before retrying
+                import asyncio
+                await asyncio.sleep(5)  # 5 second pause after error
+                
+    except KeyboardInterrupt:
+        print(f"\n\nContinuous game mode stopped by user after {game_count-1} games")
+    
+    print(f"\n{'='*60}")
+    print(f"CONTINUOUS GAME SESSION SUMMARY")
+    print(f"{'='*60}")
+    print(f"Total games played: {game_count-1}")
+    print("Continuous gaming session ended.")
+
+
 if __name__ == "__main__":
-    asyncio.run(start_single_game())
+    import argparse
+
+    parser = argparse.ArgumentParser(description="BitterTruth-AI Game Player")
+    parser.add_argument("--continuous", action="store_true",
+                       help="Run games continuously in a loop")
+    parser.add_argument("--max-actions", type=int, default=DEFAULT_ACTION_LIMIT,
+                       help=f"Maximum actions per game (default: {DEFAULT_ACTION_LIMIT}, use 0 for unlimited)")
+
+    args = parser.parse_args()
+
+    if args.continuous:
+        asyncio.run(start_continuous_games(args.max_actions))
+    else:
+        asyncio.run(start_single_game(args.max_actions))

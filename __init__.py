@@ -23,11 +23,11 @@ Example Usage:
     asyncio.run(play_game())
 """
 
-from .arc_api_client import ARCClient, GameState, Scorecard, ARCError, ARCAuthenticationError, ARCAPIError
-from .database_interface import DatabaseInterface
-from .game_session_manager import GameSessionManager, SessionContext
-from .action_handler import ActionHandler
-from .core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
+from arc_api_client import ARCClient, GameState, Scorecard, ARCError, ARCAuthenticationError, ARCAPIError
+from database_interface import DatabaseInterface
+from game_session_manager import GameSessionManager, SessionContext
+from action_handler import ActionHandler
+from core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
 
 __version__ = "1.0.0"
 __author__ = "Tabula Rasa Team"

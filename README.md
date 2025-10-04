@@ -486,7 +486,3 @@ BitterTruth-AI/
 ## Examples
 
 See `start_game.py` for a simple standalone game example, or use `main_runner.py` for full functionality including the evolution system.
-
-## License
-
-This module is part of the Tabula Rasa project.
