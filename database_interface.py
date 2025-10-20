@@ -513,3 +513,323 @@ class DatabaseInterface:
             stats['games_last_24h'] = cursor.fetchone()[0]
 
             return stats
+
+    # ========================================================================
+    # OUROBOROS EXTENSIONS
+    # ========================================================================
+
+    def execute_script(self, script: str):
+        """Execute SQL script for schema extensions."""
+        with self._get_connection() as conn:
+            conn.executescript(script)
+            conn.commit()
+
+    def store_agent(self, agent_data: Dict[str, Any]):
+        """Store agent in database."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO agents (
+                    agent_id, agent_type, genome, generation, parent_ids,
+                    specialization, created_at, is_active, total_games_played,
+                    total_games_won, total_score_achieved
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                agent_data['agent_id'],
+                agent_data['agent_type'],
+                agent_data['genome'],
+                agent_data.get('generation', 0),
+                agent_data.get('parent_ids', '[]'),
+                agent_data['specialization'],
+                agent_data.get('created_at', datetime.now().isoformat()),
+                agent_data.get('is_active', True),
+                agent_data.get('total_games_played', 0),
+                agent_data.get('total_games_won', 0),
+                agent_data.get('total_score_achieved', 0.0)
+            ))
+            conn.commit()
+
+    def get_active_agents(self) -> List[Dict[str, Any]]:
+        """Get all active agents."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM agents WHERE is_active = 1")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_active_agent_count(self) -> int:
+        """Get count of active agents."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM agents WHERE is_active = 1")
+            return cursor.fetchone()[0]
+
+    def get_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """Get agent by ID."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def agent_exists(self, agent_id: str) -> bool:
+        """Check if agent exists."""
+        return self.get_agent(agent_id) is not None
+
+    def update_agent(self, agent_id: str, agent_data: Dict[str, Any]):
+        """Update agent data."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE agents SET
+                    agent_type = ?, genome = ?, generation = ?, parent_ids = ?,
+                    specialization = ?, is_active = ?, total_games_played = ?,
+                    total_games_won = ?, total_score_achieved = ?
+                WHERE agent_id = ?
+            """, (
+                agent_data['agent_type'],
+                agent_data['genome'],
+                agent_data.get('generation', 0),
+                agent_data.get('parent_ids', '[]'),
+                agent_data['specialization'],
+                agent_data.get('is_active', True),
+                agent_data.get('total_games_played', 0),
+                agent_data.get('total_games_won', 0),
+                agent_data.get('total_score_achieved', 0.0),
+                agent_id
+            ))
+            conn.commit()
+
+    def store_arc_reward_data(self, agent_id: str, reward_data: Dict[str, Any]):
+        """Store ARC reward data for agent."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO agent_arc_performance (
+                    performance_id, agent_id, game_id, session_id, game_timestamp,
+                    final_score, win_score_threshold, win_achieved, total_actions,
+                    score_efficiency, win_proximity, level_progressions,
+                    strategy_used, genome_config, base_reward, win_bonus,
+                    efficiency_bonus, level_progression_bonus, total_evolutionary_reward
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(uuid.uuid4()),
+                agent_id,
+                reward_data.get('game_id', ''),
+                reward_data.get('session_id', ''),
+                datetime.now().isoformat(),
+                reward_data.get('arc_native_rewards', {}).get('final_score', 0.0),
+                reward_data.get('arc_native_rewards', {}).get('win_score_threshold', 0.0),
+                reward_data.get('arc_native_rewards', {}).get('game_win', False),
+                reward_data.get('arc_native_rewards', {}).get('total_actions', 0),
+                reward_data.get('derived_metrics', {}).get('score_efficiency', 0.0),
+                reward_data.get('derived_metrics', {}).get('win_proximity', 0.0),
+                reward_data.get('arc_native_rewards', {}).get('level_progressions', 0),
+                'agent_strategy',
+                json.dumps({}),
+                reward_data.get('evolutionary_feedback', {}).get('reward_breakdown', {}).get('base_reward', 0.0),
+                reward_data.get('evolutionary_feedback', {}).get('reward_breakdown', {}).get('win_bonus', 0.0),
+                reward_data.get('evolutionary_feedback', {}).get('reward_breakdown', {}).get('efficiency_bonus', 0.0),
+                reward_data.get('evolutionary_feedback', {}).get('reward_breakdown', {}).get('level_bonus', 0.0),
+                reward_data.get('total_evolutionary_reward', 0.0)
+            ))
+            conn.commit()
+
+    def get_agent_arc_performance(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """Get agent's ARC performance summary."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT
+                    COUNT(*) as total_games_played,
+                    SUM(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END) as total_games_won,
+                    AVG(final_score) as avg_score_per_game,
+                    AVG(score_efficiency) as score_efficiency,
+                    SUM(level_progressions) as level_progressions_detected,
+                    AVG(total_evolutionary_reward) as avg_evolutionary_reward
+                FROM agent_arc_performance
+                WHERE agent_id = ?
+            """, (agent_id,))
+
+            row = cursor.fetchone()
+            if not row or row[0] == 0:
+                return None
+
+            data = dict(row)
+            data['win_rate'] = data['total_games_won'] / max(data['total_games_played'], 1)
+            data['consistency_score'] = 0.5  # Placeholder
+            data['level_progression_rate'] = data['level_progressions_detected'] / max(data['total_games_played'], 1)
+
+            return data
+
+    def get_population_performance_data(self) -> List[Dict[str, Any]]:
+        """Get performance data for all agents."""
+        agents = self.get_active_agents()
+        for agent in agents:
+            performance = self.get_agent_arc_performance(agent['agent_id'])
+            if performance:
+                agent.update(performance)
+            else:
+                # Set defaults for agents with no performance data
+                agent.update({
+                    'total_games_played': 0,
+                    'total_games_won': 0,
+                    'win_rate': 0.0,
+                    'avg_score_per_game': 0.0,
+                    'score_efficiency': 0.0,
+                    'level_progressions_detected': 0
+                })
+        return agents
+
+    def store_evolution_decision(self, evolution_strategy: Dict[str, Any], performance_data: Dict[str, Any]):
+        """Store Claude Code evolution decision."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO claude_evolution_decisions (
+                    decision_id, generation, population_analysis, evolution_strategy,
+                    reasoning, agents_created, agents_retired, mutations_applied,
+                    crossovers_performed, expected_improvement_rate, target_win_rate,
+                    strategy_focus
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(uuid.uuid4()),
+                evolution_strategy.get('generation', 0),
+                json.dumps(performance_data),
+                json.dumps(evolution_strategy),
+                evolution_strategy.get('reasoning', ''),
+                0,  # Will be updated after evolution
+                0,  # Will be updated after evolution
+                0,  # Will be updated after evolution
+                0,  # Will be updated after evolution
+                evolution_strategy.get('target_win_rate', 0.0),
+                evolution_strategy.get('target_win_rate', 0.0),
+                evolution_strategy.get('focus', 'balanced')
+            ))
+            conn.commit()
+
+    def store_action_tracking(self, action_data: Dict[str, Any]):
+        """Store action tracking data."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO arc_action_tracking (
+                    action_id, agent_id, game_id, action_type, action_data,
+                    coordinate_x, coordinate_y, api_request_sent, api_response_received,
+                    coordinate_valid, action_accepted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(uuid.uuid4()),
+                action_data['agent_id'],
+                action_data.get('game_id', ''),
+                action_data['action_type'],
+                action_data['action_data'],
+                action_data.get('coordinate_x'),
+                action_data.get('coordinate_y'),
+                action_data['api_request_sent'],
+                action_data['api_response_received'],
+                action_data.get('coordinate_valid', True),
+                action_data.get('action_accepted', True)
+            ))
+            conn.commit()
+
+    # General logging method
+    def log_event(self, logger_name: str, level: str, message: str, **kwargs):
+        """Log event to system_logs table."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO system_logs (
+                    level, logger_name, message, extra_data
+                ) VALUES (?, ?, ?, ?)
+            """, (
+                level,
+                logger_name,
+                message,
+                json.dumps(kwargs) if kwargs else None
+            ))
+            conn.commit()
+
+    # Placeholder methods for other Ouroboros operations
+    def store_coordinator_log(self, log_data: Dict[str, Any]):
+        """Store coordinator log entry."""
+        self.log_event("coordinator", log_data['event_type'], log_data.get('event_data', '{}'))
+
+    def store_evolution_log(self, log_data: Dict[str, Any]):
+        """Store evolution log entry."""
+        self.log_event("evolution", log_data['event_type'], log_data.get('event_data', '{}'))
+
+    def store_rlvr_log(self, log_data: Dict[str, Any]):
+        """Store RLVR log entry."""
+        self.log_event("rlvr", log_data['event_type'], log_data.get('event_data', '{}'))
+
+    def store_analysis_log(self, log_data: Dict[str, Any]):
+        """Store analysis log entry."""
+        self.log_event("analysis", log_data['event_type'], log_data.get('event_data', '{}'))
+
+    def store_factory_log(self, log_data: Dict[str, Any]):
+        """Store factory log entry."""
+        self.log_event("factory", log_data['event_type'], log_data.get('event_data', '{}'))
+
+    def store_agent_action(self, agent_id: str, action_record: Dict[str, Any]):
+        """Store agent action record."""
+        self.log_event("agent_action", f"agent_{agent_id}", json.dumps(action_record))
+
+    def update_agent_performance(self, agent_id: str, performance_update: Dict[str, Any]):
+        """Update agent performance data."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE agents SET
+                    total_games_played = ?, total_games_won = ?,
+                    total_score_achieved = ?, last_performance_update = ?
+                WHERE agent_id = ?
+            """, (
+                performance_update['games_played'],
+                performance_update['wins'],
+                performance_update['total_score'],
+                datetime.now().isoformat(),
+                agent_id
+            ))
+            conn.commit()
+
+    # Additional methods needed by performance analyzer
+    def get_performance_data_since(self, since_date):
+        """Get performance data since a specific date"""
+        # Placeholder - return empty list for now
+        return []
+
+    def get_performance_data_before(self, before_date):
+        """Get performance data before a specific date"""
+        # Placeholder - return empty list for now
+        return []
+
+    def store_performance_analysis(self, analysis_data):
+        """Store performance analysis results"""
+        self.log_event("performance_analysis", "analysis_stored", json.dumps(analysis_data))
+
+    def get_agents_by_generation(self, generation):
+        """Get agents by generation"""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM agents WHERE generation = ?", (generation,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_agent_recent_performance(self, agent_id, limit=10):
+        """Get agent's recent performance"""
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT * FROM agent_arc_performance
+                WHERE agent_id = ?
+                ORDER BY game_timestamp DESC
+                LIMIT ?
+            """, (agent_id, limit))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def store_population_fitness_summary(self, summary_data):
+        """Store population fitness summary"""
+        self.log_event("population_fitness", "summary_stored", json.dumps(summary_data))
+
+    def store_reward_validation(self, validation_data):
+        """Store reward validation results"""
+        self.log_event("reward_validation", "validation_completed", json.dumps(validation_data))
+
+    def get_agent_detailed_performance(self, agent_id):
+        """Get detailed performance data for agent"""
+        agent = self.get_agent(agent_id)
+        if agent:
+            performance = self.get_agent_arc_performance(agent_id)
+            if performance:
+                agent.update(performance)
+        return agent
+
+    def get_agent_performance_history(self, agent_id):
+        """Get agent's performance history"""
+        return self.get_agent_recent_performance(agent_id, limit=50)

@@ -11,9 +11,9 @@ from typing import Dict, Any, List, Optional, Callable
 import random
 from datetime import datetime
 
-from .game_session_manager import GameSessionManager
-from .action_handler import ActionHandler
-from .arc_api_client import GameState
+from game_session_manager import GameSessionManager
+from action_handler import ActionHandler
+from arc_api_client import GameState
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,10 @@ class GameplayEngine:
         logger.info(f"Starting game: {game_id}")
 
         try:
+            # Start session if not already running
+            if not self.session_manager.is_running:
+                await self.session_manager.start_session(game_id=game_id)
+            
             # Create game
             game_data = await self.session_manager.create_game(game_id)
             game_state = GameState.from_dict(game_data)
@@ -146,19 +150,30 @@ class GameplayEngine:
         """Execute an action.
 
         Args:
-            action: Action to execute
+            action: Action to execute (string like "ACTION1" or int like 1)
             game_state: Current game state
 
         Returns:
             New game state
         """
+        # Normalize action to string format if it's an integer
+        if isinstance(action, int):
+            action = f"ACTION{action}"
+        
         if action == "ACTION6":
-            # Get random coordinates for ACTION6
-            x, y = self.action_handler.get_random_coordinates(game_state.frame)
+            # CORRECT ACTION6 USAGE: Analyze frame and select intelligent coordinates
+            # DO NOT use random coordinates - this is treating ACTION6 like a touchscreen
+            x, y, reason = self.action_handler.get_smart_coordinates(
+                game_state.frame,
+                strategy="visual"  # Use visual analysis
+            )
+            logger.info(f"ACTION6 at ({x}, {y}): {reason}")
             return await self.action_handler.send_action_6(x, y, game_state.frame)
         else:
-            # Execute regular action
-            method_name = f"send_{action.lower()}"
+            # Execute regular action - convert ACTION1 to send_action_1 format
+            # Extract number from ACTION string (e.g., "ACTION1" -> "1")
+            action_num = action.replace("ACTION", "")
+            method_name = f"send_action_{action_num}"
             if hasattr(self.action_handler, method_name):
                 method = getattr(self.action_handler, method_name)
                 return await method()

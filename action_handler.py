@@ -9,7 +9,8 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 import random
 
-from .arc_api_client import GameState
+from arc_api_client import GameState
+from visual_analyzer import VisualAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class ActionHandler:
         self.session_manager = session_manager
         self.last_frame = None
         self.last_score = 0.0
+        self.visual_analyzer = VisualAnalyzer()  # Add visual analyzer
 
     def _validate_coordinates(self, x: int, y: int, frame: List[List[int]]) -> bool:
         """Validate that coordinates are within frame bounds.
@@ -230,6 +232,61 @@ class ActionHandler:
 
         return x, y
 
+    def get_smart_coordinates(self, frame: List[List[int]],
+                            strategy: str = "visual") -> Tuple[int, int, str]:
+        """Get intelligent coordinates for ACTION6 based on visual analysis.
+
+        This is the CORRECT way to use ACTION6:
+        1. Analyze the frame for interesting features
+        2. Select coordinates based on what's visually salient
+        3. "Click" on those features like a touchscreen
+
+        Args:
+            frame: Current game frame
+            strategy: Selection strategy
+                - "visual": Analyze frame for interesting targets (RECOMMENDED)
+                - "exploratory": Systematic exploration pattern
+                - "random": Random coordinates (fallback)
+
+        Returns:
+            Tuple of (x, y, reason)
+        """
+        if not frame or not frame[0]:
+            raise ValueError("Invalid frame for coordinate generation")
+
+        height = len(frame)
+        width = len(frame[0])
+
+        if strategy == "visual":
+            # CORRECT: Analyze frame to find interesting targets
+            analysis = self.visual_analyzer.analyze_frame(frame)
+            target = self.visual_analyzer.select_best_target(analysis)
+
+            if target:
+                x, y, reason = target
+                logger.info(f"ACTION6 target found: ({x}, {y}) - {reason}")
+                return x, y, reason
+            else:
+                # No obvious targets, use exploratory
+                logger.debug("No visual targets found, using exploratory mode")
+                x, y = self.visual_analyzer.get_exploratory_coordinates(frame)
+                return x, y, "Exploratory search (no obvious targets)"
+
+        elif strategy == "exploratory":
+            # Systematic exploration around frame center
+            x, y = self.visual_analyzer.get_exploratory_coordinates(frame)
+            return x, y, "Systematic exploration"
+
+        elif strategy == "random":
+            # Fallback: random coordinates (NOT RECOMMENDED)
+            x = random.randint(0, width - 1)
+            y = random.randint(0, height - 1)
+            logger.warning("Using random ACTION6 coordinates - this is suboptimal!")
+            return x, y, "Random fallback"
+
+        else:
+            raise ValueError(f"Unknown coordinate strategy: {strategy}")
+
     async def send_random_action(self, available_actions: List[str] = None,
                                exclude_actions: List[str] = None,
                                frame: List[List[int]] = None) -> GameState:
@@ -333,9 +390,9 @@ class ActionHandler:
         Returns:
             Selected action
         """
-        available = game_state.available_actions or [
-            "ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION6", "ACTION7"
-        ]
+        # Normalize available_actions to string format (API may return ints or strings)
+        raw_available = game_state.available_actions or [1, 2, 3, 4, 5, 6, 7]
+        available = [f"ACTION{a}" if isinstance(a, int) else a for a in raw_available]
 
         if strategy == "random":
             return self.get_random_action(available)
@@ -366,8 +423,9 @@ class ActionHandler:
                         weight_values = list(weights.values())
                         return random.choices(actions, weights=weight_values)[0]
 
-            # Fall back to random if no effectiveness data
-            return self.get_random_action(available)
+            # Fall back to truly random selection for diversity
+            # This ensures we explore different actions
+            return random.choice(available)
 
         else:
             raise ValueError(f"Unknown strategy: {strategy}")

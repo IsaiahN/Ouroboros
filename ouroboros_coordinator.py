@@ -17,10 +17,6 @@ import asyncio
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from database_interface import DatabaseInterface
-from evolutionary_engine import EvolutionaryEngine
-from arc_rlvr_framework import ARCRLVRFramework
-from performance_analyzer import PerformanceAnalyzer
-from agent_factory import AgentFactory
 
 # Rule 1: Disable pycache
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -35,10 +31,12 @@ class OuroborosCoordinator:
     def __init__(self, database_interface: DatabaseInterface):
         self.db = database_interface
         self.population_manager = PopulationManager(database_interface)
-        self.evolution_engine = EvolutionaryEngine(database_interface)
-        self.arc_rlvr = ARCRLVRFramework(database_interface)
-        self.performance_analyzer = PerformanceAnalyzer(database_interface)
-        self.agent_factory = AgentFactory(database_interface)
+
+        # Lazy imports to avoid circular dependencies
+        self.evolution_engine = None
+        self.arc_rlvr = None
+        self.performance_analyzer = None
+        self.agent_factory = None
 
         # Claude Code memory and state
         self.coordinator_id = f"claude_{uuid.uuid4().hex[:8]}"
@@ -47,6 +45,24 @@ class OuroborosCoordinator:
 
         # Initialize Ouroboros database schema if needed
         self._initialize_ouroboros_schema()
+
+    def _initialize_components(self):
+        """Initialize components with lazy imports"""
+        if self.evolution_engine is None:
+            from evolutionary_engine import EvolutionaryEngine
+            self.evolution_engine = EvolutionaryEngine(self.db)
+
+        if self.arc_rlvr is None:
+            from arc_rlvr_framework import ARCRLVRFramework
+            self.arc_rlvr = ARCRLVRFramework(self.db)
+
+        if self.performance_analyzer is None:
+            from performance_analyzer import PerformanceAnalyzer
+            self.performance_analyzer = PerformanceAnalyzer(self.db)
+
+        if self.agent_factory is None:
+            from agent_factory import AgentFactory
+            self.agent_factory = AgentFactory(self.db)
 
     def _initialize_ouroboros_schema(self):
         """Initialize extended database schema for Ouroboros"""
@@ -72,11 +88,14 @@ class OuroborosCoordinator:
             })
             raise
 
-    def run_autonomous_evolution(self, max_generations: Optional[int] = None):
+    async def run_autonomous_evolution(self, max_generations: Optional[int] = None):
         """
         Main coordination loop - Claude Code runs this autonomously
         Rule 4: LLM self-management - operates without human intervention
         """
+        # Initialize components
+        self._initialize_components()
+
         self._log_coordinator_event("autonomous_evolution_started", {
             "max_generations": max_generations,
             "coordinator_id": self.coordinator_id

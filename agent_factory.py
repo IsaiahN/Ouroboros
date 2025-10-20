@@ -532,5 +532,18 @@ class ARCAgent:
         """Balanced action selection for generic agents"""
         return self._use_existing_smart_selection(available_actions, 'balanced')
 
+    def _determine_initial_strategy(self) -> str:
+        """Determine initial strategy based on agent type and genome"""
+        if self.agent_type == 'pattern_specialist':
+            return 'pattern_focused'
+        elif self.agent_type == 'score_optimizer':
+            return 'score_focused'
+        elif self.agent_type == 'exploration_agent':
+            return 'exploration_focused'
+        elif self.agent_type == 'win_focused_agent':
+            return 'win_focused'
+        else:
+            return 'balanced'
+
 # [CHECKPOINT 6 COMPLETED: AGENT FACTORY IMPLEMENTATION]
 # Next: Integration with existing codebase (core_gameplay.py, action_handler.py, main_runner.py)

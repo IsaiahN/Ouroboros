@@ -21,8 +21,8 @@ except ImportError:
     # python-dotenv not installed, fall back to system environment variables
     pass
 
-from .core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
-from .database_interface import DatabaseInterface
+from core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
+from database_interface import DatabaseInterface
 
 # Configure database logging
 from database_logger import setup_database_logging

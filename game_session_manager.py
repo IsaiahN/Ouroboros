@@ -18,8 +18,8 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 import uuid
 
-from .arc_api_client import ARCClient, GameState
-from .database_interface import DatabaseInterface
+from arc_api_client import ARCClient, GameState
+from database_interface import DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +165,18 @@ class GameSessionManager:
 
         # Record action details for tracing
         action_start_time = datetime.now()
-        action_number = int(action.replace('ACTION', '')) if action.startswith('ACTION') else 0
+        
+        # Normalize action to string format
+        if isinstance(action, int):
+            action = f"ACTION{action}"
+        
+        # Extract action number (ACTION1 -> 1, ACTION6 -> 6, etc.)
+        if isinstance(action, str) and action.startswith('ACTION'):
+            action_number = int(action.replace('ACTION', ''))
+        else:
+            logger.warning(f"Invalid action format: {action}, defaulting to action 1")
+            action = "ACTION1"
+            action_number = 1
 
         try:
             # Send action via API
@@ -174,15 +185,15 @@ class GameSessionManager:
             # Update session statistics
             self.session_stats['total_actions'] += 1
 
-            # Save action trace
+            # Save action trace (DO NOT save frames - they are too large and unhashable)
             self.db.save_action_trace({
                 'session_id': self.current_session_id,
                 'game_id': self.current_game_id,
                 'action_number': action_number,
                 'coordinates': kwargs.get('coordinates') if action == 'ACTION6' else None,
                 'timestamp': action_start_time,
-                'frame_before': kwargs.get('frame_before'),
-                'frame_after': game_state.frame,
+                'frame_before': None,  # Don't save frame - too large
+                'frame_after': None,   # Don't save frame - too large
                 'frame_changed': kwargs.get('frame_changed', False),
                 'score_before': kwargs.get('score_before', 0.0),
                 'score_after': game_state.score,
