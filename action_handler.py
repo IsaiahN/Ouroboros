@@ -264,12 +264,15 @@ class ActionHandler:
 
             if target:
                 x, y, reason = target
+                # Mark this coordinate as clicked to avoid spamming
+                self.visual_analyzer.mark_coordinate_clicked(x, y)
                 logger.info(f"ACTION6 target found: ({x}, {y}) - {reason}")
                 return x, y, reason
             else:
                 # No obvious targets, use exploratory
                 logger.debug("No visual targets found, using exploratory mode")
                 x, y = self.visual_analyzer.get_exploratory_coordinates(frame)
+                self.visual_analyzer.mark_coordinate_clicked(x, y)
                 return x, y, "Exploratory search (no obvious targets)"
 
         elif strategy == "exploratory":

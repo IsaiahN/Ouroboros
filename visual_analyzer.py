@@ -23,16 +23,71 @@ class VisualAnalyzer:
     def __init__(self):
         """Initialize visual analyzer."""
         self.previous_frame = None
+        self.clicked_coordinates = set()  # Track coordinates we've already tried
+        self.last_action_changed_frame = False  # Did last action change the frame?
+        self.consecutive_no_change_count = 0  # How many actions with no frame change?
+
+    def update_frame_change_tracking(self, new_frame: List[List[int]]) -> bool:
+        """Track whether the frame changed after an action.
+        
+        Args:
+            new_frame: Frame after action was taken
+            
+        Returns:
+            True if frame changed, False otherwise
+        """
+        if self.previous_frame is None:
+            self.previous_frame = [row[:] for row in new_frame] if new_frame else None
+            self.last_action_changed_frame = False
+            return False
+        
+        # Compare frames
+        changed = False
+        if len(new_frame) != len(self.previous_frame):
+            changed = True
+        else:
+            for i, row in enumerate(new_frame):
+                if row != self.previous_frame[i]:
+                    changed = True
+                    break
+        
+        self.last_action_changed_frame = changed
+        
+        if changed:
+            self.consecutive_no_change_count = 0
+            logger.debug("Frame changed - action was productive!")
+        else:
+            self.consecutive_no_change_count += 1
+            logger.debug(f"Frame unchanged ({self.consecutive_no_change_count} consecutive)")
+        
+        # Update previous frame
+        self.previous_frame = [row[:] for row in new_frame]
+        
+        return changed
+    
+    def mark_coordinate_clicked(self, x: int, y: int):
+        """Mark a coordinate as already clicked.
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+        """
+        self.clicked_coordinates.add((x, y))
+        logger.debug(f"Marked ({x}, {y}) as clicked. Total clicked: {len(self.clicked_coordinates)}")
+    
+    def reset_clicked_coordinates(self):
+        """Reset clicked coordinates (e.g., when starting new game)."""
+        self.clicked_coordinates.clear()
+        logger.debug("Cleared clicked coordinates")
 
     def analyze_frame(self, frame: List[List[int]]) -> Dict[str, Any]:
         """Analyze a frame for interesting features.
 
         The frame is always a 64x64 grid from the ARC API.
-        API returns it as: [ [[row1_64_cols], [row2_64_cols], ...64 rows...] ]
-        We need to extract the 2D 64x64 grid.
+        Frame is already unwrapped by GameState.from_dict() in arc_api_client.py
 
         Args:
-            frame: Frame data from API (may be wrapped in extra arrays)
+            frame: Frame data (unwrapped 64x64 grid)
 
         Returns:
             Analysis results with potential targets
@@ -40,16 +95,10 @@ class VisualAnalyzer:
         if not frame:
             return {"targets": [], "analysis": "Empty frame"}
         
-        # The API may return frame wrapped in an extra array
-        # Unwrap until we get to the actual 64x64 grid
-        # Expected: 64 rows, each with 64 columns
-        while frame and len(frame) == 1 and isinstance(frame[0], list):
-            frame = frame[0]
-        
-        if not frame or not isinstance(frame, list):
+        if not isinstance(frame, list):
             return {"targets": [], "analysis": "Invalid frame structure"}
         
-        # Now we should have a 64x64 grid (or similar)
+        # Frame should already be unwrapped to 64x64 grid
         height = len(frame)
         if height == 0:
             return {"targets": [], "analysis": "Empty frame"}
@@ -293,7 +342,7 @@ class VisualAnalyzer:
         return unique_targets
 
     def select_best_target(self, analysis: Dict[str, Any]) -> Optional[Tuple[int, int, str]]:
-        """Select the best target from analysis.
+        """Select the best target from analysis, avoiding already-clicked coordinates.
 
         Args:
             analysis: Analysis results from analyze_frame
@@ -306,9 +355,33 @@ class VisualAnalyzer:
         if not targets:
             return None
 
-        # Get highest priority target
-        best_target = targets[0]
-        return (best_target["x"], best_target["y"], best_target["reason"])
+        # Filter out already-clicked coordinates
+        unclicked_targets = [
+            t for t in targets 
+            if (t["x"], t["y"]) not in self.clicked_coordinates
+        ]
+        
+        # If we have unclicked targets, prefer those
+        if unclicked_targets:
+            best_target = unclicked_targets[0]
+            logger.debug(f"Selected unclicked target: ({best_target['x']}, {best_target['y']})")
+            return (best_target["x"], best_target["y"], best_target["reason"])
+        
+        # If all targets clicked, reset and try again (frame might have changed)
+        if self.consecutive_no_change_count > 10:
+            logger.info("All targets clicked and no frame changes - resetting clicked coordinates")
+            self.reset_clicked_coordinates()
+            if targets:
+                best_target = targets[0]
+                return (best_target["x"], best_target["y"], best_target["reason"])
+        
+        # Fallback: use best target even if clicked
+        if targets:
+            best_target = targets[0]
+            logger.debug(f"Using already-clicked target: ({best_target['x']}, {best_target['y']})")
+            return (best_target["x"], best_target["y"], best_target["reason"])
+        
+        return None
 
     def get_exploratory_coordinates(self, frame: List[List[int]],
                                    center_x: int = None,
@@ -338,101 +411,6 @@ class VisualAnalyzer:
             center_y = height // 2
 
         # Random offset within radius
-        dx = random.randint(-radius, radius)
-        dy = random.randint(-radius, radius)
-
-        # Clamp to bounds
-        x = max(0, min(width - 1, center_x + dx))
-        y = max(0, min(height - 1, center_y + dy))
-
-        return (x, y)
-
-
-    def _deduplicate_targets(self, targets: List[Dict[str, Any]],
-                            min_distance: int = 3) -> List[Dict[str, Any]]:
-        """Remove duplicate targets that are too close together.
-
-        Args:
-            targets: List of target dictionaries
-            min_distance: Minimum distance between targets
-
-        Returns:
-            Deduplicated and sorted targets
-        """
-        if not targets:
-            return []
-
-        # Sort by priority (highest first)
-        sorted_targets = sorted(targets, key=lambda t: t["priority"], reverse=True)
-
-        # Keep targets that are far enough apart
-        unique_targets = []
-        for target in sorted_targets:
-            x, y = target["x"], target["y"]
-
-            # Check distance to all kept targets
-            too_close = False
-            for kept in unique_targets:
-                dx = abs(x - kept["x"])
-                dy = abs(y - kept["y"])
-                distance = (dx**2 + dy**2) ** 0.5
-
-                if distance < min_distance:
-                    too_close = True
-                    break
-
-            if not too_close:
-                unique_targets.append(target)
-
-        return unique_targets
-
-    def select_best_target(self, analysis: Dict[str, Any]) -> Optional[Tuple[int, int, str]]:
-        """Select the best target from analysis.
-
-        Args:
-            analysis: Analysis results from analyze_frame
-
-        Returns:
-            Tuple of (x, y, reason) or None if no targets
-        """
-        targets = analysis.get("targets", [])
-
-        if not targets:
-            return None
-
-        # Get highest priority target
-        best_target = targets[0]
-        return (best_target["x"], best_target["y"], best_target["reason"])
-
-    def get_exploratory_coordinates(self, frame: List[List[int]],
-                                   center_x: int = None,
-                                   center_y: int = None,
-                                   radius: int = 5) -> Tuple[int, int]:
-        """Get coordinates for exploratory search pattern.
-
-        Args:
-            frame: Current frame
-            center_x: Center X for search (default: middle of frame)
-            center_y: Center Y for search (default: middle of frame)
-            radius: Search radius
-
-        Returns:
-            Tuple of (x, y) for exploration
-        """
-        if not frame or not frame[0]:
-            return (0, 0)
-
-        height = len(frame)
-        width = len(frame[0])
-
-        # Use frame center if not specified
-        if center_x is None:
-            center_x = width // 2
-        if center_y is None:
-            center_y = height // 2
-
-        # Random offset within radius
-        import random
         dx = random.randint(-radius, radius)
         dy = random.randint(-radius, radius)
 

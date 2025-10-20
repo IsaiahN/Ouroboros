@@ -168,7 +168,15 @@ class GameplayEngine:
                 strategy="visual"  # Use visual analysis
             )
             logger.info(f"ACTION6 at ({x}, {y}): {reason}")
-            return await self.action_handler.send_action_6(x, y, game_state.frame)
+            new_state = await self.action_handler.send_action_6(x, y, game_state.frame)
+            
+            # Track frame changes to detect productive actions
+            if new_state and new_state.frame:
+                frame_changed = self.action_handler.visual_analyzer.update_frame_change_tracking(new_state.frame)
+                if not frame_changed:
+                    logger.debug(f"ACTION6 at ({x}, {y}) did not change frame")
+                    
+            return new_state
         else:
             # Execute regular action - convert ACTION1 to send_action_1 format
             # Extract number from ACTION string (e.g., "ACTION1" -> "1")

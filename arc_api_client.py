@@ -59,13 +59,19 @@ class GameState:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'GameState':
         """Create GameState from API response."""
+        # Unwrap frame if it's nested in extra arrays
+        # API returns: [ [[64_rows_x_64_cols]] ] -> we want: [[64_rows_x_64_cols]]
+        frame = data.get('frame', [])
+        while frame and len(frame) == 1 and isinstance(frame[0], list) and len(frame[0]) > 1:
+            frame = frame[0]
+        
         return cls(
             game_id=data.get('game_id', ''),
             guid=data.get('guid', ''),
             state=data.get('state', 'UNKNOWN'),
             score=float(data.get('score', 0.0)),
             win_score=float(data.get('win_score', 0.0)),
-            frame=data.get('frame', []),
+            frame=frame,
             action_input=data.get('action_input'),
             available_actions=data.get('available_actions', [])
         )

@@ -55,6 +55,8 @@ These rules are non-negotiable and must be followed at all times when working on
 - All ACTION1-ACTION7 commands must be sent to the real ARC API
 - Track API responses to verify actions were received and processed
 
+### Rule 8: Dont create summary md files unless asked
+
 ## Architecture Guidelines
 
 ### Database-First Design

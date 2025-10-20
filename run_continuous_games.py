@@ -9,7 +9,7 @@ import os
 import sys
 import asyncio
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Rule 1: Disable pycache
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -29,17 +29,22 @@ from database_interface import DatabaseInterface
 db_handler = setup_database_logging(level='INFO')
 
 
-async def run_multiple_games(num_games: int = 5):
+async def run_multiple_games(num_games: int = 5, poll_interval: int = 120):
     """
     Run multiple ARC games to build performance data
     Rule 6 & 7: All real ARC API games
+    
+    Args:
+        num_games: Number of games to run (None = infinite loop)
+        poll_interval: Seconds to wait between games (default: 120 = 2 minutes)
     """
     
     print("=" * 70)
     print("CONTINUOUS ARC GAME RUNNER - Ouroboros Data Collection")
     print("=" * 70)
     print(f"Time: {datetime.now()}")
-    print(f"Target Games: {num_games}")
+    print(f"Target Games: {num_games if num_games else 'Unlimited (Ctrl+C to stop)'}")
+    print(f"Poll Interval: {poll_interval}s ({poll_interval/60:.1f} minutes)")
     print(f"Rule 6 & 7: Real ARC API games only")
     print("=" * 70)
     print()
@@ -71,7 +76,8 @@ async def run_multiple_games(num_games: int = 5):
             print()
             
             # Play multiple games
-            for game_num in range(num_games):
+            game_num = 0
+            while num_games is None or game_num < num_games:
                 # Select game (cycle through available games)
                 game_idx = game_num % len(available_games)
                 game = available_games[game_idx]
@@ -82,7 +88,10 @@ async def run_multiple_games(num_games: int = 5):
                 max_actions = random.randint(200, 500)
                 
                 print(f"\n{'='*70}")
-                print(f"GAME {game_num + 1}/{num_games}")
+                if num_games:
+                    print(f"GAME {game_num + 1}/{num_games}")
+                else:
+                    print(f"GAME {game_num + 1} (Continuous Mode)")
                 print(f"{'='*70}")
                 print(f"Game ID: {game_id}")
                 print(f"Title: {game_title}")
@@ -112,10 +121,15 @@ async def run_multiple_games(num_games: int = 5):
                 
                 results.append(result)
                 
-                # Brief pause between games
-                if game_num < num_games - 1:
-                    print(f"\nPausing 2 seconds before next game...")
-                    await asyncio.sleep(2)
+                # Increment counter
+                game_num += 1
+                
+                # Wait for poll interval before next game
+                if num_games is None or game_num < num_games:
+                    next_game_time = datetime.now() + timedelta(seconds=poll_interval)
+                    print(f"\nWaiting {poll_interval}s ({poll_interval/60:.1f} minutes) before next game...")
+                    print(f"Next game starts at: {next_game_time.strftime('%H:%M:%S')}")
+                    await asyncio.sleep(poll_interval)
             
             # Summary
             print(f"\n{'='*70}")
@@ -159,15 +173,24 @@ async def run_multiple_games(num_games: int = 5):
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Run multiple ARC games")
-    parser.add_argument('--games', type=int, default=5, help='Number of games to play (default: 5)')
+    parser = argparse.ArgumentParser(description="Run multiple ARC games with polling")
+    parser.add_argument('--games', type=int, default=None, 
+                       help='Number of games to play (default: unlimited, use Ctrl+C to stop)')
+    parser.add_argument('--interval', type=int, default=120,
+                       help='Seconds between games (default: 120 = 2 minutes)')
     args = parser.parse_args()
     
-    results = asyncio.run(run_multiple_games(args.games))
-    
-    if results:
-        print(f"\n✓ SUCCESS: Completed {len(results)} games")
+    try:
+        results = asyncio.run(run_multiple_games(args.games, args.interval))
+        
+        if results:
+            print(f"\n✓ SUCCESS: Completed {len(results)} games")
+            sys.exit(0)
+        else:
+            print(f"\n✗ FAILED: No games completed")
+            sys.exit(1)
+    except KeyboardInterrupt:
+        print(f"\n\n{'='*70}")
+        print("STOPPED BY USER (Ctrl+C)")
+        print(f"{'='*70}")
         sys.exit(0)
-    else:
-        print(f"\n✗ FAILED: No games completed")
-        sys.exit(1)
