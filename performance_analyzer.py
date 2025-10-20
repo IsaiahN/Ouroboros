@@ -1,0 +1,474 @@
+"""
+Performance Analyzer - Analyzes ARC performance data for Claude Code decision-making
+Provides comprehensive analysis of agent and population performance
+Following Rule 2: Database-only storage and analysis
+"""
+
+import json
+import uuid
+import numpy as np
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional
+from database_interface import DatabaseInterface
+
+
+class PerformanceAnalyzer:
+    """
+    Analyzes ARC performance data for evolutionary decisions
+    Provides Claude Code with insights for strategic evolution planning
+    """
+
+    def __init__(self, database_interface: DatabaseInterface):
+        self.db = database_interface
+        self.analyzer_id = f"analyzer_{uuid.uuid4().hex[:8]}"
+
+    def analyze_population_performance(self) -> Dict[str, Any]:
+        """
+        Analyze current population's ARC performance for Claude Code
+        Returns comprehensive analysis for evolution strategy decisions
+        """
+        self._log_analysis_event("population_analysis_started", {})
+
+        try:
+            # Get all active agents and their ARC performance
+            population_data = self.db.get_population_performance_data()
+
+            if not population_data:
+                return self._create_empty_analysis()
+
+            analysis = {
+                'population_stats': self._calculate_population_statistics(population_data),
+                'top_performers': self._identify_top_performers(population_data),
+                'performance_trends': self._analyze_performance_trends(population_data),
+                'strategy_effectiveness': self._analyze_strategy_effectiveness(population_data),
+                'diversity_metrics': self._calculate_diversity_metrics(population_data),
+                'bottlenecks_and_opportunities': self._identify_bottlenecks_and_opportunities(population_data),
+                'evolution_recommendations': self._generate_evolution_recommendations(population_data)
+            }
+
+            # Store analysis in database for Claude Code reference (Rule 2)
+            self.db.store_performance_analysis(analysis)
+
+            self._log_analysis_event("population_analysis_completed", {
+                "population_size": len(population_data),
+                "avg_win_rate": analysis['population_stats']['average_win_rate']
+            })
+
+            return analysis
+
+        except Exception as e:
+            self._log_analysis_event("population_analysis_error", {
+                "error": str(e)
+            })
+            raise
+
+    def _calculate_population_statistics(self, population_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Calculate key ARC performance statistics for the population"""
+        if not population_data:
+            return {}
+
+        # Extract performance metrics
+        win_rates = [agent.get('win_rate', 0.0) for agent in population_data]
+        avg_scores = [agent.get('avg_score_per_game', 0.0) for agent in population_data]
+        score_efficiencies = [agent.get('score_efficiency', 0.0) for agent in population_data]
+        games_played = [agent.get('total_games_played', 0) for agent in population_data]
+        level_progressions = [agent.get('level_progressions_detected', 0) for agent in population_data]
+
+        # Calculate statistics
+        stats = {
+            'population_size': len(population_data),
+            'active_agents': sum(1 for agent in population_data if agent.get('is_active', True)),
+
+            # Win rate statistics
+            'average_win_rate': sum(win_rates) / len(win_rates),
+            'best_win_rate': max(win_rates),
+            'worst_win_rate': min(win_rates),
+            'win_rate_std_dev': self._calculate_std_dev(win_rates),
+
+            # Score statistics
+            'average_score': sum(avg_scores) / len(avg_scores),
+            'best_avg_score': max(avg_scores),
+            'score_variance': self._calculate_variance(avg_scores),
+
+            # Efficiency statistics
+            'average_score_efficiency': sum(score_efficiencies) / len(score_efficiencies),
+            'best_score_efficiency': max(score_efficiencies),
+            'efficiency_variance': self._calculate_variance(score_efficiencies),
+
+            # Experience statistics
+            'total_games_played': sum(games_played),
+            'avg_games_per_agent': sum(games_played) / len(games_played),
+            'total_level_progressions': sum(level_progressions),
+
+            # Performance distribution
+            'agents_with_wins': sum(1 for rate in win_rates if rate > 0),
+            'high_performers': sum(1 for rate in win_rates if rate > 0.2),  # >20% win rate
+            'consistent_performers': sum(1 for games in games_played if games >= 10)
+        }
+
+        return stats
+
+    def _identify_top_performers(self, population_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Identify top performing agents based on ARC metrics"""
+        # Sort by multiple criteria for comprehensive ranking
+        def performance_score(agent):
+            win_rate = agent.get('win_rate', 0.0)
+            score_efficiency = agent.get('score_efficiency', 0.0)
+            games_played = agent.get('total_games_played', 0)
+
+            # Composite performance score with reliability weighting
+            base_score = win_rate * 0.6 + score_efficiency * 0.4
+            reliability_weight = min(games_played / 10.0, 1.0)  # Full weight at 10+ games
+
+            return base_score * reliability_weight
+
+        # Sort and take top performers
+        sorted_agents = sorted(population_data, key=performance_score, reverse=True)
+        top_performers = sorted_agents[:min(5, len(sorted_agents))]
+
+        # Add performance insights for each top performer
+        for agent in top_performers:
+            agent['performance_score'] = performance_score(agent)
+            agent['performance_insights'] = self._analyze_agent_strengths(agent)
+
+        return top_performers
+
+    def _analyze_performance_trends(self, population_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze performance trends over time"""
+        # Get historical performance data
+        current_time = datetime.now()
+        week_ago = current_time - timedelta(days=7)
+
+        # Recent vs historical performance
+        recent_performance = self.db.get_performance_data_since(week_ago)
+        historical_performance = self.db.get_performance_data_before(week_ago)
+
+        trends = {
+            'improvement_rate': self._calculate_improvement_rate(recent_performance, historical_performance),
+            'win_rate_trend': self._calculate_win_rate_trend(),
+            'score_efficiency_trend': self._calculate_score_efficiency_trend(),
+            'population_health_trend': self._calculate_population_health_trend(),
+            'stagnation_indicators': self._detect_stagnation_indicators(population_data)
+        }
+
+        return trends
+
+    def _analyze_strategy_effectiveness(self, population_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze effectiveness of different agent strategies"""
+        strategy_performance = {}
+
+        for agent in population_data:
+            agent_type = agent.get('agent_type', 'unknown')
+            specialization = agent.get('specialization', 'generalist')
+
+            # Group by agent type
+            if agent_type not in strategy_performance:
+                strategy_performance[agent_type] = {
+                    'agents': [],
+                    'avg_win_rate': 0.0,
+                    'avg_score_efficiency': 0.0,
+                    'total_agents': 0
+                }
+
+            strategy_performance[agent_type]['agents'].append(agent)
+            strategy_performance[agent_type]['total_agents'] += 1
+
+        # Calculate averages for each strategy
+        for strategy, data in strategy_performance.items():
+            agents = data['agents']
+            if agents:
+                data['avg_win_rate'] = sum(a.get('win_rate', 0.0) for a in agents) / len(agents)
+                data['avg_score_efficiency'] = sum(a.get('score_efficiency', 0.0) for a in agents) / len(agents)
+                data['success_rate'] = sum(1 for a in agents if a.get('win_rate', 0) > 0.1) / len(agents)
+
+        # Rank strategies by effectiveness
+        ranked_strategies = sorted(
+            strategy_performance.items(),
+            key=lambda x: x[1]['avg_win_rate'],
+            reverse=True
+        )
+
+        return {
+            'strategy_performance': strategy_performance,
+            'most_effective_strategy': ranked_strategies[0][0] if ranked_strategies else None,
+            'least_effective_strategy': ranked_strategies[-1][0] if ranked_strategies else None,
+            'strategy_recommendations': self._generate_strategy_recommendations(strategy_performance)
+        }
+
+    def _calculate_diversity_metrics(self, population_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Calculate population diversity metrics"""
+        if not population_data:
+            return {'genetic_diversity': 0.0}
+
+        # Strategy type diversity
+        agent_types = [agent.get('agent_type', 'unknown') for agent in population_data]
+        type_distribution = {}
+        for agent_type in agent_types:
+            type_distribution[agent_type] = type_distribution.get(agent_type, 0) + 1
+
+        # Calculate Shannon diversity index for strategy types
+        total_agents = len(population_data)
+        shannon_diversity = 0.0
+        for count in type_distribution.values():
+            if count > 0:
+                proportion = count / total_agents
+                shannon_diversity -= proportion * np.log2(proportion)
+
+        # Performance diversity (variance in performance metrics)
+        win_rates = [agent.get('win_rate', 0.0) for agent in population_data]
+        score_efficiencies = [agent.get('score_efficiency', 0.0) for agent in population_data]
+
+        performance_diversity = (
+            self._calculate_variance(win_rates) +
+            self._calculate_variance(score_efficiencies)
+        ) / 2.0
+
+        # Genetic diversity (based on genome parameters)
+        genetic_diversity = self._calculate_genetic_diversity(population_data)
+
+        return {
+            'genetic_diversity': genetic_diversity,
+            'strategy_diversity': shannon_diversity,
+            'performance_diversity': performance_diversity,
+            'type_distribution': type_distribution,
+            'diversity_health': self._assess_diversity_health(shannon_diversity, genetic_diversity)
+        }
+
+    def _calculate_genetic_diversity(self, population_data: List[Dict[str, Any]]) -> float:
+        """Calculate genetic diversity based on genome parameters"""
+        if not population_data:
+            return 0.0
+
+        # Collect genome parameters
+        genome_params = []
+        for agent in population_data:
+            genome = agent.get('genome', {})
+            if isinstance(genome, str):
+                try:
+                    genome = json.loads(genome)
+                except:
+                    continue
+
+            # Extract numerical parameters for diversity calculation
+            params = []
+            for key in ['exploration_weight', 'conservative_bias', 'action_diversity',
+                       'score_optimization_priority', 'win_focus_threshold']:
+                if key in genome:
+                    params.append(genome[key])
+
+            if params:
+                genome_params.append(params)
+
+        if len(genome_params) < 2:
+            return 0.0
+
+        # Calculate average pairwise distance
+        total_distance = 0.0
+        comparisons = 0
+
+        for i in range(len(genome_params)):
+            for j in range(i + 1, len(genome_params)):
+                distance = self._calculate_genome_distance(genome_params[i], genome_params[j])
+                total_distance += distance
+                comparisons += 1
+
+        return total_distance / max(comparisons, 1)
+
+    def _calculate_genome_distance(self, genome1: List[float], genome2: List[float]) -> float:
+        """Calculate distance between two genomes"""
+        if len(genome1) != len(genome2):
+            return 0.0
+
+        distance = sum((g1 - g2) ** 2 for g1, g2 in zip(genome1, genome2))
+        return np.sqrt(distance) / len(genome1)
+
+    def _identify_bottlenecks_and_opportunities(self, population_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Identify performance bottlenecks and improvement opportunities"""
+        bottlenecks = []
+        opportunities = []
+
+        # Analyze population statistics for bottlenecks
+        stats = self._calculate_population_statistics(population_data)
+
+        # Low win rate bottleneck
+        if stats['average_win_rate'] < 0.1:
+            bottlenecks.append({
+                'type': 'low_win_rate',
+                'description': 'Population has very low win rate',
+                'severity': 'high',
+                'recommendation': 'Focus on exploration and strategy diversification'
+            })
+
+        # Low diversity bottleneck
+        diversity = self._calculate_diversity_metrics(population_data)
+        if diversity['genetic_diversity'] < 0.3:
+            bottlenecks.append({
+                'type': 'low_diversity',
+                'description': 'Population lacks genetic diversity',
+                'severity': 'medium',
+                'recommendation': 'Increase mutation rate and introduce new agent types'
+            })
+
+        # Stagnation bottleneck
+        if stats['win_rate_std_dev'] < 0.05:
+            bottlenecks.append({
+                'type': 'stagnation',
+                'description': 'Population performance is stagnating',
+                'severity': 'medium',
+                'recommendation': 'Introduce disruptive mutations and new strategies'
+            })
+
+        # Identify opportunities
+        if stats['best_win_rate'] > 0.3:
+            opportunities.append({
+                'type': 'high_performer_potential',
+                'description': 'Some agents show high win potential',
+                'value': 'high',
+                'recommendation': 'Focus on exploiting successful strategies through crossover'
+            })
+
+        if stats['average_score_efficiency'] > 0.5:
+            opportunities.append({
+                'type': 'efficiency_strength',
+                'description': 'Population shows good score efficiency',
+                'value': 'medium',
+                'recommendation': 'Leverage efficiency traits while improving win rate'
+            })
+
+        return {
+            'bottlenecks': bottlenecks,
+            'opportunities': opportunities,
+            'overall_assessment': self._generate_overall_assessment(bottlenecks, opportunities)
+        }
+
+    def _generate_evolution_recommendations(self, population_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Generate specific recommendations for evolution strategy"""
+        recommendations = []
+
+        stats = self._calculate_population_statistics(population_data)
+        diversity = self._calculate_diversity_metrics(population_data)
+
+        # Recommendation logic based on current state
+        if stats['average_win_rate'] < 0.05:
+            recommendations.append({
+                'priority': 'high',
+                'strategy_focus': 'exploration',
+                'mutation_rate': 0.4,
+                'crossover_rate': 0.3,
+                'rationale': 'Very low win rate requires aggressive exploration'
+            })
+        elif stats['average_win_rate'] > 0.2:
+            recommendations.append({
+                'priority': 'high',
+                'strategy_focus': 'exploitation',
+                'mutation_rate': 0.1,
+                'crossover_rate': 0.8,
+                'rationale': 'Good win rate should be exploited and refined'
+            })
+        else:
+            recommendations.append({
+                'priority': 'medium',
+                'strategy_focus': 'balanced',
+                'mutation_rate': 0.2,
+                'crossover_rate': 0.6,
+                'rationale': 'Moderate performance requires balanced approach'
+            })
+
+        # Diversity-based recommendations
+        if diversity['genetic_diversity'] < 0.2:
+            recommendations.append({
+                'priority': 'high',
+                'strategy_focus': 'diversification',
+                'mutation_rate': 0.5,
+                'crossover_rate': 0.4,
+                'rationale': 'Low diversity requires immediate diversification'
+            })
+
+        return recommendations
+
+    def analyze_agent_details(self, agent_id: str) -> Dict[str, Any]:
+        """Detailed analysis of specific agent performance"""
+        agent_data = self.db.get_agent_detailed_performance(agent_id)
+
+        if not agent_data:
+            return {'error': 'Agent not found'}
+
+        analysis = {
+            'agent_overview': agent_data,
+            'performance_history': self.db.get_agent_performance_history(agent_id),
+            'strengths': self._analyze_agent_strengths(agent_data),
+            'weaknesses': self._analyze_agent_weaknesses(agent_data),
+            'evolution_potential': self._assess_evolution_potential(agent_data),
+            'breeding_value': self._assess_breeding_value(agent_data)
+        }
+
+        return analysis
+
+    def _analyze_agent_strengths(self, agent_data: Dict[str, Any]) -> List[str]:
+        """Analyze specific agent strengths"""
+        strengths = []
+
+        if agent_data.get('win_rate', 0) > 0.2:
+            strengths.append('High win rate')
+
+        if agent_data.get('score_efficiency', 0) > 0.5:
+            strengths.append('Excellent score efficiency')
+
+        if agent_data.get('total_games_played', 0) >= 20:
+            strengths.append('Extensive experience')
+
+        if agent_data.get('level_progressions_detected', 0) > 5:
+            strengths.append('Good level progression detection')
+
+        return strengths
+
+    def _analyze_agent_weaknesses(self, agent_data: Dict[str, Any]) -> List[str]:
+        """Analyze specific agent weaknesses"""
+        weaknesses = []
+
+        if agent_data.get('win_rate', 0) < 0.05:
+            weaknesses.append('Very low win rate')
+
+        if agent_data.get('score_efficiency', 0) < 0.2:
+            weaknesses.append('Poor score efficiency')
+
+        if agent_data.get('total_games_played', 0) < 5:
+            weaknesses.append('Limited experience')
+
+        return weaknesses
+
+    # Utility methods
+    def _calculate_variance(self, values: List[float]) -> float:
+        """Calculate variance of values"""
+        if len(values) < 2:
+            return 0.0
+        mean = sum(values) / len(values)
+        return sum((x - mean) ** 2 for x in values) / len(values)
+
+    def _calculate_std_dev(self, values: List[float]) -> float:
+        """Calculate standard deviation"""
+        return np.sqrt(self._calculate_variance(values))
+
+    def _create_empty_analysis(self) -> Dict[str, Any]:
+        """Create empty analysis structure"""
+        return {
+            'population_stats': {'population_size': 0},
+            'top_performers': [],
+            'performance_trends': {},
+            'strategy_effectiveness': {},
+            'diversity_metrics': {'genetic_diversity': 0.0},
+            'bottlenecks_and_opportunities': {'bottlenecks': [], 'opportunities': []},
+            'evolution_recommendations': []
+        }
+
+    def _log_analysis_event(self, event_type: str, event_data: Dict[str, Any]):
+        """Log analysis events to database (Rule 2: no log files)"""
+        self.db.store_analysis_log({
+            'event_type': event_type,
+            'event_data': json.dumps(event_data),
+            'analyzer_id': self.analyzer_id,
+            'timestamp': datetime.now().isoformat()
+        })
+
+# [CHECKPOINT 5 COMPLETED: PERFORMANCE ANALYZER IMPLEMENTATION]
+# Next: Implement Agent Factory
