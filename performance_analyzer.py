@@ -153,6 +153,36 @@ class PerformanceAnalyzer:
 
         return trends
 
+    def _calculate_improvement_rate(self, recent_performance, historical_performance):
+        """Calculate improvement rate between recent and historical performance"""
+        if not recent_performance or not historical_performance:
+            return 0.0
+
+        # Simple improvement calculation
+        recent_avg = sum(p.get('score', 0) for p in recent_performance) / len(recent_performance)
+        historical_avg = sum(p.get('score', 0) for p in historical_performance) / len(historical_performance)
+
+        if historical_avg == 0:
+            return 0.0
+
+        return (recent_avg - historical_avg) / historical_avg
+
+    def _calculate_win_rate_trend(self):
+        """Calculate win rate trend"""
+        return 0.0  # Placeholder
+
+    def _calculate_score_efficiency_trend(self):
+        """Calculate score efficiency trend"""
+        return 0.0  # Placeholder
+
+    def _calculate_population_health_trend(self):
+        """Calculate population health trend"""
+        return 0.0  # Placeholder
+
+    def _detect_stagnation_indicators(self, population_data):
+        """Detect stagnation in population"""
+        return []  # Placeholder
+
     def _analyze_strategy_effectiveness(self, population_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Analyze effectiveness of different agent strategies"""
         strategy_performance = {}
@@ -195,6 +225,22 @@ class PerformanceAnalyzer:
             'strategy_recommendations': self._generate_strategy_recommendations(strategy_performance)
         }
 
+    def _generate_strategy_recommendations(self, strategy_performance):
+        """Generate strategy recommendations based on performance"""
+        recommendations = []
+
+        if not strategy_performance:
+            return recommendations
+
+        # Find best performing strategy
+        best_strategy = max(strategy_performance.items(),
+                          key=lambda x: x[1].get('avg_win_rate', 0))
+
+        if best_strategy[1]['avg_win_rate'] > 0.1:
+            recommendations.append(f"Focus on {best_strategy[0]} strategy (win rate: {best_strategy[1]['avg_win_rate']:.3f})")
+
+        return recommendations
+
     def _calculate_diversity_metrics(self, population_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Calculate population diversity metrics"""
         if not population_data:
@@ -233,6 +279,16 @@ class PerformanceAnalyzer:
             'type_distribution': type_distribution,
             'diversity_health': self._assess_diversity_health(shannon_diversity, genetic_diversity)
         }
+
+    def _assess_diversity_health(self, shannon_diversity, genetic_diversity):
+        """Assess overall diversity health of population"""
+        # Simple health assessment
+        if shannon_diversity > 1.5 and genetic_diversity > 0.5:
+            return 'healthy'
+        elif shannon_diversity > 1.0 and genetic_diversity > 0.3:
+            return 'moderate'
+        else:
+            return 'low'
 
     def _calculate_genetic_diversity(self, population_data: List[Dict[str, Any]]) -> float:
         """Calculate genetic diversity based on genome parameters"""
@@ -340,6 +396,17 @@ class PerformanceAnalyzer:
             'opportunities': opportunities,
             'overall_assessment': self._generate_overall_assessment(bottlenecks, opportunities)
         }
+
+    def _generate_overall_assessment(self, bottlenecks, opportunities):
+        """Generate overall assessment based on bottlenecks and opportunities"""
+        if len(bottlenecks) == 0 and len(opportunities) > 0:
+            return 'healthy_with_opportunities'
+        elif len(bottlenecks) > 0 and len(opportunities) > 0:
+            return 'mixed_with_potential'
+        elif len(bottlenecks) > 0:
+            return 'needs_improvement'
+        else:
+            return 'stable'
 
     def _generate_evolution_recommendations(self, population_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Generate specific recommendations for evolution strategy"""

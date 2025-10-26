@@ -55,7 +55,10 @@ These rules are non-negotiable and must be followed at all times when working on
 - All ACTION1-ACTION7 commands must be sent to the real ARC API
 - Track API responses to verify actions were received and processed
 
-### Rule 8: Dont create summary md files unless asked
+## Rule 8: 
+Whenever creating an implementation or change, Test the new implementation on the current main active fun script, and then scan the terminal for errors, bugs, and anything else and then fix the issue and rescan, retest etc. you should automatically start and stop the terminal runs etc. until you can get a clean verifiable run with actions sent, and scores updated, and real scorecard ids etc.
+
+### Rule 9: Dont create summary md files unless asked
 
 ## Architecture Guidelines
 

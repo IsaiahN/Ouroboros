@@ -268,8 +268,18 @@ class EvolutionaryEngine:
 
     def _update_population_database(self, new_population: List[Dict[str, Any]], generation: int):
         """Update population in database"""
+        import json
+
         # Store new agents
         for agent in new_population:
+            # Ensure genome is JSON string for database storage
+            if isinstance(agent.get('genome'), dict):
+                agent['genome'] = json.dumps(agent['genome'])
+
+            # Ensure parent_ids is JSON string for database storage
+            if isinstance(agent.get('parent_ids'), list):
+                agent['parent_ids'] = json.dumps(agent['parent_ids'])
+
             if not self.db.agent_exists(agent['agent_id']):
                 self.db.store_agent(agent)
             else:
@@ -293,8 +303,19 @@ class CrossoverOperations:
         Create offspring by combining traits from both parents
         Focuses on strategy parameters that affect ARC performance
         """
+        # Handle genome data (might be JSON string)
+        import json
+
+        p1_genome = parent1['genome']
+        if isinstance(p1_genome, str):
+            p1_genome = json.loads(p1_genome)
+
+        p2_genome = parent2['genome']
+        if isinstance(p2_genome, str):
+            p2_genome = json.loads(p2_genome)
+
         # Start with parent1 as base
-        offspring_genome = copy.deepcopy(parent1['genome'])
+        offspring_genome = copy.deepcopy(p1_genome)
 
         # Generate unique ID for offspring
         offspring_genome['agent_id'] = f"offspring_{uuid.uuid4().hex[:8]}"
@@ -307,24 +328,24 @@ class CrossoverOperations:
         ]
 
         for param in strategy_params:
-            if param in parent1['genome'] and param in parent2['genome']:
+            if param in p1_genome and param in p2_genome:
                 # Random selection or averaging
                 if random.random() < 0.5:
-                    offspring_genome[param] = parent2['genome'][param]
+                    offspring_genome[param] = p2_genome[param]
                 else:
                     # Average with small random variation
-                    avg_value = (parent1['genome'][param] + parent2['genome'][param]) / 2
+                    avg_value = (p1_genome[param] + p2_genome[param]) / 2
                     offspring_genome[param] = avg_value + random.uniform(-0.05, 0.05)
                     offspring_genome[param] = max(0.0, min(1.0, offspring_genome[param]))
 
         # Special handling for categorical parameters
         categorical_params = ['coordinate_exploration_pattern']
         for param in categorical_params:
-            if param in parent1['genome'] and param in parent2['genome']:
+            if param in p1_genome and param in p2_genome:
                 # Random selection from parents
                 offspring_genome[param] = random.choice([
-                    parent1['genome'][param],
-                    parent2['genome'][param]
+                    p1_genome[param],
+                    p2_genome[param]
                 ])
 
         # Create offspring agent
