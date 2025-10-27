@@ -28,8 +28,10 @@ class OuroborosCoordinator:
     Central coordinator that manages the entire evolutionary system
     """
 
-    def __init__(self, database_interface: DatabaseInterface):
+    def __init__(self, database_interface: DatabaseInterface, api_key: Optional[str] = None):
         self.db = database_interface
+        self.api_key = api_key or os.getenv('ARC_API_KEY')
+        self.db_path = "core_data.db"  # Default database path
         self.population_manager = PopulationManager(database_interface)
 
         # Lazy imports to avoid circular dependencies
@@ -116,12 +118,16 @@ class OuroborosCoordinator:
                     break
 
                 # 1. Analyze current ARC performance data from database (Rule 2)
+                if self.performance_analyzer is None:
+                    raise RuntimeError("Performance analyzer not initialized")
                 performance_data = self.performance_analyzer.analyze_population_performance()
 
                 # 2. Make evolution decisions based on ARC results
                 evolution_strategy = self._determine_evolution_strategy(performance_data)
 
                 # 3. Execute evolution cycle
+                if self.evolution_engine is None:
+                    raise RuntimeError("Evolution engine not initialized")
                 new_agents = self.evolution_engine.evolve_population(evolution_strategy)
 
                 # 4. Deploy agents for ARC game testing (Rule 5: live data only)
@@ -248,9 +254,9 @@ class OuroborosCoordinator:
             'agent_results': []
         }
 
-        # Create session for agent testing
-        session_manager = GameSessionManager(self.db)
-        session_id = session_manager.create_session("agent_testing")
+        # Create session for agent testing - use api_key, not db
+        session_manager = GameSessionManager(self.api_key, self.db_path)
+        session_id = await session_manager.start_session("agent_testing")
 
         for agent in agents:
             agent_test_result = await self._test_agent_with_real_arc_games(
@@ -273,21 +279,34 @@ class OuroborosCoordinator:
         """
         from core_gameplay import GameplayEngine
 
-        gameplay_engine = GameplayEngine(self.db)
+        gameplay_engine = GameplayEngine(self.api_key, self.db_path)
 
         # Test agent on 3 random ARC games for performance evaluation
         test_games = 3
         wins = 0
         total_score = 0.0
         games_played = 0
+        
+        # Get available games first
+        available_games = await gameplay_engine.session_manager.get_available_games()
+        if not available_games:
+            return {
+                'agent_id': agent.agent_id,
+                'games_played': 0,
+                'wins': 0,
+                'total_score': 0.0,
+                'win_rate': 0.0,
+                'avg_score': 0.0
+            }
 
-        for game_num in range(test_games):
+        for game_num in range(min(test_games, len(available_games))):
             try:
+                game_id = available_games[game_num].get('id', available_games[game_num].get('game_id'))
                 # Rule 6: Real ARC games only - no simulations
+                # play_single_game accepts action_callback, not agent_callback/agent_genome
                 game_result = await gameplay_engine.play_single_game(
-                    game_id=None,  # Let system select game
-                    agent_callback=agent.select_action,
-                    agent_genome=agent.genome
+                    game_id=game_id,
+                    action_callback=agent.select_action
                 )
 
                 games_played += 1
@@ -296,7 +315,8 @@ class OuroborosCoordinator:
                     wins += 1
 
                 # Process ARC rewards through RLVR framework
-                self.arc_rlvr.process_arc_rewards(agent.agent_id, game_result)
+                if self.arc_rlvr is not None:
+                    self.arc_rlvr.process_arc_rewards(agent.agent_id, game_result)
 
                 # Rule 7: Verify real actions were sent
                 self._verify_real_actions_sent(agent.agent_id, game_result)
@@ -382,7 +402,8 @@ class OuroborosCoordinator:
                 'actions_taken': []
             }
 
-            self.arc_rlvr.process_arc_rewards(agent_result['agent_id'], mock_game_result)
+            if self.arc_rlvr is not None:
+                self.arc_rlvr.process_arc_rewards(agent_result['agent_id'], mock_game_result)
 
         return test_results
 
@@ -484,6 +505,8 @@ class OuroborosCoordinator:
             # Generate diverse initial genome
             initial_genome = self._generate_initial_genome(agent_type)
 
+            if self.agent_factory is None:
+                raise RuntimeError("Agent factory not initialized")
             agent = self.agent_factory.create_agent(agent_type, initial_genome)
             initial_agents.append(agent)
 
@@ -536,6 +559,47 @@ class OuroborosCoordinator:
         """Get current active population size from database"""
         return self.db.get_active_agent_count()
 
+    def _store_agent_test_results(self, test_results: Dict[str, Any]):
+        """Store agent test results in database"""
+        try:
+            self.db.execute_query("""
+                INSERT INTO agent_test_results 
+                (test_id, agents_tested, games_completed, total_wins, total_score, test_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                str(uuid.uuid4()),
+                test_results.get('agents_tested', 0),
+                test_results.get('games_completed', 0),
+                test_results.get('total_wins', 0),
+                test_results.get('total_score', 0.0),
+                datetime.now().isoformat()
+            ))
+        except Exception as e:
+            self._log_coordinator_event("store_test_results_error", {"error": str(e)})
+
+    def _update_agent_performance(self, agent_id: str, agent_result: Dict[str, Any]):
+        """Update agent performance metrics in database"""
+        try:
+            self.db.execute_query("""
+                INSERT INTO agent_arc_performance
+                (agent_id, games_played, total_score, avg_score_per_game, 
+                 total_games_won, win_rate, performance_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                agent_id,
+                agent_result.get('games_played', 0),
+                agent_result.get('total_score', 0.0),
+                agent_result.get('avg_score', 0.0),
+                agent_result.get('wins', 0),
+                agent_result.get('win_rate', 0.0),
+                datetime.now().isoformat()
+            ))
+        except Exception as e:
+            self._log_coordinator_event("update_performance_error", {
+                "agent_id": agent_id,
+                "error": str(e)
+            })
+
     # [CHECKPOINT 2 COMPLETED: CORE COORDINATOR IMPLEMENTATION]
     # Next: Implement evolution engine and RLVR framework
 
@@ -552,8 +616,14 @@ class PopulationManager:
 
     def retire_agent(self, agent_id: str, reason: str):
         """Retire agent from active population"""
-        self.db.update_agent_status(agent_id, is_active=False, retirement_reason=reason)
+        self.db.execute_query(
+            "UPDATE agents SET is_active = ?, retirement_reason = ? WHERE agent_id = ?",
+            (False, reason, agent_id)
+        )
 
     def activate_agent(self, agent_id: str):
         """Activate agent in population"""
-        self.db.update_agent_status(agent_id, is_active=True)
+        self.db.execute_query(
+            "UPDATE agents SET is_active = ? WHERE agent_id = ?",
+            (True, agent_id)
+        )

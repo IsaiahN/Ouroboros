@@ -84,8 +84,8 @@ class DatabaseInterface:
     # SESSION MANAGEMENT
     # ========================================================================
 
-    def create_session(self, session_id: str = None, mode: str = "gameplay",
-                      game_id: str = None) -> str:
+    def create_session(self, session_id: Optional[str] = None, mode: str = "gameplay",
+                      game_id: Optional[str] = None) -> str:
         """Create a new training session.
 
         Args:
@@ -213,7 +213,7 @@ class DatabaseInterface:
 
         logger.debug(f"Saved game result: {game_data['game_id']}")
 
-    def get_game_results(self, session_id: str = None, game_id: str = None,
+    def get_game_results(self, session_id: Optional[str] = None, game_id: Optional[str] = None,
                         limit: int = 100) -> List[Dict[str, Any]]:
         """Get game results.
 
@@ -286,7 +286,7 @@ class DatabaseInterface:
             ))
             conn.commit()
 
-    def get_action_traces(self, session_id: str = None, game_id: str = None,
+    def get_action_traces(self, session_id: Optional[str] = None, game_id: Optional[str] = None,
                          limit: int = 1000) -> List[Dict[str, Any]]:
         """Get action traces.
 
@@ -388,7 +388,7 @@ class DatabaseInterface:
 
             conn.commit()
 
-    def get_action_effectiveness(self, game_id: str = None) -> List[Dict[str, Any]]:
+    def get_action_effectiveness(self, game_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get action effectiveness data.
 
         Args:
@@ -428,7 +428,7 @@ class DatabaseInterface:
             """, (session_id, game_id, action_number, score))
             conn.commit()
 
-    def get_score_history(self, session_id: str = None, game_id: str = None,
+    def get_score_history(self, session_id: Optional[str] = None, game_id: Optional[str] = None,
                          limit: int = 1000) -> List[Dict[str, Any]]:
         """Get score history.
 

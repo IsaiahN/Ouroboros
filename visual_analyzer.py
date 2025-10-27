@@ -26,12 +26,28 @@ class VisualAnalyzer:
         self.clicked_coordinates = set()  # Track coordinates we've already tried
         self.last_action_changed_frame = False  # Did last action change the frame?
         self.consecutive_no_change_count = 0  # How many actions with no frame change?
+        
+        # Adaptive exploration parameters
+        self.exploration_radius = 5  # Start with focused exploration
+        self.min_exploration_radius = 3
+        self.max_exploration_radius = 20
+        self.stagnation_threshold = 8  # Actions without improvement to trigger expansion
+        self.improvement_threshold = 5  # Actions with improvement to trigger contraction
+        self.recent_scores = []  # Track recent scores to detect stagnation
+        self.actions_since_improvement = 0
+        self.actions_since_decline = 0
+        
+        # Pattern oscillation detection
+        self.recent_targets = []  # Track last N targets to detect oscillation
+        self.max_target_history = 10
+        self.oscillation_detected = False
 
-    def update_frame_change_tracking(self, new_frame: List[List[int]]) -> bool:
+    def update_frame_change_tracking(self, new_frame: List[List[int]], current_score: Optional[float] = None) -> bool:
         """Track whether the frame changed after an action.
         
         Args:
             new_frame: Frame after action was taken
+            current_score: Current game score (if available) to track improvement
             
         Returns:
             True if frame changed, False otherwise
@@ -53,17 +69,75 @@ class VisualAnalyzer:
         
         self.last_action_changed_frame = changed
         
+        # Track score changes for adaptive exploration
+        if current_score is not None:
+            self._update_score_tracking(current_score)
+        
         if changed:
             self.consecutive_no_change_count = 0
+            self.actions_since_decline = 0
             logger.debug("Frame changed - action was productive!")
         else:
             self.consecutive_no_change_count += 1
+            self.actions_since_decline += 1
             logger.debug(f"Frame unchanged ({self.consecutive_no_change_count} consecutive)")
+        
+        # Adapt exploration based on stagnation
+        self._adapt_exploration_radius()
         
         # Update previous frame
         self.previous_frame = [row[:] for row in new_frame]
         
         return changed
+    
+    def _update_score_tracking(self, current_score: float):
+        """Track recent scores to detect improvement or stagnation.
+        
+        Args:
+            current_score: Current game score
+        """
+        self.recent_scores.append(current_score)
+        
+        # Keep only recent scores (last 10)
+        if len(self.recent_scores) > 10:
+            self.recent_scores.pop(0)
+        
+        # Check if score improved
+        if len(self.recent_scores) >= 2:
+            if current_score > self.recent_scores[-2]:
+                self.actions_since_improvement = 0
+                logger.debug(f"Score improved to {current_score}")
+            else:
+                self.actions_since_improvement += 1
+    
+    def _adapt_exploration_radius(self):
+        """Adapt exploration radius based on stagnation/improvement.
+        
+        When stuck (no changes, no improvement): EXPAND exploration
+        When improving: CONTRACT to exploit current strategy
+        """
+        # Expand if stagnating
+        if self.actions_since_decline >= self.stagnation_threshold:
+            old_radius = self.exploration_radius
+            self.exploration_radius = min(
+                self.exploration_radius + 2,
+                self.max_exploration_radius
+            )
+            if old_radius != self.exploration_radius:
+                logger.info(f"Stagnation detected - expanding exploration radius: {old_radius} → {self.exploration_radius}")
+                # Reset clicked coordinates to explore new areas
+                self.reset_clicked_coordinates()
+                self.actions_since_decline = 0
+        
+        # Contract if improving
+        elif self.actions_since_improvement == 0 and self.exploration_radius > self.min_exploration_radius:
+            old_radius = self.exploration_radius
+            self.exploration_radius = max(
+                self.exploration_radius - 1,
+                self.min_exploration_radius
+            )
+            if old_radius != self.exploration_radius:
+                logger.info(f"Improvement detected - contracting exploration radius: {old_radius} → {self.exploration_radius}")
     
     def mark_coordinate_clicked(self, x: int, y: int):
         """Mark a coordinate as already clicked.
@@ -73,7 +147,48 @@ class VisualAnalyzer:
             y: Y coordinate
         """
         self.clicked_coordinates.add((x, y))
+        
+        # Track target history for oscillation detection
+        self.recent_targets.append((x, y))
+        if len(self.recent_targets) > self.max_target_history:
+            self.recent_targets.pop(0)
+        
+        # Detect oscillation (clicking same few coordinates repeatedly)
+        self._detect_oscillation()
+        
         logger.debug(f"Marked ({x}, {y}) as clicked. Total clicked: {len(self.clicked_coordinates)}")
+    
+    def _detect_oscillation(self):
+        """Detect if we're oscillating between the same targets.
+        
+        If we're repeatedly clicking the same small set of coordinates,
+        expand exploration to break the pattern.
+        """
+        if len(self.recent_targets) < self.max_target_history:
+            return
+        
+        # Count unique coordinates in recent history
+        unique_recent = len(set(self.recent_targets))
+        
+        # If only hitting 2-3 coordinates repeatedly, we're oscillating
+        if unique_recent <= 3:
+            if not self.oscillation_detected:
+                logger.warning(f"Oscillation detected! Only {unique_recent} unique targets in last {self.max_target_history} actions")
+                logger.warning(f"Recent targets: {self.recent_targets[-5:]}")
+                self.oscillation_detected = True
+                
+                # Force expansion to break oscillation
+                old_radius = self.exploration_radius
+                self.exploration_radius = min(
+                    self.exploration_radius + 5,  # Bigger jump to break pattern
+                    self.max_exploration_radius
+                )
+                logger.info(f"Breaking oscillation - expanding radius: {old_radius} → {self.exploration_radius}")
+                
+                # Clear clicked coordinates to force new exploration
+                self.reset_clicked_coordinates()
+        else:
+            self.oscillation_detected = False
     
     def reset_clicked_coordinates(self):
         """Reset clicked coordinates (e.g., when starting new game)."""
@@ -304,18 +419,22 @@ class VisualAnalyzer:
         return targets
 
     def _deduplicate_targets(self, targets: List[Dict[str, Any]],
-                            min_distance: int = 5) -> List[Dict[str, Any]]:
+                            min_distance: Optional[int] = None) -> List[Dict[str, Any]]:
         """Remove duplicate targets that are too close together.
 
         Args:
             targets: List of target dictionaries
-            min_distance: Minimum distance between targets
+            min_distance: Minimum distance between targets (uses exploration_radius if None)
 
         Returns:
             Deduplicated and sorted targets
         """
         if not targets:
             return []
+        
+        # Use adaptive exploration radius for deduplication
+        if min_distance is None:
+            min_distance = self.exploration_radius
 
         # Sort by priority (highest first)
         sorted_targets = sorted(targets, key=lambda t: t["priority"], reverse=True)
@@ -343,6 +462,7 @@ class VisualAnalyzer:
 
     def select_best_target(self, analysis: Dict[str, Any]) -> Optional[Tuple[int, int, str]]:
         """Select the best target from analysis, avoiding already-clicked coordinates.
+        Uses adaptive exploration radius to expand/contract search space.
 
         Args:
             analysis: Analysis results from analyze_frame
@@ -361,15 +481,26 @@ class VisualAnalyzer:
             if (t["x"], t["y"]) not in self.clicked_coordinates
         ]
         
+        # If oscillating, try to find targets between previous clicks
+        if self.oscillation_detected and len(self.recent_targets) >= 2:
+            combination_target = self._find_combination_target(targets)
+            if combination_target:
+                logger.info(f"Oscillation detected - trying combination point: {combination_target}")
+                return combination_target
+        
         # If we have unclicked targets, prefer those
         if unclicked_targets:
             best_target = unclicked_targets[0]
-            logger.debug(f"Selected unclicked target: ({best_target['x']}, {best_target['y']})")
+            logger.debug(f"Selected unclicked target: ({best_target['x']}, {best_target['y']}) [radius={self.exploration_radius}]")
             return (best_target["x"], best_target["y"], best_target["reason"])
         
-        # If all targets clicked, reset and try again (frame might have changed)
+        # If all targets clicked and stagnating, force expansion
         if self.consecutive_no_change_count > 10:
-            logger.info("All targets clicked and no frame changes - resetting clicked coordinates")
+            logger.info("All targets clicked and no frame changes - forcing exploration expansion")
+            self.exploration_radius = min(
+                self.exploration_radius + 3,
+                self.max_exploration_radius
+            )
             self.reset_clicked_coordinates()
             if targets:
                 best_target = targets[0]
@@ -382,10 +513,86 @@ class VisualAnalyzer:
             return (best_target["x"], best_target["y"], best_target["reason"])
         
         return None
+    
+    def _find_combination_target(self, targets: List[Dict[str, Any]]) -> Optional[Tuple[int, int, str]]:
+        """Find a target between recent clicks to explore combinations.
+        
+        When oscillating between pseudo-buttons, try clicking between them
+        or in patterns that might trigger different behavior.
+        
+        Args:
+            targets: Available targets
+            
+        Returns:
+            Tuple of (x, y, reason) or None
+        """
+        if len(self.recent_targets) < 2:
+            return None
+        
+        # Get last two unique targets
+        last_target = self.recent_targets[-1]
+        prev_target = self.recent_targets[-2]
+        
+        # Skip if they're the same
+        if last_target == prev_target:
+            return None
+        
+        # Try midpoint between oscillating targets
+        mid_x = (last_target[0] + prev_target[0]) // 2
+        mid_y = (last_target[1] + prev_target[1]) // 2
+        
+        # Clamp to frame bounds
+        mid_x = max(0, min(63, mid_x))
+        mid_y = max(0, min(63, mid_y))
+        
+        # Check if we haven't tried this combination yet
+        if (mid_x, mid_y) not in self.clicked_coordinates:
+            return (mid_x, mid_y, f"Combination point between oscillating targets")
+        
+        # Try varied offset points using adaptive radius for spacing
+        # Use larger, more varied offsets to truly escape oscillation
+        radius = self.exploration_radius
+        offsets = [
+            (radius, 0),
+            (-radius, 0),
+            (0, radius),
+            (0, -radius),
+            (radius, radius),
+            (-radius, -radius),
+            (radius, -radius),
+            (-radius, radius),
+            # Additional diagonal and far offsets
+            (radius * 2, radius),
+            (radius, radius * 2),
+            (-radius * 2, -radius),
+            (-radius, -radius * 2),
+            # Try completely random nearby areas
+            (radius + 5, radius + 3),
+            (-radius - 5, radius + 3),
+            (radius + 3, -radius - 5),
+            (-radius - 3, -radius - 5)
+        ]
+        
+        for dx, dy in offsets:
+            test_x = max(0, min(63, mid_x + dx))
+            test_y = max(0, min(63, mid_y + dy))
+            
+            if (test_x, test_y) not in self.clicked_coordinates:
+                return (test_x, test_y, f"Exploration around oscillation pattern (offset={dx},{dy})")
+        
+        # If all offsets tried, force a random unexplored coordinate
+        import random
+        for _ in range(20):  # Try 20 random attempts
+            rand_x = random.randint(0, 63)
+            rand_y = random.randint(0, 63)
+            if (rand_x, rand_y) not in self.clicked_coordinates:
+                return (rand_x, rand_y, f"Random exploration to break oscillation deadlock")
+        
+        return None
 
     def get_exploratory_coordinates(self, frame: List[List[int]],
-                                   center_x: int = None,
-                                   center_y: int = None,
+                                   center_x: Optional[int] = None,
+                                   center_y: Optional[int] = None,
                                    radius: int = 8) -> Tuple[int, int]:
         """Get coordinates for exploratory search pattern.
 

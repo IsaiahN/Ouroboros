@@ -60,6 +60,14 @@ Whenever creating an implementation or change, Test the new implementation on th
 
 ### Rule 9: Dont create summary md files unless asked
 
+## Rule 10: Prevent Code Drift
+- Always align new code with existing architecture
+- Avoid introducing new patterns unless necessary
+- **Enhance existing files** rather than creating new standalone files
+- Pattern learning integrated into `core_gameplay.py` (not separate file)
+- Database extensions go into `ouroboros_database_extension.sql`
+- Never create duplicate functionality in new files   
+
 ## Architecture Guidelines
 
 ### Database-First Design
@@ -116,15 +124,23 @@ Whenever creating an implementation or change, Test the new implementation on th
 - `performance_analyzer.py` - Analyzes ARC performance data for decisions
 
 ### Existing Integration Points
-- `core_gameplay.py` - Main game loop, enhanced with agent callbacks
-- `action_handler.py` - Action execution, extended with evolutionary selection
+- `core_gameplay.py` - Main game loop with **integrated pattern learning**
+  - Captures winning sequences automatically (Rule 2: database-only)
+  - Replays known winning sequences when available
+  - Config: `enable_pattern_learning`, `learning_mode`
+- `action_handler.py` - Action execution with **diversity tracking**
+  - Prevents action/coordinate spamming
+  - Adaptive exploration with oscillation detection
 - `game_session_manager.py` - Session management, tracks agent performance
 - `database_interface.py` - Database operations, extended for Ouroboros
 - `arc_api_client.py` - ARC API client, all real game interactions
 
 ### Database Files
 - `core_database_schema.sql` - Original schema for game tracking
-- `ouroboros_database_extension.sql` - Extended schema for evolution system
+- `ouroboros_database_extension.sql` - Extended schema including:
+  - Evolution system (agents, performance, decisions)
+  - **Pattern learning** (winning_sequences, discovered_patterns)
+  - Claude memory and insights
 - `database_logger.py` - Database-based logging system
 - `core_data.db` - SQLite database file (created at runtime)
 

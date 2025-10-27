@@ -3,25 +3,34 @@ Core Gameplay Logic
 
 Provides the fundamental gameplay loop and decision-making logic.
 Contains only essential game mechanics without architect/governor/director complexity.
+
+Enhanced with pattern learning (Rule 10: integrated, not new files):
+- Captures winning sequences
+- Discovers and reuses patterns
+- Learns from every game
 """
 
 import asyncio
 import logging
+import json
+import uuid
 from typing import Dict, Any, List, Optional, Callable
+from collections import Counter
 import random
 from datetime import datetime
 
 from game_session_manager import GameSessionManager
 from action_handler import ActionHandler
 from arc_api_client import GameState
+from database_interface import DatabaseInterface
 
 logger = logging.getLogger(__name__)
 
 
 class GameplayEngine:
-    """Core engine for playing ARC games."""
+    """Core engine for playing ARC games with integrated pattern learning."""
 
-    def __init__(self, api_key: str = None, db_path: str = "core_data.db"):
+    def __init__(self, api_key: Optional[str] = None, db_path: str = "core_data.db"):
         """Initialize gameplay engine.
 
         Args:
@@ -30,12 +39,15 @@ class GameplayEngine:
         """
         self.session_manager = GameSessionManager(api_key, db_path)
         self.action_handler = ActionHandler(self.session_manager)
+        self.db = DatabaseInterface(db_path)  # Pattern learning database access
         self.game_config = {
             'max_actions_per_game': 100,
             'action_timeout': 30.0,
             'strategy': 'balanced',
             'enable_random_exploration': True,
-            'coordinate_retry_limit': 3
+            'coordinate_retry_limit': 3,
+            'enable_pattern_learning': True,  # Toggle pattern learning
+            'learning_mode': 'smart_exploration'  # 'exploit', 'explore', 'smart_exploration'
         }
 
     def configure(self, **config):
@@ -49,7 +61,7 @@ class GameplayEngine:
 
     async def play_single_game(self, game_id: str,
                               action_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """Play a single game to completion.
+        """Play a single game to completion with optional pattern learning.
 
         Args:
             game_id: Game ID to play
@@ -59,6 +71,23 @@ class GameplayEngine:
             Game results dictionary
         """
         logger.info(f"Starting game: {game_id}")
+
+        # Pattern Learning: Check for known winning sequence (Rule 10: integrated)
+        if self.game_config.get('enable_pattern_learning', True):
+            learning_mode = self.game_config.get('learning_mode', 'smart_exploration')
+            
+            if learning_mode in ['exploit', 'smart_exploration']:
+                known_sequence = self._get_best_sequence_for_game(game_id)
+                
+                if known_sequence:
+                    logger.info(f"Attempting to replay known winning sequence for {game_id}")
+                    replay_result = await self._try_replay_sequence(game_id, known_sequence)
+                    
+                    if replay_result and replay_result['win']:
+                        logger.info(f"Successfully replayed winning sequence!")
+                        return replay_result
+                    else:
+                        logger.info(f"Sequence replay failed, falling back to normal gameplay")
 
         try:
             # Start session if not already running
@@ -122,6 +151,12 @@ class GameplayEngine:
             # Finish game in session manager
             await self.session_manager.finish_game(game_state.state, game_state.score)
 
+            # Pattern Learning: Capture winning sequence (Rule 2: Database-only)
+            if results['win'] and self.game_config.get('enable_pattern_learning', True):
+                sequence_id = self._capture_winning_sequence(game_id, game_state.score)
+                if sequence_id:
+                    results['learned_sequence_id'] = sequence_id
+
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, Actions: {action_count}")
             return results
 
@@ -172,7 +207,12 @@ class GameplayEngine:
             
             # Track frame changes to detect productive actions
             if new_state and new_state.frame:
-                frame_changed = self.action_handler.visual_analyzer.update_frame_change_tracking(new_state.frame)
+                # Pass current score to help adaptive exploration
+                current_score = new_state.score if hasattr(new_state, 'score') else None
+                frame_changed = self.action_handler.visual_analyzer.update_frame_change_tracking(
+                    new_state.frame, 
+                    current_score
+                )
                 if not frame_changed:
                     logger.debug(f"ACTION6 at ({x}, {y}) did not change frame")
                     
@@ -281,7 +321,7 @@ class GameplayEngine:
             # Ensure session is properly closed
             await self.session_manager.shutdown()
 
-    def get_performance_stats(self, session_id: str = None) -> Dict[str, Any]:
+    def get_performance_stats(self, session_id: Optional[str] = None) -> Dict[str, Any]:
         """Get performance statistics.
 
         Args:
@@ -329,6 +369,223 @@ class GameplayEngine:
         """Async context manager exit."""
         if self.session_manager.is_running:
             await self.session_manager.shutdown()
+
+    # ========================================================================
+    # PATTERN LEARNING METHODS (Rule 10: Integrated into existing file)
+    # ========================================================================
+
+    def _capture_winning_sequence(self, game_id: str, final_score: float) -> Optional[str]:
+        """
+        Capture winning sequence for pattern learning (Rule 2: Database-only).
+        Called automatically after wins when enable_pattern_learning=True.
+        
+        Args:
+            game_id: Game that was won
+            final_score: Final score achieved
+            
+        Returns:
+            sequence_id if captured, None otherwise
+        """
+        if not self.game_config.get('enable_pattern_learning', True):
+            return None
+            
+        try:
+            session_id = self.session_manager.current_session_id
+            if not session_id:
+                return None
+            
+            # Get action traces from database
+            action_traces = self.db.execute_query("""
+                SELECT action_number, coordinates, frame_before, frame_after
+                FROM action_traces
+                WHERE game_id = ? AND session_id = ?
+                ORDER BY timestamp ASC
+            """, (game_id, session_id))
+            
+            if not action_traces or len(action_traces) == 0:
+                return None
+            
+            # Extract sequence
+            actions = [t['action_number'] for t in action_traces]
+            coordinates = []
+            for t in action_traces:
+                if t['action_number'] == 6 and t.get('coordinates'):
+                    try:
+                        coord = json.loads(t['coordinates'])
+                        coordinates.append(coord)
+                    except:
+                        pass
+            
+            efficiency = final_score / len(actions) if len(actions) > 0 else 0.0
+            sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
+            
+            # Get frames
+            initial_frame = json.loads(action_traces[0]['frame_before']) if action_traces[0].get('frame_before') else []
+            final_frame = json.loads(action_traces[-1]['frame_after']) if action_traces[-1].get('frame_after') else []
+            
+            # Detect pattern tags
+            pattern_tags = self._detect_pattern_tags(actions, coordinates)
+            game_type = self._classify_game_type(actions)
+            
+            # Store in database (Rule 2)
+            self.db.execute_query("""
+                INSERT INTO winning_sequences (
+                    sequence_id, game_id, level_number, agent_id, session_id,
+                    action_sequence, coordinate_sequence, total_actions, total_score,
+                    efficiency_score, initial_frame, final_frame, pattern_tags,
+                    game_type, discovered_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                sequence_id, game_id, 1, 'core_agent', session_id,
+                json.dumps(actions), json.dumps(coordinates), len(actions),
+                final_score, efficiency, json.dumps(initial_frame),
+                json.dumps(final_frame), json.dumps(pattern_tags),
+                game_type, datetime.now().isoformat()
+            ))
+            
+            logger.info(f"Captured winning sequence {sequence_id}: {len(actions)} actions, "
+                       f"efficiency {efficiency:.2f}, tags: {pattern_tags}")
+            return sequence_id
+            
+        except Exception as e:
+            logger.error(f"Error capturing winning sequence: {e}")
+            return None
+
+    def _detect_pattern_tags(self, actions: List[int], coordinates: List[Dict]) -> List[str]:
+        """Detect pattern tags in action sequence."""
+        tags = []
+        if not actions:
+            return tags
+            
+        action_counts = Counter(actions)
+        
+        # Action composition patterns
+        if action_counts.get(6, 0) / len(actions) > 0.8:
+            tags.append('action6_heavy')
+        if len(set(actions)) <= 2:
+            tags.append('action_repetition')
+            
+        # Coordinate patterns
+        if coordinates and len(coordinates) > 1:
+            x_coords = [c.get('x', 0) for c in coordinates]
+            y_coords = [c.get('y', 0) for c in coordinates]
+            if max(x_coords) - min(x_coords) < 10 and max(y_coords) - min(y_coords) < 10:
+                tags.append('coordinate_clustering')
+                
+        return tags
+
+    def _classify_game_type(self, actions: List[int]) -> str:
+        """Classify game type based on actions."""
+        if not actions:
+            return 'unknown'
+        action_counts = Counter(actions)
+        if action_counts.get(6, 0) == len(actions):
+            return 'action6_only'
+        elif len(action_counts) >= 5:
+            return 'diverse_actions'
+        else:
+            return 'mixed_actions'
+
+    def _get_best_sequence_for_game(self, game_id: str) -> Optional[Dict]:
+        """
+        Get best known winning sequence for a game (Rule 2: from database).
+        
+        Args:
+            game_id: Game to check
+            
+        Returns:
+            Sequence dict or None
+        """
+        if not self.game_config.get('enable_pattern_learning', True):
+            return None
+            
+        try:
+            sequences = self.db.execute_query("""
+                SELECT * FROM winning_sequences
+                WHERE game_id = ?
+                ORDER BY efficiency_score DESC, total_score DESC
+                LIMIT 1
+            """, (game_id,))
+            
+            if sequences:
+                seq = sequences[0]
+                # Update reference counter
+                self.db.execute_query("""
+                    UPDATE winning_sequences
+                    SET times_referenced = times_referenced + 1,
+                        last_referenced = ?
+                    WHERE sequence_id = ?
+                """, (datetime.now().isoformat(), seq['sequence_id']))
+                
+                logger.info(f"Found known winning sequence for {game_id}: "
+                           f"{seq['total_actions']} actions, efficiency {seq['efficiency_score']:.2f}")
+                return seq
+                
+        except Exception as e:
+            logger.debug(f"No winning sequence found for {game_id}: {e}")
+            
+        return None
+
+    async def _try_replay_sequence(self, game_id: str, sequence: Dict) -> Optional[Dict[str, Any]]:
+        """
+        Try to replay a known winning sequence (Rule 7: Real actions).
+        
+        Args:
+            game_id: Game to play
+            sequence: Winning sequence to replay
+            
+        Returns:
+            Game results or None if failed
+        """
+        try:
+            if not self.session_manager.is_running:
+                await self.session_manager.start_session(game_id=game_id)
+            
+            game_data = await self.session_manager.create_game(game_id)
+            game_state = GameState.from_dict(game_data)
+            
+            actions = json.loads(sequence['action_sequence'])
+            coordinates = json.loads(sequence.get('coordinate_sequence', '[]'))
+            
+            start_time = datetime.now()
+            action_count = 0
+            coord_index = 0
+            
+            for action_num in actions:
+                if game_state.state != "NOT_FINISHED":
+                    break
+                
+                if action_num == 6 and coord_index < len(coordinates):
+                    coord = coordinates[coord_index]
+                    x, y = coord.get('x', 0), coord.get('y', 0)
+                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame)
+                    coord_index += 1
+                else:
+                    action = f"ACTION{action_num}"
+                    game_state = await self._execute_action(action, game_state)
+                
+                action_count += 1
+            
+            await self.session_manager.finish_game(game_state.state, game_state.score)
+            
+            duration = (datetime.now() - start_time).total_seconds()
+            
+            result = {
+                'game_id': game_id,
+                'final_state': game_state.state,
+                'final_score': game_state.score,
+                'actions_taken': action_count,
+                'duration_seconds': duration,
+                'win': game_state.state == "WIN",
+                'method': 'replay_sequence'
+            }
+            
+            logger.info(f"Sequence replay result: {'WIN' if result['win'] else 'LOSS'}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error replaying sequence: {e}")
+            return None
 
 
 # Simple gameplay strategies that can be used as action callbacks

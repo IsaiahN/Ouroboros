@@ -28,6 +28,13 @@ class ActionHandler:
         self.last_frame = None
         self.last_score = 0.0
         self.visual_analyzer = VisualAnalyzer()  # Add visual analyzer
+        
+        # Action diversity tracking (similar to coordinate diversity)
+        self.recent_actions = []  # Track last N actions
+        self.max_action_history = 10
+        self.action_stagnation_count = 0  # How many times same action repeated
+        self.last_action = None
+        self.consecutive_same_action = 0
 
     def _validate_coordinates(self, x: int, y: int, frame: List[List[int]]) -> bool:
         """Validate that coordinates are within frame bounds.
@@ -128,7 +135,7 @@ class ActionHandler:
         """
         return await self._send_action_with_context("ACTION5", reasoning=reasoning)
 
-    async def send_action_6(self, x: int, y: int, frame: List[List[int]] = None) -> GameState:
+    async def send_action_6(self, x: int, y: int, frame: Optional[List[List[int]]] = None) -> GameState:
         """Send ACTION6 (coordinate-based action) to the game.
 
         Args:
@@ -190,8 +197,8 @@ class ActionHandler:
 
         return game_state
 
-    def get_random_action(self, available_actions: List[str] = None,
-                         exclude_actions: List[str] = None) -> str:
+    def get_random_action(self, available_actions: Optional[List[str]] = None,
+                         exclude_actions: Optional[List[str]] = None) -> str:
         """Get a random action from available actions.
 
         Args:
@@ -290,9 +297,9 @@ class ActionHandler:
         else:
             raise ValueError(f"Unknown coordinate strategy: {strategy}")
 
-    async def send_random_action(self, available_actions: List[str] = None,
-                               exclude_actions: List[str] = None,
-                               frame: List[List[int]] = None) -> GameState:
+    async def send_random_action(self, available_actions: Optional[List[str]] = None,
+                               exclude_actions: Optional[List[str]] = None,
+                               frame: Optional[List[List[int]]] = None) -> GameState:
         """Send a random action.
 
         Args:
@@ -356,7 +363,7 @@ class ActionHandler:
 
         return analysis
 
-    def get_action_traces(self, game_id: str = None, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_action_traces(self, game_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """Get action traces for analysis.
 
         Args:
@@ -384,7 +391,7 @@ class ActionHandler:
 
     async def smart_action_selection(self, game_state: GameState,
                                    strategy: str = "balanced") -> str:
-        """Select action using basic strategy.
+        """Select action using basic strategy with diversity tracking.
 
         Args:
             game_state: Current game state
@@ -397,13 +404,16 @@ class ActionHandler:
         raw_available = game_state.available_actions or [1, 2, 3, 4, 5, 6, 7]
         available = [f"ACTION{a}" if isinstance(a, int) else a for a in raw_available]
 
+        # Track action diversity to prevent spamming same action
+        selected_action = None
+
         if strategy == "random":
-            return self.get_random_action(available)
+            selected_action = self._select_with_diversity(available)
 
         elif strategy == "conservative":
             # Prefer actions 1-5, avoid ACTION6 unless specifically needed
             safe_actions = [a for a in available if a != "ACTION6"]
-            return self.get_random_action(safe_actions if safe_actions else available)
+            selected_action = self._select_with_diversity(safe_actions if safe_actions else available)
 
         elif strategy == "balanced":
             # Use effectiveness data if available
@@ -421,14 +431,91 @@ class ActionHandler:
                             weights[action_name] = max(0.1, data['success_rate'])
 
                     if weights:
-                        # Weighted random selection
-                        actions = list(weights.keys())
-                        weight_values = list(weights.values())
-                        return random.choices(actions, weights=weight_values)[0]
+                        # Weighted random selection with diversity
+                        selected_action = self._select_with_diversity(
+                            list(weights.keys()), 
+                            weights=list(weights.values())
+                        )
 
-            # Fall back to truly random selection for diversity
-            # This ensures we explore different actions
-            return random.choice(available)
+            # Fall back to diverse random selection
+            if selected_action is None:
+                selected_action = self._select_with_diversity(available)
 
         else:
             raise ValueError(f"Unknown strategy: {strategy}")
+        
+        # Track this action
+        self._track_action(selected_action)
+        
+        return selected_action
+    
+    def _select_with_diversity(self, available_actions: List[str], 
+                               weights: Optional[List[float]] = None) -> str:
+        """Select action with diversity to avoid spamming same action.
+        
+        Args:
+            available_actions: List of available actions
+            weights: Optional weights for each action
+            
+        Returns:
+            Selected action with diversity enforcement
+        """
+        if not available_actions:
+            raise ValueError("No actions available")
+        
+        # Check for action stagnation (same action repeated too many times)
+        if self.consecutive_same_action >= 5:
+            # Force diversity - exclude the stagnant action
+            diverse_actions = [a for a in available_actions if a != self.last_action]
+            if diverse_actions:
+                logger.info(f"Action stagnation detected ({self.last_action} x{self.consecutive_same_action}) - forcing diversity")
+                # Reset counter
+                self.consecutive_same_action = 0
+                # Select from diverse actions
+                if weights and len(weights) == len(available_actions):
+                    # Adjust weights to exclude stagnant action
+                    diverse_weights = [w for a, w in zip(available_actions, weights) if a != self.last_action]
+                    return random.choices(diverse_actions, weights=diverse_weights)[0]
+                else:
+                    return random.choice(diverse_actions)
+        
+        # Check recent action history for oscillation
+        if len(self.recent_actions) >= self.max_action_history:
+            unique_recent = len(set(self.recent_actions))
+            if unique_recent <= 2:
+                # Oscillating between only 1-2 actions - force diversity
+                logger.warning(f"Action oscillation detected! Only {unique_recent} unique actions in last {self.max_action_history}")
+                # Exclude recently used actions
+                recent_set = set(self.recent_actions[-5:])  # Last 5 actions
+                diverse_actions = [a for a in available_actions if a not in recent_set]
+                if diverse_actions:
+                    logger.info(f"Breaking oscillation - trying different action")
+                    return random.choice(diverse_actions)
+        
+        # Normal selection with optional weights
+        if weights:
+            return random.choices(available_actions, weights=weights)[0]
+        else:
+            return random.choice(available_actions)
+    
+    def _track_action(self, action: str):
+        """Track action for diversity monitoring.
+        
+        Args:
+            action: Action that was selected
+        """
+        # Track consecutive same action
+        if action == self.last_action:
+            self.consecutive_same_action += 1
+        else:
+            self.consecutive_same_action = 1
+            self.last_action = action
+        
+        # Track action history
+        self.recent_actions.append(action)
+        if len(self.recent_actions) > self.max_action_history:
+            self.recent_actions.pop(0)
+        
+        # Log if action is being repeated
+        if self.consecutive_same_action >= 3:
+            logger.debug(f"Action {action} repeated {self.consecutive_same_action} times")

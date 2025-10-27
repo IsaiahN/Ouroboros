@@ -110,7 +110,7 @@ class ARCAPIError(ARCError):
 class ARCClient:
     """Core client for interacting with the ARC-AGI-3 API."""
 
-    def __init__(self, api_key: str = None, base_url: str = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         """Initialize the ARC-AGI-3 API client.
 
         Args:
@@ -266,9 +266,16 @@ class ARCClient:
             List of available games with their metadata
         """
         response = await self._make_request("GET", GAMES_ENDPOINT)
+        # Ensure we return a list
+        if isinstance(response, dict):
+            # If the API returns a dict with a games key, extract it
+            if 'games' in response:
+                return response['games']
+            # Otherwise wrap the single game in a list
+            return [response]
         return response
 
-    def generate_tags(self, game_id: str = None, session_id: str = None) -> List[str]:
+    def generate_tags(self, game_id: Optional[str] = None, session_id: Optional[str] = None) -> List[str]:
         """Generate tags for scorecard identification."""
         import threading
         import platform
@@ -330,7 +337,7 @@ class ARCClient:
 
         return tags
 
-    async def open_scorecard(self, tags: List[str] = None) -> Scorecard:
+    async def open_scorecard(self, tags: Optional[List[str]] = None) -> Scorecard:
         """Open a new scorecard for tracking performance.
 
         Args:
@@ -351,7 +358,7 @@ class ARCClient:
         logger.info(f"Opened scorecard: {scorecard.card_id}")
         return scorecard
 
-    async def close_scorecard(self, card_id: str = None) -> Dict[str, Any]:
+    async def close_scorecard(self, card_id: Optional[str] = None) -> Dict[str, Any]:
         """Close a scorecard.
 
         Args:
@@ -361,10 +368,9 @@ class ARCClient:
             Scorecard results
         """
         if not card_id:
+            if not self.current_scorecard_id:
+                raise ValueError("No scorecard ID provided and no current scorecard")
             card_id = self.current_scorecard_id
-
-        if not card_id:
-            raise ValueError("No scorecard ID provided and no current scorecard")
 
         payload = {"card_id": card_id}
         response = await self._make_request("POST", SCORECARD_CLOSE_ENDPOINT, json=payload)
@@ -372,7 +378,7 @@ class ARCClient:
         logger.info(f"Closed scorecard: {card_id}")
         return response
 
-    async def reset_game(self, game_id: str, card_id: str = None) -> GameState:
+    async def reset_game(self, game_id: str, card_id: Optional[str] = None) -> GameState:
         """Reset the current game or start a new one.
 
         Args:
@@ -383,10 +389,9 @@ class ARCClient:
             GameState: The initial game state after reset.
         """
         if not card_id:
+            if not self.current_scorecard_id:
+                raise ValueError("No scorecard ID provided and no current scorecard")
             card_id = self.current_scorecard_id
-
-        if not card_id:
-            raise ValueError("No scorecard ID provided and no current scorecard")
 
         payload = {
             "game_id": game_id,
@@ -401,8 +406,8 @@ class ARCClient:
 
         return GameState.from_dict(response)
 
-    async def send_action(self, action: str, game_id: str = None, card_id: str = None,
-                         guid: str = None, x: int = None, y: int = None, **kwargs) -> GameState:
+    async def send_action(self, action: str, game_id: Optional[str] = None, card_id: Optional[str] = None,
+                         guid: Optional[str] = None, x: Optional[int] = None, y: Optional[int] = None, **kwargs) -> GameState:
         """Send an action to the game.
 
         Args:
@@ -443,7 +448,7 @@ class ARCClient:
             raise ValueError(f"Invalid action: {action}. Must be one of {list(action_endpoints.keys())}")
 
         # Prepare request data
-        payload = {
+        payload: Dict[str, Any] = {
             "game_id": game_id,
             "card_id": card_id,
             "guid": guid
@@ -469,7 +474,7 @@ class ARCClient:
 
         return GameState.from_dict(response)
 
-    async def create_game(self, game_id: str, tags: List[str] = None) -> Dict[str, Any]:
+    async def create_game(self, game_id: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
         """Create a new game by opening a scorecard and resetting the game.
 
         Args:

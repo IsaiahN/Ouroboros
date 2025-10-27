@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_single_game(game_id: str, api_key: str, strategy: str = "balanced",
-                         db_path: str = None) -> dict:
+                         db_path: Optional[str] = None) -> dict:
     """Run a single game.
 
     Args:
@@ -64,7 +64,7 @@ async def run_single_game(game_id: str, api_key: str, strategy: str = "balanced"
         return result
 
 
-async def run_session(max_games: Optional[int] = None, api_key: str = None,
+async def run_session(max_games: Optional[int] = None, api_key: Optional[str] = None,
                      strategy: str = "balanced", mode: str = "gameplay",
                      db_path: str = "core_data.db") -> dict:
     """Run a gaming session.
@@ -85,7 +85,7 @@ async def run_session(max_games: Optional[int] = None, api_key: str = None,
         return result
 
 
-def show_stats(db_path: str = "core_data.db", session_id: str = None):
+def show_stats(db_path: str = "core_data.db", session_id: Optional[str] = None):
     """Show performance statistics.
 
     Args:

@@ -282,3 +282,97 @@ LIMIT 10;
 
 -- [CHECKPOINT 1 COMPLETED: DATABASE SCHEMA EXTENSION]
 -- Next: Implement core coordinator and evolution engine components
+
+-- ============================================================================
+-- PATTERN LEARNING & ABSTRACTION EXTENSION (Rule 10: Integrated)
+-- Tracks winning sequences, discovers patterns, learns abstractions
+-- Critical for beating levels: learns HOW to beat each level type
+-- ============================================================================
+
+-- Winning action sequences (the gold standard - what actually worked)
+CREATE TABLE IF NOT EXISTS winning_sequences (
+    sequence_id TEXT PRIMARY KEY,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    agent_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- The winning sequence
+    action_sequence TEXT NOT NULL,         -- JSON: ordered list of actions
+    coordinate_sequence TEXT,              -- JSON: coordinates for ACTION6
+    total_actions INTEGER NOT NULL,
+    total_score REAL NOT NULL,
+    efficiency_score REAL NOT NULL,        -- score / actions
+    
+    -- Game state context
+    initial_frame TEXT NOT NULL,           -- JSON: starting frame state
+    final_frame TEXT NOT NULL,             -- JSON: winning frame state
+    frame_transitions TEXT,                -- JSON: key frame changes
+    
+    -- Abstraction tags (for pattern matching)
+    pattern_tags TEXT,                     -- JSON: ['grid_clear', 'color_match', 'sequence_repeat']
+    difficulty_level TEXT,                 -- 'easy', 'medium', 'hard'
+    game_type TEXT,                        -- 'action6_only', 'mixed_actions', 'pattern_based'
+    
+    -- Reuse tracking
+    times_referenced INTEGER DEFAULT 0,
+    success_rate_when_reused REAL DEFAULT 0.0,
+    last_referenced TIMESTAMP,
+    
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Discovered patterns (abstractions across multiple wins)
+CREATE TABLE IF NOT EXISTS discovered_patterns (
+    pattern_id TEXT PRIMARY KEY,
+    pattern_name TEXT NOT NULL,
+    pattern_type TEXT NOT NULL,            -- 'action_sequence', 'coordinate_cluster', 'color_pattern'
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Pattern definition
+    pattern_signature TEXT NOT NULL,       -- JSON: abstract pattern description
+    concrete_examples TEXT NOT NULL,       -- JSON: array of sequence_ids that match
+    occurrence_count INTEGER DEFAULT 1,
+    success_count INTEGER DEFAULT 1,
+    
+    -- Effectiveness metrics
+    success_rate REAL NOT NULL,            -- % of times pattern leads to win
+    avg_score_achieved REAL NOT NULL,
+    avg_efficiency REAL NOT NULL,
+    confidence_score REAL NOT NULL,        -- statistical confidence
+    
+    -- Application context
+    applicable_game_types TEXT,            -- JSON: which game types this works on
+    
+    -- Learning status
+    validation_status TEXT DEFAULT 'hypothesis',  -- 'hypothesis', 'validated', 'invalidated'
+    validation_games INTEGER DEFAULT 0,
+    last_validated TIMESTAMP
+);
+
+-- Pattern application attempts
+CREATE TABLE IF NOT EXISTS pattern_applications (
+    application_id TEXT PRIMARY KEY,
+    pattern_id TEXT NOT NULL,
+    sequence_id TEXT,
+    game_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Results
+    success BOOLEAN NOT NULL,
+    score_achieved REAL NOT NULL,
+    actions_taken INTEGER NOT NULL,
+    
+    FOREIGN KEY (pattern_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Pattern learning indexes
+CREATE INDEX IF NOT EXISTS idx_winning_sequences_game_id ON winning_sequences(game_id);
+CREATE INDEX IF NOT EXISTS idx_winning_sequences_efficiency ON winning_sequences(efficiency_score);
+CREATE INDEX IF NOT EXISTS idx_discovered_patterns_success_rate ON discovered_patterns(success_rate);
+CREATE INDEX IF NOT EXISTS idx_pattern_applications_success ON pattern_applications(success);
+
+-- [CHECKPOINT: PATTERN LEARNING INTEGRATED]

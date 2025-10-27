@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class GameSessionManager:
     """Manages game sessions and handles graceful shutdown."""
 
-    def __init__(self, api_key: str = None, db_path: str = "core_data.db"):
+    def __init__(self, api_key: Optional[str] = None, db_path: str = "core_data.db"):
         """Initialize the session manager.
 
         Args:
@@ -71,7 +71,7 @@ class GameSessionManager:
         """
         self.shutdown_handlers.append(handler)
 
-    async def start_session(self, mode: str = "gameplay", game_id: str = None) -> str:
+    async def start_session(self, mode: str = "gameplay", game_id: Optional[str] = None) -> str:
         """Start a new game session.
 
         Args:
@@ -102,7 +102,7 @@ class GameSessionManager:
 
         return self.current_session_id
 
-    async def create_game(self, game_id: str, tags: list = None) -> Dict[str, Any]:
+    async def create_game(self, game_id: str, tags: Optional[list] = None) -> Dict[str, Any]:
         """Create and initialize a new game.
 
         Args:
@@ -206,12 +206,13 @@ class GameSessionManager:
             })
 
             # Save score
-            self.db.save_score(
-                self.current_session_id,
-                self.current_game_id,
-                self.session_stats['total_actions'],
-                game_state.score
-            )
+            if self.current_session_id and self.current_game_id:
+                self.db.save_score(
+                    self.current_session_id,
+                    self.current_game_id,
+                    self.session_stats['total_actions'],
+                    game_state.score
+                )
 
             # Update action effectiveness
             score_change = game_state.score - kwargs.get('score_before', 0.0)
