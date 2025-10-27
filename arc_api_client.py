@@ -460,13 +460,17 @@ class ARCClient:
                 raise ValueError("ACTION6 requires x and y coordinates")
             payload["x"] = x
             payload["y"] = y
+            logger.info(f"Sending {action} to API with coordinates ({x}, {y})")
         else:
             # Add reasoning for other actions
             if "reasoning" in kwargs:
                 payload["reasoning"] = kwargs["reasoning"]
+            logger.info(f"Sending {action} to API")
 
         # Make the request
         response = await self._make_request("POST", action_endpoints[action], json=payload)
+        
+        logger.info(f"{action} API response - State: {response.get('state')}, Score: {response.get('score')}")
 
         # Update game state
         self.current_game_id = response.get("game_id")

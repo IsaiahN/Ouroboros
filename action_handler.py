@@ -463,6 +463,11 @@ class ActionHandler:
         if not available_actions:
             raise ValueError("No actions available")
         
+        # Only apply diversity enforcement if there are multiple actions available
+        if len(available_actions) <= 1:
+            # If only one action available (e.g., ACTION6 only games), just use it
+            return available_actions[0]
+        
         # Check for action stagnation (same action repeated too many times)
         if self.consecutive_same_action >= 5:
             # Force diversity - exclude the stagnant action
@@ -480,11 +485,13 @@ class ActionHandler:
                     return random.choice(diverse_actions)
         
         # Check recent action history for oscillation
+        # Only check if we have multiple actions available
         if len(self.recent_actions) >= self.max_action_history:
             unique_recent = len(set(self.recent_actions))
-            if unique_recent <= 2:
-                # Oscillating between only 1-2 actions - force diversity
-                logger.warning(f"Action oscillation detected! Only {unique_recent} unique actions in last {self.max_action_history}")
+            # Only warn about oscillation if we have multiple actions but keep using 1-2
+            if unique_recent <= 2 and len(available_actions) > 2:
+                # Oscillating between only 1-2 actions when more are available - force diversity
+                logger.warning(f"Action oscillation detected! Only {unique_recent} unique actions in last {self.max_action_history} (but {len(available_actions)} available)")
                 # Exclude recently used actions
                 recent_set = set(self.recent_actions[-5:])  # Last 5 actions
                 diverse_actions = [a for a in available_actions if a not in recent_set]

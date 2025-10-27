@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS game_results (
     final_score REAL DEFAULT 0.0,
     total_actions INTEGER DEFAULT 0,
     actions_taken TEXT, -- JSON array of action numbers
+    available_actions TEXT, -- JSON array of available actions at game start
     win_detected BOOLEAN DEFAULT FALSE,
     level_completions INTEGER DEFAULT 0,
     frame_changes INTEGER DEFAULT 0,

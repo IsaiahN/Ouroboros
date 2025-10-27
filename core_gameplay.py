@@ -128,7 +128,7 @@ class GameplayEngine:
                         break
 
                 except Exception as e:
-                    logger.error(f"Error in action {action_count}: {e}")
+                    logger.error(f"Error in action {action_count}: {e}", exc_info=True)
                     # Continue with next action unless it's a critical error
                     if "authentication" in str(e).lower() or "api_key" in str(e).lower():
                         break
@@ -451,7 +451,7 @@ class GameplayEngine:
             logger.error(f"Error capturing winning sequence: {e}")
             return None
 
-    def _detect_pattern_tags(self, actions: List[int], coordinates: List[Dict]) -> List[str]:
+    def _detect_pattern_tags(self, actions: List[int], coordinates: List) -> List[str]:
         """Detect pattern tags in action sequence."""
         tags = []
         if not actions:
@@ -467,10 +467,14 @@ class GameplayEngine:
             
         # Coordinate patterns
         if coordinates and len(coordinates) > 1:
-            x_coords = [c.get('x', 0) for c in coordinates]
-            y_coords = [c.get('y', 0) for c in coordinates]
-            if max(x_coords) - min(x_coords) < 10 and max(y_coords) - min(y_coords) < 10:
-                tags.append('coordinate_clustering')
+            # coordinates are lists [x, y], not dicts
+            try:
+                x_coords = [c[0] if isinstance(c, list) and len(c) > 0 else 0 for c in coordinates]
+                y_coords = [c[1] if isinstance(c, list) and len(c) > 1 else 0 for c in coordinates]
+                if x_coords and y_coords and max(x_coords) - min(x_coords) < 10 and max(y_coords) - min(y_coords) < 10:
+                    tags.append('coordinate_clustering')
+            except Exception as e:
+                logger.debug(f"Error processing coordinates for pattern tags: {e}")
                 
         return tags
 

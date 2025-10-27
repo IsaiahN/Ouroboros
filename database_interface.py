@@ -190,10 +190,10 @@ class DatabaseInterface:
             conn.execute("""
                 INSERT OR REPLACE INTO game_results (
                     game_id, session_id, start_time, end_time, status,
-                    final_score, total_actions, actions_taken, win_detected,
+                    final_score, total_actions, actions_taken, available_actions, win_detected,
                     level_completions, frame_changes, coordinate_attempts,
                     coordinate_successes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 game_data['game_id'],
                 game_data['session_id'],
@@ -203,6 +203,7 @@ class DatabaseInterface:
                 game_data.get('final_score', 0.0),
                 game_data.get('total_actions', 0),
                 json.dumps(game_data.get('actions_taken', [])),
+                json.dumps(game_data.get('available_actions', [])),
                 game_data.get('win_detected', False),
                 game_data.get('level_completions', 0),
                 game_data.get('frame_changes', 0),

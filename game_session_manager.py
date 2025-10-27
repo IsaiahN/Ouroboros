@@ -139,11 +139,12 @@ class GameSessionManager:
             'start_time': datetime.now(),
             'status': 'started',
             'final_score': game_data.get('score', 0.0),
-            'total_actions': 0
+            'total_actions': 0,
+            'available_actions': game_data.get('available_actions', [])
         })
 
         self.current_game_id = game_id
-        logger.info(f"Created game: {game_id}")
+        logger.info(f"Created game: {game_id} with actions: {game_data.get('available_actions', [])}")
 
         return game_data
 
