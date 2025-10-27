@@ -278,6 +278,12 @@ class VisualAnalyzer:
         for y in range(height):
             for x in range(width):
                 color = frame[y][x]
+                # Handle case where color might be a list (convert to hashable tuple)
+                if isinstance(color, list):
+                    color = tuple(color) if color else 0
+                elif not isinstance(color, (int, float, str, tuple)):
+                    color = 0  # Fallback to background
+                    
                 if color not in color_positions:
                     color_positions[color] = []
                 color_positions[color].append((x, y))
@@ -324,12 +330,19 @@ class VisualAnalyzer:
         height = len(frame)
         width = len(frame[0])
 
-        # Find background color
+        # Find background color - handle nested lists
         all_colors = []
         for row in frame:
-            all_colors.extend(row)
+            for cell in row:
+                # Handle case where cell might be a list
+                if isinstance(cell, list):
+                    # If it's a list, take the first element (shouldn't happen but defensive)
+                    all_colors.append(cell[0] if cell else 0)
+                else:
+                    all_colors.append(cell)
+        
         color_counts = Counter(all_colors)
-        background = color_counts.most_common(1)[0][0]
+        background = color_counts.most_common(1)[0][0] if color_counts else 0
 
         # For each non-background color, find its clusters
         for color in color_counts.keys():
@@ -340,7 +353,12 @@ class VisualAnalyzer:
             positions = []
             for y in range(height):
                 for x in range(width):
-                    if frame[y][x] == color:
+                    cell_value = frame[y][x]
+                    # Handle nested lists
+                    if isinstance(cell_value, list):
+                        cell_value = cell_value[0] if cell_value else 0
+                    
+                    if cell_value == color:
                         positions.append((x, y))
 
             if len(positions) >= 3:  # At least 3 pixels to be interesting

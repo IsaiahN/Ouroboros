@@ -121,13 +121,13 @@ class ActionHandler:
         if len(self.recent_coordinates) > self.max_coordinate_history:
             self.recent_coordinates.pop(0)
         
+        # Check if frame is actually changing (productive spam vs unproductive)
+        frame_changing = self.visual_analyzer.last_action_changed_frame
+        
         # Check if similar to last coordinate
         if self.last_coordinates:
             if self._is_coordinate_similar(coord, self.last_coordinates, threshold=3):
                 self.consecutive_similar_coordinate += 1
-                
-                # Check if frame is actually changing (productive spam vs unproductive)
-                frame_changing = self.visual_analyzer.last_action_changed_frame
                 
                 # Spam detection: clicking same spot repeatedly beyond threshold
                 if self.consecutive_similar_coordinate >= dynamic_threshold:

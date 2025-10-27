@@ -162,8 +162,9 @@ class GameplayEngine:
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
                         logger.warning(f"⏱️ Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
-                        logger.info(f"Moving to next level or ending game...")
-                        # Continue to allow the game to move forward or end naturally
+                        logger.info(f"Level {current_level} timed out. Ending game.")
+                        # Break out - level timed out
+                        break
                     
                     logger.debug(f"Action {action_count} (Level {current_level}-{level_action_count}): State={game_state.state}, Score={game_state.score}")
 
