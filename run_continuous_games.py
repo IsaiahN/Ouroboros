@@ -95,13 +95,14 @@ async def run_multiple_games(num_games: int = 5, poll_interval: int = 120):
                 print(f"{'='*70}")
                 print(f"Game ID: {game_id}")
                 print(f"Title: {game_title}")
-                print(f"Max Actions: {max_actions}")
+                print(f"Max Actions: {max_actions} per level, {max_actions * 5} total")
                 print(f"Started: {datetime.now().strftime('%H:%M:%S')}")
                 
                 # Configure engine
                 engine.configure(
                     strategy='balanced',
-                    max_actions_per_game=max_actions,
+                    max_actions_per_level=max_actions,
+                    max_total_actions=max_actions * 5,  # Allow 5 levels worth
                     enable_random_exploration=True
                 )
                 
@@ -115,9 +116,12 @@ async def run_multiple_games(num_games: int = 5, poll_interval: int = 120):
                 print(f"  Final State: {result['final_state']}")
                 print(f"  Final Score: {result['final_score']}")
                 print(f"  Actions Taken: {result['actions_taken']}")
+                print(f"  Levels Completed: {result.get('level_completions', 0)}/{result.get('levels_attempted', 1)}")
                 print(f"  Duration: {duration:.2f}s")
                 print(f"  Actions/sec: {result['actions_taken']/duration:.1f}")
                 print(f"  Win: {'YES' if result['win'] else 'NO'}")
+                if result.get('learned_sequence_id'):
+                    print(f"  📚 Learned: {result['learned_sequence_id']}")
                 
                 results.append(result)
                 

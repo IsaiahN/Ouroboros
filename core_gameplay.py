@@ -41,7 +41,8 @@ class GameplayEngine:
         self.action_handler = ActionHandler(self.session_manager)
         self.db = DatabaseInterface(db_path)  # Pattern learning database access
         self.game_config = {
-            'max_actions_per_game': 100,
+            'max_actions_per_level': 100,  # Max actions per level (game can have multiple levels)
+            'max_total_actions': 500,  # Max total actions across all levels
             'action_timeout': 30.0,
             'strategy': 'balanced',
             'enable_random_exploration': True,
@@ -99,13 +100,26 @@ class GameplayEngine:
             game_state = GameState.from_dict(game_data)
 
             action_count = 0
+            level_action_count = 0  # Track actions per level
             start_time = datetime.now()
+            previous_score = 0.0  # Track score for level completion detection
+            level_completions = 0  # Track how many levels completed
+            current_level = 1
 
             # Game loop
             while (game_state.state == "NOT_FINISHED" and
-                   action_count < self.game_config['max_actions_per_game']):
+                   action_count < self.game_config['max_total_actions']):
 
                 try:
+                    # Update action handler with level progress for dynamic spam tolerance
+                    self.action_handler.update_level_progress(
+                        level_action_count, 
+                        self.game_config['max_actions_per_level']
+                    )
+                    
+                    # Store previous score before action
+                    previous_score = game_state.score
+                    
                     # Select action
                     if action_callback:
                         action_result = await action_callback(game_state, self.action_handler)
@@ -121,7 +135,37 @@ class GameplayEngine:
                         game_state = await self._execute_action(action, game_state)
 
                     action_count += 1
-                    logger.debug(f"Action {action_count}: State={game_state.state}, Score={game_state.score}")
+                    level_action_count += 1
+                    
+                    # Check for significant score increase (level completion)
+                    score_increase = game_state.score - previous_score
+                    if score_increase >= 0.5:  # Significant score increase (usually +1.0 per level)
+                        level_completions += 1
+                        logger.info(f"🎉 Level {current_level} completed! Score: {previous_score} → {game_state.score} (+{score_increase})")
+                        logger.info(f"📊 Level {current_level} stats: {level_action_count} actions")
+                        
+                        # Pattern Learning: Capture level completion sequence
+                        if self.game_config.get('enable_pattern_learning', True):
+                            sequence_id = self._capture_winning_sequence(
+                                game_id, 
+                                game_state.score, 
+                                level_number=current_level,
+                                reason=f"level_{current_level}_completion"
+                            )
+                            if sequence_id:
+                                logger.info(f"✅ Captured level {current_level} winning sequence: {sequence_id}")
+                        
+                        # Move to next level
+                        current_level += 1
+                        level_action_count = 0  # Reset level action counter
+                    
+                    # Check if exceeded max actions for this level
+                    if level_action_count >= self.game_config['max_actions_per_level']:
+                        logger.warning(f"⏱️ Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
+                        logger.info(f"Moving to next level or ending game...")
+                        # Continue to allow the game to move forward or end naturally
+                    
+                    logger.debug(f"Action {action_count} (Level {current_level}-{level_action_count}): State={game_state.state}, Score={game_state.score}")
 
                     # Check for completion
                     if game_state.state in ["WIN", "GAME_OVER"]:
@@ -144,6 +188,8 @@ class GameplayEngine:
                 'actions_taken': action_count,
                 'duration_seconds': duration,
                 'win': game_state.state == "WIN",
+                'level_completions': level_completions,
+                'levels_attempted': current_level,
                 'start_time': start_time,
                 'end_time': end_time
             }
@@ -151,13 +197,20 @@ class GameplayEngine:
             # Finish game in session manager
             await self.session_manager.finish_game(game_state.state, game_state.score)
 
-            # Pattern Learning: Capture winning sequence (Rule 2: Database-only)
+            # Pattern Learning: Capture final WIN sequence (Rule 2: Database-only)
             if results['win'] and self.game_config.get('enable_pattern_learning', True):
-                sequence_id = self._capture_winning_sequence(game_id, game_state.score)
+                # Capture full game completion (all levels)
+                sequence_id = self._capture_winning_sequence(
+                    game_id, 
+                    game_state.score,
+                    level_number=current_level,
+                    reason="full_game_win"
+                )
                 if sequence_id:
                     results['learned_sequence_id'] = sequence_id
 
-            logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, Actions: {action_count}")
+            logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
+                       f"Actions: {action_count}, Levels Completed: {level_completions}/{current_level}")
             return results
 
         except Exception as e:
@@ -374,14 +427,17 @@ class GameplayEngine:
     # PATTERN LEARNING METHODS (Rule 10: Integrated into existing file)
     # ========================================================================
 
-    def _capture_winning_sequence(self, game_id: str, final_score: float) -> Optional[str]:
+    def _capture_winning_sequence(self, game_id: str, final_score: float, 
+                                 level_number: int = 1, reason: str = "win") -> Optional[str]:
         """
         Capture winning sequence for pattern learning (Rule 2: Database-only).
-        Called automatically after wins when enable_pattern_learning=True.
+        Called automatically after wins OR level completions when enable_pattern_learning=True.
         
         Args:
             game_id: Game that was won
             final_score: Final score achieved
+            level_number: Level number that was completed (default 1)
+            reason: Reason for capture ("win", "level_1_completion", etc.)
             
         Returns:
             sequence_id if captured, None otherwise
@@ -436,15 +492,15 @@ class GameplayEngine:
                     game_type, discovered_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                sequence_id, game_id, 1, 'core_agent', session_id,
+                sequence_id, game_id, level_number, 'core_agent', session_id,
                 json.dumps(actions), json.dumps(coordinates), len(actions),
                 final_score, efficiency, json.dumps(initial_frame),
                 json.dumps(final_frame), json.dumps(pattern_tags),
                 game_type, datetime.now().isoformat()
             ))
             
-            logger.info(f"Captured winning sequence {sequence_id}: {len(actions)} actions, "
-                       f"efficiency {efficiency:.2f}, tags: {pattern_tags}")
+            logger.info(f"Captured winning sequence {sequence_id} for level {level_number} ({reason}): "
+                       f"{len(actions)} actions, efficiency {efficiency:.2f}, tags: {pattern_tags}")
             return sequence_id
             
         except Exception as e:

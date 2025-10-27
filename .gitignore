@@ -51,6 +51,8 @@ cover/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 
 # Log files
 *.log

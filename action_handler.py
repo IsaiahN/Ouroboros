@@ -35,6 +35,19 @@ class ActionHandler:
         self.action_stagnation_count = 0  # How many times same action repeated
         self.last_action = None
         self.consecutive_same_action = 0
+        
+        # Coordinate diversity tracking for ACTION6
+        self.recent_coordinates = []  # Track last N coordinates
+        self.max_coordinate_history = 15
+        self.coordinate_spam_threshold = 3  # Max times to click similar coordinates
+        self.last_coordinates = None
+        self.consecutive_similar_coordinate = 0
+        
+        # Progressive spam tolerance based on game progress
+        self.level_action_count = 0  # Actions taken in current level
+        self.level_max_actions = 100  # Max actions per level (from config)
+        self.spam_allowed_early = 10  # Allow up to 10 similar clicks early in level
+        self.spam_allowed_late = 3   # Reduce to 3 similar clicks late in level
 
     def _validate_coordinates(self, x: int, y: int, frame: List[List[int]]) -> bool:
         """Validate that coordinates are within frame bounds.
@@ -51,6 +64,150 @@ class ActionHandler:
             return False
 
         return 0 <= y < len(frame) and 0 <= x < len(frame[0])
+
+    def _is_coordinate_similar(self, coord1: Tuple[int, int], coord2: Tuple[int, int], 
+                              threshold: int = 5) -> bool:
+        """Check if two coordinates are similar (within threshold distance).
+        
+        Args:
+            coord1: First coordinate (x, y)
+            coord2: Second coordinate (x, y)
+            threshold: Distance threshold for similarity
+            
+        Returns:
+            True if coordinates are within threshold distance
+        """
+        x1, y1 = coord1
+        x2, y2 = coord2
+        distance = abs(x1 - x2) + abs(y1 - y2)  # Manhattan distance
+        return distance <= threshold
+    
+    def _check_coordinate_diversity(self, x: int, y: int) -> Dict[str, Any]:
+        """Check if coordinate is diverse enough and detect spam/oscillation.
+        
+        Uses dynamic spam threshold based on level progress:
+        - Early level (0-30%): Allow up to 10 similar clicks (pseudo-button sequences)
+        - Mid level (30-70%): Moderate tolerance (5-7 clicks)
+        - Late level (70-100%): Low tolerance (3 clicks) - should have progressed
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            
+        Returns:
+            Dict with diversity info: {
+                'is_diverse': bool,
+                'spam_detected': bool, 
+                'oscillation_detected': bool,
+                'reason': str,
+                'threshold_used': int
+            }
+        """
+        coord = (x, y)
+        
+        # Get dynamic threshold based on level progress
+        dynamic_threshold = self._get_dynamic_spam_threshold()
+        
+        result = {
+            'is_diverse': True,
+            'spam_detected': False,
+            'oscillation_detected': False,
+            'reason': 'New coordinate',
+            'threshold_used': dynamic_threshold
+        }
+        
+        # Track coordinate history
+        self.recent_coordinates.append(coord)
+        if len(self.recent_coordinates) > self.max_coordinate_history:
+            self.recent_coordinates.pop(0)
+        
+        # Check if similar to last coordinate
+        if self.last_coordinates:
+            if self._is_coordinate_similar(coord, self.last_coordinates, threshold=3):
+                self.consecutive_similar_coordinate += 1
+                
+                # Check if frame is actually changing (productive spam vs unproductive)
+                frame_changing = self.visual_analyzer.last_action_changed_frame
+                
+                # Spam detection: clicking same spot repeatedly beyond threshold
+                if self.consecutive_similar_coordinate >= dynamic_threshold:
+                    # If frame is changing, this might be productive pseudo-button spam
+                    if frame_changing and self.consecutive_similar_coordinate < dynamic_threshold + 5:
+                        result['reason'] = f'Productive spam: {self.consecutive_similar_coordinate} clicks (frame changing)'
+                        logger.info(f"✅ Productive pseudo-button spam at ({x}, {y}) - frame changing!")
+                    else:
+                        result['spam_detected'] = True
+                        result['is_diverse'] = False
+                        result['reason'] = f'Coordinate spam: {self.consecutive_similar_coordinate} clicks (threshold: {dynamic_threshold})'
+                        logger.warning(f"⚠️ Coordinate spam detected at ({x}, {y}) - {self.consecutive_similar_coordinate} clicks")
+            else:
+                self.consecutive_similar_coordinate = 0
+        
+        # Oscillation detection: bouncing between 2-3 coordinates
+        if len(self.recent_coordinates) >= 6:
+            # Check if we're oscillating between recent coordinates
+            last_6 = self.recent_coordinates[-6:]
+            unique_coords = set(last_6)
+            
+            if len(unique_coords) <= 3:  # Only 2-3 unique coordinates in last 6 clicks
+                # Count how many times each coordinate appears
+                from collections import Counter
+                coord_counts = Counter(last_6)
+                max_count = max(coord_counts.values())
+                
+                # If frame is changing during oscillation, it might be productive
+                if max_count >= 3:
+                    if frame_changing:
+                        result['reason'] = f'Productive oscillation: {len(unique_coords)} buttons (frame changing)'
+                        logger.info(f"✅ Productive pseudo-button oscillation - frame changing!")
+                    else:
+                        result['oscillation_detected'] = True
+                        result['is_diverse'] = False
+                        result['reason'] = f'Coordinate oscillation: bouncing between {len(unique_coords)} spots'
+                        logger.warning(f"⚠️ Coordinate oscillation detected: {unique_coords}")
+                        
+                        # Signal visual analyzer about oscillation
+                        self.visual_analyzer.oscillation_detected = True
+        
+        self.last_coordinates = coord
+        return result
+    
+    def update_level_progress(self, level_action_count: int, max_actions_per_level: int):
+        """Update level progress for dynamic spam tolerance.
+        
+        Args:
+            level_action_count: Actions taken in current level
+            max_actions_per_level: Max actions allowed per level
+        """
+        self.level_action_count = level_action_count
+        self.level_max_actions = max_actions_per_level
+    
+    def _get_dynamic_spam_threshold(self) -> int:
+        """Calculate dynamic spam threshold based on level progress.
+        
+        Early in level (0-30%): Allow more spam (pseudo-button sequences)
+        Mid level (30-70%): Moderate spam tolerance
+        Late in level (70-100%): Reduce spam (should have progressed by now)
+        
+        Returns:
+            Dynamic threshold for consecutive similar clicks
+        """
+        if self.level_max_actions == 0:
+            return self.coordinate_spam_threshold
+        
+        progress = self.level_action_count / self.level_max_actions
+        
+        if progress < 0.3:
+            # Early game: Allow spam for pseudo-button sequences
+            threshold = self.spam_allowed_early
+        elif progress < 0.7:
+            # Mid game: Moderate tolerance
+            threshold = (self.spam_allowed_early + self.spam_allowed_late) // 2
+        else:
+            # Late game: Low tolerance, should have found solution
+            threshold = self.spam_allowed_late
+        
+        return threshold
 
     def _detect_frame_changes(self, old_frame: List[List[int]],
                             new_frame: List[List[int]]) -> Tuple[bool, int]:
@@ -246,7 +403,9 @@ class ActionHandler:
         This is the CORRECT way to use ACTION6:
         1. Analyze the frame for interesting features
         2. Select coordinates based on what's visually salient
-        3. "Click" on those features like a touchscreen
+        3. Detect and avoid coordinate spam/oscillation
+        4. Use pseudo-button pathfinding when oscillating
+        5. "Click" on those features like a touchscreen
 
         Args:
             frame: Current game frame
@@ -271,6 +430,55 @@ class ActionHandler:
 
             if target:
                 x, y, reason = target
+                
+                # Check coordinate diversity (spam/oscillation detection)
+                diversity_check = self._check_coordinate_diversity(x, y)
+                
+                # Log progress and threshold info
+                progress = (self.level_action_count / self.level_max_actions * 100) if self.level_max_actions > 0 else 0
+                logger.debug(f"Level progress: {progress:.0f}%, Spam threshold: {diversity_check['threshold_used']}")
+                
+                if diversity_check['spam_detected']:
+                    logger.warning(f"🚫 Coordinate spam detected (threshold: {diversity_check['threshold_used']}) - forcing new target")
+                    # Force exploration to break out of spam pattern
+                    x, y = self.visual_analyzer.get_exploratory_coordinates(
+                        frame, 
+                        radius=self.visual_analyzer.exploration_radius + 5
+                    )
+                    reason = f"Anti-spam exploration (was {self.consecutive_similar_coordinate} clicks)"
+                    # Reset spam counter
+                    self.consecutive_similar_coordinate = 0
+                
+                elif diversity_check['oscillation_detected']:
+                    logger.warning(f"🔄 Coordinate oscillation detected (unproductive) - trying pseudo-button pathfinding")
+                    # Try pathfinding between oscillating points
+                    combination_target = self.visual_analyzer._find_combination_target(
+                        analysis.get("targets", [])
+                    )
+                    if combination_target:
+                        x, y, reason = combination_target
+                        reason = f"Pseudo-button pathfinding: {reason}"
+                        logger.info(f"🎯 Pathfinding target: ({x}, {y})")
+                    else:
+                        # Force wide exploration
+                        self.visual_analyzer.exploration_radius = min(
+                            self.visual_analyzer.exploration_radius + 5,
+                            self.visual_analyzer.max_exploration_radius
+                        )
+                        x, y = self.visual_analyzer.get_exploratory_coordinates(
+                            frame,
+                            radius=self.visual_analyzer.exploration_radius + 10
+                        )
+                        reason = "Anti-oscillation wide search"
+                    
+                    # Reset oscillation detection after handling
+                    self.visual_analyzer.oscillation_detected = False
+                    self.consecutive_similar_coordinate = 0
+                
+                elif 'Productive spam' in diversity_check['reason'] or 'Productive oscillation' in diversity_check['reason']:
+                    # Log productive spam/oscillation (frame is changing)
+                    logger.info(f"✅ {diversity_check['reason']} at ({x}, {y})")
+                
                 # Mark this coordinate as clicked to avoid spamming
                 self.visual_analyzer.mark_coordinate_clicked(x, y)
                 logger.info(f"ACTION6 target found: ({x}, {y}) - {reason}")
@@ -280,11 +488,25 @@ class ActionHandler:
                 logger.debug("No visual targets found, using exploratory mode")
                 x, y = self.visual_analyzer.get_exploratory_coordinates(frame)
                 self.visual_analyzer.mark_coordinate_clicked(x, y)
+                
+                # Still check diversity even for exploratory
+                diversity_check = self._check_coordinate_diversity(x, y)
+                
                 return x, y, "Exploratory search (no obvious targets)"
 
         elif strategy == "exploratory":
             # Systematic exploration around frame center
             x, y = self.visual_analyzer.get_exploratory_coordinates(frame)
+            
+            # Check diversity
+            diversity_check = self._check_coordinate_diversity(x, y)
+            if diversity_check['spam_detected'] or diversity_check['oscillation_detected']:
+                # Expand search radius
+                x, y = self.visual_analyzer.get_exploratory_coordinates(
+                    frame,
+                    radius=15
+                )
+            
             return x, y, "Systematic exploration"
 
         elif strategy == "random":
