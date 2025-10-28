@@ -14,7 +14,8 @@ import asyncio
 import logging
 import json
 import uuid
-from typing import Dict, Any, List, Optional, Callable
+import numpy as np
+from typing import Dict, Any, List, Optional, Callable, Tuple
 from collections import Counter
 import random
 from datetime import datetime
@@ -78,19 +79,39 @@ class GameplayEngine:
             learning_mode = self.game_config.get('learning_mode', 'smart_exploration')
             
             if learning_mode in ['exploit', 'smart_exploration']:
-                known_sequence = self._get_best_sequence_for_game(game_id, level_number=1)
-                
-                if known_sequence:
-                    logger.info(f"🎯 Found known winning sequence for {game_id} level 1, attempting replay...")
-                    replay_result = await self._try_replay_sequence(game_id, known_sequence)
+                # Get initial frame for pattern matching
+                try:
+                    if not self.session_manager.is_running:
+                        await self.session_manager.start_session(game_id=game_id)
                     
-                    if replay_result and replay_result.get('replay_success'):
-                        logger.info(f"✅ Successfully replayed winning sequence for level 1!")
-                        # If full game won, return; otherwise continue to next level
-                        if replay_result['win']:
-                            return replay_result
-                    else:
-                        logger.info(f"⚠️ Sequence replay failed, falling back to exploration mode")
+                    game_data = await self.session_manager.create_game(game_id)
+                    initial_game_state = GameState.from_dict(game_data)
+                    
+                    known_sequence = self._get_best_sequence_for_game(
+                        game_id, 
+                        level_number=1, 
+                        current_frame=initial_game_state.frame
+                    )
+                    
+                    if known_sequence:
+                        logger.info(f"🎯 Found known winning sequence for {game_id} level 1, attempting replay...")
+                        replay_result = await self._try_replay_sequence(game_id, known_sequence)
+                        
+                        if replay_result and replay_result.get('replay_success'):
+                            logger.info(f"✅ Successfully replayed winning sequence for level 1!")
+                            # If full game won, return; otherwise continue to next level
+                            if replay_result['win']:
+                                return replay_result
+                        else:
+                            logger.info(f"⚠️ Sequence replay failed, falling back to exploration mode")
+                    
+                    # Close the test game if we're starting over
+                    if not replay_result or not replay_result.get('replay_success'):
+                        await self.session_manager.shutdown()
+                        
+                except Exception as e:
+                    logger.debug(f"Pattern learning setup error: {e}")
+                    # Continue to normal gameplay
 
         try:
             # Start session if not already running
@@ -244,6 +265,8 @@ class GameplayEngine:
 
     async def _select_action(self, game_state: GameState) -> str:
         """Select the next action to take.
+        
+        Uses meta-learning to discover patterns before falling back to default strategy.
 
         Args:
             game_state: Current game state
@@ -251,6 +274,52 @@ class GameplayEngine:
         Returns:
             Action to take
         """
+        # Try meta-learning pattern detection first
+        if (self.game_config.get('enable_pattern_learning', True) and 
+            game_state.frame is not None):
+            
+            try:
+                # Convert frame to numpy array if needed
+                frame = game_state.frame
+                if not isinstance(frame, np.ndarray):
+                    frame = np.array(frame)
+                
+                pattern_result = self._meta_learn_pattern_from_frame(frame)
+                
+                if pattern_result and pattern_result.get('confidence', 0) > 0.5:
+                    logger.info(f"🧠 Meta-learner detected pattern: {pattern_result['pattern_type']}")
+                    logger.info(f"   Rule: {pattern_result['rule']['type']}, Confidence: {pattern_result['confidence']:.2f}")
+                    
+                    actions = pattern_result.get('actions', [])
+                    if actions:
+                        # Store the discovered pattern for future use
+                        self._store_discovered_pattern(pattern_result)
+                        
+                        # Execute first action from the pattern
+                        first_action = actions[0]
+                        if first_action['type'] == 'ACTION6':
+                            coord = first_action['coordinate']
+                            logger.info(f"🎯 Applying meta-learned pattern: ACTION6 at {coord}")
+                            logger.info(f"   Reason: {first_action['reason']}")
+                            
+                            # Store remaining actions for next iterations
+                            if not hasattr(self, '_pattern_action_queue'):
+                                self._pattern_action_queue = []
+                            self._pattern_action_queue = actions[1:]  # Queue remaining actions
+                            
+                            return "ACTION6"  # Will be executed with stored coordinates
+                            
+            except Exception as e:
+                logger.debug(f"Meta-learning error (falling back to default): {e}")
+        
+        # Check if we have queued pattern actions
+        if hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
+            next_action = self._pattern_action_queue.pop(0)
+            if next_action['type'] == 'ACTION6':
+                logger.info(f"🎯 Continuing pattern execution: ACTION6 at {next_action['coordinate']}")
+                return "ACTION6"
+        
+        # Fall back to default action selection
         strategy = self.game_config.get('strategy', 'balanced')
         return await self.action_handler.smart_action_selection(game_state, strategy)
 
@@ -269,13 +338,29 @@ class GameplayEngine:
             action = f"ACTION{action}"
         
         if action == "ACTION6":
-            # CORRECT ACTION6 USAGE: Analyze frame and select intelligent coordinates
-            # DO NOT use random coordinates - this is treating ACTION6 like a touchscreen
-            x, y, reason = self.action_handler.get_smart_coordinates(
-                game_state.frame,
-                strategy="visual"  # Use visual analysis
-            )
-            logger.info(f"ACTION6 at ({x}, {y}): {reason}")
+            # Check if we have meta-learned coordinates to use
+            if hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
+                # Use coordinates from meta-learning
+                next_action = self._pattern_action_queue[0]  # Peek at next action
+                if next_action['type'] == 'ACTION6':
+                    x, y = next_action['coordinate']
+                    reason = next_action['reason']
+                    logger.info(f"ACTION6 at ({x}, {y}): {reason}")
+                else:
+                    # Fall back to smart coordinates
+                    x, y, reason = self.action_handler.get_smart_coordinates(
+                        game_state.frame,
+                        strategy="visual"
+                    )
+                    logger.info(f"ACTION6 at ({x}, {y}): {reason}")
+            else:
+                # Use smart coordinate selection
+                x, y, reason = self.action_handler.get_smart_coordinates(
+                    game_state.frame,
+                    strategy="visual"
+                )
+                logger.info(f"ACTION6 at ({x}, {y}): {reason}")
+            
             new_state = await self.action_handler.send_action_6(x, y, game_state.frame)
             
             # Track frame changes to detect productive actions
@@ -498,9 +583,10 @@ class GameplayEngine:
             initial_frame = json.loads(action_traces[0]['frame_before']) if action_traces[0].get('frame_before') else []
             final_frame = json.loads(action_traces[-1]['frame_after']) if action_traces[-1].get('frame_after') else []
             
-            # Detect pattern tags
+            # Detect pattern tags and abstract pattern signature
             pattern_tags = self._detect_pattern_tags(actions, coordinates)
             game_type = self._classify_game_type(actions)
+            pattern_signature = self._detect_frame_pattern(initial_frame, final_frame)
             
             # Check if we already have a winning sequence for this game/level
             existing = self.db.execute_query("""
@@ -541,23 +627,33 @@ class GameplayEngine:
             
             # Store in database (Rule 2) only if improved or first win
             if should_store and sequence_id:
+                # Calculate frame transitions for pattern matching
+                frame_transitions = self._extract_frame_transitions(action_traces)
+                
                 self.db.execute_query("""
                     INSERT INTO winning_sequences (
                         sequence_id, game_id, level_number, agent_id, session_id,
                         action_sequence, coordinate_sequence, total_actions, total_score,
-                        efficiency_score, initial_frame, final_frame, pattern_tags,
-                        game_type, discovered_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        efficiency_score, initial_frame, final_frame, frame_transitions,
+                        pattern_tags, game_type, discovered_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     sequence_id, game_id, level_number, 'core_agent', session_id,
                     json.dumps(actions), json.dumps(coordinates), len(actions),
                     final_score, efficiency, json.dumps(initial_frame),
-                    json.dumps(final_frame), json.dumps(pattern_tags),
-                    game_type, datetime.now().isoformat()
+                    json.dumps(final_frame), json.dumps(frame_transitions),
+                    json.dumps(pattern_tags), game_type, datetime.now().isoformat()
                 ))
                 
+                # Try to detect and store abstract pattern
+                self._detect_and_store_abstract_pattern(
+                    sequence_id, game_id, level_number, pattern_signature, 
+                    pattern_tags, efficiency
+                )
+                
                 logger.info(f"✅ Captured winning sequence {sequence_id}: "
-                           f"{len(actions)} actions, efficiency {efficiency:.4f}, tags: {pattern_tags}")
+                           f"{len(actions)} actions, efficiency {efficiency:.4f}, "
+                           f"tags: {pattern_tags}, pattern: {pattern_signature.get('transformation_type', 'unknown')}")
             
             return sequence_id
             
@@ -604,14 +700,17 @@ class GameplayEngine:
         else:
             return 'mixed_actions'
 
-    def _get_best_sequence_for_game(self, game_id: str, level_number: int = 1) -> Optional[Dict]:
+    def _get_best_sequence_for_game(self, game_id: str, level_number: int = 1, 
+                                   current_frame=None) -> Optional[Dict]:
         """
         Get best known winning sequence for a specific game level (Rule 2: from database).
         Prioritizes most efficient (fewest actions, highest efficiency score).
+        If no exact match, tries to find similar patterns.
         
         Args:
             game_id: Game to check
             level_number: Specific level to get sequence for
+            current_frame: Optional current frame for pattern matching
             
         Returns:
             Sequence dict or None
@@ -620,7 +719,7 @@ class GameplayEngine:
             return None
             
         try:
-            # Get best sequence for this specific level
+            # First, try exact game/level match
             sequences = self.db.execute_query("""
                 SELECT * FROM winning_sequences
                 WHERE game_id = ? AND level_number = ?
@@ -633,8 +732,27 @@ class GameplayEngine:
                 logger.info(f"📖 Found winning sequence for {game_id} level {level_number}: "
                            f"{seq['total_actions']} actions, efficiency {seq['efficiency_score']:.4f}")
                 return seq
-            else:
-                logger.debug(f"No winning sequence found for {game_id} level {level_number}")
+            
+            # No exact match - try pattern matching if we have current frame
+            if current_frame is not None:
+                similar_pattern = self._find_similar_patterns(current_frame)
+                
+                if similar_pattern:
+                    # Get one of the concrete examples
+                    examples = json.loads(similar_pattern['concrete_examples'])
+                    if examples:
+                        # Get the most efficient example
+                        example_seq = self.db.execute_query("""
+                            SELECT * FROM winning_sequences
+                            WHERE sequence_id = ?
+                        """, (examples[0],))
+                        
+                        if example_seq:
+                            logger.info(f"🔍 Using similar pattern {similar_pattern['pattern_id']} "
+                                      f"as starting point")
+                            return example_seq[0]
+            
+            logger.debug(f"No winning sequence found for {game_id} level {level_number}")
                 
         except Exception as e:
             logger.debug(f"Error retrieving winning sequence for {game_id}: {e}")
@@ -800,6 +918,841 @@ class GameplayEngine:
         except Exception as e:
             logger.debug(f"Frame comparison error: {e}")
             return False
+    
+    def _detect_frame_pattern(self, initial_frame, final_frame) -> Dict[str, Any]:
+        """
+        Detect abstract patterns between initial and final frames.
+        This helps identify pattern-based transformations rather than literal sequences.
+        
+        Returns:
+            Dict with pattern characteristics for matching similar problems
+        """
+        pattern_info = {
+            'grid_size': None,
+            'color_distribution_change': {},
+            'symmetry_detected': False,
+            'repetition_detected': False,
+            'transformation_type': 'unknown'
+        }
+        
+        try:
+            # Unwrap nested frames
+            initial = initial_frame
+            final = final_frame
+            
+            if isinstance(initial, list) and len(initial) > 0:
+                if isinstance(initial[0], list) and len(initial[0]) > 0:
+                    if isinstance(initial[0][0], list):
+                        initial = initial[0][0]
+            
+            if isinstance(final, list) and len(final) > 0:
+                if isinstance(final[0], list) and len(final[0]) > 0:
+                    if isinstance(final[0][0], list):
+                        final = final[0][0]
+            
+            if not initial or not final:
+                return pattern_info
+            
+            # Grid size
+            if isinstance(initial, list) and len(initial) > 0 and isinstance(initial[0], list):
+                pattern_info['grid_size'] = (len(initial), len(initial[0]))
+            
+            # Color distribution changes
+            from collections import Counter
+            
+            initial_colors = Counter()
+            final_colors = Counter()
+            
+            for row in initial:
+                if isinstance(row, list):
+                    for cell in row:
+                        if isinstance(cell, int):
+                            initial_colors[cell] += 1
+            
+            for row in final:
+                if isinstance(row, list):
+                    for cell in row:
+                        if isinstance(cell, int):
+                            final_colors[cell] += 1
+            
+            # Detect transformation patterns
+            if initial_colors == final_colors:
+                pattern_info['transformation_type'] = 'rearrangement'
+            elif len(final_colors) < len(initial_colors):
+                pattern_info['transformation_type'] = 'color_reduction'
+            elif len(final_colors) > len(initial_colors):
+                pattern_info['transformation_type'] = 'color_expansion'
+            else:
+                pattern_info['transformation_type'] = 'color_transformation'
+            
+            # Store color changes
+            for color in set(list(initial_colors.keys()) + list(final_colors.keys())):
+                pattern_info['color_distribution_change'][color] = {
+                    'before': initial_colors.get(color, 0),
+                    'after': final_colors.get(color, 0),
+                    'delta': final_colors.get(color, 0) - initial_colors.get(color, 0)
+                }
+            
+            # Detect symmetry in final frame
+            if isinstance(final, list) and len(final) > 1:
+                # Check horizontal symmetry
+                is_symmetric = True
+                for i in range(len(final) // 2):
+                    if final[i] != final[-(i+1)]:
+                        is_symmetric = False
+                        break
+                pattern_info['symmetry_detected'] = is_symmetric
+            
+            # Detect repetition patterns
+            if isinstance(final, list) and len(final) > 0:
+                # Check if rows repeat
+                row_counts = Counter([tuple(row) if isinstance(row, list) else row for row in final])
+                if max(row_counts.values()) > 1:
+                    pattern_info['repetition_detected'] = True
+            
+        except Exception as e:
+            logger.debug(f"Pattern detection error: {e}")
+        
+        return pattern_info
+    
+    def _extract_frame_transitions(self, action_traces: List[Dict]) -> List[Dict]:
+        """
+        Extract key frame transitions where significant changes occurred.
+        This helps identify critical moments in winning sequences.
+        """
+        transitions = []
+        
+        try:
+            for i, trace in enumerate(action_traces):
+                # Record transitions where frame actually changed
+                if trace.get('frame_changed'):
+                    transition = {
+                        'action_index': i,
+                        'action_number': trace.get('action_number'),
+                        'score_before': trace.get('score_before', 0),
+                        'score_after': trace.get('score_after', 0),
+                        'score_delta': trace.get('score_change', 0)
+                    }
+                    
+                    # Include coordinates if ACTION6
+                    if trace.get('action_number') == 6 and trace.get('coordinates'):
+                        try:
+                            transition['coordinates'] = json.loads(trace['coordinates'])
+                        except:
+                            pass
+                    
+                    transitions.append(transition)
+        
+        except Exception as e:
+            logger.debug(f"Frame transition extraction error: {e}")
+        
+        return transitions
+    
+    def _detect_and_store_abstract_pattern(self, sequence_id: str, game_id: str, 
+                                          level_number: int, pattern_signature: Dict,
+                                          pattern_tags: List[str], efficiency: float):
+        """
+        Detect and store abstract patterns that can be reused across similar problems.
+        This enables pattern-based matching rather than just literal sequence replay.
+        """
+        try:
+            # Create pattern signature hash for matching
+            sig_str = json.dumps({
+                'transformation_type': pattern_signature.get('transformation_type'),
+                'grid_size': pattern_signature.get('grid_size'),
+                'symmetry': pattern_signature.get('symmetry_detected'),
+                'repetition': pattern_signature.get('repetition_detected'),
+                'tags': sorted(pattern_tags)
+            }, sort_keys=True)
+            
+            import hashlib
+            pattern_hash = hashlib.md5(sig_str.encode()).hexdigest()[:16]
+            pattern_id = f"pat_{pattern_hash}"
+            
+            # Check if this pattern already exists
+            existing_pattern = self.db.execute_query("""
+                SELECT pattern_id, occurrence_count, success_count, 
+                       concrete_examples, avg_efficiency
+                FROM discovered_patterns
+                WHERE pattern_id = ?
+            """, (pattern_id,))
+            
+            if existing_pattern:
+                # Update existing pattern
+                pat = existing_pattern[0]
+                examples = json.loads(pat['concrete_examples'])
+                
+                if sequence_id not in examples:
+                    examples.append(sequence_id)
+                    new_count = pat['occurrence_count'] + 1
+                    new_success = pat['success_count'] + 1
+                    
+                    # Update average efficiency
+                    new_avg_eff = (pat['avg_efficiency'] * pat['occurrence_count'] + efficiency) / new_count
+                    
+                    self.db.execute_query("""
+                        UPDATE discovered_patterns
+                        SET occurrence_count = ?,
+                            success_count = ?,
+                            concrete_examples = ?,
+                            avg_efficiency = ?,
+                            success_rate = ?
+                        WHERE pattern_id = ?
+                    """, (
+                        new_count, new_success, json.dumps(examples),
+                        new_avg_eff, new_success / new_count,
+                        pattern_id
+                    ))
+                    
+                    logger.info(f"📊 Updated pattern {pattern_id}: {new_count} occurrences")
+            else:
+                # Create new pattern
+                pattern_name = f"{pattern_signature.get('transformation_type', 'unknown')}_{pattern_tags[0] if pattern_tags else 'generic'}"
+                
+                self.db.execute_query("""
+                    INSERT INTO discovered_patterns (
+                        pattern_id, pattern_name, pattern_type, pattern_signature,
+                        concrete_examples, occurrence_count, success_count,
+                        success_rate, avg_score_achieved, avg_efficiency,
+                        confidence_score, discovered_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    pattern_id, pattern_name, 'transformation',
+                    json.dumps(pattern_signature), json.dumps([sequence_id]),
+                    1, 1, 1.0, 1.0, efficiency, 0.5,
+                    datetime.now().isoformat()
+                ))
+                
+                logger.info(f"🆕 Discovered new pattern {pattern_id}: {pattern_name}")
+        
+        except Exception as e:
+            logger.debug(f"Abstract pattern detection error: {e}")
+    
+    def _find_similar_patterns(self, current_frame) -> Optional[Dict]:
+        """
+        Find patterns that might apply to the current game state.
+        Uses abstract pattern matching rather than exact frame matching.
+        """
+        try:
+            # Get current frame characteristics
+            dummy_final = current_frame  # We don't know final yet
+            current_sig = self._detect_frame_pattern(current_frame, dummy_final)
+            
+            # Query patterns with similar characteristics
+            all_patterns = self.db.execute_query("""
+                SELECT pattern_id, pattern_name, pattern_signature, 
+                       concrete_examples, success_rate, avg_efficiency,
+                       confidence_score
+                FROM discovered_patterns
+                WHERE success_rate >= 0.5
+                ORDER BY confidence_score DESC, success_rate DESC
+                LIMIT 10
+            """)
+            
+            best_match = None
+            best_score = 0.0
+            
+            for pat in all_patterns:
+                try:
+                    sig = json.loads(pat['pattern_signature'])
+                    
+                    # Calculate similarity score
+                    similarity = 0.0
+                    
+                    # Grid size match
+                    if sig.get('grid_size') == current_sig.get('grid_size'):
+                        similarity += 0.3
+                    
+                    # Transformation type match
+                    if sig.get('transformation_type') == current_sig.get('transformation_type'):
+                        similarity += 0.3
+                    
+                    # Pattern features
+                    if sig.get('symmetry_detected') == current_sig.get('symmetry_detected'):
+                        similarity += 0.2
+                    
+                    if sig.get('repetition_detected') == current_sig.get('repetition_detected'):
+                        similarity += 0.2
+                    
+                    # Weight by pattern success rate and confidence
+                    weighted_score = similarity * pat['success_rate'] * pat['confidence_score']
+                    
+                    if weighted_score > best_score:
+                        best_score = weighted_score
+                        best_match = pat
+                
+                except Exception as e:
+                    logger.debug(f"Pattern matching error: {e}")
+                    continue
+            
+            if best_match and best_score >= 0.3:
+                logger.info(f"🎯 Found similar pattern {best_match['pattern_id']} "
+                           f"(similarity: {best_score:.2f})")
+                return best_match
+            
+        except Exception as e:
+            logger.debug(f"Pattern search error: {e}")
+        
+        return None
+    
+    # ========== META-LEARNING METHODS (Rule 10: Integrated into core_gameplay.py) ==========
+    
+    def _meta_learn_pattern_from_frame(self, frame: np.ndarray) -> Optional[Dict[str, Any]]:
+        """
+        Meta-learning: Analyzes frame and discovers pattern rules without hardcoding.
+        
+        Discovers:
+        - Anomalies (odd one out)
+        - Templates/Keys (transformation examples)
+        - Spatial significance (center, corners, edges)
+        - Transformation rules (what to apply)
+        
+        Args:
+            frame: Current game frame (numpy array)
+            
+        Returns:
+            Dictionary with discovered pattern and transformation actions, or None
+        """
+        if frame is None or frame.size == 0:
+            return None
+            
+        try:
+            # Step 1: Find what's special (anomalies)
+            anomalies = self._meta_detect_anomalies(frame)
+            logger.info(f"🧠 Meta: Detected {len(anomalies)} anomalies")
+            
+            # Step 2: Check spatial significance
+            spatial_features = self._meta_analyze_spatial_significance(frame, anomalies)
+            logger.info(f"🧠 Meta: {len(spatial_features.get('center_anomalies', []))} center, "
+                       f"{len(spatial_features.get('corner_anomalies', []))} corner, "
+                       f"{len(spatial_features.get('edge_anomalies', []))} edge")
+            
+            # Step 3: Look for templates/transformation examples
+            templates = self._meta_find_transformation_templates(frame, anomalies, spatial_features)
+            logger.info(f"🧠 Meta: Found {len(templates)} potential templates")
+            
+            # Step 4: Extract transformation rules
+            if templates:
+                rule = self._meta_extract_transformation_rule(frame, templates[0])
+                logger.info(f"🧠 Meta: Extracted rule: {rule}")
+                
+                if rule:
+                    # Step 5: Find where to apply the rule
+                    targets = self._meta_find_application_targets(frame, rule)
+                    
+                    # Step 6: Generate actions
+                    actions = self._meta_generate_transformation_actions(frame, targets, rule)
+                    
+                    return {
+                        'pattern_type': 'template_transformation',
+                        'rule': rule,
+                        'template_region': templates[0],
+                        'target_regions': targets,
+                        'actions': actions,
+                        'confidence': self._meta_calculate_confidence(rule, targets)
+                    }
+            
+            # Try other pattern types
+            symmetry_pattern = self._meta_detect_symmetry_completion(frame)
+            if symmetry_pattern:
+                return symmetry_pattern
+                
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in pattern meta-learning: {e}")
+            return None
+    
+    def _meta_detect_anomalies(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+        """Finds regions that are different from others (odd one out)."""
+        anomalies = []
+        regions = self._meta_segment_into_regions(frame)
+        
+        if len(regions) < 2:
+            return anomalies
+        
+        # Calculate complexity scores
+        complexity_scores = []
+        for region in regions:
+            score = {
+                'region': region,
+                'unique_colors': len(np.unique(region['pixels'])),
+                'color_changes': self._meta_count_color_boundaries(region['pixels']),
+                'entropy': self._meta_calculate_entropy(region['pixels']),
+                'has_substructure': self._meta_has_nested_structure(region['pixels'])
+            }
+            complexity_scores.append(score)
+        
+        # Find statistical outliers
+        avg_colors = np.mean([s['unique_colors'] for s in complexity_scores])
+        avg_changes = np.mean([s['color_changes'] for s in complexity_scores])
+        
+        for score in complexity_scores:
+            if (score['unique_colors'] > avg_colors * 1.5 or 
+                score['color_changes'] > avg_changes * 1.5 or
+                score['has_substructure']):
+                anomalies.append({
+                    'region': score['region'],
+                    'complexity': score,
+                    'reason': 'Higher complexity than peers'
+                })
+        
+        return anomalies
+    
+    def _meta_analyze_spatial_significance(self, frame: np.ndarray, 
+                                          anomalies: List[Dict]) -> Dict[str, Any]:
+        """Checks if anomalies are in significant positions."""
+        height, width = frame.shape[:2]
+        frame_center = (height // 2, width // 2)
+        
+        features = {
+            'center_anomalies': [],
+            'corner_anomalies': [],
+            'edge_anomalies': []
+        }
+        
+        for anomaly in anomalies:
+            region = anomaly['region']
+            region_center = region['center']
+            
+            distance = np.sqrt((region_center[0] - frame_center[0])**2 + 
+                             (region_center[1] - frame_center[1])**2)
+            normalized_distance = distance / np.sqrt(height**2 + width**2)
+            
+            if normalized_distance < 0.2:  # Very close to center
+                features['center_anomalies'].append({
+                    'anomaly': anomaly,
+                    'distance': distance,
+                    'weight': 2.0  # Center gets higher weight
+                })
+            elif self._meta_is_near_corner(region_center, (height, width)):
+                features['corner_anomalies'].append(anomaly)
+            elif self._meta_is_near_edge(region_center, (height, width)):
+                features['edge_anomalies'].append(anomaly)
+        
+        return features
+    
+    def _meta_find_transformation_templates(self, frame: np.ndarray, 
+                                           anomalies: List[Dict],
+                                           spatial_features: Dict) -> List[Dict]:
+        """Identifies regions that demonstrate transformations."""
+        templates = []
+        
+        # Central anomalies are most likely to be templates
+        for center_anomaly in spatial_features.get('center_anomalies', []):
+            anomaly = center_anomaly['anomaly']
+            region = anomaly['region']
+            
+            if self._meta_has_nested_structure(region['pixels']):
+                layers = self._meta_extract_layers(region['pixels'])
+                
+                if layers and len(layers) >= 2:
+                    templates.append({
+                        'region': region,
+                        'layers': layers,
+                        'type': 'nested_transformation',
+                        'weight': center_anomaly['weight']
+                    })
+        
+        # Also check regular anomalies
+        for anomaly in anomalies:
+            region = anomaly['region']
+            if self._meta_shows_color_transformation(region['pixels']):
+                templates.append({
+                    'region': region,
+                    'type': 'color_transformation',
+                    'weight': 1.0
+                })
+        
+        templates.sort(key=lambda x: x['weight'], reverse=True)
+        return templates
+    
+    def _meta_extract_transformation_rule(self, frame: np.ndarray, 
+                                         template: Dict) -> Optional[Dict[str, Any]]:
+        """Extracts the transformation rule from a template region."""
+        region = template['region']
+        pixels = region['pixels']
+        
+        logger.debug(f"Extracting rule from template type: {template['type']}")
+        
+        if template['type'] == 'nested_transformation':
+            layers = template['layers']
+            
+            if len(layers) >= 2:
+                outer_layer = layers[0]  # Border
+                inner_layer = layers[-1]  # Center (most inner)
+                
+                outer_color = self._meta_get_dominant_color(outer_layer)
+                inner_color = self._meta_get_dominant_color(inner_layer)
+                
+                if outer_color != inner_color:
+                    center_ratio = self._meta_calculate_center_ratio(layers)
+                    
+                    return {
+                        'type': 'add_center_pattern',
+                        'border_color': int(outer_color),
+                        'center_color': int(inner_color),
+                        'center_ratio': center_ratio,
+                        'template_position': region['center']
+                    }
+        
+        elif template['type'] == 'color_transformation':
+            color_freq = Counter(pixels.flatten())
+            
+            if len(color_freq) >= 2:
+                colors = sorted(color_freq.items(), key=lambda x: x[1], reverse=True)
+                return {
+                    'type': 'color_replacement',
+                    'from_color': int(colors[1][0]),
+                    'to_color': int(colors[0][0])
+                }
+        
+        return None
+    
+    def _meta_find_application_targets(self, frame: np.ndarray, 
+                                      rule: Dict) -> List[Dict[str, Any]]:
+        """Finds regions where the transformation rule should be applied."""
+        targets = []
+        regions = self._meta_segment_into_regions(frame)
+        
+        if rule['type'] == 'add_center_pattern':
+            border_color = rule['border_color']
+            template_pos = rule['template_position']
+            
+            for region in regions:
+                # Skip the template itself
+                if self._meta_regions_overlap(region['center'], template_pos, threshold=5):
+                    continue
+                
+                dominant_color = self._meta_get_dominant_color(region['pixels'])
+                
+                if dominant_color == border_color:
+                    targets.append({
+                        'region': region,
+                        'reason': 'Matches border color pattern'
+                    })
+        
+        elif rule['type'] == 'color_replacement':
+            from_color = rule['from_color']
+            
+            for region in regions:
+                if np.any(region['pixels'] == from_color):
+                    targets.append({
+                        'region': region,
+                        'reason': 'Contains color to replace'
+                    })
+        
+        return targets
+    
+    def _meta_generate_transformation_actions(self, frame: np.ndarray, 
+                                             targets: List[Dict],
+                                             rule: Dict) -> List[Dict[str, Any]]:
+        """Generates ACTION6 coordinates to execute the transformation."""
+        actions = []
+        
+        if rule['type'] == 'add_center_pattern':
+            center_color = rule['center_color']
+            center_ratio = rule['center_ratio']
+            
+            for target in targets:
+                region = target['region']
+                region_center = region['center']
+                region_size = region['size']
+                
+                center_size = int(region_size * center_ratio)
+                center_radius = int(np.sqrt(center_size) / 2)
+                
+                for dy in range(-center_radius, center_radius + 1):
+                    for dx in range(-center_radius, center_radius + 1):
+                        y = region_center[0] + dy
+                        x = region_center[1] + dx
+                        
+                        if 0 <= y < frame.shape[0] and 0 <= x < frame.shape[1]:
+                            actions.append({
+                                'type': 'ACTION6',
+                                'coordinate': (x, y),
+                                'color': center_color,
+                                'reason': 'Applying template pattern to center',
+                                'rule_type': 'add_center_pattern'
+                            })
+        
+        return actions
+    
+    def _meta_calculate_confidence(self, rule: Dict, targets: List[Dict]) -> float:
+        """Calculates confidence score for the discovered pattern."""
+        base_confidence = 0.5
+        target_bonus = min(len(targets) * 0.1, 0.3)
+        
+        if rule['type'] in ['add_center_pattern', 'color_replacement']:
+            type_bonus = 0.2
+        else:
+            type_bonus = 0.0
+        
+        return min(base_confidence + target_bonus + type_bonus, 1.0)
+    
+    def _meta_detect_symmetry_completion(self, frame: np.ndarray) -> Optional[Dict]:
+        """Detects if pattern requires symmetry completion."""
+        height, width = frame.shape[:2]
+        
+        left_half = frame[:, :width//2]
+        right_half = frame[:, width//2:]
+        
+        if right_half.shape[1] > 0 and left_half.shape == right_half.shape:
+            right_unique = len(np.unique(right_half))
+            left_unique = len(np.unique(left_half))
+            
+            if right_unique < left_unique:
+                return {
+                    'pattern_type': 'symmetry_completion',
+                    'rule': {'type': 'mirror_horizontal', 'source': 'left'},
+                    'confidence': 0.6
+                }
+        
+        return None
+    
+    # Helper methods for meta-learning
+    
+    def _meta_segment_into_regions(self, frame: np.ndarray) -> List[Dict]:
+        """Segments frame into distinct rectangular regions."""
+        regions = []
+        height, width = frame.shape[:2]
+        
+        region_size = self._meta_detect_grid_size(frame)
+        
+        if region_size:
+            rows = height // region_size
+            cols = width // region_size
+            
+            for r in range(rows):
+                for c in range(cols):
+                    y1 = r * region_size
+                    x1 = c * region_size
+                    y2 = min(y1 + region_size, height)
+                    x2 = min(x1 + region_size, width)
+                    
+                    region_pixels = frame[y1:y2, x1:x2]
+                    
+                    regions.append({
+                        'pixels': region_pixels,
+                        'bounds': (y1, x1, y2, x2),
+                        'center': ((y1 + y2) // 2, (x1 + x2) // 2),
+                        'size': region_pixels.size
+                    })
+        
+        return regions
+    
+    def _meta_detect_grid_size(self, frame: np.ndarray) -> Optional[int]:
+        """Attempts to detect if frame has a grid structure."""
+        height, width = frame.shape[:2]
+        
+        common_sizes = [height // 3, height // 4, height // 5, 
+                       width // 3, width // 4, width // 5]
+        
+        for size in common_sizes:
+            if size > 5:
+                h_rem = height % size
+                w_rem = width % size
+                
+                if h_rem < 5 and w_rem < 5:
+                    return size
+        
+        return None
+    
+    def _meta_count_color_boundaries(self, pixels: np.ndarray) -> int:
+        """Counts number of color transitions in region."""
+        if pixels.size < 2:
+            return 0
+        
+        flat = pixels.flatten()
+        boundaries = np.sum(flat[:-1] != flat[1:])
+        return int(boundaries)
+    
+    def _meta_calculate_entropy(self, pixels: np.ndarray) -> float:
+        """Calculates Shannon entropy of color distribution."""
+        if pixels.size == 0:
+            return 0.0
+        
+        _, counts = np.unique(pixels, return_counts=True)
+        probs = counts / pixels.size
+        entropy = -np.sum(probs * np.log2(probs + 1e-10))
+        return float(entropy)
+    
+    def _meta_has_nested_structure(self, pixels: np.ndarray) -> bool:
+        """Checks if region has nested/layered structure."""
+        if pixels.size < 9:
+            return False
+        
+        height, width = pixels.shape[:2]
+        
+        if height < 3 or width < 3:
+            return False
+        
+        cy1, cy2 = height // 3, 2 * height // 3
+        cx1, cx2 = width // 3, 2 * width // 3
+        
+        center = pixels[cy1:cy2, cx1:cx2]
+        edges = np.concatenate([
+            pixels[0, :], pixels[-1, :],
+            pixels[:, 0], pixels[:, -1]
+        ])
+        
+        center_color = self._meta_get_dominant_color(center)
+        edge_color = self._meta_get_dominant_color(edges)
+        
+        return center_color != edge_color
+    
+    def _meta_extract_layers(self, pixels: np.ndarray) -> List[np.ndarray]:
+        """Extracts concentric layers from region."""
+        layers = []
+        height, width = pixels.shape[:2]
+        
+        if height < 3 or width < 3:
+            return [pixels]
+        
+        # Outer layer (edges)
+        outer = np.concatenate([
+            pixels[0, :], pixels[-1, :],
+            pixels[1:-1, 0], pixels[1:-1, -1]
+        ])
+        layers.append(outer)
+        
+        # Middle layer (if exists)
+        if height >= 5 and width >= 5:
+            middle = np.concatenate([
+                pixels[1, 1:-1], pixels[-2, 1:-1],
+                pixels[2:-2, 1], pixels[2:-2, -2]
+            ])
+            layers.append(middle)
+        
+        # Inner core
+        center_margin = max(height // 4, width // 4)
+        if center_margin > 0:
+            inner = pixels[center_margin:-center_margin, center_margin:-center_margin]
+            if inner.size > 0:
+                layers.append(inner)
+        
+        return layers
+    
+    def _meta_get_dominant_color(self, pixels: np.ndarray) -> int:
+        """Returns most common color in region."""
+        if pixels.size == 0:
+            return 0
+        
+        values, counts = np.unique(pixels.flatten(), return_counts=True)
+        return int(values[np.argmax(counts)])
+    
+    def _meta_calculate_center_ratio(self, layers: List[np.ndarray]) -> float:
+        """Calculates ratio of center size to total region."""
+        if len(layers) < 2:
+            return 0.25
+        
+        total_size = sum(layer.size for layer in layers)
+        center_size = layers[-1].size
+        
+        return center_size / total_size if total_size > 0 else 0.25
+    
+    def _meta_shows_color_transformation(self, pixels: np.ndarray) -> bool:
+        """Checks if region shows evidence of color transformation."""
+        unique_colors = len(np.unique(pixels))
+        return unique_colors >= 2 and unique_colors <= 4
+    
+    def _meta_regions_overlap(self, pos1: Tuple[int, int], 
+                             pos2: Tuple[int, int], 
+                             threshold: int = 5) -> bool:
+        """Checks if two positions are close (same region)."""
+        distance = np.sqrt((pos1[0] - pos2[0])**2 + (pos1[1] - pos2[1])**2)
+        return distance < threshold
+    
+    def _meta_is_near_corner(self, pos: Tuple[int, int], 
+                            frame_size: Tuple[int, int]) -> bool:
+        """Checks if position is near a corner."""
+        y, x = pos
+        h, w = frame_size
+        
+        threshold = min(h, w) * 0.2
+        corners = [(0, 0), (0, w-1), (h-1, 0), (h-1, w-1)]
+        
+        for cy, cx in corners:
+            distance = np.sqrt((y - cy)**2 + (x - cx)**2)
+            if distance < threshold:
+                return True
+        
+        return False
+    
+    def _meta_is_near_edge(self, pos: Tuple[int, int], 
+                          frame_size: Tuple[int, int]) -> bool:
+        """Checks if position is near an edge."""
+        y, x = pos
+        h, w = frame_size
+        
+        threshold = min(h, w) * 0.15
+        
+        return (y < threshold or y > h - threshold or 
+                x < threshold or x > w - threshold)
+    
+    # ========== END META-LEARNING METHODS ==========
+    
+    def _store_discovered_pattern(self, pattern_result: Dict[str, Any]) -> None:
+        """
+        Stores a pattern discovered by the meta-learner for future use.
+        
+        Args:
+            pattern_result: Pattern detection result from meta-learner
+        """
+        try:
+            pattern_type = pattern_result.get('pattern_type', 'unknown')
+            rule = pattern_result.get('rule', {})
+            confidence = pattern_result.get('confidence', 0.5)
+            
+            # Generate unique pattern ID based on rule
+            import hashlib
+            rule_str = json.dumps(rule, sort_keys=True)
+            pattern_id = f"meta_{hashlib.md5(rule_str.encode()).hexdigest()[:16]}"
+            
+            # Check if pattern already exists
+            existing = self.db.execute_query("""
+                SELECT pattern_id, occurrence_count, success_count
+                FROM discovered_patterns
+                WHERE pattern_id = ?
+            """, (pattern_id,))
+            
+            if existing:
+                # Update existing pattern
+                old_count = existing[0]['occurrence_count']
+                old_success = existing[0]['success_count']
+                
+                new_count = old_count + 1
+                new_confidence = min((old_success + 1) / new_count, 1.0)
+                
+                self.db.execute_query("""
+                    UPDATE discovered_patterns
+                    SET occurrence_count = ?,
+                        confidence_score = ?,
+                        last_seen_at = ?
+                    WHERE pattern_id = ?
+                """, (new_count, new_confidence, datetime.now().isoformat(), pattern_id))
+                
+                logger.info(f"📊 Updated meta-pattern {pattern_id}: {new_count} occurrences")
+            else:
+                # Create new pattern
+                pattern_name = f"meta_{pattern_type}_{rule['type']}"
+                
+                self.db.execute_query("""
+                    INSERT INTO discovered_patterns (
+                        pattern_id, pattern_name, pattern_type, pattern_signature,
+                        occurrence_count, success_count, success_rate,
+                        confidence_score, discovered_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    pattern_id, pattern_name, pattern_type,
+                    json.dumps(rule), 1, 0, 0.0, confidence,
+                    datetime.now().isoformat()
+                ))
+                
+                logger.info(f"🆕 Stored meta-learned pattern: {pattern_name}")
+        
+        except Exception as e:
+            logger.error(f"Error storing discovered pattern: {e}")
 
 
 # Simple gameplay strategies that can be used as action callbacks
