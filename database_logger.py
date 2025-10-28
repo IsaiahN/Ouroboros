@@ -22,18 +22,26 @@ class DatabaseLogHandler(logging.Handler):
     rather than creating log files on disk.
     """
 
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = None, auto_cleanup: bool = True, cleanup_threshold: int = 100000):
         """
         Initialize the database logging handler.
 
         Args:
             db_path: Path to the SQLite database file
+            auto_cleanup: Enable automatic log cleanup (default: True)
+            cleanup_threshold: Number of logs before triggering cleanup (default: 100,000)
         """
         super().__init__()
 
         self.db_path = db_path or os.getenv('DATABASE_PATH', 'core_data.db')
         self._local = threading.local()
         self._lock = threading.Lock()
+        
+        # Auto-cleanup settings
+        self.auto_cleanup = auto_cleanup
+        self.cleanup_threshold = cleanup_threshold
+        self._log_count = 0
+        self._last_cleanup_check = 0
 
         # Initialize database schema
         self._ensure_logs_table()
@@ -195,6 +203,50 @@ class DatabaseLogHandler(logging.Handler):
                 print(error_msg, file=sys.stderr)
             except:
                 pass  # If even stderr fails, silently continue
+        
+        # Auto-cleanup check (every 1000 logs)
+        if self.auto_cleanup:
+            self._log_count += 1
+            if self._log_count - self._last_cleanup_check >= 1000:
+                self._last_cleanup_check = self._log_count
+                self._check_and_cleanup()
+    
+    def _check_and_cleanup(self):
+        """Check log count and cleanup if threshold exceeded."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) as count FROM system_logs")
+            row = cursor.fetchone()
+            total_logs = row[0] if row else 0
+            
+            if total_logs > self.cleanup_threshold:
+                # Clean up old logs (keep last 24 hours + errors from last 7 days)
+                cursor.execute("""
+                    DELETE FROM system_logs
+                    WHERE timestamp < datetime('now', '-1 day')
+                    AND level NOT IN ('ERROR', 'CRITICAL')
+                """)
+                
+                cursor.execute("""
+                    DELETE FROM system_logs
+                    WHERE timestamp < datetime('now', '-7 days')
+                """)
+                
+                conn.commit()
+                
+                # Log the cleanup (but don't recurse!)
+                cursor.execute("SELECT COUNT(*) as count FROM system_logs")
+                row = cursor.fetchone()
+                new_count = row[0] if row else 0
+                
+                print(f"[DatabaseLogHandler] Auto-cleanup: {total_logs:,} → {new_count:,} logs", 
+                      file=__import__('sys').stderr)
+                
+        except Exception as e:
+            # Silently fail - cleanup is not critical
+            pass
 
     def close(self):
         """Close the handler and clean up resources."""
