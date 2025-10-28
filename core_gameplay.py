@@ -43,7 +43,7 @@ class GameplayEngine:
         self.db = DatabaseInterface(db_path)  # Pattern learning database access
         self.game_config = {
             'max_actions_per_level': 100,  # Max actions per level (game can have multiple levels)
-            'max_total_actions': 500,  # Max total actions across all levels
+            'max_total_actions': 1500,  # Max total actions across all levels
             'action_timeout': 30.0,
             'strategy': 'balanced',
             'enable_random_exploration': True,
@@ -200,9 +200,17 @@ class GameplayEngine:
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
                         logger.warning(f"⏱️ Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
-                        logger.info(f"Level {current_level} timed out. Ending game.")
-                        # Break out - level timed out
-                        break
+                        logger.info(f"Level {current_level} timed out - continuing with remaining game actions if available")
+                        
+                        # Don't break! Just reset level counter and continue trying
+                        # The game should only end when:
+                        # 1. Total action limit reached (max_total_actions)
+                        # 2. Game state is WIN or GAME_OVER
+                        # 3. API returns finished state
+                        
+                        # Reset level action counter to allow continued play
+                        level_action_count = 0
+                        current_level += 1  # Move to "next level" tracking (even if not truly completed)
                     
                     logger.debug(f"Action {action_count} (Level {current_level}-{level_action_count}): State={game_state.state}, Score={game_state.score}")
 

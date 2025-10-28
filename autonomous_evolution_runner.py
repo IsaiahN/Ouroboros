@@ -42,6 +42,7 @@ from performance_analyzer import PerformanceAnalyzer
 from evolutionary_engine import EvolutionaryEngine
 from arc_rlvr_framework import ARCRLVRFramework
 from core_gameplay import GameplayEngine
+from adaptive_action_limits import AdaptiveActionLimits
 
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
@@ -85,6 +86,7 @@ class AutonomousEvolutionRunner:
         self.coordinator = OuroborosCoordinator(self.db)
         self.analyzer = PerformanceAnalyzer(self.db)
         self.factory = AgentFactory(self.db)
+        self.adaptive_limits = AdaptiveActionLimits(self.db)  # Adaptive action limit manager
         
         self.initial_population_size = initial_population_size
         self.games_per_generation = games_per_generation
@@ -175,6 +177,36 @@ class AutonomousEvolutionRunner:
         except Exception as e:
             print(f"⚠️  Cleanup error (non-critical): {e}")
     
+    def _cleanup_old_logs(self):
+        """
+        Clean up old system logs to prevent database bloat.
+        Keeps only the last 10,000 most recent log entries.
+        """
+        try:
+            # Get current log count
+            count_result = self.db.execute_query("SELECT COUNT(*) as count FROM system_logs")
+            total_logs = count_result[0]['count'] if count_result else 0
+            
+            if total_logs > 10000:
+                # Delete old logs, keep newest 10,000
+                deleted = self.db.execute_query("""
+                    DELETE FROM system_logs 
+                    WHERE id NOT IN (
+                        SELECT id FROM system_logs 
+                        ORDER BY timestamp DESC 
+                        LIMIT 10000
+                    )
+                """)
+                
+                # Vacuum to reclaim space
+                self.db.execute_query("VACUUM")
+                
+                logs_removed = total_logs - 10000
+                print(f"  🗑️  Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
+                
+        except Exception as e:
+            print(f"  ⚠️  Log cleanup failed (non-critical): {e}")
+    
     def _save_checkpoint(self):
         """Save checkpoint data for resume capability."""
         try:
@@ -235,6 +267,11 @@ class AutonomousEvolutionRunner:
         print(f"Max Generations: {self.max_generations}")
         print(f"Target Win Rate: {self.target_win_rate:.1%}")
         print(f"Evolution Interval: {self.evolution_interval.total_seconds()/60:.0f} minutes")
+        print()
+        print("🎯 Adaptive Action Limits: ENABLED")
+        print(f"   Adjusts per-level and total actions based on generation performance")
+        print(f"   Hard floor: {self.adaptive_limits.MIN_ACTIONS_PER_LEVEL} actions/level")
+        print(f"   Range: {self.adaptive_limits.MIN_TOTAL_ACTIONS}-{self.adaptive_limits.MAX_TOTAL_ACTIONS} total actions")
         print("="*80 + "\n")
     
     def print_status(self, generation: int, games_played: int, win_rate: float, 
@@ -335,6 +372,10 @@ class AutonomousEvolutionRunner:
         """
         print(f"\n🎮 Running {num_games} evaluation games...")
         
+        # Get adaptive action limits for current generation
+        actions_per_level, total_actions = self.adaptive_limits.adjust_limits(self.current_generation)
+        self.adaptive_limits.print_status()
+        
         try:
             import random
             
@@ -377,14 +418,12 @@ class AutonomousEvolutionRunner:
                         game = available_games[game_idx]
                         game_id = game.get('id', game.get('game_id'))
                         
-                        # Rule 8: max_actions_per_level = 200 as requested
-                        max_actions = random.randint(400, 600)  # Total actions per game
-                        
-                        # Configure engine with agent-specific strategy
+                        # Use adaptive action limits (adjusted per generation)
+                        # Configure engine with current adaptive limits
                         engine.configure(
                             strategy='balanced',
-                            max_actions_per_level=200,  # Rule 8: Set to 200 as requested
-                            max_actions_per_game=max_actions,
+                            max_actions_per_level=actions_per_level,  # Adaptive: adjusts based on performance
+                            max_actions_per_game=total_actions,       # Adaptive: adjusts based on performance
                             enable_random_exploration=True,
                             enable_pattern_learning=True
                         )
@@ -425,6 +464,11 @@ class AutonomousEvolutionRunner:
                         break
                 
                 self.total_games_played += len(results)
+                
+                # Auto-cleanup logs every 50 games to prevent database bloat
+                if self.total_games_played % 50 == 0:
+                    print(f"\n🗑️  Auto-cleanup triggered (every 50 games)...")
+                    self._cleanup_old_logs()
                 
                 # Calculate summary stats
                 summary = {
@@ -692,6 +736,10 @@ class AutonomousEvolutionRunner:
             print(f"   Last shutdown: {checkpoint.get('shutdown_time', 'unknown')}")
         
         self.print_banner()
+        
+        # Cleanup old logs on startup to prevent bloat from previous runs
+        print("\n🗑️  Performing startup database cleanup...")
+        self._cleanup_old_logs()
         
         try:
             # Initialize population
