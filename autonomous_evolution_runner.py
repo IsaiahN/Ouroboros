@@ -451,6 +451,7 @@ class AutonomousEvolutionRunner:
         """
         Analyze population performance and evolve new generation.
         Rule 4: Claude Code analyzes and makes evolution decisions
+        Uses comprehensive success rate (game wins + level completions + score achievements)
         
         Returns:
             True if evolution successful
@@ -462,11 +463,15 @@ class AutonomousEvolutionRunner:
             analysis = self.analyzer.analyze_population_performance()
             
             pop_stats = analysis.get('population_stats', {})
+            
+            # Use comprehensive success rate (not just game wins)
+            avg_success_rate = pop_stats.get('average_comprehensive_success', 0)
             avg_win_rate = pop_stats.get('average_win_rate', 0)
             population_size = pop_stats.get('population_size', 0)
             
             print(f"  Population: {population_size} agents")
-            print(f"  Avg Win Rate: {avg_win_rate:.2%}")
+            print(f"  Comprehensive Success Rate: {avg_success_rate:.2%} (wins + levels + scores)")
+            print(f"  Game Win Rate: {avg_win_rate:.2%} (wins only)")
             print(f"  Best Win Rate: {pop_stats.get('best_win_rate', 0):.2%}")
             
             # Check if we should evolve
@@ -474,8 +479,9 @@ class AutonomousEvolutionRunner:
                 print(f"⚠️  Reached max generations ({self.max_generations})")
                 return False
             
-            if avg_win_rate >= self.target_win_rate:
-                print(f"🎉 Reached target win rate ({self.target_win_rate:.1%})!")
+            # Use comprehensive success rate for target check
+            if avg_success_rate >= self.target_win_rate:
+                print(f"🎉 Reached target success rate ({self.target_win_rate:.1%})!")
                 return False
             
             # Evolve new generation using EvolutionaryEngine
@@ -490,15 +496,15 @@ class AutonomousEvolutionRunner:
                 print("⚠️  No agents with performance data, cannot evolve")
                 return False
             
-            # Determine evolution strategy based on performance
-            if avg_win_rate < 0.1:
+            # Determine evolution strategy based on comprehensive success
+            if avg_success_rate < 0.1:
                 strategy_focus = 'exploration'
-            elif avg_win_rate < 0.3:
+            elif avg_success_rate < 0.3:
                 strategy_focus = 'diversification'
             else:
                 strategy_focus = 'exploitation'
             
-            print(f"  Strategy: {strategy_focus}")
+            print(f"  Strategy: {strategy_focus} (based on {avg_success_rate:.1%} success rate)")
             
             # Create next generation through breeding
             new_agents_created = 0
@@ -661,7 +667,7 @@ class AutonomousEvolutionRunner:
         if should_evolve:
             success = await self.analyze_and_evolve()
             if not success:
-                # Check if we hit targets
+                # Check if we hit targets (comprehensive success)
                 if eval_results['win_rate'] >= self.target_win_rate:
                     print(f"\n🎉 TARGET ACHIEVED! Win Rate: {eval_results['win_rate']:.1%}")
                     return False
@@ -793,7 +799,8 @@ class AutonomousEvolutionRunner:
             pop_stats = analysis.get('population_stats', {})
             
             print(f"\nFinal Performance:")
-            print(f"  Win Rate: {pop_stats.get('average_win_rate', 0):.2%}")
+            print(f"  Comprehensive Success: {pop_stats.get('average_comprehensive_success', 0):.2%} (wins + levels + scores)")
+            print(f"  Game Win Rate: {pop_stats.get('average_win_rate', 0):.2%} (wins only)")
             print(f"  Best Win Rate: {pop_stats.get('best_win_rate', 0):.2%}")
             print(f"  Avg Score: {pop_stats.get('average_score', 0):.2f}")
             print(f"  Population: {pop_stats.get('population_size', 0)} agents")

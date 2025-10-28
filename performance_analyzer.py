@@ -73,17 +73,32 @@ class PerformanceAnalyzer:
         score_efficiencies = [agent.get('score_efficiency', 0.0) for agent in population_data]
         games_played = [agent.get('total_games_played', 0) for agent in population_data]
         level_progressions = [agent.get('level_progressions_detected', 0) for agent in population_data]
+        
+        # Calculate comprehensive success rates for all agents
+        comprehensive_success_rates = []
+        for agent in population_data:
+            agent_id = agent.get('agent_id')
+            if agent_id:
+                success_metrics = self.calculate_comprehensive_success_rate(agent_id)
+                comprehensive_success_rates.append(success_metrics['comprehensive_success_rate'])
+            else:
+                comprehensive_success_rates.append(0.0)
 
         # Calculate statistics
         stats = {
             'population_size': len(population_data),
             'active_agents': sum(1 for agent in population_data if agent.get('is_active', True)),
 
-            # Win rate statistics
-            'average_win_rate': sum(win_rates) / len(win_rates),
-            'best_win_rate': max(win_rates),
-            'worst_win_rate': min(win_rates),
-            'win_rate_std_dev': self._calculate_std_dev(win_rates),
+            # Win rate statistics (game wins only)
+            'average_win_rate': sum(win_rates) / len(win_rates) if win_rates else 0.0,
+            'best_win_rate': max(win_rates) if win_rates else 0.0,
+            'worst_win_rate': min(win_rates) if win_rates else 0.0,
+            'win_rate_std_dev': self._calculate_std_dev(win_rates) if win_rates else 0.0,
+            
+            # Comprehensive success statistics (wins + levels + scores)
+            'average_comprehensive_success': sum(comprehensive_success_rates) / len(comprehensive_success_rates) if comprehensive_success_rates else 0.0,
+            'best_comprehensive_success': max(comprehensive_success_rates) if comprehensive_success_rates else 0.0,
+            'comprehensive_success_std_dev': self._calculate_std_dev(comprehensive_success_rates) if comprehensive_success_rates else 0.0,
 
             # Score statistics
             'average_score': sum(avg_scores) / len(avg_scores),
@@ -166,6 +181,88 @@ class PerformanceAnalyzer:
             return 0.0
 
         return (recent_avg - historical_avg) / historical_avg
+
+    def calculate_comprehensive_success_rate(self, agent_id: str) -> Dict[str, float]:
+        """
+        Calculate comprehensive success rate including:
+        - Game wins (full victories)
+        - Level completions (partial success)
+        - Score achievements (progress toward win)
+        
+        Returns weighted success metrics for evolution decisions
+        """
+        try:
+            # Get all performance data for agent
+            perf_data = self.db.execute_query(
+                """
+                SELECT 
+                    win_achieved,
+                    level_progressions,
+                    final_score,
+                    win_score_threshold,
+                    win_proximity,
+                    score_efficiency
+                FROM agent_arc_performance
+                WHERE agent_id = ?
+                ORDER BY game_timestamp DESC
+                """,
+                (agent_id,)
+            )
+            
+            if not perf_data:
+                return {
+                    'game_win_rate': 0.0,
+                    'level_success_rate': 0.0,
+                    'score_achievement_rate': 0.0,
+                    'comprehensive_success_rate': 0.0,
+                    'total_games': 0
+                }
+            
+            total_games = len(perf_data)
+            
+            # 1. Game Win Rate (full victories)
+            game_wins = sum(1 for p in perf_data if p['win_achieved'])
+            game_win_rate = game_wins / total_games
+            
+            # 2. Level Success Rate (any level progression)
+            level_successes = sum(1 for p in perf_data if p['level_progressions'] > 0)
+            level_success_rate = level_successes / total_games
+            
+            # 3. Score Achievement Rate (games reaching 50%+ of win score)
+            score_achievements = sum(1 for p in perf_data if p['win_proximity'] >= 0.5)
+            score_achievement_rate = score_achievements / total_games
+            
+            # 4. Comprehensive Success Rate (weighted combination)
+            # Weights: Game wins (70%), Level completions (20%), Score achievements (10%)
+            comprehensive_success_rate = (
+                game_win_rate * 0.70 +
+                level_success_rate * 0.20 +
+                score_achievement_rate * 0.10
+            )
+            
+            return {
+                'game_win_rate': game_win_rate,
+                'level_success_rate': level_success_rate,
+                'score_achievement_rate': score_achievement_rate,
+                'comprehensive_success_rate': comprehensive_success_rate,
+                'total_games': total_games,
+                'game_wins': game_wins,
+                'level_completions': level_successes,
+                'score_achievements': score_achievements
+            }
+            
+        except Exception as e:
+            self._log_analysis_event("success_rate_calculation_error", {
+                "agent_id": agent_id,
+                "error": str(e)
+            })
+            return {
+                'game_win_rate': 0.0,
+                'level_success_rate': 0.0,
+                'score_achievement_rate': 0.0,
+                'comprehensive_success_rate': 0.0,
+                'total_games': 0
+            }
 
     def _calculate_win_rate_trend(self):
         """Calculate win rate trend"""
