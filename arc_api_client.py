@@ -141,7 +141,25 @@ class ARCClient:
 
     async def __aenter__(self):
         """Async context manager entry."""
-        self.session = aiohttp.ClientSession(headers=self.headers)
+        # Create timeout with longer durations for long-running games
+        timeout = aiohttp.ClientTimeout(
+            total=None,  # No total timeout
+            connect=30,  # 30 seconds to establish connection
+            sock_read=600  # 10 minutes for reading response (very long games)
+        )
+        # Create connector with keep-alive enabled
+        connector = aiohttp.TCPConnector(
+            limit=100,
+            limit_per_host=30,
+            ttl_dns_cache=300,  # Cache DNS for 5 minutes
+            enable_cleanup_closed=True,
+            force_close=False  # Keep connections alive
+        )
+        self.session = aiohttp.ClientSession(
+            headers=self.headers,
+            timeout=timeout,
+            connector=connector
+        )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

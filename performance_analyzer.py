@@ -284,6 +284,117 @@ class PerformanceAnalyzer:
                 'total_games': 0
             }
 
+    def calculate_diversity_fitness(self, agent_id: str) -> Dict[str, float]:
+        """
+        Calculate diversity-focused fitness prioritizing generalization over specialization.
+        
+        Diversity Fitness Weights:
+        - 50% Novel Game Performance (first-time games)
+        - 30% Few-Shot Learning (improvement on 2nd attempt)
+        - 20% Game Diversity (unique games scored on)
+        
+        Args:
+            agent_id: Agent ID to calculate fitness for
+            
+        Returns:
+            Dict with diversity fitness metrics
+        """
+        try:
+            # Get game diversity data
+            diversity_data = self.db.execute_query("""
+                SELECT 
+                    game_id,
+                    attempts,
+                    first_attempt_score,
+                    best_score,
+                    last_attempt_score,
+                    is_novel_game,
+                    few_shot_improvement
+                FROM agent_game_diversity
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if not diversity_data:
+                return {
+                    'diversity_fitness_score': 0.0,
+                    'novel_game_performance': 0.0,
+                    'few_shot_learning_rate': 0.0,
+                    'game_diversity_score': 0.0,
+                    'unique_games_played': 0,
+                    'unique_games_scored': 0,
+                    'overfitting_penalty': 0.0
+                }
+            
+            total_games = len(diversity_data)
+            
+            # 1. Novel Game Performance (50% weight)
+            # Average score on first-time games
+            novel_games = [g for g in diversity_data if g['is_novel_game'] or g['attempts'] == 1]
+            novel_game_performance = 0.0
+            if novel_games:
+                # Normalize scores (assume max score ~10.0 for ARC games)
+                novel_scores = [min(g['first_attempt_score'] / 10.0, 1.0) for g in novel_games]
+                novel_game_performance = sum(novel_scores) / len(novel_scores)
+            
+            # 2. Few-Shot Learning (30% weight)
+            # How much agents improve from attempt 1 to 2
+            few_shot_games = [g for g in diversity_data if g['attempts'] >= 2]
+            few_shot_learning_rate = 0.0
+            if few_shot_games:
+                improvements = [g['few_shot_improvement'] for g in few_shot_games]
+                # Count positive improvements
+                positive_improvements = sum(1 for imp in improvements if imp > 0)
+                few_shot_learning_rate = positive_improvements / len(few_shot_games)
+            
+            # 3. Game Diversity (20% weight)
+            # Ratio of unique games scored on vs played
+            unique_games_played = total_games
+            unique_games_scored = sum(1 for g in diversity_data if g['best_score'] > 0)
+            game_diversity_score = unique_games_scored / unique_games_played if unique_games_played > 0 else 0.0
+            
+            # 4. Anti-Overfitting Penalty
+            # Penalize agents that play same games repeatedly
+            max_attempts_on_single_game = max(g['attempts'] for g in diversity_data) if diversity_data else 0
+            overfitting_penalty = 0.0
+            if max_attempts_on_single_game > 10:  # Threshold for overfitting
+                overfitting_penalty = min((max_attempts_on_single_game - 10) * 0.05, 0.5)  # Max 50% penalty
+            
+            # Calculate Diversity Fitness Score
+            # 50% novel + 30% few-shot + 20% diversity - overfitting penalty
+            diversity_fitness_score = (
+                novel_game_performance * 0.50 +
+                few_shot_learning_rate * 0.30 +
+                game_diversity_score * 0.20 -
+                overfitting_penalty
+            )
+            diversity_fitness_score = max(0.0, diversity_fitness_score)  # Ensure non-negative
+            
+            return {
+                'diversity_fitness_score': diversity_fitness_score,
+                'novel_game_performance': novel_game_performance,
+                'few_shot_learning_rate': few_shot_learning_rate,
+                'game_diversity_score': game_diversity_score,
+                'unique_games_played': unique_games_played,
+                'unique_games_scored': unique_games_scored,
+                'overfitting_penalty': overfitting_penalty,
+                'max_repeats_on_game': max_attempts_on_single_game
+            }
+            
+        except Exception as e:
+            self._log_analysis_event("diversity_fitness_calculation_error", {
+                "agent_id": agent_id,
+                "error": str(e)
+            })
+            return {
+                'diversity_fitness_score': 0.0,
+                'novel_game_performance': 0.0,
+                'few_shot_learning_rate': 0.0,
+                'game_diversity_score': 0.0,
+                'unique_games_played': 0,
+                'unique_games_scored': 0,
+                'overfitting_penalty': 0.0
+            }
+
     def _calculate_win_rate_trend(self):
         """Calculate win rate trend"""
         return 0.0  # Placeholder

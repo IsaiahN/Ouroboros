@@ -375,4 +375,273 @@ CREATE INDEX IF NOT EXISTS idx_winning_sequences_efficiency ON winning_sequences
 CREATE INDEX IF NOT EXISTS idx_discovered_patterns_success_rate ON discovered_patterns(success_rate);
 CREATE INDEX IF NOT EXISTS idx_pattern_applications_success ON pattern_applications(success);
 
+-- ============================================================================
+-- AGI-FOCUSED GAME DIVERSITY TRACKING
+-- Tracks agent performance across diverse games for generalization testing
+-- Following AGI goal: generalize to 100s of unseen games, not specialize
+-- ============================================================================
+
+-- Game diversity tracking per agent
+CREATE TABLE IF NOT EXISTS agent_game_diversity (
+    agent_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    attempts INTEGER DEFAULT 0,
+    first_attempt_score REAL DEFAULT 0.0,
+    best_score REAL DEFAULT 0.0,
+    last_attempt_score REAL DEFAULT 0.0,
+    is_novel_game BOOLEAN DEFAULT TRUE,        -- First time this agent saw this game
+    few_shot_improvement REAL DEFAULT 0.0,     -- Score improvement from attempt 1 to 2
+    last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (agent_id, game_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- AGI performance metrics (generalization focus)
+CREATE TABLE IF NOT EXISTS agent_agi_metrics (
+    agent_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    
+    -- Diversity metrics
+    unique_games_played INTEGER DEFAULT 0,
+    unique_games_scored INTEGER DEFAULT 0,      -- Games with ANY score > 0
+    game_diversity_ratio REAL DEFAULT 0.0,      -- scored/played ratio
+    
+    -- Generalization metrics
+    novel_game_performance REAL DEFAULT 0.0,    -- Avg score on first-time games
+    novel_games_attempted INTEGER DEFAULT 0,
+    novel_games_scored INTEGER DEFAULT 0,
+    
+    -- Few-shot learning metrics
+    few_shot_improvement_avg REAL DEFAULT 0.0,  -- Avg improvement attempt 1→2
+    few_shot_success_rate REAL DEFAULT 0.0,     -- % games improved on 2nd try
+    
+    -- Anti-overfitting metrics
+    max_repeats_on_single_game INTEGER DEFAULT 0,
+    overfitting_penalty REAL DEFAULT 0.0,       -- Penalty if too focused on one game
+    
+    -- AGI fitness score (50% novel + 30% few-shot + 20% diversity)
+    agi_fitness_score REAL DEFAULT 0.0,
+    
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Game exposure tracking (prevent overfitting)
+CREATE TABLE IF NOT EXISTS game_exposure_history (
+    game_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    times_played INTEGER DEFAULT 0,
+    unique_agents_played INTEGER DEFAULT 0,
+    avg_score REAL DEFAULT 0.0,
+    best_score REAL DEFAULT 0.0,
+    is_retired BOOLEAN DEFAULT FALSE,           -- Retired if played too much
+    retirement_reason TEXT,
+    last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (game_id, generation)
+);
+
+-- AGI diversity indexes
+CREATE INDEX IF NOT EXISTS idx_agent_game_diversity_agent ON agent_game_diversity(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_game_diversity_novel ON agent_game_diversity(is_novel_game);
+CREATE INDEX IF NOT EXISTS idx_agent_agi_metrics_fitness ON agent_agi_metrics(agi_fitness_score DESC);
+CREATE INDEX IF NOT EXISTS idx_game_exposure_retired ON game_exposure_history(is_retired);
+
 -- [CHECKPOINT: PATTERN LEARNING INTEGRATED]
+-- [CHECKPOINT: AGI GAME DIVERSITY TRACKING ADDED]
+
+-- ============================================================================
+-- META-LEARNING EXTENSION - Learn to Learn Capability
+-- Stores learned visual primitives, transformation rules, and meta-learning metrics
+-- Enables true generalization to unseen levels through rule induction
+-- ============================================================================
+
+-- Learned visual primitives (building blocks for reasoning)
+CREATE TABLE IF NOT EXISTS visual_primitives (
+    primitive_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    primitive_type TEXT NOT NULL,          -- 'symmetry_detector', 'pattern_finder', 'color_analyzer'
+    primitive_name TEXT NOT NULL,
+    learned_parameters TEXT NOT NULL,      -- JSON: parameters/weights for this primitive
+    success_rate REAL DEFAULT 0.0,
+    times_used INTEGER DEFAULT 0,
+    avg_confidence REAL DEFAULT 0.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used TIMESTAMP,
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Learned transformation rules (abstract IF-THEN rules)
+CREATE TABLE IF NOT EXISTS learned_rules (
+    rule_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    source_game_id TEXT NOT NULL,          -- Game where rule was learned
+    rule_name TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Rule definition
+    preconditions TEXT NOT NULL,           -- JSON: visual conditions that must be met
+    action_template TEXT NOT NULL,         -- JSON: sequence of actions to take
+    expected_outcome TEXT NOT NULL,        -- 'win', 'progress', 'score_increase'
+    
+    -- Confidence and success tracking
+    confidence REAL DEFAULT 0.5,
+    success_count INTEGER DEFAULT 0,
+    failure_count INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0.0,         -- success / (success + failure)
+    
+    -- Transfer learning
+    applicable_games TEXT,                 -- JSON: list of game_ids where rule works
+    transferred_successfully BOOLEAN DEFAULT 0,
+    transfer_attempts INTEGER DEFAULT 0,
+    successful_transfers INTEGER DEFAULT 0,
+    
+    -- Rule characteristics
+    visual_signature TEXT,                 -- Compact signature for quick matching
+    complexity_level TEXT,                 -- 'simple', 'moderate', 'complex'
+    generality_score REAL DEFAULT 0.0,     -- How many games rule works on
+    
+    last_updated TIMESTAMP,
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Rule transfer attempts (learning history)
+CREATE TABLE IF NOT EXISTS rule_transfers (
+    transfer_id TEXT PRIMARY KEY,
+    rule_id TEXT NOT NULL,
+    source_game_id TEXT NOT NULL,
+    target_game_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    transfer_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Transfer results
+    transfer_successful BOOLEAN NOT NULL,
+    confidence_before REAL NOT NULL,
+    confidence_after REAL,
+    score_achieved REAL,
+    actions_taken INTEGER,
+    
+    -- Analysis
+    match_confidence REAL,                 -- How well preconditions matched
+    execution_quality REAL,                -- How well actions were executed
+    actual_result TEXT,                    -- 'full_win', 'partial_success', 'no_progress', 'failure'
+    failure_reason TEXT,
+    
+    FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Meta-learning metrics per agent (learning to learn)
+CREATE TABLE IF NOT EXISTS agent_meta_learning (
+    agent_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    
+    -- Rule acquisition
+    total_rules_learned INTEGER DEFAULT 0,
+    rules_created_this_gen INTEGER DEFAULT 0,
+    avg_rules_per_game REAL DEFAULT 0.0,
+    
+    -- Transfer learning
+    successful_transfers INTEGER DEFAULT 0,
+    failed_transfers INTEGER DEFAULT 0,
+    transfer_success_rate REAL DEFAULT 0.0,
+    
+    -- Generalization capability
+    avg_rule_generality REAL DEFAULT 0.0,  -- Avg games each rule works on
+    novel_game_success_rate REAL DEFAULT 0.0,
+    learning_rate REAL DEFAULT 0.0,        -- How fast agent learns new rules
+    
+    -- Meta-fitness (30% of total fitness in diversity mode)
+    meta_fitness_score REAL DEFAULT 0.0,
+    
+    -- Visual reasoning capability
+    visual_primitives_learned INTEGER DEFAULT 0,
+    visual_understanding_score REAL DEFAULT 0.0,
+    
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Curriculum stage tracking (4-stage learning progression)
+CREATE TABLE IF NOT EXISTS curriculum_progress (
+    agent_id TEXT NOT NULL,
+    stage_number INTEGER NOT NULL,         -- 1: specialization, 2: near_transfer, 3: diversification, 4: generalization
+    stage_name TEXT NOT NULL,
+    entered_stage TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    exited_stage TIMESTAMP,
+    
+    -- Stage requirements
+    required_win_rate REAL NOT NULL,
+    achieved_win_rate REAL DEFAULT 0.0,
+    required_transfer_rate REAL,
+    achieved_transfer_rate REAL DEFAULT 0.0,
+    
+    -- Stage performance
+    games_played_in_stage INTEGER DEFAULT 0,
+    games_won_in_stage INTEGER DEFAULT 0,
+    rules_learned_in_stage INTEGER DEFAULT 0,
+    successful_transfers_in_stage INTEGER DEFAULT 0,
+    
+    -- Advancement
+    stage_completed BOOLEAN DEFAULT FALSE,
+    completion_timestamp TIMESTAMP,
+    
+    PRIMARY KEY (agent_id, stage_number),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Game session visual analysis (store frame analyses for rule learning)
+CREATE TABLE IF NOT EXISTS game_visual_analysis (
+    analysis_id TEXT PRIMARY KEY,
+    game_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    frame_number INTEGER NOT NULL,
+    analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Frame data
+    frame_data TEXT NOT NULL,              -- JSON: the actual frame
+    
+    -- Visual features (from visual_reasoning_engine)
+    symmetry_detected TEXT,                -- JSON: symmetry types and confidence
+    patterns_found TEXT,                   -- JSON: repeating patterns
+    colors_analyzed TEXT,                  -- JSON: color distribution
+    shapes_detected TEXT,                  -- JSON: shape information
+    spatial_relations TEXT,                -- JSON: relationships between objects
+    complexity_metrics TEXT,               -- JSON: complexity scores
+    
+    -- Transformation suggestions
+    likely_transformations TEXT,           -- JSON: suggested actions based on visual analysis
+    
+    -- Used for rule learning
+    used_in_rule_id TEXT,
+    
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (used_in_rule_id) REFERENCES learned_rules(rule_id)
+);
+
+-- Meta-learning indexes
+CREATE INDEX IF NOT EXISTS idx_visual_primitives_agent ON visual_primitives(agent_id);
+CREATE INDEX IF NOT EXISTS idx_visual_primitives_type ON visual_primitives(primitive_type);
+CREATE INDEX IF NOT EXISTS idx_visual_primitives_success ON visual_primitives(success_rate DESC);
+
+CREATE INDEX IF NOT EXISTS idx_learned_rules_agent ON learned_rules(agent_id);
+CREATE INDEX IF NOT EXISTS idx_learned_rules_confidence ON learned_rules(confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_learned_rules_transferred ON learned_rules(transferred_successfully);
+CREATE INDEX IF NOT EXISTS idx_learned_rules_generality ON learned_rules(generality_score DESC);
+
+CREATE INDEX IF NOT EXISTS idx_rule_transfers_rule ON rule_transfers(rule_id);
+CREATE INDEX IF NOT EXISTS idx_rule_transfers_successful ON rule_transfers(transfer_successful);
+CREATE INDEX IF NOT EXISTS idx_rule_transfers_timestamp ON rule_transfers(transfer_timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_agent_meta_learning_fitness ON agent_meta_learning(meta_fitness_score DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_meta_learning_transfer_rate ON agent_meta_learning(transfer_success_rate DESC);
+
+CREATE INDEX IF NOT EXISTS idx_curriculum_progress_agent ON curriculum_progress(agent_id);
+CREATE INDEX IF NOT EXISTS idx_curriculum_progress_stage ON curriculum_progress(stage_number);
+CREATE INDEX IF NOT EXISTS idx_curriculum_progress_completed ON curriculum_progress(stage_completed);
+
+CREATE INDEX IF NOT EXISTS idx_game_visual_analysis_agent ON game_visual_analysis(agent_id);
+CREATE INDEX IF NOT EXISTS idx_game_visual_analysis_game ON game_visual_analysis(game_id);
+
+-- [CHECKPOINT: META-LEARNING DATABASE SCHEMA ADDED]
+-- Next: Implement meta-learning fitness calculation in evolutionary_engine.py

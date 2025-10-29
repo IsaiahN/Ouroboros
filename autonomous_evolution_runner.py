@@ -68,7 +68,9 @@ class AutonomousEvolutionRunner:
         max_generations: int = 50,
         target_win_rate: float = 0.50,
         evolution_interval_minutes: int = 60,
-        health_check_interval: int = 10
+        health_check_interval: int = 10,
+        agi_mode: bool = False,  # Enable diversity-focused evolution
+        specialist_mode: bool = False  # NEW: Enable specialist-focused evolution
     ):
         """
         Initialize autonomous runner.
@@ -81,6 +83,8 @@ class AutonomousEvolutionRunner:
             target_win_rate: Stop when this win rate achieved
             evolution_interval_minutes: Minutes between evolution cycles
             health_check_interval: Games between health checks
+            agi_mode: Enable diversity-focused generalization and anti-overfitting
+            specialist_mode: Enable specialist-focused deep mastery (NEW)
         """
         self.db = DatabaseInterface(db_path)
         self.coordinator = OuroborosCoordinator(self.db)
@@ -88,12 +92,38 @@ class AutonomousEvolutionRunner:
         self.factory = AgentFactory(self.db)
         self.adaptive_limits = AdaptiveActionLimits(self.db)  # Adaptive action limit manager
         
+        # META-LEARNING COMPONENTS (AGI MODE)
+        if agi_mode:
+            from meta_learning_curriculum import MetaLearningCurriculum
+            from rule_induction_engine import RuleInductionEngine
+            from visual_reasoning_engine import VisualReasoningEngine
+            
+            self.curriculum = MetaLearningCurriculum(self.db)
+            self.rule_engine = RuleInductionEngine(self.db)
+            self.visual_engine = VisualReasoningEngine(self.db)
+            print("✨ Meta-learning components initialized")
+        else:
+            self.curriculum = None
+            self.rule_engine = None
+            self.visual_engine = None
+        
+        # SPECIALIST COORDINATOR (SPECIALIST MODE)
+        if specialist_mode:
+            from specialist_coordinator import SpecialistCoordinator
+            
+            self.specialist_coordinator = SpecialistCoordinator(self.db)
+            print("🎯 Specialist coordinator initialized")
+        else:
+            self.specialist_coordinator = None
+        
         self.initial_population_size = initial_population_size
         self.games_per_generation = games_per_generation
         self.max_generations = max_generations
         self.target_win_rate = target_win_rate
         self.evolution_interval = timedelta(minutes=evolution_interval_minutes)
         self.health_check_interval = health_check_interval
+        self.agi_mode = agi_mode  # Diversity mode flag
+        self.specialist_mode = specialist_mode  # NEW: Specialist mode flag
         
         self.current_generation = 0
         self.total_games_played = 0
@@ -163,6 +193,11 @@ class AutonomousEvolutionRunner:
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
             
+            # Force WAL checkpoint to save all pending writes
+            print("  - Checkpointing database WAL...")
+            if hasattr(self.db, 'checkpoint_wal'):
+                self.db.checkpoint_wal()
+            
             # Close database connections
             print("  - Closing database connections...")
             if hasattr(self.db, 'close'):
@@ -210,6 +245,10 @@ class AutonomousEvolutionRunner:
     def _save_checkpoint(self):
         """Save checkpoint data for resume capability."""
         try:
+            # Checkpoint WAL first to ensure data is persisted
+            if hasattr(self.db, 'checkpoint_wal'):
+                self.db.checkpoint_wal()
+            
             checkpoint = {
                 'current_generation': self.current_generation,
                 'total_games_played': self.total_games_played,
@@ -268,6 +307,30 @@ class AutonomousEvolutionRunner:
         print(f"Target Win Rate: {self.target_win_rate:.1%}")
         print(f"Evolution Interval: {self.evolution_interval.total_seconds()/60:.0f} minutes")
         print()
+        
+        # Specialist Mode indicator (NEW)
+        if self.specialist_mode:
+            print("🎯 SPECIALIST MODE: ENABLED")
+            print("   Focus: Deep mastery over generalization")
+            print("   Strategy: Each agent masters 2-3 specific games")
+            print("   Fitness: 100% performance on assigned games")
+            print("   Goal: Achieve high scores (2.0-3.0+) through focused training")
+            print()
+        
+        # Diversity Mode indicator
+        elif self.agi_mode:
+            print("🌍 DIVERSITY MODE: ENABLED")
+            print("   Focus: Generalization over specialization")
+            print("   Strategy: Diverse games, anti-overfitting, novel game priority")
+            print("   Fitness: 50% novel games + 30% few-shot + 20% diversity")
+            print()
+            print("🧠 META-LEARNING: ENABLED")
+            print("   Visual Reasoning: Analyzes grids for symmetry, patterns, shapes")
+            print("   Rule Induction: Learns abstract IF-THEN rules from wins")
+            print("   Curriculum: 4-stage progression (specialization → generalization)")
+            print("   Fitness: 30% standard + 40% diversity + 30% meta-learning")
+            print()
+        
         print("🎯 Adaptive Action Limits: ENABLED")
         print(f"   Adjusts per-level and total actions based on generation performance")
         print(f"   Hard floor: {self.adaptive_limits.MIN_ACTIONS_PER_LEVEL} actions/level")
@@ -351,6 +414,29 @@ class AutonomousEvolutionRunner:
                 print(f"  Agent {i+1}/{self.initial_population_size}: {agent.agent_type} - {agent.agent_id}")
             
             print(f"✓ Created {len(agents_created)} agents")
+            
+            # Initialize specialist assignments if in specialist mode
+            if self.specialist_mode and self.specialist_coordinator:
+                print(f"\n🎯 Initializing specialist game assignments...")
+                # Get available games
+                try:
+                    from arc_api_client import ARCAPIClient
+                    api_key = os.getenv('ARC_API_KEY')
+                    if api_key:
+                        client = ARCAPIClient(api_key)
+                        available_games = client.get_available_games()
+                        game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
+                        
+                        if game_ids:
+                            # Assign 2 games per specialist for focused training
+                            self.specialist_coordinator.initialize_specialist_assignments(
+                                [a.to_dict() for a in agents_created],
+                                game_ids,
+                                games_per_specialist=2
+                            )
+                except Exception as e:
+                    print(f"⚠️  Could not initialize specialist assignments: {e}")
+            
             return True
             
         except Exception as e:
@@ -401,22 +487,65 @@ class AutonomousEvolutionRunner:
                     print("✗ No games available from API")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
                 
+                # SPECIALIST MODE: Auto-assign games if not already assigned (for resumed checkpoints)
+                if self.specialist_mode and self.specialist_coordinator:
+                    # Check if assignments exist
+                    first_agent = agents[0] if agents else None
+                    if first_agent:
+                        assignments = self.specialist_coordinator.get_games_for_specialist(first_agent['agent_id'])
+                        if not assignments:
+                            print(f"\n🎯 Auto-assigning specialists (resuming from checkpoint)...")
+                            game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
+                            self.specialist_coordinator.initialize_specialist_assignments(
+                                agents,
+                                game_ids,
+                                games_per_specialist=2
+                            )
+                            print(f"✓ Assigned {len(game_ids)} games across {len(agents)} specialists")
+                
                 results = []
                 total_wins = 0
                 total_score = 0
+                rules_learned = 0  # NEW: Track rule learning
                 
                 for agent_idx, agent in enumerate(agents):
                     agent_id = agent['agent_id']
                     
+                    # SPECIALIST MODE: Use specialist coordinator for game selection (NEW)
+                    if self.specialist_mode and self.specialist_coordinator:
+                        # Select only assigned games for this specialist
+                        agent_games = self.specialist_coordinator.select_games_for_agent(
+                            agent_id,
+                            [g.get('id', g.get('game_id')) for g in available_games],
+                            games_per_agent
+                        )
+                        assigned = self.specialist_coordinator.get_games_for_specialist(agent_id)
+                        print(f"  🎯 Agent {agent_id[:8]} - Specialist on {assigned}: {len(agent_games)} games")
+                    
+                    # META-LEARNING: Use curriculum for game selection
+                    elif self.curriculum:
+                        # Initialize agent in curriculum if needed
+                        if self.curriculum.get_agent_current_stage(agent_id) == 1 and \
+                           not self.db.execute_query("SELECT 1 FROM curriculum_progress WHERE agent_id = ?", (agent_id,)):
+                            self.curriculum.initialize_agent_curriculum(agent_id, self.current_generation)
+                        
+                        # Select games based on curriculum stage
+                        agent_games = self.curriculum.select_games_for_agent(
+                            agent_id, 
+                            [g.get('id', g.get('game_id')) for g in available_games],
+                            games_per_agent
+                        )
+                        print(f"  📚 Agent {agent_id[:8]} - Stage {self.curriculum.get_agent_current_stage(agent_id)}: {len(agent_games)} games")
+                    else:
+                        # Standard game selection
+                        agent_games = [available_games[i % len(available_games)].get('id', available_games[i % len(available_games)].get('game_id')) 
+                                      for i in range(games_per_agent)]
+                    
                     # Run games for this agent
-                    for game_num in range(games_per_agent):
+                    for game_idx, game_id in enumerate(agent_games):
                         if self.shutdown_requested:
                             print("⏸️  Shutdown requested, stopping evaluation")
                             break
-                        
-                        game_idx = (agent_idx * games_per_agent + game_num) % len(available_games)
-                        game = available_games[game_idx]
-                        game_id = game.get('id', game.get('game_id'))
                         
                         # Use adaptive action limits (adjusted per generation)
                         # Configure engine with current adaptive limits
@@ -425,11 +554,26 @@ class AutonomousEvolutionRunner:
                             max_actions_per_level=actions_per_level,  # Adaptive: adjusts based on performance
                             max_actions_per_game=total_actions,       # Adaptive: adjusts based on performance
                             enable_random_exploration=True,
-                            enable_pattern_learning=True
+                            enable_pattern_learning=True,
+                            # Diversity Mode settings (Rule 10: enhance existing)
+                            diversity_mode=self.agi_mode,  # CHANGED: use diversity_mode instead of agi_mode
+                            enforce_game_diversity=self.agi_mode,
+                            max_repeats_per_game=5 if self.agi_mode else 999,
+                            # Specialist Mode settings (NEW)
+                            specialist_mode=self.specialist_mode
                         )
                         
                         # Play game - REAL ARC API CALL
-                        result = await engine.play_single_game(game_id)
+                        # Wrap in cancellable task for graceful shutdown
+                        try:
+                            game_task = asyncio.create_task(engine.play_single_game(game_id))
+                            result = await game_task
+                        except asyncio.CancelledError:
+                            # Game was cancelled during shutdown
+                            print(f"⏸️  Game {game_id[:8]} cancelled")
+                            if self.shutdown_requested:
+                                break
+                            raise
                         
                         # Process ARC rewards
                         rlvr = ARCRLVRFramework(self.db)
@@ -448,6 +592,26 @@ class AutonomousEvolutionRunner:
                         
                         if result.get('win', False):
                             total_wins += 1
+                            
+                            # Extract rules from winning games for meta-learning
+                            if self.rule_engine and hasattr(engine, 'session_manager'):
+                                try:
+                                    game_session_data = {
+                                        'game_id': game_id,
+                                        'agent_id': agent_id,
+                                        'session_id': engine.session_manager.current_session_id,
+                                        'initial_frame': result.get('initial_frame'),
+                                        'action_sequence': result.get('action_sequence', []),
+                                        'frame_states': result.get('frame_states', []),
+                                        'won': True,
+                                        'score_achieved': result.get('final_score', 0)
+                                    }
+                                    new_rule = self.rule_engine.extract_rule_from_game_session(game_session_data)
+                                    if new_rule:
+                                        print(f"  📚 Learned new rule: {new_rule['rule_name']}")
+                                except Exception as e:
+                                    print(f"  ⚠️  Failed to extract rule: {e}")
+                        
                         total_score += result.get('final_score', 0)
                         
                         results.append({
@@ -464,6 +628,13 @@ class AutonomousEvolutionRunner:
                         break
                 
                 self.total_games_played += len(results)
+                
+                # Update curriculum progress for this agent if meta-learning enabled
+                if self.curriculum:
+                    try:
+                        self.curriculum.update_stage_progress(agent_id)
+                    except Exception as e:
+                        print(f"  ⚠️  Failed to update curriculum: {e}")
                 
                 # Auto-cleanup logs every 50 games to prevent database bloat
                 if self.total_games_played % 50 == 0:
@@ -485,11 +656,22 @@ class AutonomousEvolutionRunner:
                 
                 return summary
             
+        except asyncio.CancelledError:
+            # Task was cancelled during shutdown - this is expected
+            print("⏸️  Evaluation cancelled during shutdown")
+            raise  # Re-raise to propagate cancellation
+            
         except Exception as e:
-            print(f"✗ Evaluation games failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
+            if self.shutdown_requested:
+                # Errors during shutdown are expected, just log briefly
+                print(f"⚠️  Error during shutdown evaluation (ignored): {type(e).__name__}")
+                return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
+            else:
+                # Real error - log details
+                print(f"✗ Evaluation games failed: {e}")
+                import traceback
+                traceback.print_exc()
+                return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
     
     async def analyze_and_evolve(self) -> bool:
         """
@@ -550,56 +732,37 @@ class AutonomousEvolutionRunner:
             
             print(f"  Strategy: {strategy_focus} (based on {avg_success_rate:.1%} success rate)")
             
-            # Create next generation through breeding
-            new_agents_created = 0
-            import random
+            # Create evolution strategy dict with diversity mode flag
+            evolution_strategy = {
+                'focus': strategy_focus,
+                'diversity_mode': self.agi_mode,  # Pass diversity mode to evolutionary engine
+                'specialist_mode': self.specialist_mode,  # Pass specialist mode to evolutionary engine (NEW)
+                'generation': self.current_generation,
+                'mutation_rate': 0.3 if strategy_focus == 'exploration' else 0.15,
+                'crossover_rate': 0.7,
+                'selection_pressure': 0.5,
+                'elite_size': 2,
+                'offspring_size': 5
+            }
             
-            # Get crossover and mutation operators
-            from evolutionary_engine import CrossoverOperations, MutationStrategies
-            crossover_ops = CrossoverOperations()
-            mutator = MutationStrategies()
+            # Use EvolutionaryEngine's evolve_population for proper fitness calculation
+            # This applies meta-learning fitness (30/40/30 split) when diversity_mode=True
+            print(f"\n🧬 Calling evolve_population with diversity_mode={self.agi_mode}...")
+            evolution_engine = EvolutionaryEngine(self.db)
             
-            for i in range(3):  # Create 3 new agents per generation
-                # Select two parents from top performers
-                if len(top_performers) >= 2:
-                    parent1 = random.choice(top_performers)
-                    parent2 = random.choice(top_performers)
-                    
-                    # Get parent agent data
-                    parent1_data = self.db.execute_query(
-                        "SELECT * FROM agents WHERE agent_id = ?",
-                        (parent1['agent_id'],)
-                    )
-                    parent2_data = self.db.execute_query(
-                        "SELECT * FROM agents WHERE agent_id = ?",
-                        (parent2['agent_id'],)
-                    )
-                    
-                    if parent1_data and parent2_data:
-                        # Crossover to create child genome
-                        child_genome = crossover_ops.crossover_genomes(
-                            parent1_data[0],
-                            parent2_data[0]
-                        )
-                        
-                        # Mutate child based on strategy
-                        mutated_data = mutator.mutate_genome(
-                            {'genome': child_genome},
-                            strategy_focus=strategy_focus
-                        )
-                        
-                        # Create new agent
-                        agent_type = random.choice([
-                            'pattern_specialist',
-                            'score_optimizer',
-                            'exploration_agent',
-                            'win_focused_agent'
-                        ])
-                        
-                        new_agent = self.factory.create_agent(agent_type, mutated_data['genome'])
-                        new_agents_created += 1
-                        
-                        print(f"  Created agent: {new_agent.agent_id} (from {parent1['agent_id']} x {parent2['agent_id']})")
+            try:
+                new_population = evolution_engine.evolve_population(evolution_strategy)
+                new_agents_created = len(new_population)
+                
+                print(f"✓ Evolution cycle complete")
+                print(f"  New population size: {new_agents_created}")
+                if self.agi_mode:
+                    print(f"  Fitness calculation: 30% standard + 40% diversity + 30% meta-learning")
+                
+            except Exception as e:
+                print(f"⚠️  Evolution failed: {e}")
+                print(f"  Falling back to previous generation")
+                return False
             
             self.current_generation += 1
             self.last_evolution_time = datetime.now()
@@ -676,6 +839,11 @@ class AutonomousEvolutionRunner:
         Returns:
             True if should continue, False if should stop
         """
+        # Check for shutdown at start of cycle
+        if self.shutdown_requested:
+            print("🛑 Shutdown requested - skipping cycle")
+            return False
+        
         # Health check
         health = self.check_system_health()
         if not health['healthy']:
@@ -772,8 +940,23 @@ class AutonomousEvolutionRunner:
                         break
                     
                 except asyncio.CancelledError:
-                    print("\n⚠️  Current cycle cancelled")
+                    print("\n⚠️  Current cycle cancelled - shutting down gracefully")
                     break
+                
+                except Exception as e:
+                    if self.shutdown_requested:
+                        # Ignore errors during shutdown - they're expected
+                        print(f"\n⚠️  Error during shutdown (ignored): {type(e).__name__}")
+                        break
+                    else:
+                        # Real error - log and continue
+                        print(f"\n⚠️  Cycle error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Continue to next cycle unless shutdown requested
+                        if not self.shutdown_requested:
+                            continue
+                        break
                 
                 # Check shutdown between cycles
                 if self.shutdown_requested:
@@ -928,6 +1111,12 @@ async def main():
         help='Database file path (default: core_data.db)'
     )
     
+    parser.add_argument(
+        '--diversity-mode',
+        action='store_true',
+        help='Enable diversity-focused evolution (diverse games, anti-overfitting, novel game priority)'
+    )
+    
     args = parser.parse_args()
     
     # Validate API key
@@ -943,7 +1132,8 @@ async def main():
         games_per_generation=args.games_per_gen,
         max_generations=args.max_generations,
         target_win_rate=args.target_win_rate,
-        evolution_interval_minutes=args.evolution_interval
+        evolution_interval_minutes=args.evolution_interval,
+        agi_mode=args.diversity_mode  # NEW: Pass diversity mode flag
     )
     
     await runner.run()

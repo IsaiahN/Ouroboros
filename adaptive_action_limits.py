@@ -177,7 +177,6 @@ class AdaptiveActionLimits:
         recent_perf = performances[0]
         comprehensive_success = recent_perf['comprehensive_success']
         avg_actions = recent_perf['avg_actions_used']
-        efficiency = recent_perf['efficiency']
         
         # Determine adjustment direction
         adjustment_factor = 1.0

@@ -163,6 +163,11 @@ class GameSessionManager:
 
         if not self.current_game_id:
             raise RuntimeError("No active game")
+        
+        # Check if client session is still valid, recreate if needed
+        if self.client and not self.client.session:
+            logger.warning("Client session lost, recreating...")
+            await self.client.__aenter__()
 
         # Record action details for tracing
         action_start_time = datetime.now()

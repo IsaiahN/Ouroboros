@@ -31,18 +31,26 @@ class EvolutionaryEngine:
         Returns new generation of agents
         """
         generation = evolution_strategy.get('generation', 0)
+        diversity_mode = evolution_strategy.get('diversity_mode', False)  # Check if in diversity mode
+        specialist_mode = evolution_strategy.get('specialist_mode', False)  # NEW: Check if in specialist mode
 
         self._log_evolution_event("evolution_cycle_started", {
             "generation": generation,
-            "strategy": evolution_strategy
+            "strategy": evolution_strategy,
+            "diversity_mode": diversity_mode,
+            "specialist_mode": specialist_mode  # NEW: Log specialist mode
         })
 
         try:
             # 1. Load current population from database (Rule 2)
             current_population = self._load_population_from_database()
 
-            # 2. Calculate ARC-based fitness scores
-            fitness_scores = self._calculate_arc_fitness(current_population)
+            # 2. Calculate ARC-based fitness scores (with optional diversity+meta-learning or specialist)
+            fitness_scores = self._calculate_arc_fitness(
+                current_population, 
+                diversity_mode=diversity_mode,
+                specialist_mode=specialist_mode
+            )
 
             # 3. Select breeding pairs based on ARC performance
             breeding_pairs = self._select_breeding_pairs(
@@ -84,46 +92,287 @@ class EvolutionaryEngine:
             })
             raise
 
-    def _calculate_arc_fitness(self, population: List[Dict[str, Any]]) -> Dict[str, float]:
+    def _calculate_arc_fitness(self, population: List[Dict[str, Any]], 
+                               diversity_mode: bool = False,
+                               specialist_mode: bool = False) -> Dict[str, float]:
         """
-        Calculate fitness based on ARC game performance only
+        Calculate fitness based on ARC game performance
         Uses ARC-native rewards: wins, scores, efficiency
+        
+        Args:
+            population: List of agent dictionaries
+            diversity_mode: If True, use combined fitness (standard + diversity + meta-learning)
+            specialist_mode: If True, focus 100% on assigned specialization games
+        
+        Returns:
+            Dictionary mapping agent_id to fitness score
         """
         fitness_scores = {}
 
         for agent in population:
             agent_id = agent['agent_id']
 
-            # Get ARC performance from database
-            arc_performance = self.db.get_agent_arc_performance(agent_id)
-
-            if not arc_performance:
-                # New agent with no performance data
-                fitness_scores[agent_id] = 0.0
-                continue
-
-            # Calculate fitness based on ARC-native metrics
-            win_rate = arc_performance.get('win_rate', 0.0)
-            score_efficiency = arc_performance.get('score_efficiency', 0.0)
-            consistency_score = arc_performance.get('consistency_score', 0.0)
-            level_progression_rate = arc_performance.get('level_progression_rate', 0.0)
-
-            # Weighted fitness calculation (prioritizing ARC wins)
-            fitness = (
-                win_rate * 0.5 +                    # 50% weight on winning games
-                score_efficiency * 0.25 +           # 25% weight on score efficiency
-                consistency_score * 0.15 +          # 15% weight on consistency
-                level_progression_rate * 0.10       # 10% weight on level progression
-            )
-
-            # Bonus for agents with more game experience (minimum reliability)
-            games_played = arc_performance.get('total_games_played', 0)
-            if games_played >= 10:
-                fitness *= 1.1  # 10% bonus for proven agents
-
-            fitness_scores[agent_id] = fitness
+            if specialist_mode:
+                # SPECIALIST FITNESS - 100% focus on assigned games
+                # No diversity penalties, deep mastery encouraged
+                fitness_scores[agent_id] = self._calculate_specialist_fitness(agent_id, agent)
+                
+            elif diversity_mode:
+                # COMBINED FITNESS for generalization
+                # 30% standard (can it win?)
+                # 40% diversity (can it generalize?)
+                # 30% meta-learning (can it learn to learn?)
+                
+                standard_fitness = self._calculate_standard_fitness(agent_id)
+                diversity_fitness = self._calculate_diversity_fitness_component(agent_id)
+                meta_fitness = self._calculate_meta_learning_fitness(agent_id)
+                
+                # Weighted combination
+                fitness = (
+                    standard_fitness * 0.30 +
+                    diversity_fitness * 0.40 +
+                    meta_fitness * 0.30
+                )
+                
+                fitness_scores[agent_id] = fitness
+            else:
+                # STANDARD FITNESS only (original behavior)
+                fitness_scores[agent_id] = self._calculate_standard_fitness(agent_id)
 
         return fitness_scores
+    
+    def _calculate_standard_fitness(self, agent_id: str) -> float:
+        """
+        Calculate standard fitness based on win rate and performance
+        Original fitness calculation (50% wins, 25% efficiency, 15% consistency, 10% progression)
+        """
+        # Get ARC performance from database
+        arc_performance = self.db.get_agent_arc_performance(agent_id)
+
+        if not arc_performance:
+            # New agent with no performance data
+            return 0.0
+
+        # Calculate fitness based on ARC-native metrics
+        win_rate = arc_performance.get('win_rate', 0.0)
+        score_efficiency = arc_performance.get('score_efficiency', 0.0)
+        consistency_score = arc_performance.get('consistency_score', 0.0)
+        level_progression_rate = arc_performance.get('level_progression_rate', 0.0)
+
+        # Weighted fitness calculation (prioritizing ARC wins)
+        fitness = (
+            win_rate * 0.5 +                    # 50% weight on winning games
+            score_efficiency * 0.25 +           # 25% weight on score efficiency
+            consistency_score * 0.15 +          # 15% weight on consistency
+            level_progression_rate * 0.10       # 10% weight on level progression
+        )
+
+        # Bonus for agents with more game experience (minimum reliability)
+        games_played = arc_performance.get('total_games_played', 0)
+        if games_played >= 10:
+            fitness *= 1.1  # 10% bonus for proven agents
+
+        return fitness
+    
+    def _calculate_specialist_fitness(self, agent_id: str, agent_data: Dict[str, Any]) -> float:
+        """
+        Calculate specialist fitness - 100% focus on assigned games
+        No diversity penalties, encourages deep mastery
+        
+        Args:
+            agent_id: Agent ID
+            agent_data: Agent dictionary with specialization field
+            
+        Returns:
+            Specialist fitness score (0.0 to 1.0+)
+        """
+        # Get assigned games from specialization field
+        specialization = agent_data.get('specialization', '')
+        try:
+            if isinstance(specialization, str) and specialization:
+                spec_data = json.loads(specialization) if specialization.startswith('{') else {'assigned_games': []}
+            else:
+                spec_data = {}
+        except:
+            spec_data = {}
+        
+        assigned_games = spec_data.get('assigned_games', [])
+        
+        if not assigned_games:
+            # No assignment yet - use standard fitness
+            return self._calculate_standard_fitness(agent_id)
+        
+        # Get performance ONLY on assigned games
+        try:
+            # Query performance on assigned games only
+            placeholders = ','.join(['?' for _ in assigned_games])
+            query = f"""
+                SELECT 
+                    COUNT(*) as games_played,
+                    SUM(CASE WHEN win_achieved THEN 1 ELSE 0 END) as wins,
+                    AVG(final_score) as avg_score,
+                    AVG(score_efficiency) as avg_efficiency,
+                    MAX(final_score) as best_score
+                FROM agent_arc_performance
+                WHERE agent_id = ? AND game_id IN ({placeholders})
+            """
+            
+            result = self.db.execute_query(query, (agent_id, *assigned_games))
+            
+            if not result or result[0]['games_played'] == 0:
+                # No games played on assigned games yet
+                return 0.0
+            
+            perf = result[0]
+            games_played = perf['games_played']
+            wins = perf['wins'] or 0
+            avg_score = perf['avg_score'] or 0.0
+            avg_efficiency = perf['avg_efficiency'] or 0.0
+            best_score = perf['best_score'] or 0.0
+            
+            # Calculate specialist fitness
+            # Heavy emphasis on wins and scores ON ASSIGNED GAMES
+            win_rate = wins / games_played if games_played > 0 else 0.0
+            
+            # Normalize avg_score (assuming max score ~10.0 for ARC)
+            normalized_score = min(avg_score / 10.0, 1.0)
+            
+            # Normalize efficiency (assuming 1.0 is excellent)
+            normalized_efficiency = min(avg_efficiency, 1.0)
+            
+            # Specialist fitness weights:
+            # 50% win rate on assigned games
+            # 30% average score on assigned games  
+            # 20% efficiency on assigned games
+            fitness = (
+                win_rate * 0.50 +
+                normalized_score * 0.30 +
+                normalized_efficiency * 0.20
+            )
+            
+            # Bonus for deep mastery (high scores on assigned games)
+            if best_score >= 3.0:
+                fitness *= 1.3  # 30% bonus for achieving score 3+
+            elif best_score >= 2.0:
+                fitness *= 1.15  # 15% bonus for achieving score 2+
+            
+            # Bonus for consistent performance
+            if games_played >= 20:
+                fitness *= 1.1  # 10% bonus for experience
+            
+            return min(fitness, 2.0)  # Cap at 2.0 to allow specialists to dominate
+            
+        except Exception as e:
+            self._log_evolution_event("specialist_fitness_error", {
+                "agent_id": agent_id,
+                "error": str(e),
+                "assigned_games": assigned_games
+            })
+            return 0.0
+    
+    def _calculate_diversity_fitness_component(self, agent_id: str) -> float:
+        """
+        Calculate diversity fitness (novel games, few-shot learning, diversity)
+        Uses performance_analyzer.calculate_diversity_fitness()
+        """
+        try:
+            from performance_analyzer import PerformanceAnalyzer
+            analyzer = PerformanceAnalyzer(self.db)
+            
+            diversity_metrics = analyzer.calculate_diversity_fitness(agent_id)
+            return diversity_metrics.get('diversity_fitness_score', 0.0)
+        except Exception as e:
+            self._log_evolution_event("diversity_fitness_error", {
+                "agent_id": agent_id,
+                "error": str(e)
+            })
+            return 0.0
+    
+    def _calculate_meta_learning_fitness(self, agent_id: str) -> float:
+        """
+        Calculate meta-learning fitness (ability to learn and transfer knowledge)
+        
+        Metrics:
+        - 25% Rule acquisition (how many rules learned)
+        - 35% Transfer success rate (rules that work on new games)
+        - 25% Rule generality (avg games each rule works on)
+        - 15% Learning speed (rules per game)
+        
+        Returns:
+            Meta-learning fitness score (0.0 to 1.0)
+        """
+        try:
+            # Get meta-learning metrics from database
+            meta_metrics = self.db.execute_query("""
+                SELECT 
+                    total_rules_learned,
+                    successful_transfers,
+                    failed_transfers,
+                    transfer_success_rate,
+                    avg_rule_generality,
+                    learning_rate
+                FROM agent_meta_learning
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if not meta_metrics or len(meta_metrics) == 0:
+                # No meta-learning data yet - return 0
+                return 0.0
+            
+            metrics = meta_metrics[0]
+            
+            # 1. Rule acquisition score (normalized to 0-1)
+            rules_learned = metrics.get('total_rules_learned', 0)
+            rule_acquisition_score = min(rules_learned / 20, 1.0)  # Cap at 20 rules
+            
+            # 2. Transfer success rate (already 0-1)
+            transfer_success_rate = metrics.get('transfer_success_rate', 0.0)
+            
+            # 3. Rule generality (normalized to 0-1)
+            avg_generality = metrics.get('avg_rule_generality', 0.0)
+            rule_generality_score = min(avg_generality / 5, 1.0)  # Cap at 5 games per rule
+            
+            # 4. Learning speed (normalized to 0-1)
+            learning_rate = metrics.get('learning_rate', 0.0)
+            learning_speed_score = min(learning_rate * 10, 1.0)  # Cap at 0.1 rules/game
+            
+            # Combined meta-fitness
+            meta_fitness = (
+                rule_acquisition_score * 0.25 +
+                transfer_success_rate * 0.35 +
+                rule_generality_score * 0.25 +
+                learning_speed_score * 0.15
+            )
+            
+            # Store calculated meta-fitness back to database
+            self.db.execute_query("""
+                UPDATE agent_meta_learning
+                SET meta_fitness_score = ?,
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE agent_id = ?
+            """, (meta_fitness, agent_id))
+            
+            return meta_fitness
+            
+        except Exception as e:
+            self._log_evolution_event("meta_learning_fitness_error", {
+                "agent_id": agent_id,
+                "error": str(e)
+            })
+            return 0.0
+    
+    def _get_agent_games_played(self, agent_id: str) -> int:
+        """Get total games played by agent"""
+        try:
+            result = self.db.execute_query("""
+                SELECT total_games_played FROM agents WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if result and len(result) > 0:
+                return result[0].get('total_games_played', 0)
+            return 0
+        except:
+            return 0
 
     def _select_breeding_pairs(self, population: List[Dict[str, Any]],
                              fitness_scores: Dict[str, float],

@@ -1,15 +1,73 @@
-# Core Game Mechanics
+# Ouroboros - ARC AGI 3 Autonomous Evolution System
 
-A clean, modular implementation of essential ARC-AGI-3 game functionality. This module contains only the core mechanics needed to play games without the complexity of architect, governor, or director systems.
+A clean, modular implementation of essential ARC-AGI-3 game functionality with autonomous evolutionary agents. This system combines core game mechanics with an evolutionary framework where agents evolve to master ARC games.
 
 ## Features
 
+### Core Game Mechanics
 - **Clean ARC API Client**: Simple interface for interacting with ARC-AGI-3 API
 - **Session Management**: Handle game sessions with graceful startup and shutdown
 - **Action Handling**: Send and validate game actions with automatic tracing
 - **Database Persistence**: Store game data, action traces, and performance metrics
 - **Gameplay Engine**: Complete game playing logic with multiple strategies
 - **Performance Tracking**: Built-in statistics and effectiveness analysis
+
+### Ouroboros Evolution System
+- **Autonomous Evolution**: Self-managing evolutionary system (Claude Code as coordinator)
+- **Specialist Agents**: Deep mastery of specific games through focused repetition
+- **Diversity Mode**: Generalization across diverse game types
+- **Adaptive Action Limits**: Dynamic adjustment based on performance
+- **Pattern Learning**: Capture and replay winning sequences
+- **Meta-Learning**: Rule induction and visual reasoning
+- **Database-Only Storage**: All data in SQLite, no log files (Rule 2)
+- **Graceful Shutdown**: Ctrl+C saves all progress via WAL checkpoint
+
+## Quick Start
+
+### Evolution System (Recommended)
+
+Run autonomous evolution to develop high-performing agents:
+
+```bash
+# Specialist mode - agents master specific games (recommended for high scores)
+python run_evolution.py --specialist --quick
+
+# Standard balanced mode
+python run_evolution.py
+
+# Diversity mode - generalization focus
+python run_evolution.py --diversity
+
+# Fast testing iterations
+python run_evolution.py --fast --specialist
+```
+
+**Modes:**
+- `--specialist`: Each agent masters 2-3 specific games (achieves 2.0-3.0+ scores)
+- `--diversity`: Agents trained on diverse games (generalization over specialization)
+- `--quick`: 5 generations for testing
+- `--fast`: 30-minute evolution intervals
+- `--thorough`: 90-minute intervals, 50 games per generation
+
+**Graceful Shutdown:**
+Press **Ctrl+C** once to initiate graceful shutdown:
+- Current game completes or cancels
+- WAL checkpoint saves all data
+- Database closes cleanly
+- Checkpoint state saved for resume
+
+### Manual Game Testing
+
+```bash
+# Play a single game manually
+python main_runner.py play <game_id>
+
+# Show database statistics
+python main_runner.py stats
+
+# List available games
+python main_runner.py list
+```
 
 ## Core Components
 
@@ -44,13 +102,13 @@ A clean, modular implementation of essential ARC-AGI-3 game functionality. This 
 - Support for custom action callbacks
 - Session and multi-game management
 
-## Quick Start
+## Advanced Usage
 
-### Basic Usage
+### Python API Usage
 
 ```python
 import asyncio
-from CORE_GAME_MECHANICS import GameplayEngine
+from core_gameplay import GameplayEngine
 
 async def play_game():
     # Initialize with your API key
@@ -61,22 +119,6 @@ async def play_game():
         print(f"Won: {result['win']}")
 
 asyncio.run(play_game())
-```
-
-### Command Line Usage
-
-```bash
-# Play a single game
-python -m CORE_GAME_MECHANICS.main_runner play game_123 --api-key YOUR_KEY
-
-# Run a gaming session
-python -m CORE_GAME_MECHANICS.main_runner session --max-games 5 --strategy balanced
-
-# Show statistics
-python -m CORE_GAME_MECHANICS.main_runner stats
-
-# List available games
-python -m CORE_GAME_MECHANICS.main_runner list --api-key YOUR_KEY
 ```
 
 ### Environment Setup
@@ -99,9 +141,6 @@ DATABASE_PATH=core_data.db
 # Optional: Logging Configuration
 LOG_LEVEL=INFO
 
-# Optional: API Configuration
-ARC_BASE_URL=https://arc-agi3-production.up.railway.app
-
 # Python Configuration
 # Disable Python bytecode (.pyc) file generation
 PYTHONDONTWRITEBYTECODE=1
@@ -112,8 +151,6 @@ PYTHONDONTWRITEBYTECODE=1
 ```bash
 export ARC_API_KEY="your_arc_api_key_here"
 ```
-
-## Advanced Usage
 
 ### Custom Strategy
 
@@ -134,7 +171,8 @@ async with GameplayEngine() as engine:
 ### Manual Session Management
 
 ```python
-from CORE_GAME_MECHANICS import GameSessionManager, ActionHandler
+from game_session_manager import GameSessionManager
+from action_handler import ActionHandler
 
 session_manager = GameSessionManager()
 action_handler = ActionHandler(session_manager)

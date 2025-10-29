@@ -172,36 +172,55 @@ Whenever creating an implementation or change, Test the new implementation on th
 ### Running Evolution
 ```bash
 # Start autonomous evolution (Claude Code coordinates)
-python start_evolution.py
-
-# Run games for agent evaluation
-python run_continuous_games.py --games 10
+python run_evolution.py                    # Standard mode
+python run_evolution.py --specialist       # Specialist mode (deep mastery)
+python run_evolution.py --diversity        # Diversity mode (generalization)
+python run_evolution.py --quick           # Quick test (5 generations)
+python run_evolution.py --fast            # Fast mode (30 min intervals)
+python run_evolution.py --thorough        # Thorough mode (90 min, 50 games/gen)
 
 # Check database for results
 python -c "from database_interface import DatabaseInterface; db = DatabaseInterface(); print(db.get_agents())"
 ```
 
-## Ouroboros System Operation (Post-Implementation)
+## Ouroboros System Operation
 
 ### Evolution Commands
 
-Once the Ouroboros system is fully implemented, use these commands:
+The main evolution runner with multiple modes:
 
 ```bash
-# Start autonomous evolution cycles
-python ouroboros_coordinator.py --generations 10 --population-size 20
+# Specialist mode - Deep mastery of specific games (RECOMMENDED)
+python run_evolution.py --specialist --quick
 
+# Standard mode - Balanced evolution
+python run_evolution.py
+
+# Diversity mode - Generalization focus (may reduce specialization)
+python run_evolution.py --diversity
+
+# Fast iterations for testing
+python run_evolution.py --fast --specialist
+
+# Thorough evaluation (longer runtime)
+python run_evolution.py --thorough --specialist
+```
+
+### Analysis Commands
+
+```bash
 # Analyze current population performance
 python performance_analyzer.py --analyze-population
 
 # View specific agent details
 python performance_analyzer.py --agent-id <agent_id>
 
-# Run agent-driven gameplay session
-python core_gameplay.py --with-evolution --agent-id <agent_id>
+# Manual game testing (different from evolution)
+python main_runner.py play <game_id>
+python main_runner.py stats
 
 # Check system health
-python ouroboros_coordinator.py --health-check
+python -c "from database_interface import DatabaseInterface; db = DatabaseInterface(); db.checkpoint_wal(); print('WAL checkpointed')"
 ```
 
 ### Database Queries for Analysis

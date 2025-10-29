@@ -75,10 +75,42 @@ class DatabaseInterface:
         self._create_database_from_schema()
 
     def close(self):
-        """Close database connections."""
+        """Close database connections and checkpoint WAL."""
         if hasattr(self._local, 'connection'):
-            self._local.connection.close()
-            delattr(self._local, 'connection')
+            try:
+                # Force WAL checkpoint to ensure all data is written to main DB file
+                # TRUNCATE mode empties the WAL file after checkpoint
+                self._local.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                self._local.connection.commit()
+                logger.info("WAL checkpoint completed before closing database")
+            except Exception as e:
+                logger.warning(f"WAL checkpoint failed (non-critical): {e}")
+            finally:
+                self._local.connection.close()
+                delattr(self._local, 'connection')
+
+    def checkpoint_wal(self):
+        """
+        Force a WAL checkpoint to persist all pending writes to main database file.
+        
+        This should be called:
+        - Before creating checkpoints/backups
+        - During graceful shutdown
+        - Periodically during long-running operations
+        
+        Returns:
+            bool: True if checkpoint successful, False otherwise
+        """
+        try:
+            conn = self._get_connection()
+            # TRUNCATE mode: checkpoint and empty the WAL file
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.commit()
+            logger.debug("WAL checkpoint completed")
+            return True
+        except Exception as e:
+            logger.warning(f"WAL checkpoint failed: {e}")
+            return False
 
     # ========================================================================
     # SESSION MANAGEMENT

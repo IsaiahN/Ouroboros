@@ -49,7 +49,13 @@ class GameplayEngine:
             'enable_random_exploration': True,
             'coordinate_retry_limit': 3,
             'enable_pattern_learning': True,  # Toggle pattern learning
-            'learning_mode': 'smart_exploration'  # 'exploit', 'explore', 'smart_exploration'
+            'learning_mode': 'smart_exploration',  # 'exploit', 'explore', 'smart_exploration'
+            
+            # Diversity-focused settings (generalization over specialization)
+            'diversity_mode': False,              # Enable diversity and generalization focus
+            'max_repeats_per_game': 5,            # Limit game repetition (diversity mode)
+            'enforce_game_diversity': False,       # Prevent game overfitting
+            'novel_game_priority': 1.0,           # Priority weight for unseen games
         }
 
     def configure(self, **config):
@@ -74,53 +80,64 @@ class GameplayEngine:
         """
         logger.info(f"Starting game: {game_id}")
 
+        # Start session if not already running
+        if not self.session_manager.is_running:
+            await self.session_manager.start_session(game_id=game_id)
+        
+        # Create game
+        game_data = await self.session_manager.create_game(game_id)
+        game_state = GameState.from_dict(game_data)
+        
         # Pattern Learning: Check for known winning sequence (Rule 10: integrated)
+        # Check AFTER game creation so we have the initial frame
+        known_sequence = None
         if self.game_config.get('enable_pattern_learning', True):
             learning_mode = self.game_config.get('learning_mode', 'smart_exploration')
             
             if learning_mode in ['exploit', 'smart_exploration']:
-                # Get initial frame for pattern matching
                 try:
-                    if not self.session_manager.is_running:
-                        await self.session_manager.start_session(game_id=game_id)
-                    
-                    game_data = await self.session_manager.create_game(game_id)
-                    initial_game_state = GameState.from_dict(game_data)
-                    
                     known_sequence = self._get_best_sequence_for_game(
                         game_id, 
                         level_number=1, 
-                        current_frame=initial_game_state.frame
+                        current_frame=game_state.frame
                     )
                     
                     if known_sequence:
-                        logger.info(f"🎯 Found known winning sequence for {game_id} level 1, attempting replay...")
-                        replay_result = await self._try_replay_sequence(game_id, known_sequence)
-                        
-                        if replay_result and replay_result.get('replay_success'):
-                            logger.info(f"✅ Successfully replayed winning sequence for level 1!")
-                            # If full game won, return; otherwise continue to next level
-                            if replay_result['win']:
-                                return replay_result
-                        else:
-                            logger.info(f"⚠️ Sequence replay failed, falling back to exploration mode")
-                    
-                    # Close the test game if we're starting over
-                    if not replay_result or not replay_result.get('replay_success'):
-                        await self.session_manager.shutdown()
-                        
+                        logger.info(f"🎯 Found known winning sequence for {game_id} level 1, will attempt inline replay")
                 except Exception as e:
-                    logger.debug(f"Pattern learning setup error: {e}")
-                    # Continue to normal gameplay
-
+                    logger.debug(f"Pattern learning lookup error: {e}")
+        
         try:
-            # Start session if not already running
-            if not self.session_manager.is_running:
-                await self.session_manager.start_session(game_id=game_id)
-            
-            # Create game
-            game_data = await self.session_manager.create_game(game_id)
-            game_state = GameState.from_dict(game_data)
+            # If we have a known sequence, try to replay it INLINE (no separate game)
+            if known_sequence:
+                replay_result = await self._replay_sequence_inline(
+                    game_state, 
+                    known_sequence
+                )
+                
+                # Update game_state from replay result
+                if replay_result:
+                    game_state = replay_result['game_state']
+                    replay_success = replay_result['success']
+                    
+                    if replay_success and game_state.state == "WIN":
+                        # Full win from replay! Finish and return
+                        await self.session_manager.finish_game(game_state.state, game_state.score)
+                        
+                        return {
+                            'game_id': game_id,
+                            'final_state': game_state.state,
+                            'final_score': game_state.score,
+                            'actions_taken': len(json.loads(known_sequence['action_sequence'])),
+                            'win': True,
+                            'method': 'pattern_replay',
+                            'sequence_id': known_sequence['sequence_id']
+                        }
+                    elif replay_success:
+                        logger.info(f"✅ Partial replay success, continuing to next level")
+                    else:
+                        logger.info(f"⚠️ Sequence replay failed, falling back to exploration")
+                        # Continue with normal exploration below
 
             action_count = 0
             level_action_count = 0  # Track actions per level
@@ -240,6 +257,10 @@ class GameplayEngine:
                 'start_time': start_time,
                 'end_time': end_time
             }
+
+            # Diversity Mode: Track game diversity (Rule 10: integrated, Rule 2: database-only)
+            if self.game_config.get('diversity_mode'):
+                self._track_game_diversity(game_id, game_state.score, action_count)
 
             # Finish game in session manager
             await self.session_manager.finish_game(game_state.state, game_state.score)
@@ -455,8 +476,11 @@ class GameplayEngine:
             game_ids = [game.get('id', game.get('game_id', str(i)))
                        for i, game in enumerate(available_games)]
 
-            # Play games
-            if max_games:
+            # Apply diversity-focused game selection if enabled
+            if self.game_config.get('diversity_mode') and self.game_config.get('enforce_game_diversity'):
+                game_ids = self._select_diverse_games(game_ids, max_games)
+            elif max_games:
+                # Standard mode: just limit count
                 game_ids = game_ids[:max_games]
 
             results = await self.play_multiple_games(game_ids)
@@ -535,6 +559,147 @@ class GameplayEngine:
         """Async context manager exit."""
         if self.session_manager.is_running:
             await self.session_manager.shutdown()
+
+    # ========================================================================
+    # DIVERSITY-FOCUSED GAME SELECTION (Rule 10: Integrated)
+    # ========================================================================
+
+    def _select_diverse_games(self, game_ids: List[str], max_games: int) -> List[str]:
+        """
+        Select games with diversity focus to prevent overfitting.
+        
+        Prioritizes:
+        1. Novel games (never played by current agent)
+        2. Under-exposed games (played <max_repeats times)
+        3. Random selection from remaining games
+        
+        Args:
+            game_ids: Available game IDs
+            max_games: Maximum games to select
+            
+        Returns:
+            List of selected game IDs optimized for diversity
+        """
+        if not max_games or max_games <= 0:
+            return game_ids
+        
+        # Get current agent ID if available (from callbacks)
+        agent_id = getattr(self, '_current_agent_id', None)
+        if not agent_id:
+            # No agent context, fallback to random selection
+            import random
+            return random.sample(game_ids, min(max_games, len(game_ids)))
+        
+        max_repeats = self.game_config.get('max_repeats_per_game', 5)
+        
+        # Query game exposure for this agent
+        game_exposure = self.db.execute_query("""
+            SELECT game_id, attempts, is_novel_game
+            FROM agent_game_diversity
+            WHERE agent_id = ?
+        """, (agent_id,))
+        
+        exposure_map = {row['game_id']: row for row in game_exposure} if game_exposure else {}
+        
+        # Categorize games
+        novel_games = []
+        under_exposed = []
+        over_exposed = []
+        
+        for game_id in game_ids:
+            if game_id not in exposure_map:
+                # Never played by this agent = novel
+                novel_games.append(game_id)
+            elif exposure_map[game_id]['attempts'] < max_repeats:
+                # Played but not too much
+                under_exposed.append((game_id, exposure_map[game_id]['attempts']))
+            else:
+                # Played too many times, avoid (anti-overfitting)
+                over_exposed.append(game_id)
+        
+        # Build selection priority: novel > under_exposed > over_exposed
+        import random
+        
+        selected = []
+        
+        # Priority 1: Novel games (shuffle for randomness)
+        random.shuffle(novel_games)
+        selected.extend(novel_games[:max_games])
+        
+        # Priority 2: Under-exposed games (prefer least played)
+        if len(selected) < max_games:
+            under_exposed.sort(key=lambda x: x[1])  # Sort by attempts (ascending)
+            remaining = max_games - len(selected)
+            selected.extend([g[0] for g in under_exposed[:remaining]])
+        
+        # Priority 3: Over-exposed games (only if necessary)
+        if len(selected) < max_games:
+            random.shuffle(over_exposed)
+            remaining = max_games - len(selected)
+            selected.extend(over_exposed[:remaining])
+        
+        logger.info(f"Diversity game selection: {len(novel_games)} novel, {len(under_exposed)} under-exposed, {len(over_exposed)} over-exposed")
+        logger.info(f"Selected: {len([g for g in selected if g in novel_games])} novel games")
+        
+        return selected[:max_games]
+
+    def _track_game_diversity(self, game_id: str, final_score: float, actions_taken: int):
+        """
+        Track game diversity metrics (Rule 2: database-only).
+        
+        Args:
+            game_id: Game ID that was played
+            final_score: Final score achieved
+            actions_taken: Total actions taken
+        """
+        agent_id = getattr(self, '_current_agent_id', None)
+        if not agent_id:
+            return  # No agent context, skip tracking
+        
+        try:
+            # Check if this is a novel game for this agent
+            existing = self.db.execute_query("""
+                SELECT attempts, first_attempt_score, best_score
+                FROM agent_game_diversity
+                WHERE agent_id = ? AND game_id = ?
+            """, (agent_id, game_id))
+            
+            if not existing or len(existing) == 0:
+                # Novel game - first time seeing it
+                self.db.execute_query("""
+                    INSERT INTO agent_game_diversity 
+                    (agent_id, game_id, attempts, first_attempt_score, best_score, 
+                     last_attempt_score, is_novel_game, few_shot_improvement, last_played)
+                    VALUES (?, ?, 1, ?, ?, ?, TRUE, 0.0, CURRENT_TIMESTAMP)
+                """, (agent_id, game_id, final_score, final_score, final_score))
+                
+                logger.info(f"📊 Diversity: Novel game tracked - {game_id} (score: {final_score})")
+            else:
+                # Repeated game - update metrics
+                first_score = existing[0]['first_attempt_score']
+                best_score = max(existing[0]['best_score'], final_score)
+                attempts = existing[0]['attempts'] + 1
+                few_shot_improvement = final_score - first_score if attempts == 2 else existing[0].get('few_shot_improvement', 0.0)
+                
+                self.db.execute_query("""
+                    UPDATE agent_game_diversity
+                    SET attempts = ?,
+                        best_score = ?,
+                        last_attempt_score = ?,
+                        few_shot_improvement = ?,
+                        is_novel_game = FALSE,
+                        last_played = CURRENT_TIMESTAMP
+                    WHERE agent_id = ? AND game_id = ?
+                """, (attempts, best_score, final_score, few_shot_improvement, agent_id, game_id))
+                
+                if attempts == 2:
+                    improvement = few_shot_improvement
+                    logger.info(f"📊 Diversity: Few-shot learning - {game_id} improvement: {improvement:+.3f}")
+                elif attempts > self.game_config.get('max_repeats_per_game', 5):
+                    logger.warning(f"⚠️ Diversity: Overfitting risk - {game_id} played {attempts} times")
+                    
+        except Exception as e:
+            logger.error(f"Error tracking game diversity: {e}")
 
     # ========================================================================
     # PATTERN LEARNING METHODS (Rule 10: Integrated into existing file)
@@ -766,6 +931,92 @@ class GameplayEngine:
             logger.debug(f"Error retrieving winning sequence for {game_id}: {e}")
             
         return None
+
+    async def _replay_sequence_inline(self, game_state: GameState, sequence: Dict) -> Optional[Dict]:
+        """
+        Replay a sequence INLINE within the existing game session.
+        Does NOT create a new game or finish the game.
+        
+        Args:
+            game_state: Current game state (starting state)
+            sequence: Winning sequence to replay
+            
+        Returns:
+            Dict with 'game_state' (updated) and 'success' (bool), or None if error
+        """
+        try:
+            sequence_id = sequence['sequence_id']
+            logger.info(f"🔄 Replaying sequence {sequence_id} inline (level {sequence['level_number']})")
+            
+            # Verify initial frame matches (critical for replay success)
+            expected_initial_frame = json.loads(sequence['initial_frame'])
+            current_frame = game_state.frame
+            
+            # Simple frame comparison
+            frames_match = self._compare_frames(expected_initial_frame, current_frame)
+            if not frames_match:
+                logger.warning(f"⚠️ Initial frame mismatch - aborting replay for {sequence_id}")
+                return {'game_state': game_state, 'success': False}
+            
+            # Track that we're referencing this sequence
+            self.db.execute_query("""
+                UPDATE winning_sequences 
+                SET times_referenced = times_referenced + 1,
+                    last_referenced = ?
+                WHERE sequence_id = ?
+            """, (datetime.now().isoformat(), sequence_id))
+            
+            # Parse sequence
+            actions = json.loads(sequence['action_sequence'])
+            coordinates = json.loads(sequence.get('coordinate_sequence', '[]'))
+            
+            action_count = 0
+            coord_index = 0
+            
+            # Execute actions
+            for action_num in actions:
+                if game_state.state != "NOT_FINISHED":
+                    break
+                
+                # Execute action
+                if action_num == 6 and coord_index < len(coordinates):
+                    coord = coordinates[coord_index]
+                    # Handle both dict and list formats
+                    if isinstance(coord, dict):
+                        x, y = coord.get('x', 0), coord.get('y', 0)
+                    elif isinstance(coord, (list, tuple)) and len(coord) >= 2:
+                        x, y = coord[0], coord[1]
+                    else:
+                        logger.warning(f"Invalid coordinate format: {coord}, skipping")
+                        coord_index += 1
+                        continue
+                    
+                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame)
+                    coord_index += 1
+                else:
+                    action = f"ACTION{action_num}"
+                    game_state = await self._execute_action(action, game_state)
+                
+                action_count += 1
+                
+                logger.debug(f"Replay action {action_count}/{len(actions)}: ACTION{action_num}, "
+                           f"Score: {game_state.score}, State: {game_state.state}")
+            
+            # Check if replay was successful
+            replay_success = (game_state.state == "WIN" or 
+                            game_state.score >= sequence['total_score'])
+            
+            if replay_success:
+                logger.info(f"✅ Inline replay successful for {sequence_id}! Score: {game_state.score}")
+            else:
+                logger.warning(f"❌ Inline replay failed for {sequence_id}. "
+                             f"Expected score: {sequence['total_score']}, Got: {game_state.score}")
+            
+            return {'game_state': game_state, 'success': replay_success}
+            
+        except Exception as e:
+            logger.error(f"Error in inline replay: {e}", exc_info=True)
+            return None
 
     async def _try_replay_sequence(self, game_id: str, sequence: Dict) -> Optional[Dict[str, Any]]:
         """
