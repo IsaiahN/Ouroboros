@@ -151,6 +151,11 @@ class GameplayEngine:
             while (game_state.state == "NOT_FINISHED" and
                    action_count < self.game_config['max_total_actions']):
 
+                # Check if session is still active (graceful shutdown detection)
+                if not self.session_manager.is_running:
+                    logger.info(f"⚠️ Session no longer running, ending game gracefully")
+                    break
+
                 try:
                     # Update action handler with level progress for dynamic spam tolerance
                     self.action_handler.update_level_progress(
@@ -235,10 +240,22 @@ class GameplayEngine:
                     if game_state.state in ["WIN", "GAME_OVER"]:
                         break
 
+                except RuntimeError as e:
+                    # Handle session shutdown gracefully
+                    if "No active session" in str(e) or "No active" in str(e):
+                        logger.info(f"⚠️ Session shutdown detected during action {action_count}, ending game gracefully")
+                        break
+                    else:
+                        logger.error(f"Runtime error in action {action_count}: {e}", exc_info=True)
+                        break
                 except Exception as e:
                     logger.error(f"Error in action {action_count}: {e}", exc_info=True)
                     # Continue with next action unless it's a critical error
                     if "authentication" in str(e).lower() or "api_key" in str(e).lower():
+                        break
+                    # Also break on session/client errors
+                    if "session" in str(e).lower() or "client" in str(e).lower():
+                        logger.info(f"⚠️ Session/client error detected, ending game gracefully")
                         break
 
             # Calculate results

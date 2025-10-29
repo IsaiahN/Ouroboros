@@ -101,7 +101,7 @@ class AutonomousEvolutionRunner:
             self.curriculum = MetaLearningCurriculum(self.db)
             self.rule_engine = RuleInductionEngine(self.db)
             self.visual_engine = VisualReasoningEngine(self.db)
-            print("✨ Meta-learning components initialized")
+            print("[*] Meta-learning components initialized")
         else:
             self.curriculum = None
             self.rule_engine = None
@@ -112,7 +112,7 @@ class AutonomousEvolutionRunner:
             from specialist_coordinator import SpecialistCoordinator
             
             self.specialist_coordinator = SpecialistCoordinator(self.db)
-            print("🎯 Specialist coordinator initialized")
+            print("[>] Specialist coordinator initialized")
         else:
             self.specialist_coordinator = None
         
@@ -169,19 +169,19 @@ class AutonomousEvolutionRunner:
         signal_name = signal_names.get(signum, f'Signal {signum}')
         
         if not self.shutdown_requested:
-            print(f"\n\n⚠️  Received {signal_name}")
-            print("🛑 Initiating graceful shutdown...")
+            print(f"\n\n[WARN]️  Received {signal_name}")
+            print("[?] Initiating graceful shutdown...")
             print("   (Press Ctrl+C again to force quit)\n")
             self.shutdown_requested = True
             self.running = False
         else:
-            print(f"\n\n❌ Forced shutdown requested")
+            print(f"\n\n[X] Forced shutdown requested")
             print("   Terminating immediately (data may be incomplete)\n")
             sys.exit(1)
     
     async def _cleanup(self):
         """Perform cleanup operations before shutdown."""
-        print("\n🧹 Performing cleanup...")
+        print("\n[?] Performing cleanup...")
         
         try:
             # Cancel current task if running
@@ -207,10 +207,10 @@ class AutonomousEvolutionRunner:
             print("  - Saving final state...")
             self._save_checkpoint()
             
-            print("✓ Cleanup complete")
+            print("[OK] Cleanup complete")
             
         except Exception as e:
-            print(f"⚠️  Cleanup error (non-critical): {e}")
+            print(f"[WARN]️  Cleanup error (non-critical): {e}")
     
     def _cleanup_old_logs(self):
         """
@@ -237,10 +237,10 @@ class AutonomousEvolutionRunner:
                 self.db.execute_query("VACUUM")
                 
                 logs_removed = total_logs - 10000
-                print(f"  🗑️  Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
+                print(f"  [?]  Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
                 
         except Exception as e:
-            print(f"  ⚠️  Log cleanup failed (non-critical): {e}")
+            print(f"  [WARN]️  Log cleanup failed (non-critical): {e}")
     
     def _save_checkpoint(self):
         """Save checkpoint data for resume capability."""
@@ -298,7 +298,7 @@ class AutonomousEvolutionRunner:
     def print_banner(self):
         """Print startup banner."""
         print("\n" + "="*80)
-        print("🧬 AUTONOMOUS EVOLUTION RUNNER")
+        print("[DNA] AUTONOMOUS EVOLUTION RUNNER")
         print("="*80)
         print(f"Started: {self.start_time}")
         print(f"Initial Population: {self.initial_population_size} agents")
@@ -310,7 +310,7 @@ class AutonomousEvolutionRunner:
         
         # Specialist Mode indicator (NEW)
         if self.specialist_mode:
-            print("🎯 SPECIALIST MODE: ENABLED")
+            print("[>] SPECIALIST MODE: ENABLED")
             print("   Focus: Deep mastery over generalization")
             print("   Strategy: Each agent masters 2-3 specific games")
             print("   Fitness: 100% performance on assigned games")
@@ -319,19 +319,19 @@ class AutonomousEvolutionRunner:
         
         # Diversity Mode indicator
         elif self.agi_mode:
-            print("🌍 DIVERSITY MODE: ENABLED")
+            print("[?] DIVERSITY MODE: ENABLED")
             print("   Focus: Generalization over specialization")
             print("   Strategy: Diverse games, anti-overfitting, novel game priority")
             print("   Fitness: 50% novel games + 30% few-shot + 20% diversity")
             print()
-            print("🧠 META-LEARNING: ENABLED")
+            print("[?] META-LEARNING: ENABLED")
             print("   Visual Reasoning: Analyzes grids for symmetry, patterns, shapes")
             print("   Rule Induction: Learns abstract IF-THEN rules from wins")
-            print("   Curriculum: 4-stage progression (specialization → generalization)")
+            print("   Curriculum: 4-stage progression (specialization [?] generalization)")
             print("   Fitness: 30% standard + 40% diversity + 30% meta-learning")
             print()
         
-        print("🎯 Adaptive Action Limits: ENABLED")
+        print("[>] Adaptive Action Limits: ENABLED")
         print(f"   Adjusts per-level and total actions based on generation performance")
         print(f"   Hard floor: {self.adaptive_limits.MIN_ACTIONS_PER_LEVEL} actions/level")
         print(f"   Range: {self.adaptive_limits.MIN_TOTAL_ACTIONS}-{self.adaptive_limits.MAX_TOTAL_ACTIONS} total actions")
@@ -344,7 +344,7 @@ class AutonomousEvolutionRunner:
         hours = runtime.total_seconds() / 3600
         
         print(f"\n{'='*80}")
-        print(f"📊 STATUS UPDATE - Generation {generation}")
+        print(f"[CHART] STATUS UPDATE - Generation {generation}")
         print(f"{'='*80}")
         print(f"Runtime: {hours:.1f} hours")
         print(f"Total Games: {games_played}")
@@ -365,10 +365,10 @@ class AutonomousEvolutionRunner:
         agent_count = self.db.get_active_agent_count()
         
         if agent_count > 0:
-            print(f"✓ Found {agent_count} existing agents, skipping initialization")
+            print(f"[OK] Found {agent_count} existing agents, skipping initialization")
             return True
         
-        print(f"\n🧬 Creating initial population ({self.initial_population_size} agents)...")
+        print(f"\n[DNA] Creating initial population ({self.initial_population_size} agents)...")
         
         try:
             import random
@@ -413,11 +413,11 @@ class AutonomousEvolutionRunner:
                 
                 print(f"  Agent {i+1}/{self.initial_population_size}: {agent.agent_type} - {agent.agent_id}")
             
-            print(f"✓ Created {len(agents_created)} agents")
+            print(f"[OK] Created {len(agents_created)} agents")
             
             # Initialize specialist assignments if in specialist mode
             if self.specialist_mode and self.specialist_coordinator:
-                print(f"\n🎯 Initializing specialist game assignments...")
+                print(f"\n[>] Initializing specialist game assignments...")
                 # Get available games
                 try:
                     from arc_api_client import ARCAPIClient
@@ -435,12 +435,12 @@ class AutonomousEvolutionRunner:
                                 games_per_specialist=2
                             )
                 except Exception as e:
-                    print(f"⚠️  Could not initialize specialist assignments: {e}")
+                    print(f"[WARN]️  Could not initialize specialist assignments: {e}")
             
             return True
             
         except Exception as e:
-            print(f"✗ Failed to create population: {e}")
+            print(f"[?] Failed to create population: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -456,7 +456,7 @@ class AutonomousEvolutionRunner:
         Returns:
             Dictionary with game results summary
         """
-        print(f"\n🎮 Running {num_games} evaluation games...")
+        print(f"\n[?] Running {num_games} evaluation games...")
         
         # Get adaptive action limits for current generation
         actions_per_level, total_actions = self.adaptive_limits.adjust_limits(self.current_generation)
@@ -467,13 +467,13 @@ class AutonomousEvolutionRunner:
             
             api_key = os.getenv('ARC_API_KEY')
             if not api_key:
-                print("✗ ARC_API_KEY not found in environment")
+                print("[?] ARC_API_KEY not found in environment")
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
             
             # Get active agents
             agents = self.db.get_active_agents()
             if not agents:
-                print("✗ No active agents found")
+                print("[?] No active agents found")
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
             
             games_per_agent = max(1, num_games // len(agents))
@@ -484,7 +484,7 @@ class AutonomousEvolutionRunner:
                 available_games = await engine.session_manager.get_available_games()
                 
                 if not available_games:
-                    print("✗ No games available from API")
+                    print("[?] No games available from API")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
                 
                 # SPECIALIST MODE: Auto-assign games if not already assigned (for resumed checkpoints)
@@ -494,14 +494,14 @@ class AutonomousEvolutionRunner:
                     if first_agent:
                         assignments = self.specialist_coordinator.get_games_for_specialist(first_agent['agent_id'])
                         if not assignments:
-                            print(f"\n🎯 Auto-assigning specialists (resuming from checkpoint)...")
+                            print(f"\n[>] Auto-assigning specialists (resuming from checkpoint)...")
                             game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
                             self.specialist_coordinator.initialize_specialist_assignments(
                                 agents,
                                 game_ids,
                                 games_per_specialist=2
                             )
-                            print(f"✓ Assigned {len(game_ids)} games across {len(agents)} specialists")
+                            print(f"[OK] Assigned {len(game_ids)} games across {len(agents)} specialists")
                 
                 results = []
                 total_wins = 0
@@ -520,7 +520,7 @@ class AutonomousEvolutionRunner:
                             games_per_agent
                         )
                         assigned = self.specialist_coordinator.get_games_for_specialist(agent_id)
-                        print(f"  🎯 Agent {agent_id[:8]} - Specialist on {assigned}: {len(agent_games)} games")
+                        print(f"  [>] Agent {agent_id[:8]} - Specialist on {assigned}: {len(agent_games)} games")
                     
                     # META-LEARNING: Use curriculum for game selection
                     elif self.curriculum:
@@ -535,7 +535,7 @@ class AutonomousEvolutionRunner:
                             [g.get('id', g.get('game_id')) for g in available_games],
                             games_per_agent
                         )
-                        print(f"  📚 Agent {agent_id[:8]} - Stage {self.curriculum.get_agent_current_stage(agent_id)}: {len(agent_games)} games")
+                        print(f"  [?] Agent {agent_id[:8]} - Stage {self.curriculum.get_agent_current_stage(agent_id)}: {len(agent_games)} games")
                     else:
                         # Standard game selection
                         agent_games = [available_games[i % len(available_games)].get('id', available_games[i % len(available_games)].get('game_id')) 
@@ -544,7 +544,7 @@ class AutonomousEvolutionRunner:
                     # Run games for this agent
                     for game_idx, game_id in enumerate(agent_games):
                         if self.shutdown_requested:
-                            print("⏸️  Shutdown requested, stopping evaluation")
+                            print("[PAUSE]️  Shutdown requested, stopping evaluation")
                             break
                         
                         # Use adaptive action limits (adjusted per generation)
@@ -570,7 +570,7 @@ class AutonomousEvolutionRunner:
                             result = await game_task
                         except asyncio.CancelledError:
                             # Game was cancelled during shutdown
-                            print(f"⏸️  Game {game_id[:8]} cancelled")
+                            print(f"[PAUSE]️  Game {game_id[:8]} cancelled")
                             if self.shutdown_requested:
                                 break
                             raise
@@ -608,9 +608,9 @@ class AutonomousEvolutionRunner:
                                     }
                                     new_rule = self.rule_engine.extract_rule_from_game_session(game_session_data)
                                     if new_rule:
-                                        print(f"  📚 Learned new rule: {new_rule['rule_name']}")
+                                        print(f"  [?] Learned new rule: {new_rule['rule_name']}")
                                 except Exception as e:
-                                    print(f"  ⚠️  Failed to extract rule: {e}")
+                                    print(f"  [WARN]️  Failed to extract rule: {e}")
                         
                         total_score += result.get('final_score', 0)
                         
@@ -634,11 +634,11 @@ class AutonomousEvolutionRunner:
                     try:
                         self.curriculum.update_stage_progress(agent_id)
                     except Exception as e:
-                        print(f"  ⚠️  Failed to update curriculum: {e}")
+                        print(f"  [WARN]️  Failed to update curriculum: {e}")
                 
                 # Auto-cleanup logs every 50 games to prevent database bloat
                 if self.total_games_played % 50 == 0:
-                    print(f"\n🗑️  Auto-cleanup triggered (every 50 games)...")
+                    print(f"\n[?]  Auto-cleanup triggered (every 50 games)...")
                     self._cleanup_old_logs()
                 
                 # Calculate summary stats
@@ -650,7 +650,7 @@ class AutonomousEvolutionRunner:
                     'timestamp': datetime.now()
                 }
                 
-                print(f"✓ Completed {len(results)} games")
+                print(f"[OK] Completed {len(results)} games")
                 print(f"  Wins: {total_wins}/{len(results)} ({summary['win_rate']:.1%})")
                 print(f"  Avg Score: {summary['avg_score']:.2f}")
                 
@@ -658,17 +658,17 @@ class AutonomousEvolutionRunner:
             
         except asyncio.CancelledError:
             # Task was cancelled during shutdown - this is expected
-            print("⏸️  Evaluation cancelled during shutdown")
+            print("[PAUSE]️  Evaluation cancelled during shutdown")
             raise  # Re-raise to propagate cancellation
             
         except Exception as e:
             if self.shutdown_requested:
                 # Errors during shutdown are expected, just log briefly
-                print(f"⚠️  Error during shutdown evaluation (ignored): {type(e).__name__}")
+                print(f"[WARN]️  Error during shutdown evaluation (ignored): {type(e).__name__}")
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
             else:
                 # Real error - log details
-                print(f"✗ Evaluation games failed: {e}")
+                print(f"[?] Evaluation games failed: {e}")
                 import traceback
                 traceback.print_exc()
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
@@ -682,7 +682,7 @@ class AutonomousEvolutionRunner:
         Returns:
             True if evolution successful
         """
-        print(f"\n🧠 Analyzing population performance...")
+        print(f"\n[?] Analyzing population performance...")
         
         try:
             # Analyze current population
@@ -702,16 +702,16 @@ class AutonomousEvolutionRunner:
             
             # Check if we should evolve
             if self.current_generation >= self.max_generations:
-                print(f"⚠️  Reached max generations ({self.max_generations})")
+                print(f"[WARN]️  Reached max generations ({self.max_generations})")
                 return False
             
             # Use comprehensive success rate for target check
             if avg_success_rate >= self.target_win_rate:
-                print(f"🎉 Reached target success rate ({self.target_win_rate:.1%})!")
+                print(f"[?] Reached target success rate ({self.target_win_rate:.1%})!")
                 return False
             
             # Evolve new generation using EvolutionaryEngine
-            print(f"\n🧬 Evolving Generation {self.current_generation + 1}...")
+            print(f"\n[DNA] Evolving Generation {self.current_generation + 1}...")
             
             evolution_engine = EvolutionaryEngine(self.db)
             
@@ -719,7 +719,7 @@ class AutonomousEvolutionRunner:
             top_performers = analysis.get('top_performers', [])[:5]
             
             if not top_performers:
-                print("⚠️  No agents with performance data, cannot evolve")
+                print("[WARN]️  No agents with performance data, cannot evolve")
                 return False
             
             # Determine evolution strategy based on comprehensive success
@@ -747,31 +747,31 @@ class AutonomousEvolutionRunner:
             
             # Use EvolutionaryEngine's evolve_population for proper fitness calculation
             # This applies meta-learning fitness (30/40/30 split) when diversity_mode=True
-            print(f"\n🧬 Calling evolve_population with diversity_mode={self.agi_mode}...")
+            print(f"\n[DNA] Calling evolve_population with diversity_mode={self.agi_mode}...")
             evolution_engine = EvolutionaryEngine(self.db)
             
             try:
                 new_population = evolution_engine.evolve_population(evolution_strategy)
                 new_agents_created = len(new_population)
                 
-                print(f"✓ Evolution cycle complete")
+                print(f"[OK] Evolution cycle complete")
                 print(f"  New population size: {new_agents_created}")
                 if self.agi_mode:
                     print(f"  Fitness calculation: 30% standard + 40% diversity + 30% meta-learning")
                 
             except Exception as e:
-                print(f"⚠️  Evolution failed: {e}")
+                print(f"[WARN]️  Evolution failed: {e}")
                 print(f"  Falling back to previous generation")
                 return False
             
             self.current_generation += 1
             self.last_evolution_time = datetime.now()
             
-            print(f"✓ Evolution complete - Created {new_agents_created} new agents")
+            print(f"[OK] Evolution complete - Created {new_agents_created} new agents")
             
             # Optionally prune worst performers
             if population_size > self.initial_population_size * 2:
-                print(f"\n🌿 Population too large ({population_size}), pruning worst performers...")
+                print(f"\n[?] Population too large ({population_size}), pruning worst performers...")
                 worst_performers = analysis.get('top_performers', [])[-3:]  # Get worst 3
                 
                 for agent in worst_performers:
@@ -784,7 +784,7 @@ class AutonomousEvolutionRunner:
             return True
             
         except Exception as e:
-            print(f"✗ Evolution failed: {e}")
+            print(f"[?] Evolution failed: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -841,13 +841,13 @@ class AutonomousEvolutionRunner:
         """
         # Check for shutdown at start of cycle
         if self.shutdown_requested:
-            print("🛑 Shutdown requested - skipping cycle")
+            print("[?] Shutdown requested - skipping cycle")
             return False
         
         # Health check
         health = self.check_system_health()
         if not health['healthy']:
-            print(f"\n⚠️  System Health Issues:")
+            print(f"\n[WARN]️  System Health Issues:")
             for warning in health['warnings']:
                 print(f"  - {warning}")
             
@@ -881,11 +881,11 @@ class AutonomousEvolutionRunner:
             if not success:
                 # Check if we hit targets (comprehensive success)
                 if eval_results['win_rate'] >= self.target_win_rate:
-                    print(f"\n🎉 TARGET ACHIEVED! Win Rate: {eval_results['win_rate']:.1%}")
+                    print(f"\n[?] TARGET ACHIEVED! Win Rate: {eval_results['win_rate']:.1%}")
                     return False
                 
                 if self.current_generation >= self.max_generations:
-                    print(f"\n⏹️  Max generations reached")
+                    print(f"\n[?]  Max generations reached")
                     return False
         
         # Continue running
@@ -899,23 +899,23 @@ class AutonomousEvolutionRunner:
         # Try to load previous checkpoint
         checkpoint = self._load_checkpoint()
         if checkpoint:
-            print(f"\n📂 Resuming from checkpoint:")
+            print(f"\n[DIR] Resuming from checkpoint:")
             print(f"   Generation: {checkpoint.get('current_generation', 0)}")
             print(f"   Last shutdown: {checkpoint.get('shutdown_time', 'unknown')}")
         
         self.print_banner()
         
         # Cleanup old logs on startup to prevent bloat from previous runs
-        print("\n🗑️  Performing startup database cleanup...")
+        print("\n[?]  Performing startup database cleanup...")
         self._cleanup_old_logs()
         
         try:
             # Initialize population
             if not await self.initialize_population():
-                print("✗ Failed to initialize - exiting")
+                print("[?] Failed to initialize - exiting")
                 return
             
-            print("\n🚀 Starting autonomous evolution...")
+            print("\n[>>] Starting autonomous evolution...")
             print("Press Ctrl+C for graceful shutdown\n")
             
             cycle_count = 0
@@ -923,12 +923,12 @@ class AutonomousEvolutionRunner:
             while self.running and not self.shutdown_requested:
                 cycle_count += 1
                 print(f"\n{'='*80}")
-                print(f"🔄 EVOLUTION CYCLE #{cycle_count}")
+                print(f"[CYCLE] EVOLUTION CYCLE #{cycle_count}")
                 print(f"{'='*80}")
                 
                 # Check for shutdown request before starting cycle
                 if self.shutdown_requested:
-                    print("\n🛑 Shutdown requested before cycle start")
+                    print("\n[?] Shutdown requested before cycle start")
                     break
                 
                 # Run cycle with task tracking for cancellation
@@ -940,17 +940,17 @@ class AutonomousEvolutionRunner:
                         break
                     
                 except asyncio.CancelledError:
-                    print("\n⚠️  Current cycle cancelled - shutting down gracefully")
+                    print("\n[WARN]️  Current cycle cancelled - shutting down gracefully")
                     break
                 
                 except Exception as e:
                     if self.shutdown_requested:
                         # Ignore errors during shutdown - they're expected
-                        print(f"\n⚠️  Error during shutdown (ignored): {type(e).__name__}")
+                        print(f"\n[WARN]️  Error during shutdown (ignored): {type(e).__name__}")
                         break
                     else:
                         # Real error - log and continue
-                        print(f"\n⚠️  Cycle error: {e}")
+                        print(f"\n[WARN]️  Cycle error: {e}")
                         import traceback
                         traceback.print_exc()
                         # Continue to next cycle unless shutdown requested
@@ -960,7 +960,7 @@ class AutonomousEvolutionRunner:
                 
                 # Check shutdown between cycles
                 if self.shutdown_requested:
-                    print("\n🛑 Shutdown requested between cycles")
+                    print("\n[?] Shutdown requested between cycles")
                     break
                 
                 # Brief pause between cycles (check for shutdown during pause)
@@ -977,12 +977,12 @@ class AutonomousEvolutionRunner:
             
         except KeyboardInterrupt:
             # Should be caught by signal handler, but just in case
-            print("\n\n⏸️  Keyboard interrupt received")
+            print("\n\n[PAUSE]️  Keyboard interrupt received")
             await self._cleanup()
             self.print_final_summary()
         
         except Exception as e:
-            print(f"\n\n✗ Fatal error: {e}")
+            print(f"\n\n[?] Fatal error: {e}")
             import traceback
             traceback.print_exc()
             
@@ -1008,7 +1008,7 @@ class AutonomousEvolutionRunner:
         hours = runtime.total_seconds() / 3600
         
         print("\n" + "="*80)
-        print("📈 FINAL SUMMARY")
+        print("[?] FINAL SUMMARY")
         print("="*80)
         
         # Shutdown reason
@@ -1049,11 +1049,11 @@ class AutonomousEvolutionRunner:
             print(f"  (Could not load final stats: {e})")
         
         print("="*80)
-        print("\n✓ Autonomous evolution runner stopped")
+        print("\n[OK] Autonomous evolution runner stopped")
         print(f"Database: {self.db.db_path}")
         
         if self.shutdown_requested or not self.running:
-            print("\n💾 Checkpoint saved - progress preserved")
+            print("\n[SAVE] Checkpoint saved - progress preserved")
             print("To resume from this point:")
             print("  python autonomous_evolution_runner.py")
             print("  python run_evolution.py")

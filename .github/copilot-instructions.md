@@ -125,9 +125,12 @@ Whenever creating an implementation or change, Test the new implementation on th
 - `performance_analyzer.py` - Analyzes ARC performance data for decisions
 
 ### Existing Integration Points
-- `core_gameplay.py` - Main game loop with **integrated pattern learning**
+- `core_gameplay.py` - Main game loop with **integrated pattern learning and community memory**
   - Captures winning sequences automatically (Rule 2: database-only)
   - Replays known winning sequences when available
+  - **Community memory**: Queries sequences with Bayesian reputation scoring
+  - **Validation tracking**: Records success/failure for every sequence attempt
+  - **Downvoting**: Failed sequences get reduced reliability scores
   - Config: `enable_pattern_learning`, `learning_mode`
 - `action_handler.py` - Action execution with **diversity tracking**
   - Prevents action/coordinate spamming
@@ -140,7 +143,9 @@ Whenever creating an implementation or change, Test the new implementation on th
 - `core_database_schema.sql` - Original schema for game tracking
 - `ouroboros_database_extension.sql` - Extended schema including:
   - Evolution system (agents, performance, decisions)
+  - **Three-layer epigenetic architecture** (agents.epigenetics column)
   - **Pattern learning** (winning_sequences, discovered_patterns)
+  - **Community memory** (sequence_validation_attempts, sequence_reputation)
   - Claude memory and insights
 - `database_logger.py` - Database-based logging system
 - `core_data.db` - SQLite database file (created at runtime)
@@ -268,11 +273,17 @@ actions = db.execute_query("""
 ### Key System Components
 
 **Core Files (Post-Implementation):**
-- `ouroboros_coordinator.py` - Central LLM coordinator, autonomous operation
-- `evolutionary_engine.py` - Agent breeding, mutation, selection
+- `ouroboros_coordinator.py` - Central LLM coordinator, reference implementation
+- `autonomous_evolution_runner.py` - Operational evolution orchestrator (specialist_mode, agi_mode)
+- `evolutionary_engine.py` - Three-layer evolution (genome, epigenetic, somatic)
 - `arc_rlvr_framework.py` - ARC-native reward processing
-- `agent_factory.py` - Creates specialized agent types
+- `agent_factory.py` - Creates agents with epigenetic layer
 - `performance_analyzer.py` - Population performance analysis
+
+**Three-Layer Epigenetic Architecture:**
+- **Layer 1 (Static Genome)**: agent_type, base_architecture - 1-2% mutation rate
+- **Layer 2 (Epigenetic)**: feature_attention_weights, learning_rate_modifiers, exploration_settings - 10-20% mutation, FITNESS-WEIGHTED inheritance with 0.95 decay
+- **Layer 3 (Somatic)**: winning_sequences, memories - NOT inherited, community database
 
 **Agent Types:**
 - `pattern_specialist` - Focuses on ARC pattern recognition
@@ -281,14 +292,22 @@ actions = db.execute_query("""
 - `win_focused_agent` - Prioritizes game wins
 
 **Integration Points:**
-- `core_gameplay.py` - Enhanced with agent callbacks and genome-based strategy
+- `core_gameplay.py` - Enhanced with agent callbacks, genome-based strategy, community memory validation
 - `action_handler.py` - Extended with evolutionary action selection
 - `game_session_manager.py` - Tracks agent performance per session
 - `database_interface.py` - All Ouroboros tables and operations
 
 ### ARC Performance Metrics
 
-**Primary Fitness Calculation:**
+**Learning Speed Fitness (NEW - Specialist Mode):**
+```
+fitness = (level_wins^1.5 / log(games_played + 1)) * execution_efficiency * consistency
+```
+- Rewards fast learners exponentially (28x-56x advantage)
+- Age penalty prevents solution inheritance dominance
+- Discovered patterns stay in community database (Layer 3)
+
+**Legacy Fitness Calculation (Standard Mode):**
 ```
 fitness = (win_rate * 0.7) + (score_efficiency * 0.2) + (consistency * 0.1)
 ```
@@ -306,6 +325,13 @@ win_proximity = score_achieved / win_score_threshold
 **Total Evolutionary Reward:**
 ```
 total_reward = base_score + win_bonus(100) + efficiency_bonus + proximity_bonus + level_bonus(10/level)
+```
+
+**Community Memory Reputation (Bayesian):**
+```
+reliability = (success_count + 2) / (total_attempts + 4)
+success_rate = success_count / max(total_attempts, 1)
+# Sequences with reliability < 0.3 are filtered out
 ```
 
 ### Evolution Strategy Focus
@@ -403,6 +429,51 @@ memories = db.execute_query("""
 3. Review coordinator logs in system_logs table
 4. Ensure coordinator loop is running with proper database connection
 
+## Ouroboros Three-Layer Architecture (CRITICAL)
+
+**Why Three Layers:**
+- Prevents overfitting (solutions don't pollute genome)
+- Enables learning (inherit capacity, not solutions)
+- Community knowledge (sequences shared via database validation)
+- Fast learners win (fitness rewards discovery speed, not inheritance)
+
+**Layer 1 - Static Genome (Nature):**
+- agent_type, base_architecture
+- 1-2% mutation per generation
+- Full genetic inheritance through crossover
+- Defines fundamental agent "hardware"
+
+**Layer 2 - Epigenetic (Nurture, Learning Capacity):**
+- feature_attention_weights, learning_rate_modifiers, exploration_settings, meta_capacities
+- 10-20% mutation per generation
+- **FITNESS-WEIGHTED inheritance** with 0.95 decay per generation
+- Inherits HOW to learn, not WHAT was learned
+- Prevents any single strategy from dominating forever
+
+**Layer 3 - Somatic (Experience, Learned Knowledge):**
+- winning_sequences, discovered_patterns, action_memories
+- **NOT inherited** - stays in community database
+- All agents can query with Bayesian validation
+- Downvoting mechanism for failed sequences
+- Prevents solution copying while enabling knowledge sharing
+
+**Epigenetic Inheritance Formula:**
+```python
+offspring_feature = (
+    parent1_feature * (parent1_fitness / total_fitness) +
+    parent2_feature * (parent2_fitness / total_fitness)
+) * 0.95  # Decay prevents overfitting
+```
+
+**Community Memory Workflow:**
+1. Agent discovers winning sequence → stored in database (Layer 3)
+2. Other agents query sequences → filtered by reliability > 0.3
+3. Agent validates sequence → success/failure tracked
+4. Reputation updated → Bayesian: (successes + 2) / (total + 4)
+5. Failed sequences automatically downvoted
+
+**See DOCS/Ouroboros_Three_Layer_Quick_Reference.md for complete details**
+
 ## Remember
 
 - **No test files** - Use real ARC games
@@ -411,7 +482,9 @@ memories = db.execute_query("""
 - **Clean integration** - Enhance existing code
 - **Autonomous design** - Claude Code coordinates everything
 - **Agent-driven** - All gameplay uses agent genomes and callbacks
-- **Fitness = ARC performance** - 70% win rate, 20% efficiency, 10% consistency
+- **Three layers** - Layer 1 (genome 1-2%), Layer 2 (epigenetic 10-20%, inherited), Layer 3 (somatic, NOT inherited)
+- **Learning speed fitness** - Rewards fast learners 28x-56x over slow learners
+- **Community memory** - Validated sequences, Bayesian reputation, downvoting
 - **Monitor health** - Check population_health_metrics regularly
 - **Verify actions** - Always confirm API requests/responses in database
 

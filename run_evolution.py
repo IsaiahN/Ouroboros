@@ -41,7 +41,7 @@ def main():
     
     # Configure based on mode
     if args.fast:
-        print("🚀 FAST MODE - Quick iterations")
+        print(">> FAST MODE - Quick iterations")
         config = {
             'initial_population_size': 8,
             'games_per_generation': 10,
@@ -50,7 +50,7 @@ def main():
             'target_win_rate': 0.50
         }
     elif args.thorough:
-        print("🔬 THOROUGH MODE - Deep evaluation")
+        print(">> THOROUGH MODE - Deep evaluation")
         config = {
             'initial_population_size': 15,
             'games_per_generation': 50,
@@ -59,7 +59,7 @@ def main():
             'target_win_rate': 0.50
         }
     elif args.quick:
-        print("⚡ QUICK TEST - 5 generations")
+        print(">> QUICK TEST - 5 generations")
         config = {
             'initial_population_size': 5,
             'games_per_generation': 10,
@@ -68,7 +68,7 @@ def main():
             'target_win_rate': 0.50
         }
     else:
-        print("🧬 STANDARD MODE - Balanced evolution")
+        print(">> STANDARD MODE - Balanced evolution")
         config = {
             'initial_population_size': 10,
             'games_per_generation': 20,
@@ -80,7 +80,7 @@ def main():
     # Check API key
     api_key = os.getenv('ARC_API_KEY')
     if not api_key or api_key == 'your_api_key_here':
-        print("\n❌ ERROR: Need valid ARC_API_KEY in .env file")
+        print("\n[ERROR] Need valid ARC_API_KEY in .env file")
         return
     
     print(f"\n{'='*60}")
