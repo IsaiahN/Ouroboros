@@ -224,31 +224,49 @@ class PerformanceAnalyzer:
             game_wins = sum(1 for p in perf_data if p['win_achieved'])
             game_win_rate = game_wins / total_games
             
-            # 2. Level Success Rate (any level progression)
+            # 2. Score Progress Rate (ANY score increase, most important!)
+            # Count games where ANY score was achieved (even 0.01)
+            score_progress_games = sum(1 for p in perf_data if p['final_score'] > 0)
+            score_progress_rate = score_progress_games / total_games
+            
+            # 3. Level Success Rate (any level progression)
             level_successes = sum(1 for p in perf_data if p['level_progressions'] > 0)
             level_success_rate = level_successes / total_games
             
-            # 3. Score Achievement Rate (games reaching 50%+ of win score)
-            score_achievements = sum(1 for p in perf_data if p['win_proximity'] >= 0.5)
-            score_achievement_rate = score_achievements / total_games
+            # 4. High Score Achievement Rate (games reaching 50%+ of win score)
+            high_score_achievements = sum(1 for p in perf_data if p['win_proximity'] >= 0.5)
+            high_score_rate = high_score_achievements / total_games
             
-            # 4. Comprehensive Success Rate (weighted combination)
-            # Weights: Game wins (70%), Level completions (20%), Score achievements (10%)
+            # 5. Path Efficiency (for wins, average efficiency)
+            winning_games = [p for p in perf_data if p['win_achieved']]
+            avg_path_efficiency = 0.0
+            if winning_games:
+                # Calculate average score_efficiency for winning games
+                avg_path_efficiency = sum(p['score_efficiency'] for p in winning_games) / len(winning_games)
+            
+            # 6. Comprehensive Success Rate (SCORE-FOCUSED weighting)
+            # NEW WEIGHTS: Score progress (40%), Wins (30%), Levels (15%), High scores (10%), Efficiency (5%)
+            # Prioritizes ANY score increase as primary fitness signal
             comprehensive_success_rate = (
-                game_win_rate * 0.70 +
-                level_success_rate * 0.20 +
-                score_achievement_rate * 0.10
+                score_progress_rate * 0.40 +      # ANY score increase (MOST IMPORTANT)
+                game_win_rate * 0.30 +            # Full wins (important)
+                level_success_rate * 0.15 +       # Level completions (good)
+                high_score_rate * 0.10 +          # High scores (bonus)
+                min(avg_path_efficiency * 100, 1.0) * 0.05  # Efficiency (minor)
             )
             
             return {
                 'game_win_rate': game_win_rate,
+                'score_progress_rate': score_progress_rate,  # NEW: ANY score > 0
                 'level_success_rate': level_success_rate,
-                'score_achievement_rate': score_achievement_rate,
+                'high_score_rate': high_score_rate,  # Renamed from score_achievement_rate
+                'path_efficiency': avg_path_efficiency,
                 'comprehensive_success_rate': comprehensive_success_rate,
                 'total_games': total_games,
                 'game_wins': game_wins,
+                'score_progress_games': score_progress_games,  # NEW
                 'level_completions': level_successes,
-                'score_achievements': score_achievements
+                'high_score_achievements': high_score_achievements  # Renamed
             }
             
         except Exception as e:
@@ -258,8 +276,10 @@ class PerformanceAnalyzer:
             })
             return {
                 'game_win_rate': 0.0,
+                'score_progress_rate': 0.0,  # NEW
                 'level_success_rate': 0.0,
-                'score_achievement_rate': 0.0,
+                'high_score_rate': 0.0,  # Renamed
+                'path_efficiency': 0.0,
                 'comprehensive_success_rate': 0.0,
                 'total_games': 0
             }

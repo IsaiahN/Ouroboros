@@ -29,7 +29,8 @@ class ARCRLVRFramework:
             'score_efficiency': 10.0,      # Score per action taken
             'level_progression': 20.0,     # Detecting and completing levels
             'consistency_bonus': 5.0,      # Consistent performance across games
-            'exploration_bonus': 2.0       # Trying different strategies
+            'exploration_bonus': 2.0,      # Trying different strategies
+            'path_efficiency': 15.0        # NEW: Reward efficient win paths (fewer actions to success)
         }
 
     def process_arc_rewards(self, agent_id: str, game_session_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -137,6 +138,13 @@ class ARCRLVRFramework:
         # Consistency metrics (for agents with game history)
         consistency_score = self._calculate_agent_consistency(arc_rewards.get('agent_id'))
 
+        # NEW: Path efficiency (for wins, how efficient was the path?)
+        path_efficiency = 0.0
+        if arc_rewards['game_win'] and total_actions > 0:
+            # Lower actions to win = higher efficiency
+            # Normalize: 1.0 at 100 actions, 0.5 at 500 actions, 0.1 at 1000+ actions
+            path_efficiency = min(1.0, 100.0 / total_actions)
+
         return {
             'score_efficiency': score_efficiency,
             'win_proximity': win_proximity,
@@ -144,7 +152,8 @@ class ARCRLVRFramework:
             'score_improvement_rate': score_improvement_rate,
             'consistency_score': consistency_score,
             'level_progression_rate': arc_rewards['level_progressions'] / max(total_actions, 1),
-            'action_effectiveness': self._calculate_action_effectiveness(arc_rewards)
+            'action_effectiveness': self._calculate_action_effectiveness(arc_rewards),
+            'path_efficiency': path_efficiency  # NEW: Track efficient win paths
         }
 
     def _generate_evolutionary_feedback(self, arc_rewards: Dict[str, Any],
@@ -176,6 +185,16 @@ class ARCRLVRFramework:
         # Exploration bonus (for trying different strategies)
         exploration_bonus = self._calculate_exploration_bonus(arc_rewards) * self.reward_weights['exploration_bonus']
 
+        # NEW: Path efficiency bonus (reward winning in fewer actions)
+        path_efficiency_bonus = 0.0
+        if arc_rewards['game_win'] and arc_rewards['total_actions'] > 0:
+            # Calculate efficiency: inverse of actions taken (fewer actions = higher reward)
+            # Normalize by typical game length (e.g., 500 actions)
+            typical_game_length = 500
+            efficiency_ratio = typical_game_length / arc_rewards['total_actions']
+            # Cap at 2x bonus (if win in 250 actions or less)
+            path_efficiency_bonus = min(efficiency_ratio, 2.0) * self.reward_weights['path_efficiency']
+
         # Calculate total evolutionary reward
         total_reward = (
             base_reward +
@@ -184,7 +203,8 @@ class ARCRLVRFramework:
             proximity_bonus +
             level_bonus +
             consistency_bonus +
-            exploration_bonus
+            exploration_bonus +
+            path_efficiency_bonus
         )
 
         return {
@@ -196,7 +216,8 @@ class ARCRLVRFramework:
                 'proximity_bonus': proximity_bonus,
                 'level_bonus': level_bonus,
                 'consistency_bonus': consistency_bonus,
-                'exploration_bonus': exploration_bonus
+                'exploration_bonus': exploration_bonus,
+                'path_efficiency_bonus': path_efficiency_bonus  # NEW
             },
             'fitness_signals': {
                 'primary_fitness': win_bonus + proximity_bonus,  # Winning focus

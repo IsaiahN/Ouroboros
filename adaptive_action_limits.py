@@ -76,7 +76,8 @@ class AdaptiveActionLimits:
         # Get performance for all agents in generation
         total_games = 0
         total_wins = 0
-        total_scores = 0
+        total_scores = 0  # Games with ANY score > 0
+        total_high_scores = 0  # Games with win_proximity >= 0.5
         total_levels = 0
         total_actions = 0
         
@@ -87,7 +88,8 @@ class AdaptiveActionLimits:
                 SELECT 
                     COUNT(*) as games,
                     SUM(CASE WHEN win_achieved THEN 1 ELSE 0 END) as wins,
-                    SUM(CASE WHEN win_proximity >= 0.5 THEN 1 ELSE 0 END) as scores,
+                    SUM(CASE WHEN final_score > 0 THEN 1 ELSE 0 END) as score_progress,
+                    SUM(CASE WHEN win_proximity >= 0.5 THEN 1 ELSE 0 END) as high_scores,
                     SUM(level_progressions) as levels,
                     AVG(total_actions) as avg_actions
                 FROM agent_arc_performance
@@ -97,7 +99,8 @@ class AdaptiveActionLimits:
             if perf and perf[0]['games'] > 0:
                 total_games += perf[0]['games']
                 total_wins += perf[0]['wins'] or 0
-                total_scores += perf[0]['scores'] or 0
+                total_scores += perf[0]['score_progress'] or 0  # ANY score > 0
+                total_high_scores += perf[0]['high_scores'] or 0  # High scores
                 total_levels += perf[0]['levels'] or 0
                 total_actions += (perf[0]['avg_actions'] or 0) * perf[0]['games']
         
@@ -105,31 +108,39 @@ class AdaptiveActionLimits:
             return {
                 'comprehensive_success': 0.0,
                 'avg_actions_used': 0.0,
-                'score_rate': 0.0,
-                'efficiency': 0.0,
+                'score_progress_rate': 0.0,
+                'game_win_rate': 0.0,
+                'high_score_rate': 0.0,
+                'path_efficiency': 0.0,
                 'sample_size': 0
             }
         
-        # Calculate comprehensive success (same formula as performance_analyzer)
+        # Score-focused fitness calculation (aligned with performance_analyzer.py)
         game_win_rate = total_wins / total_games
+        score_progress_rate = total_scores / total_games  # ANY score > 0 (most important)
         level_success_rate = min(1.0, total_levels / (total_games * 3))  # Assume 3 levels per game
-        score_achievement_rate = total_scores / total_games
+        high_score_rate = total_high_scores / total_games  # High scores already tracked
         
-        comprehensive_success = (
-            game_win_rate * 0.70 +
-            level_success_rate * 0.20 +
-            score_achievement_rate * 0.10
-        )
-        
+        # Path efficiency (normalized)
         avg_actions = total_actions / total_games
-        score_rate = total_scores / total_games
-        efficiency = total_scores / max(total_actions, 1) if total_actions > 0 else 0.0
+        path_efficiency = min(1.0, 100.0 / avg_actions) if avg_actions > 0 else 0.0
+        
+        # NEW WEIGHTS: 40% score progress, 30% wins, 15% levels, 10% high scores, 5% efficiency
+        comprehensive_success = (
+            score_progress_rate * 0.40 +   # ANY score increase (MOST IMPORTANT)
+            game_win_rate * 0.30 +          # Full wins
+            level_success_rate * 0.15 +     # Level completions
+            high_score_rate * 0.10 +        # High scores (≥50% win threshold)
+            path_efficiency * 0.05          # Efficiency bonus
+        )
         
         return {
             'comprehensive_success': comprehensive_success,
             'avg_actions_used': avg_actions,
-            'score_rate': score_rate,
-            'efficiency': efficiency,
+            'score_progress_rate': score_progress_rate,
+            'game_win_rate': game_win_rate,
+            'high_score_rate': high_score_rate,
+            'path_efficiency': path_efficiency,
             'sample_size': total_games
         }
     
