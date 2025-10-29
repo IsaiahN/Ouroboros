@@ -12,7 +12,8 @@
 CREATE TABLE IF NOT EXISTS agents (
     agent_id TEXT PRIMARY KEY,
     agent_type TEXT NOT NULL,
-    genome TEXT NOT NULL,              -- JSON strategy parameters
+    genome TEXT NOT NULL,              -- JSON strategy parameters (Layer 1: Static Genome)
+    epigenetics TEXT,                  -- JSON epigenetic inheritance (Layer 2: Epigenetic)
     generation INTEGER NOT NULL,
     parent_ids TEXT,                   -- JSON array of parent agent IDs
     specialization TEXT NOT NULL,
@@ -369,11 +370,67 @@ CREATE TABLE IF NOT EXISTS pattern_applications (
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
+-- Community memory: Sequence validation tracking (Layer 3 - Somatic/Community)
+-- Tracks which agents tried which sequences and whether they worked
+-- This enables communal learning while requiring individual validation
+CREATE TABLE IF NOT EXISTS sequence_validation_attempts (
+    validation_id TEXT PRIMARY KEY,
+    sequence_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Validation results
+    validation_success BOOLEAN NOT NULL,       -- Did sequence work for this agent?
+    partial_success BOOLEAN DEFAULT FALSE,     -- Got partway through sequence
+    actions_completed INTEGER DEFAULT 0,       -- How many actions from sequence worked
+    total_actions_in_sequence INTEGER NOT NULL,
+    
+    -- Performance
+    score_achieved REAL DEFAULT 0.0,
+    efficiency_vs_original REAL DEFAULT 1.0,   -- This agent's efficiency / original efficiency
+    
+    -- Context
+    agent_epigenetics TEXT,                    -- JSON: agent's epigenetic state during attempt
+    failure_reason TEXT,                       -- If failed, why? 'state_mismatch', 'invalid_action', etc.
+    
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Sequence reputation scores (computed from validation attempts)
+-- Updated periodically to track community consensus on sequence quality
+CREATE TABLE IF NOT EXISTS sequence_reputation (
+    sequence_id TEXT PRIMARY KEY,
+    
+    -- Validation statistics
+    total_validation_attempts INTEGER DEFAULT 0,
+    successful_validations INTEGER DEFAULT 0,
+    failed_validations INTEGER DEFAULT 0,
+    partial_validations INTEGER DEFAULT 0,
+    
+    -- Reputation metrics
+    success_rate REAL DEFAULT 0.0,              -- successful / total
+    reliability_score REAL DEFAULT 0.5,         -- Bayesian confidence-adjusted score
+    agent_diversity INTEGER DEFAULT 1,          -- How many different agents tried it
+    
+    -- Temporal tracking
+    recent_success_rate REAL DEFAULT 0.0,       -- Last 10 attempts only
+    trending TEXT DEFAULT 'stable',             -- 'improving', 'declining', 'stable'
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
+);
+
 -- Pattern learning indexes
 CREATE INDEX IF NOT EXISTS idx_winning_sequences_game_id ON winning_sequences(game_id);
 CREATE INDEX IF NOT EXISTS idx_winning_sequences_efficiency ON winning_sequences(efficiency_score);
 CREATE INDEX IF NOT EXISTS idx_discovered_patterns_success_rate ON discovered_patterns(success_rate);
 CREATE INDEX IF NOT EXISTS idx_pattern_applications_success ON pattern_applications(success);
+CREATE INDEX IF NOT EXISTS idx_sequence_validation_attempts_agent ON sequence_validation_attempts(agent_id);
+CREATE INDEX IF NOT EXISTS idx_sequence_validation_attempts_sequence ON sequence_validation_attempts(sequence_id);
+CREATE INDEX IF NOT EXISTS idx_sequence_reputation_success_rate ON sequence_reputation(success_rate DESC);
 
 -- ============================================================================
 -- AGI-FOCUSED GAME DIVERSITY TRACKING

@@ -877,8 +877,8 @@ class GameplayEngine:
                                    current_frame=None) -> Optional[Dict]:
         """
         Get best known winning sequence for a specific game level (Rule 2: from database).
-        Prioritizes most efficient (fewest actions, highest efficiency score).
-        If no exact match, tries to find similar patterns.
+        Prioritizes sequences with high reliability scores (community validation).
+        Uses reputation system to filter out sequences that fail often (Task 4).
         
         Args:
             game_id: Game to check
@@ -892,21 +892,36 @@ class GameplayEngine:
             return None
             
         try:
-            # First, try exact game/level match
+            # Query sequences with reputation scores (community memory)
+            # Prioritize: reliability_score, then efficiency, then fewest actions
             sequences = self.db.execute_query("""
-                SELECT * FROM winning_sequences
-                WHERE game_id = ? AND level_number = ?
-                ORDER BY total_actions ASC, efficiency_score DESC
-                LIMIT 1
+                SELECT ws.*, 
+                       COALESCE(sr.reliability_score, 0.5) as reliability,
+                       COALESCE(sr.success_rate, 0.5) as community_success_rate,
+                       COALESCE(sr.agent_diversity, 0) as validators,
+                       COALESCE(sr.trending, 'stable') as trend
+                FROM winning_sequences ws
+                LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
+                WHERE ws.game_id = ? AND ws.level_number = ?
+                ORDER BY reliability DESC, ws.efficiency_score DESC, ws.total_actions ASC
+                LIMIT 5
             """, (game_id, level_number))
             
             if sequences:
-                seq = sequences[0]
-                logger.info(f"📖 Found winning sequence for {game_id} level {level_number}: "
-                           f"{seq['total_actions']} actions, efficiency {seq['efficiency_score']:.4f}")
-                return seq
+                # Filter out sequences with very low reliability (< 0.3)
+                reliable_sequences = [s for s in sequences if s['reliability'] >= 0.3]
+                
+                if reliable_sequences:
+                    seq = reliable_sequences[0]
+                    logger.info(f"📖 Found winning sequence for {game_id} level {level_number}: "
+                               f"{seq['total_actions']} actions, efficiency {seq['efficiency_score']:.4f}, "
+                               f"community reliability {seq['reliability']:.2f} "
+                               f"({seq['validators']} agents validated, trend: {seq['trend']})")
+                    return seq
+                else:
+                    logger.info(f"⚠️ Found sequences for {game_id} but all have low reliability (<0.3)")
             
-            # No exact match - try pattern matching if we have current frame
+            # No reliable exact match - try pattern matching if we have current frame
             if current_frame is not None:
                 similar_pattern = self._find_similar_patterns(current_frame)
                 
@@ -916,16 +931,19 @@ class GameplayEngine:
                     if examples:
                         # Get the most efficient example
                         example_seq = self.db.execute_query("""
-                            SELECT * FROM winning_sequences
-                            WHERE sequence_id = ?
+                            SELECT ws.*, 
+                                   COALESCE(sr.reliability_score, 0.5) as reliability
+                            FROM winning_sequences ws
+                            LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
+                            WHERE ws.sequence_id = ?
                         """, (examples[0],))
                         
-                        if example_seq:
+                        if example_seq and example_seq[0]['reliability'] >= 0.3:
                             logger.info(f"🔍 Using similar pattern {similar_pattern['pattern_id']} "
-                                      f"as starting point")
+                                      f"as starting point (reliability: {example_seq[0]['reliability']:.2f})")
                             return example_seq[0]
             
-            logger.debug(f"No winning sequence found for {game_id} level {level_number}")
+            logger.debug(f"No reliable winning sequence found for {game_id} level {level_number}")
                 
         except Exception as e:
             logger.debug(f"Error retrieving winning sequence for {game_id}: {e}")
@@ -1005,6 +1023,37 @@ class GameplayEngine:
             # Check if replay was successful
             replay_success = (game_state.state == "WIN" or 
                             game_state.score >= sequence['total_score'])
+            
+            # Record validation attempt for community memory (Task 4)
+            failure_reason = None
+            if not replay_success:
+                if not frames_match:
+                    failure_reason = 'initial_frame_mismatch'
+                elif action_count < len(actions):
+                    failure_reason = 'incomplete_sequence'
+                else:
+                    failure_reason = 'insufficient_score'
+            
+            # Get agent information from config or session
+            agent_id = self.game_config.get('agent_id', 'unknown')
+            session_id = self.session_manager.current_session_id if self.session_manager and self.session_manager.current_session_id else 'unknown'
+            
+            # Get agent epigenetics if available from config
+            agent_epigenetics = self.game_config.get('agent_epigenetics')
+            
+            self._record_sequence_validation(
+                sequence_id=sequence_id,
+                agent_id=agent_id,
+                game_id=sequence['game_id'],
+                session_id=session_id,
+                success=replay_success,
+                actions_completed=action_count,
+                total_actions=len(actions),
+                score_achieved=game_state.score,
+                original_efficiency=sequence['efficiency_score'],
+                agent_epigenetics=agent_epigenetics,
+                failure_reason=failure_reason
+            )
             
             if replay_success:
                 logger.info(f"✅ Inline replay successful for {sequence_id}! Score: {game_state.score}")
@@ -1130,6 +1179,158 @@ class GameplayEngine:
         except Exception as e:
             logger.error(f"Error replaying sequence: {e}", exc_info=True)
             return None
+    
+    def _record_sequence_validation(self, sequence_id: str, agent_id: str, 
+                                   game_id: str, session_id: str,
+                                   success: bool, actions_completed: int,
+                                   total_actions: int, score_achieved: float,
+                                   original_efficiency: float,
+                                   agent_epigenetics: Optional[Dict] = None,
+                                   failure_reason: Optional[str] = None):
+        """
+        Record sequence validation attempt for community memory (Task 4).
+        Tracks which agents tried which sequences and whether they worked.
+        
+        Args:
+            sequence_id: Sequence that was attempted
+            agent_id: Agent that attempted it
+            game_id: Game where it was attempted
+            session_id: Session ID
+            success: Did the sequence work completely?
+            actions_completed: How many actions from sequence worked
+            total_actions: Total actions in sequence
+            score_achieved: Score achieved by this agent
+            original_efficiency: Original sequence's efficiency score
+            agent_epigenetics: Agent's epigenetic state (for analysis)
+            failure_reason: If failed, why?
+        """
+        try:
+            import uuid
+            validation_id = f"val_{uuid.uuid4().hex[:12]}"
+            
+            partial_success = (actions_completed > 0 and 
+                             actions_completed < total_actions and 
+                             not success)
+            
+            # Calculate efficiency vs original
+            if score_achieved > 0 and actions_completed > 0:
+                agent_efficiency = score_achieved / actions_completed
+                efficiency_ratio = agent_efficiency / original_efficiency if original_efficiency > 0 else 0.0
+            else:
+                efficiency_ratio = 0.0
+            
+            # Store validation attempt
+            self.db.execute_query("""
+                INSERT INTO sequence_validation_attempts
+                (validation_id, sequence_id, agent_id, game_id, session_id,
+                 validation_success, partial_success, actions_completed, 
+                 total_actions_in_sequence, score_achieved, efficiency_vs_original,
+                 agent_epigenetics, failure_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (validation_id, sequence_id, agent_id, game_id, session_id,
+                  success, partial_success, actions_completed, total_actions,
+                  score_achieved, efficiency_ratio,
+                  json.dumps(agent_epigenetics) if agent_epigenetics else None,
+                  failure_reason))
+            
+            # Update sequence reputation
+            self._update_sequence_reputation(sequence_id)
+            
+            logger.info(f"📊 Recorded validation: {sequence_id} by {agent_id} - "
+                       f"{'✓ Success' if success else '✗ Failed'} "
+                       f"({actions_completed}/{total_actions} actions)")
+            
+        except Exception as e:
+            logger.error(f"Error recording sequence validation: {e}")
+    
+    def _update_sequence_reputation(self, sequence_id: str):
+        """
+        Update reputation score for a sequence based on all validation attempts.
+        Uses Bayesian approach with prior to handle small sample sizes.
+        
+        This implements the "downvoting" mechanism - sequences that fail often
+        get lower reputation scores and are less likely to be selected.
+        """
+        try:
+            # Get all validation attempts for this sequence
+            attempts = self.db.execute_query("""
+                SELECT 
+                    COUNT(*) as total_attempts,
+                    SUM(CASE WHEN validation_success = 1 THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN validation_success = 0 THEN 1 ELSE 0 END) as failures,
+                    SUM(CASE WHEN partial_success = 1 THEN 1 ELSE 0 END) as partials,
+                    COUNT(DISTINCT agent_id) as unique_agents
+                FROM sequence_validation_attempts
+                WHERE sequence_id = ?
+            """, (sequence_id,))
+            
+            if not attempts or attempts[0]['total_attempts'] == 0:
+                # No validation attempts yet, use default values
+                self.db.execute_query("""
+                    INSERT OR REPLACE INTO sequence_reputation
+                    (sequence_id, total_validation_attempts, successful_validations,
+                     failed_validations, partial_validations, success_rate,
+                     reliability_score, agent_diversity, recent_success_rate, trending)
+                    VALUES (?, 0, 0, 0, 0, 0.5, 0.5, 1, 0.5, 'stable')
+                """, (sequence_id,))
+                return
+            
+            stats = attempts[0]
+            total = stats['total_attempts']
+            successes = stats['successes'] or 0
+            failures = stats['failures'] or 0
+            partials = stats['partials'] or 0
+            unique_agents = stats['unique_agents'] or 1
+            
+            # Calculate raw success rate
+            raw_success_rate = successes / total if total > 0 else 0.5
+            
+            # Bayesian reliability score (adds prior of 2 successes, 2 failures)
+            # This prevents new sequences from having extreme scores
+            reliability_score = (successes + 2) / (total + 4)
+            
+            # Calculate recent success rate (last 10 attempts)
+            recent_attempts = self.db.execute_query("""
+                SELECT validation_success
+                FROM sequence_validation_attempts
+                WHERE sequence_id = ?
+                ORDER BY attempted_at DESC
+                LIMIT 10
+            """, (sequence_id,))
+            
+            recent_successes = sum(1 for a in recent_attempts if a['validation_success'])
+            recent_success_rate = recent_successes / len(recent_attempts) if recent_attempts else 0.5
+            
+            # Determine trend
+            if len(recent_attempts) >= 5:
+                if recent_success_rate > raw_success_rate + 0.1:
+                    trending = 'improving'
+                elif recent_success_rate < raw_success_rate - 0.1:
+                    trending = 'declining'
+                else:
+                    trending = 'stable'
+            else:
+                trending = 'stable'
+            
+            # Update reputation
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO sequence_reputation
+                (sequence_id, total_validation_attempts, successful_validations,
+                 failed_validations, partial_validations, success_rate,
+                 reliability_score, agent_diversity, recent_success_rate, trending,
+                 last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (sequence_id, total, successes, failures, partials,
+                  raw_success_rate, reliability_score, unique_agents,
+                  recent_success_rate, trending, datetime.now().isoformat()))
+            
+            logger.debug(f"📈 Updated reputation for {sequence_id}: "
+                        f"reliability={reliability_score:.2f}, "
+                        f"success_rate={raw_success_rate:.2f}, "
+                        f"trend={trending}")
+            
+        except Exception as e:
+            logger.error(f"Error updating sequence reputation: {e}")
     
     def _compare_frames(self, frame1, frame2) -> bool:
         """

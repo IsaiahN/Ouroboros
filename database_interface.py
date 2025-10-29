@@ -562,14 +562,15 @@ class DatabaseInterface:
         with self._get_connection() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO agents (
-                    agent_id, agent_type, genome, generation, parent_ids,
+                    agent_id, agent_type, genome, epigenetics, generation, parent_ids,
                     specialization, created_at, is_active, total_games_played,
                     total_games_won, total_score_achieved
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 agent_data['agent_id'],
                 agent_data['agent_type'],
                 agent_data['genome'],
+                agent_data.get('epigenetics'),
                 agent_data.get('generation', 0),
                 agent_data.get('parent_ids', '[]'),
                 agent_data['specialization'],

@@ -21,10 +21,16 @@ class AgentFactory:
         self.db = database_interface
         self.factory_id = f"factory_{uuid.uuid4().hex[:8]}"
 
-    def create_agent(self, agent_type: str, genome: Dict[str, Any]) -> 'ARCAgent':
+    def create_agent(self, agent_type: str, genome: Dict[str, Any], 
+                    epigenetics: Optional[Dict[str, Any]] = None) -> 'ARCAgent':
         """
         Create agent that uses existing ActionHandler and GameplayEngine
         Rule 3: Enhances existing code rather than replacing it
+        
+        Args:
+            agent_type: Type of agent to create
+            genome: Static genome (Layer 1 - slow evolution)
+            epigenetics: Epigenetic layer (Layer 2 - adaptive preparedness)
         """
         agent_types = {
             'pattern_specialist': self._create_pattern_specialist,
@@ -38,7 +44,7 @@ class AgentFactory:
             raise ValueError(f"Unknown agent type: {agent_type}. Available types: {list(agent_types.keys())}")
 
         # Create agent using appropriate factory method
-        agent = agent_types[agent_type](genome)
+        agent = agent_types[agent_type](genome, epigenetics)
 
         # Store agent in database (Rule 2)
         self.db.store_agent(agent.to_dict())
@@ -46,12 +52,14 @@ class AgentFactory:
         self._log_factory_event("agent_created", {
             "agent_id": agent.agent_id,
             "agent_type": agent_type,
-            "genome_hash": hash(str(genome))
+            "genome_hash": hash(str(genome)),
+            "has_epigenetics": epigenetics is not None
         })
 
         return agent
 
-    def _create_pattern_specialist(self, genome: Dict[str, Any]) -> 'ARCAgent':
+    def _create_pattern_specialist(self, genome: Dict[str, Any], 
+                                   epigenetics: Optional[Dict[str, Any]] = None) -> 'ARCAgent':
         """Agent specializing in ARC pattern recognition"""
         agent_id = self._generate_agent_id()
 
@@ -68,10 +76,12 @@ class AgentFactory:
             agent_type='pattern_specialist',
             genome=genome,
             specialization_config=specialization_config,
-            database_interface=self.db
+            database_interface=self.db,
+            epigenetics=epigenetics
         )
 
-    def _create_score_optimizer(self, genome: Dict[str, Any]) -> 'ARCAgent':
+    def _create_score_optimizer(self, genome: Dict[str, Any],
+                               epigenetics: Optional[Dict[str, Any]] = None) -> 'ARCAgent':
         """Agent focused on ARC score maximization"""
         agent_id = self._generate_agent_id()
 
@@ -88,10 +98,12 @@ class AgentFactory:
             agent_type='score_optimizer',
             genome=genome,
             specialization_config=specialization_config,
-            database_interface=self.db
+            database_interface=self.db,
+            epigenetics=epigenetics
         )
 
-    def _create_exploration_agent(self, genome: Dict[str, Any]) -> 'ARCAgent':
+    def _create_exploration_agent(self, genome: Dict[str, Any],
+                                  epigenetics: Optional[Dict[str, Any]] = None) -> 'ARCAgent':
         """Agent focused on exploration and strategy discovery"""
         agent_id = self._generate_agent_id()
 
@@ -108,10 +120,12 @@ class AgentFactory:
             agent_type='exploration_agent',
             genome=genome,
             specialization_config=specialization_config,
-            database_interface=self.db
+            database_interface=self.db,
+            epigenetics=epigenetics
         )
 
-    def _create_win_focused_agent(self, genome: Dict[str, Any]) -> 'ARCAgent':
+    def _create_win_focused_agent(self, genome: Dict[str, Any],
+                                  epigenetics: Optional[Dict[str, Any]] = None) -> 'ARCAgent':
         """Agent singularly focused on winning ARC games"""
         agent_id = self._generate_agent_id()
 
@@ -128,10 +142,12 @@ class AgentFactory:
             agent_type='win_focused_agent',
             genome=genome,
             specialization_config=specialization_config,
-            database_interface=self.db
+            database_interface=self.db,
+            epigenetics=epigenetics
         )
 
-    def _create_hybrid_agent(self, genome: Dict[str, Any]) -> 'ARCAgent':
+    def _create_hybrid_agent(self, genome: Dict[str, Any],
+                            epigenetics: Optional[Dict[str, Any]] = None) -> 'ARCAgent':
         """Agent combining multiple specializations"""
         agent_id = self._generate_agent_id()
 
@@ -150,7 +166,8 @@ class AgentFactory:
             agent_type='hybrid_agent',
             genome=genome,
             specialization_config=specialization_config,
-            database_interface=self.db
+            database_interface=self.db,
+            epigenetics=epigenetics
         )
 
     def _generate_agent_id(self) -> str:
@@ -230,12 +247,17 @@ class ARCAgent:
     """
 
     def __init__(self, agent_id: str, agent_type: str, genome: Dict[str, Any],
-                 specialization_config: Dict[str, Any], database_interface: DatabaseInterface):
+                 specialization_config: Dict[str, Any], database_interface: DatabaseInterface,
+                 epigenetics: Optional[Dict[str, Any]] = None):
         self.agent_id = agent_id
         self.agent_type = agent_type
         self.genome = genome
         self.specialization_config = specialization_config
         self.db = database_interface
+
+        # EPIGENETIC LAYER - Inherited adaptive preparedness from parent's experience
+        # This is what makes agents "prepared to learn" without inheriting solutions
+        self.epigenetics = epigenetics or self._initialize_default_epigenetics()
 
         # Performance tracking
         self.games_played = 0
@@ -246,6 +268,47 @@ class ARCAgent:
         # Integration with existing systems
         self.action_handler = None  # Will be set when needed
         self.current_strategy = self._determine_initial_strategy()
+
+    def _initialize_default_epigenetics(self) -> Dict[str, Any]:
+        """
+        Initialize default epigenetic layer for first-generation agents.
+        Epigenetics represent "learning predispositions" not learned solutions.
+        """
+        return {
+            # Feature attention weights (what to notice in ARC grids)
+            'feature_attention_weights': {
+                'edges': 1.0,           # Baseline attention to edges
+                'symmetry': 1.0,        # Baseline attention to symmetry
+                'color_patterns': 1.0,  # Baseline attention to colors
+                'spatial_relations': 1.0  # Baseline attention to positions
+            },
+            
+            # Learning rate adjustments (how fast to adapt)
+            'learning_rate_modifiers': {
+                'visual_learning': 1.0,     # Speed of visual pattern learning
+                'symbolic_learning': 1.0,   # Speed of logical rule learning
+                'motor_learning': 1.0       # Speed of action optimization
+            },
+            
+            # Exploration/exploitation settings
+            'exploration_settings': {
+                'exploration_ratio': 0.5,    # Default 50/50 explore/exploit
+                'novelty_seeking': 0.5,      # Moderate novelty preference
+                'risk_tolerance': 0.5        # Moderate risk tolerance
+            },
+            
+            # Meta-learning capacities
+            'meta_capacities': {
+                'problem_decomposition_tendency': 1.0,  # Ability to break down problems
+                'abstraction_capacity': 1.0,            # Ability to form abstractions
+                'transfer_learning_ability': 1.0        # Ability to apply learning across domains
+            },
+            
+            # Inheritance tracking
+            'inheritance_strength': 1.0,  # First generation = full strength
+            'generation_depth': 0,        # Number of generations from root
+            'decay_rate': 0.95            # Epigenetic fading per generation
+        }
 
     def select_action(self, game_state: Dict[str, Any], available_actions: List[int],
                      action_handler) -> Dict[str, Any]:
@@ -494,7 +557,8 @@ class ARCAgent:
             'is_active': True,
             'total_games_played': self.games_played,
             'total_games_won': self.wins,
-            'total_score_achieved': self.total_score
+            'total_score_achieved': self.total_score,
+            'epigenetics': json.dumps(self.epigenetics) if self.epigenetics else None
         }
 
     # Utility methods for action selection

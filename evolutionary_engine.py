@@ -174,6 +174,130 @@ class EvolutionaryEngine:
 
         return fitness
     
+    def _calculate_learning_speed_fitness(self, agent_id: str) -> float:
+        """
+        Calculate fitness based on learning speed and efficiency improvement (Tasks 5 & 6).
+        Rewards fast learners who get more efficient over time, not solution inheritors.
+        
+        Formula: (level_wins^1.5 / age_factor) * execution_efficiency * consistency
+        
+        Where:
+        - level_wins: Total wins achieved
+        - age_factor: log(games_played + 1) - older agents need higher win rates
+        - execution_efficiency: Average score per action
+        - consistency: Stability of performance over time
+        
+        Returns:
+            Learning speed fitness score (higher = faster learner)
+        """
+        try:
+            # Get comprehensive performance data
+            perf_query = """
+                SELECT 
+                    COUNT(*) as games_played,
+                    SUM(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END) as level_wins,
+                    AVG(final_score) as avg_score,
+                    AVG(total_actions) as avg_actions,
+                    AVG(score_efficiency) as avg_efficiency,
+                    STDEV(final_score) as score_stdev,
+                    MIN(game_timestamp) as first_game,
+                    MAX(game_timestamp) as last_game
+                FROM agent_arc_performance
+                WHERE agent_id = ?
+            """
+            
+            # SQLite doesn't have STDEV, use custom calculation
+            perf_data = self.db.execute_query("""
+                SELECT 
+                    COUNT(*) as games_played,
+                    SUM(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END) as level_wins,
+                    AVG(final_score) as avg_score,
+                    AVG(total_actions) as avg_actions,
+                    AVG(score_efficiency) as avg_efficiency,
+                    MIN(game_timestamp) as first_game,
+                    MAX(game_timestamp) as last_game
+                FROM agent_arc_performance
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if not perf_data or perf_data[0]['games_played'] == 0:
+                return 0.0
+            
+            perf = perf_data[0]
+            games_played = perf['games_played']
+            level_wins = perf['level_wins'] or 0
+            avg_score = perf['avg_score'] or 0.0
+            avg_actions = perf['avg_actions'] or 1.0
+            avg_efficiency = perf['avg_efficiency'] or 0.0
+            
+            # Calculate discovery_speed (wins per game played)
+            discovery_speed = level_wins / games_played if games_played > 0 else 0.0
+            
+            # Calculate age_factor using log to penalize older agents who haven't learned much
+            # log(games_played + 1) ensures new agents aren't penalized too heavily
+            import math
+            age_factor = math.log(games_played + 1)
+            
+            # Age-adjusted mastery: discovery_speed / age_factor
+            # Fast learners win quickly, slow learners need many games
+            age_adjusted_mastery = discovery_speed / age_factor if age_factor > 0 else 0.0
+            
+            # Execution efficiency: how many actions needed per score point
+            # Lower is better, so we invert it
+            moves_per_win = avg_actions / (level_wins / games_played) if level_wins > 0 else avg_actions
+            execution_efficiency = 1.0 / (1.0 + moves_per_win / 10.0)  # Normalize
+            
+            # Calculate consistency (lower variance = higher consistency)
+            # Get score variance
+            scores = self.db.execute_query("""
+                SELECT final_score FROM agent_arc_performance
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if len(scores) > 1:
+                score_list = [s['final_score'] for s in scores]
+                mean = sum(score_list) / len(score_list)
+                variance = sum((s - mean) ** 2 for s in score_list) / len(score_list)
+                std_dev = math.sqrt(variance)
+                
+                # Consistency: inverse of coefficient of variation
+                # Higher std_dev relative to mean = lower consistency
+                if mean > 0:
+                    cv = std_dev / mean
+                    consistency = 1.0 / (1.0 + cv)
+                else:
+                    consistency = 0.5
+            else:
+                consistency = 0.5  # Neutral for single game
+            
+            # Main formula: (level_wins^1.5 / age_factor) * execution_efficiency * consistency
+            # The ^1.5 exponent rewards agents with more wins exponentially
+            wins_component = (level_wins ** 1.5) / age_factor if age_factor > 0 else 0.0
+            
+            learning_speed_fitness = wins_component * execution_efficiency * consistency
+            
+            # Log metrics for analysis
+            self._log_evolution_event("learning_speed_calculated", {
+                "agent_id": agent_id,
+                "games_played": games_played,
+                "level_wins": level_wins,
+                "discovery_speed": discovery_speed,
+                "age_factor": age_factor,
+                "age_adjusted_mastery": age_adjusted_mastery,
+                "execution_efficiency": execution_efficiency,
+                "consistency": consistency,
+                "learning_speed_fitness": learning_speed_fitness
+            })
+            
+            return learning_speed_fitness
+            
+        except Exception as e:
+            self._log_evolution_event("learning_speed_fitness_error", {
+                "agent_id": agent_id,
+                "error": str(e)
+            })
+            return 0.0
+    
     def _calculate_specialist_fitness(self, agent_id: str, agent_data: Dict[str, Any]) -> float:
         """
         Calculate specialist fitness - 100% focus on assigned games
@@ -230,37 +354,68 @@ class EvolutionaryEngine:
             avg_efficiency = perf['avg_efficiency'] or 0.0
             best_score = perf['best_score'] or 0.0
             
-            # Calculate specialist fitness
-            # Heavy emphasis on wins and scores ON ASSIGNED GAMES
-            win_rate = wins / games_played if games_played > 0 else 0.0
+            # NEW: Use learning speed formula (Task 6)
+            # Formula: (level_wins^1.5 / age_factor) * execution_efficiency * consistency
+            # Rewards fast learners who get more efficient over time
             
-            # Normalize avg_score (assuming max score ~10.0 for ARC)
-            normalized_score = min(avg_score / 10.0, 1.0)
+            import math
             
-            # Normalize efficiency (assuming 1.0 is excellent)
-            normalized_efficiency = min(avg_efficiency, 1.0)
+            # Age factor: log(games_played + 1) - penalizes agents who need many games to learn
+            age_factor = math.log(games_played + 1)
             
-            # Specialist fitness weights:
-            # 50% win rate on assigned games
-            # 30% average score on assigned games  
-            # 20% efficiency on assigned games
-            fitness = (
-                win_rate * 0.50 +
-                normalized_score * 0.30 +
-                normalized_efficiency * 0.20
-            )
+            # Wins component: level_wins^1.5 rewards more wins exponentially
+            wins_component = (wins ** 1.5) / age_factor if age_factor > 0 else 0.0
             
-            # Bonus for deep mastery (high scores on assigned games)
-            if best_score >= 3.0:
-                fitness *= 1.3  # 30% bonus for achieving score 3+
-            elif best_score >= 2.0:
-                fitness *= 1.15  # 15% bonus for achieving score 2+
+            # Execution efficiency: score per action (already computed by database)
+            # Normalize to 0-1 range (assuming 1.0 is excellent)
+            execution_efficiency = min(avg_efficiency, 1.0)
             
-            # Bonus for consistent performance
-            if games_played >= 20:
-                fitness *= 1.1  # 10% bonus for experience
+            # Calculate consistency on assigned games
+            # Get all scores for consistency calculation
+            score_records = self.db.execute_query(f"""
+                SELECT final_score FROM agent_arc_performance
+                WHERE agent_id = ? AND game_id IN ({placeholders})
+            """, (agent_id, *assigned_games))
             
-            return min(fitness, 2.0)  # Cap at 2.0 to allow specialists to dominate
+            if len(score_records) > 1:
+                scores = [s['final_score'] for s in score_records]
+                mean = sum(scores) / len(scores)
+                variance = sum((s - mean) ** 2 for s in scores) / len(scores)
+                std_dev = math.sqrt(variance)
+                
+                # Consistency: inverse of coefficient of variation
+                if mean > 0:
+                    cv = std_dev / mean
+                    consistency = 1.0 / (1.0 + cv)
+                else:
+                    consistency = 0.5
+            else:
+                consistency = 0.5  # Neutral for single game
+            
+            # Apply the learning speed formula (Task 6)
+            # This rewards agents who learn FAST and get efficient, not those who inherit solutions
+            specialist_fitness = wins_component * execution_efficiency * consistency
+            
+            # Bonus for deep mastery (achieving high scores quickly)
+            if best_score >= 3.0 and games_played <= 15:
+                specialist_fitness *= 1.3  # 30% bonus for fast mastery
+            elif best_score >= 2.0 and games_played <= 10:
+                specialist_fitness *= 1.15  # 15% bonus for quick learning
+            
+            # Log detailed metrics
+            self._log_evolution_event("specialist_fitness_calculated", {
+                "agent_id": agent_id,
+                "assigned_games": assigned_games,
+                "games_played": games_played,
+                "wins": wins,
+                "age_factor": age_factor,
+                "wins_component": wins_component,
+                "execution_efficiency": execution_efficiency,
+                "consistency": consistency,
+                "specialist_fitness": specialist_fitness
+            })
+            
+            return min(specialist_fitness, 2.0)  # Cap at 2.0 to allow specialists to dominate
             
         except Exception as e:
             self._log_evolution_event("specialist_fitness_error", {
@@ -428,6 +583,7 @@ class EvolutionaryEngine:
                           evolution_strategy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Generate offspring through crossover of parent genomes
+        Includes epigenetic inheritance (Layer 2) calculation
         """
         offspring = []
 
@@ -436,11 +592,20 @@ class EvolutionaryEngine:
             offspring1 = self.crossover_ops.crossover_genomes(parent1, parent2)
             offspring2 = self.crossover_ops.crossover_genomes(parent2, parent1)  # Reversed order
 
+            # Calculate epigenetic inheritance for both offspring (Layer 2: Epigenetic)
+            # This inherits LEARNING CAPACITY (attention weights, learning rates) NOT SOLUTIONS
+            epigenetics1 = self.calculate_epigenetic_inheritance(parent1, parent2)
+            epigenetics2 = self.calculate_epigenetic_inheritance(parent2, parent1)
+
             # Mark as offspring for tracking
             offspring1['parent_ids'] = [parent1['agent_id'], parent2['agent_id']]
             offspring2['parent_ids'] = [parent1['agent_id'], parent2['agent_id']]
             offspring1['generation'] = evolution_strategy.get('generation', 0)
             offspring2['generation'] = evolution_strategy.get('generation', 0)
+            
+            # Add epigenetic inheritance (Layer 2)
+            offspring1['epigenetics'] = json.dumps(epigenetics1)
+            offspring2['epigenetics'] = json.dumps(epigenetics2)
 
             offspring.extend([offspring1, offspring2])
 
@@ -533,6 +698,204 @@ class EvolutionaryEngine:
                 self.db.store_agent(agent)
             else:
                 self.db.update_agent(agent['agent_id'], agent)
+
+    def calculate_epigenetic_inheritance(self, parent1: Dict[str, Any], 
+                                        parent2: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Calculate epigenetic inheritance from parent performance data.
+        Inherits LEARNING CAPACITY (hardware) not SOLUTIONS (software).
+        
+        Layer 2 (Epigenetic): Inherits attention biases, learning rates, exploration settings
+        Layer 3 (Somatic): Winning sequences stay in community database, NOT inherited
+        
+        Returns epigenetic dict with decay applied (0.95 per generation)
+        """
+        # Parse parent epigenetics if they exist
+        p1_epigenetics = parent1.get('epigenetics')
+        if isinstance(p1_epigenetics, str):
+            p1_epigenetics = json.loads(p1_epigenetics) if p1_epigenetics else None
+        
+        p2_epigenetics = parent2.get('epigenetics')
+        if isinstance(p2_epigenetics, str):
+            p2_epigenetics = json.loads(p2_epigenetics) if p2_epigenetics else None
+        
+        # Get parent performance data from database
+        p1_performance = self._get_agent_performance_summary(parent1['agent_id'])
+        p2_performance = self._get_agent_performance_summary(parent2['agent_id'])
+        
+        # Initialize offspring epigenetics with default structure
+        offspring_epigenetics = {
+            'feature_attention_weights': {
+                'edges': 1.0,
+                'symmetry': 1.0,
+                'color_patterns': 1.0,
+                'spatial_relations': 1.0
+            },
+            'learning_rate_modifiers': {
+                'visual_learning': 1.0,
+                'symbolic_learning': 1.0,
+                'motor_learning': 1.0
+            },
+            'exploration_settings': {
+                'exploration_ratio': 0.5,
+                'novelty_seeking': 0.5,
+                'risk_tolerance': 0.5
+            },
+            'meta_capacities': {
+                'problem_decomposition_tendency': 1.0,
+                'abstraction_capacity': 1.0,
+                'transfer_learning_ability': 1.0
+            },
+            'inheritance_strength': 1.0,
+            'generation_depth': 0,
+            'decay_rate': 0.95
+        }
+        
+        # Calculate which parent was more successful (higher fitness parent gets more weight)
+        p1_fitness = p1_performance.get('fitness', 0.0)
+        p2_fitness = p2_performance.get('fitness', 0.0)
+        total_fitness = p1_fitness + p2_fitness
+        
+        if total_fitness > 0:
+            p1_weight = p1_fitness / total_fitness
+            p2_weight = p2_fitness / total_fitness
+        else:
+            p1_weight = 0.5
+            p2_weight = 0.5
+        
+        # Inherit feature attention weights based on parent performance
+        if p1_epigenetics and p2_epigenetics:
+            for feature in offspring_epigenetics['feature_attention_weights'].keys():
+                p1_val = p1_epigenetics.get('feature_attention_weights', {}).get(feature, 1.0)
+                p2_val = p2_epigenetics.get('feature_attention_weights', {}).get(feature, 1.0)
+                
+                # Weighted average based on fitness, with small mutation
+                inherited_val = (p1_val * p1_weight + p2_val * p2_weight)
+                mutation = random.uniform(-0.1, 0.1)
+                offspring_epigenetics['feature_attention_weights'][feature] = max(0.5, min(1.6, inherited_val + mutation))
+        
+        # Inherit learning rate modifiers
+        if p1_epigenetics and p2_epigenetics:
+            for modifier in offspring_epigenetics['learning_rate_modifiers'].keys():
+                p1_val = p1_epigenetics.get('learning_rate_modifiers', {}).get(modifier, 1.0)
+                p2_val = p2_epigenetics.get('learning_rate_modifiers', {}).get(modifier, 1.0)
+                
+                inherited_val = (p1_val * p1_weight + p2_val * p2_weight)
+                mutation = random.uniform(-0.1, 0.1)
+                offspring_epigenetics['learning_rate_modifiers'][modifier] = max(0.5, min(1.6, inherited_val + mutation))
+        
+        # Inherit exploration settings (influenced by parent success patterns)
+        if p1_performance.get('games_played', 0) > 5 and p2_performance.get('games_played', 0) > 5:
+            # Use performance data to adjust exploration
+            p1_win_rate = p1_performance.get('win_rate', 0.0)
+            p2_win_rate = p2_performance.get('win_rate', 0.0)
+            
+            if p1_epigenetics and p2_epigenetics:
+                # If parents had high win rates, offspring can be less exploratory
+                avg_win_rate = (p1_win_rate + p2_win_rate) / 2
+                
+                p1_explore = p1_epigenetics.get('exploration_settings', {}).get('exploration_ratio', 0.5)
+                p2_explore = p2_epigenetics.get('exploration_settings', {}).get('exploration_ratio', 0.5)
+                
+                inherited_explore = (p1_explore * p1_weight + p2_explore * p2_weight)
+                
+                # Adjust based on success - successful parents pass down refined exploration
+                if avg_win_rate > 0.3:
+                    inherited_explore *= 0.9  # Slightly more exploitative
+                else:
+                    inherited_explore *= 1.1  # Slightly more exploratory
+                
+                offspring_epigenetics['exploration_settings']['exploration_ratio'] = max(0.2, min(0.8, inherited_explore))
+                
+                # Inherit novelty seeking and risk tolerance similarly
+                for setting in ['novelty_seeking', 'risk_tolerance']:
+                    p1_val = p1_epigenetics.get('exploration_settings', {}).get(setting, 0.5)
+                    p2_val = p2_epigenetics.get('exploration_settings', {}).get(setting, 0.5)
+                    inherited_val = (p1_val * p1_weight + p2_val * p2_weight)
+                    mutation = random.uniform(-0.05, 0.05)
+                    offspring_epigenetics['exploration_settings'][setting] = max(0.2, min(0.8, inherited_val + mutation))
+        
+        # Inherit meta capacities
+        if p1_epigenetics and p2_epigenetics:
+            for capacity in offspring_epigenetics['meta_capacities'].keys():
+                p1_val = p1_epigenetics.get('meta_capacities', {}).get(capacity, 1.0)
+                p2_val = p2_epigenetics.get('meta_capacities', {}).get(capacity, 1.0)
+                
+                inherited_val = (p1_val * p1_weight + p2_val * p2_weight)
+                mutation = random.uniform(-0.05, 0.05)
+                offspring_epigenetics['meta_capacities'][capacity] = max(0.7, min(1.3, inherited_val + mutation))
+        
+        # Calculate generation depth and inheritance strength with decay
+        max_parent_gen = max(
+            p1_epigenetics.get('generation_depth', 0) if p1_epigenetics else 0,
+            p2_epigenetics.get('generation_depth', 0) if p2_epigenetics else 0
+        )
+        
+        offspring_epigenetics['generation_depth'] = max_parent_gen + 1
+        
+        # Apply decay to inheritance strength (0.95 per generation)
+        base_strength = (
+            (p1_epigenetics.get('inheritance_strength', 1.0) if p1_epigenetics else 1.0) * p1_weight +
+            (p2_epigenetics.get('inheritance_strength', 1.0) if p2_epigenetics else 1.0) * p2_weight
+        )
+        offspring_epigenetics['inheritance_strength'] = base_strength * 0.95
+        
+        return offspring_epigenetics
+
+    def _get_agent_performance_summary(self, agent_id: str) -> Dict[str, Any]:
+        """Get performance summary for an agent from database"""
+        try:
+            query = """
+                SELECT 
+                    COUNT(*) as games_played,
+                    SUM(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END) as games_won,
+                    AVG(final_score) as avg_score,
+                    AVG(total_actions) as avg_actions,
+                    AVG(CASE WHEN total_actions > 0 THEN CAST(final_score AS FLOAT) / total_actions ELSE 0 END) as score_efficiency
+                FROM agent_arc_performance
+                WHERE agent_id = ?
+            """
+            
+            result = self.db.execute_query(query, (agent_id,))
+            
+            if result and len(result) > 0:
+                row = result[0]
+                games_played = row.get('games_played', 0)
+                games_won = row.get('games_won', 0)
+                
+                return {
+                    'games_played': games_played,
+                    'games_won': games_won,
+                    'win_rate': games_won / games_played if games_played > 0 else 0.0,
+                    'avg_score': row.get('avg_score', 0.0),
+                    'avg_actions': row.get('avg_actions', 0.0),
+                    'score_efficiency': row.get('score_efficiency', 0.0),
+                    'fitness': (games_won / games_played * 0.7 + row.get('score_efficiency', 0.0) * 0.3) if games_played > 0 else 0.0
+                }
+            else:
+                return {
+                    'games_played': 0,
+                    'games_won': 0,
+                    'win_rate': 0.0,
+                    'avg_score': 0.0,
+                    'avg_actions': 0.0,
+                    'score_efficiency': 0.0,
+                    'fitness': 0.0
+                }
+        except Exception as e:
+            self._log_evolution_event("performance_summary_error", {
+                "agent_id": agent_id,
+                "error": str(e)
+            })
+            return {
+                'games_played': 0,
+                'games_won': 0,
+                'win_rate': 0.0,
+                'avg_score': 0.0,
+                'avg_actions': 0.0,
+                'score_efficiency': 0.0,
+                'fitness': 0.0
+            }
 
     def _log_evolution_event(self, event_type: str, event_data: Dict[str, Any]):
         """Log evolution events to database (Rule 2: no log files)"""
