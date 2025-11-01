@@ -42,6 +42,15 @@ class EvolutionaryEngine:
         })
 
         try:
+            # CRITICAL: Sync agent performance before calculating fitness
+            # This ensures fitness calculations use latest game results
+            agents_synced = self.db.sync_agent_performance_to_agents_table()
+            if agents_synced > 0:
+                self._log_evolution_event("agent_performance_synced", {
+                    "agents_updated": agents_synced,
+                    "generation": generation
+                })
+            
             # 1. Load current population from database (Rule 2)
             current_population = self._load_population_from_database()
 
@@ -645,7 +654,11 @@ class EvolutionaryEngine:
         Select new population from current population + offspring
         Maintains population size while favoring high-fitness agents
         """
-        target_population_size = len(current_population)
+        # Use population_size from strategy, or default to reasonable size
+        target_population_size = evolution_strategy.get('population_size', 50)
+        
+        # NEVER let population exceed 200 agents (safety limit)
+        target_population_size = min(target_population_size, 200)
 
         # Combine current population and offspring
         all_candidates = current_population + offspring
@@ -681,10 +694,26 @@ class EvolutionaryEngine:
         return self.db.get_active_agents()
 
     def _update_population_database(self, new_population: List[Dict[str, Any]], generation: int):
-        """Update population in database"""
+        """Update population in database - store new agents and deactivate culled ones"""
         import json
 
-        # Store new agents
+        # Get IDs of agents that made it to new population
+        selected_ids = {agent['agent_id'] for agent in new_population}
+        
+        # Deactivate agents that were NOT selected (culled from population)
+        # This is CRITICAL to prevent population explosion
+        with self.db._get_connection() as conn:
+            conn.execute("""
+                UPDATE agents 
+                SET is_active = 0 
+                WHERE is_active = 1 
+                AND generation = ?
+                AND agent_id NOT IN ({})
+            """.format(','.join('?' * len(selected_ids))), 
+            [generation] + list(selected_ids))
+            conn.commit()
+
+        # Store new agents or update existing
         for agent in new_population:
             # Ensure genome is JSON string for database storage
             if isinstance(agent.get('genome'), dict):

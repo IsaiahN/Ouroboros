@@ -44,6 +44,11 @@ class DatabaseInterface:
             self._local.connection.row_factory = sqlite3.Row
             # Enable WAL mode for better concurrent access
             self._local.connection.execute("PRAGMA journal_mode=WAL")
+            # Aggressive WAL checkpointing to prevent data loss on force-close
+            # Checkpoint every 1000 pages (~4MB) instead of default 1000 pages
+            self._local.connection.execute("PRAGMA wal_autocheckpoint=100")  # 400KB
+            # Synchronous mode NORMAL for better crash recovery (still fast)
+            self._local.connection.execute("PRAGMA synchronous=NORMAL")
         return self._local.connection
 
     def _initialize_database_from_template(self):
@@ -687,6 +692,51 @@ class DatabaseInterface:
             data['level_progression_rate'] = data['level_progressions_detected'] / max(data['total_games_played'], 1)
 
             return data
+
+    def sync_agent_performance_to_agents_table(self):
+        """
+        Sync agent_arc_performance data to agents table.
+        Updates total_games_played, total_games_won, avg_score_per_game, score_efficiency.
+        Call this after each evaluation cycle.
+        """
+        with self._get_connection() as conn:
+            # Update all agents from their performance data
+            conn.execute("""
+                UPDATE agents
+                SET 
+                    total_games_played = (
+                        SELECT COUNT(*) 
+                        FROM agent_arc_performance 
+                        WHERE agent_id = agents.agent_id
+                    ),
+                    total_games_won = (
+                        SELECT SUM(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END)
+                        FROM agent_arc_performance 
+                        WHERE agent_id = agents.agent_id
+                    ),
+                    avg_score_per_game = (
+                        SELECT AVG(final_score)
+                        FROM agent_arc_performance 
+                        WHERE agent_id = agents.agent_id
+                    ),
+                    score_efficiency = (
+                        SELECT AVG(score_efficiency)
+                        FROM agent_arc_performance 
+                        WHERE agent_id = agents.agent_id
+                    )
+                WHERE EXISTS (
+                    SELECT 1 FROM agent_arc_performance 
+                    WHERE agent_id = agents.agent_id
+                )
+            """)
+            conn.commit()
+            
+            # Return count of agents updated
+            cursor = conn.execute("""
+                SELECT COUNT(DISTINCT agent_id) 
+                FROM agent_arc_performance
+            """)
+            return cursor.fetchone()[0]
 
     def get_population_performance_data(self) -> List[Dict[str, Any]]:
         """Get performance data for all agents."""

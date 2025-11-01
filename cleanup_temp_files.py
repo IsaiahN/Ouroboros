@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""
+Temporary File Cleanup System
+Automatically removes temporary diagnostic/analysis files on startup.
+
+INTEGRATION: This script runs automatically at the start of every evolution run
+via run_evolution.py to keep the workspace clean.
+
+Manual usage:
+    python cleanup_temp_files.py              # Delete temp files
+    python cleanup_temp_files.py --dry-run    # Preview what would be deleted
+"""
+
+import os
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Patterns for temporary files (case-insensitive matching)
+TEMP_PATTERNS = [
+    "check_*.py",
+    "investigate_*.py", 
+    "analyze_*.py",
+    "diagnose_*.py",
+    "show_*.py",
+    "test_*.py",
+    "run_arc_debug_*.py",
+    "run_arc_game_*.py",
+    "detailed_*.py",
+    "verify_*.py",
+    "find_*.py",
+    "*_summary.*",  # Cleanup summary files (all extensions, case-insensitive)
+    "*_SUMMARY.*"   # Explicit uppercase variant
+]
+
+# Files to KEEP (whitelist - never delete these)
+KEEP_FILES = {
+    # Core system
+    "check_db.py",  # Used in diagnostics
+    "test_path_efficiency.py",  # Core feature test
+    "test_adaptive_limits.py",  # Core feature test
+    
+    # Important analysis tools
+    "analyze_action_limits.py",
+    "analyze_real_progress.py",
+    
+    # Documentation
+    "README.md",
+    
+    # Any files in DOCS/ or configs
+}
+
+# Directories to skip
+SKIP_DIRS = {
+    ".git",
+    "__pycache__",
+    ".vscode",
+    "venv",
+    "env"
+}
+
+# Note: DOCS is NOT in SKIP_DIRS because we want to clean *_Summary.* files from there
+
+def should_delete(filepath: Path) -> bool:
+    """
+    Determine if file should be deleted.
+    
+    Rules:
+    1. If in whitelist, keep it
+    2. If ALL_CAPS.md file (LLM-generated docs), delete it (case-sensitive check)
+    3. If matches temp pattern (case-insensitive), delete it
+    4. Otherwise, keep it
+    """
+    filename = filepath.name
+    
+    # Whitelist check
+    if filename in KEEP_FILES:
+        return False
+    
+    # Check for ALL_CAPS.md files (LLM-generated documentation) - CASE SENSITIVE
+    if filename.endswith('.md'):
+        # Get filename without extension
+        name_without_ext = filename[:-3]
+        # Must contain at least one underscore (multi-word pattern like FILE_NAME.md)
+        # All letters must be uppercase (no lowercase allowed)
+        # Excludes single-word files like "README.md"
+        has_underscore = '_' in name_without_ext
+        has_letter = any(c.isalpha() for c in name_without_ext)
+        has_lowercase = any(c.islower() for c in name_without_ext)
+        if has_underscore and has_letter and not has_lowercase:
+            # Verify all alphabetic characters are uppercase
+            letters_only = ''.join(c for c in name_without_ext if c.isalpha())
+            if letters_only and letters_only.isupper():
+                return True
+    
+    # Pattern check (case-insensitive)
+    filename_lower = filename.lower()
+    for pattern in TEMP_PATTERNS:
+        pattern_lower = pattern.lower()
+        
+        # Simple wildcard matching
+        if pattern_lower.startswith("*"):
+            if filename_lower.endswith(pattern_lower[1:]):
+                return True
+        elif pattern_lower.endswith("*"):
+            if filename_lower.startswith(pattern_lower[:-1]):
+                return True
+        elif "*" in pattern_lower:
+            prefix, suffix = pattern_lower.split("*", 1)
+            if filename_lower.startswith(prefix) and filename_lower.endswith(suffix):
+                return True
+        elif filename_lower == pattern_lower:
+            return True
+    
+    return False
+
+def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
+    """
+    Clean up temporary files from workspace.
+    
+    Returns:
+        (files_deleted, bytes_freed)
+    """
+    workspace_path = Path(workspace_root)
+    files_deleted = 0
+    bytes_freed = 0
+    
+    print("\n[CLEANUP] Removing temporary files...")
+    print("=" * 80)
+    
+    # Walk workspace
+    for root, dirs, files in os.walk(workspace_path):
+        # Skip certain directories (but we'll check individual files)
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        
+        root_path = Path(root)
+        
+        for filename in files:
+            filepath = root_path / filename
+            
+            # Process Python files, markdown files, and summary files (case-insensitive)
+            filename_lower = filename.lower()
+            if not (filename_lower.endswith(".py") or filename_lower.endswith(".md") or "_summary." in filename_lower):
+                continue
+            
+            # Skip DOCS directory for Python files, but allow .md files to be cleaned there
+            if "DOCS" in filepath.parts and filename_lower.endswith(".py"):
+                continue
+            
+            if should_delete(filepath):
+                try:
+                    file_size = filepath.stat().st_size
+                    filepath.unlink()
+                    files_deleted += 1
+                    bytes_freed += file_size
+                    print(f"  [DEL] {filepath.relative_to(workspace_path)}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete {filepath}: {e}")
+    
+    print("=" * 80)
+    print(f"[OK] Deleted {files_deleted} files ({bytes_freed / 1024:.1f} KB freed)\n")
+    
+    return files_deleted, bytes_freed
+
+def list_temp_files(workspace_root: str = ".") -> list[Path]:
+    """
+    List temporary files without deleting them.
+    Useful for dry-run before cleanup.
+    """
+    workspace_path = Path(workspace_root)
+    temp_files = []
+    
+    for root, dirs, files in os.walk(workspace_path):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        root_path = Path(root)
+        
+        for filename in files:
+            filepath = root_path / filename
+            filename_lower = filename.lower()
+            
+            if not (filename_lower.endswith(".py") or filename_lower.endswith(".md") or "_summary." in filename_lower):
+                continue
+            
+            # Skip DOCS directory for Python files, but allow .md files to be cleaned there
+            if "DOCS" in filepath.parts and filename_lower.endswith(".py"):
+                continue
+            
+            if should_delete(filepath):
+                temp_files.append(filepath)
+    
+    return temp_files
+
+if __name__ == "__main__":
+    import sys
+    
+    # Parse arguments
+    dry_run = "--dry-run" in sys.argv or "-n" in sys.argv
+    
+    if dry_run:
+        print("\n[DRY RUN] Files that would be deleted:")
+        print("=" * 80)
+        temp_files = list_temp_files()
+        for filepath in temp_files:
+            print(f"  {filepath}")
+        print("=" * 80)
+        print(f"Total: {len(temp_files)} files\n")
+    else:
+        cleanup_temp_files()

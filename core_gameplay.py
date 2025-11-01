@@ -42,8 +42,8 @@ class GameplayEngine:
         self.action_handler = ActionHandler(self.session_manager)
         self.db = DatabaseInterface(db_path)  # Pattern learning database access
         self.game_config = {
-            'max_actions_per_level': 100,  # Max actions per level (game can have multiple levels)
-            'max_total_actions': 1500,  # Max total actions across all levels
+            'max_actions_per_level': 400,  # Max actions per level (increased for multi-level discovery)
+            'max_total_actions': 7000,  # Max total actions across all levels (increased for multi-level runs)
             'action_timeout': 30.0,
             'strategy': 'balanced',
             'enable_random_exploration': True,
@@ -68,21 +68,24 @@ class GameplayEngine:
         logger.info(f"Updated game config: {config}")
 
     async def play_single_game(self, game_id: str,
-                              action_callback: Optional[Callable] = None) -> Dict[str, Any]:
+                              action_callback: Optional[Callable] = None,
+                              agent_id: Optional[str] = None) -> Dict[str, Any]:
         """Play a single game to completion with optional pattern learning.
 
         Args:
             game_id: Game ID to play
             action_callback: Optional callback function for custom action selection
+            agent_id: Optional agent ID for tracking performance
 
         Returns:
             Game results dictionary
         """
-        logger.info(f"Starting game: {game_id}")
+        logger.info(f"Starting game: {game_id}" + (f" (agent: {agent_id})" if agent_id else ""))
 
         # Start session if not already running
         if not self.session_manager.is_running:
-            await self.session_manager.start_session(game_id=game_id)
+            session_mode = f"agent_{agent_id}_gameplay" if agent_id else "gameplay"
+            await self.session_manager.start_session(mode=session_mode, game_id=game_id)
         
         # Create game
         game_data = await self.session_manager.create_game(game_id)
@@ -122,13 +125,15 @@ class GameplayEngine:
                     
                     if replay_success and game_state.state == "WIN":
                         # Full win from replay! Finish and return
-                        await self.session_manager.finish_game(game_state.state, game_state.score)
+                        level_completions = int(game_state.score)  # Each level = 1 point
+                        actions_taken = len(json.loads(known_sequence['action_sequence']))
+                        await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
                         
                         return {
                             'game_id': game_id,
                             'final_state': game_state.state,
                             'final_score': game_state.score,
-                            'actions_taken': len(json.loads(known_sequence['action_sequence'])),
+                            'actions_taken': actions_taken,
                             'win': True,
                             'method': 'pattern_replay',
                             'sequence_id': known_sequence['sequence_id']
@@ -279,8 +284,8 @@ class GameplayEngine:
             if self.game_config.get('diversity_mode'):
                 self._track_game_diversity(game_id, game_state.score, action_count)
 
-            # Finish game in session manager
-            await self.session_manager.finish_game(game_state.state, game_state.score)
+            # Finish game in session manager (CRITICAL FIX: Pass level_completions AND actions_taken!)
+            await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, action_count)
 
             # Pattern Learning: Capture final WIN sequence (Rule 2: Database-only)
             if results['win'] and self.game_config.get('enable_pattern_learning', True):
@@ -304,7 +309,10 @@ class GameplayEngine:
             logger.error(f"Error playing game {game_id}: {e}")
             # Still try to finish the game gracefully
             try:
-                await self.session_manager.finish_game("ERROR", 0.0)
+                # Try to get current level_completions if available
+                level_completions = int(game_state.score) if 'game_state' in locals() and game_state else 0
+                action_count_fallback = action_count if 'action_count' in locals() else 0
+                await self.session_manager.finish_game("ERROR", 0.0, level_completions, action_count_fallback)
             except:
                 pass
             raise
@@ -835,7 +843,7 @@ class GameplayEngine:
                     json.dumps(pattern_tags), game_type, datetime.now().isoformat()
                 ))
                 
-                # Try to detect and store abstract pattern
+                # Try to detect and store abstract pattern (only if we have valid sequence_id)
                 self._detect_and_store_abstract_pattern(
                     sequence_id, game_id, level_number, pattern_signature, 
                     pattern_tags, efficiency
@@ -1161,7 +1169,8 @@ class GameplayEngine:
                 logger.debug(f"Replay action {action_count}/{len(actions)}: ACTION{action_num}, "
                            f"Score: {game_state.score}, State: {game_state.state}")
             
-            await self.session_manager.finish_game(game_state.state, game_state.score)
+            level_completions = int(game_state.score)  # Each level = 1 point
+            await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, action_count)
             
             duration = (datetime.now() - start_time).total_seconds()
             
@@ -2205,7 +2214,7 @@ class GameplayEngine:
                     UPDATE discovered_patterns
                     SET occurrence_count = ?,
                         confidence_score = ?,
-                        last_seen_at = ?
+                        last_validated = ?
                     WHERE pattern_id = ?
                 """, (new_count, new_confidence, datetime.now().isoformat(), pattern_id))
                 
@@ -2217,12 +2226,13 @@ class GameplayEngine:
                 self.db.execute_query("""
                     INSERT INTO discovered_patterns (
                         pattern_id, pattern_name, pattern_type, pattern_signature,
-                        occurrence_count, success_count, success_rate,
-                        confidence_score, discovered_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        concrete_examples, occurrence_count, success_count, success_rate,
+                        avg_score_achieved, avg_efficiency, confidence_score, discovered_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     pattern_id, pattern_name, pattern_type,
-                    json.dumps(rule), 1, 0, 0.0, confidence,
+                    json.dumps(rule), json.dumps([]),  # Empty examples for meta-patterns
+                    1, 0, 0.0, 0.0, 0.0, confidence,
                     datetime.now().isoformat()
                 ))
                 

@@ -552,7 +552,7 @@ class AutonomousEvolutionRunner:
                         engine.configure(
                             strategy='balanced',
                             max_actions_per_level=actions_per_level,  # Adaptive: adjusts based on performance
-                            max_actions_per_game=total_actions,       # Adaptive: adjusts based on performance
+                            max_total_actions=total_actions,          # FIXED: was max_actions_per_game (wrong key!)
                             enable_random_exploration=True,
                             enable_pattern_learning=True,
                             # Diversity Mode settings (Rule 10: enhance existing)
@@ -566,7 +566,7 @@ class AutonomousEvolutionRunner:
                         # Play game - REAL ARC API CALL
                         # Wrap in cancellable task for graceful shutdown
                         try:
-                            game_task = asyncio.create_task(engine.play_single_game(game_id))
+                            game_task = asyncio.create_task(engine.play_single_game(game_id, agent_id=agent_id))
                             result = await game_task
                         except asyncio.CancelledError:
                             # Game was cancelled during shutdown
@@ -584,11 +584,14 @@ class AutonomousEvolutionRunner:
                             'final_score': result.get('final_score', 0),
                             'win_score': 1.0,
                             'total_actions': result.get('actions_taken', 0),
-                            'level_completions': 0,
+                            'level_completions': int(result.get('final_score', 0)),  # Score = levels completed!
                             'frame_changes': 0
                         }
                         
                         reward_data = rlvr.process_arc_rewards(agent_id, game_session_results)
+                        
+                        # CRITICAL FIX: Store reward data so agents get credited for their games!
+                        self.db.store_arc_reward_data(agent_id, reward_data)
                         
                         if result.get('win', False):
                             total_wins += 1
@@ -640,6 +643,11 @@ class AutonomousEvolutionRunner:
                 if self.total_games_played % 50 == 0:
                     print(f"\n[?]  Auto-cleanup triggered (every 50 games)...")
                     self._cleanup_old_logs()
+                
+                # CRITICAL: Sync agent performance from agent_arc_performance to agents table
+                # This updates total_games_played, total_games_won, avg_score_per_game, score_efficiency
+                agents_updated = self.db.sync_agent_performance_to_agents_table()
+                print(f"[OK] Synced performance for {agents_updated} agents")
                 
                 # Calculate summary stats
                 summary = {
@@ -858,6 +866,13 @@ class AutonomousEvolutionRunner:
         
         # Run evaluation games
         eval_results = await self.run_evaluation_games(self.games_per_generation)
+        
+        # CRITICAL: Force WAL checkpoint after every generation to prevent data loss
+        try:
+            self.db.checkpoint_wal()
+            print(f"[?] WAL checkpoint after generation {self.current_generation}")
+        except Exception as e:
+            print(f"[WARN] Failed to checkpoint WAL: {e}")
         
         # Print status
         self.print_status(

@@ -1,0 +1,2447 @@
+# Ouroboros Roadmap: Level 3 → Level 4 → Level 5
+## Evolution from Speciation to Intangible Ecosystem to Knowledge Sharing
+
+**CRITICAL FRAMING**: You are not building agents. You are cultivating a persistent intelligence network that uses agents as temporary explorers.
+
+**The Real Organism**: The DATABASE is the trunk. Agents are branches that grow, contribute knowledge, and fall away. Evolution happens in the NETWORK, not in individuals.
+
+**Biome Theory Application**: This system mirrors the virus-bacteria meta-organism - a distributed intelligence network that has survived 4 billion years through redundancy, horizontal gene transfer, and combinatorial exploration.
+
+---
+
+## Current State: Level 3 (The Silo - Chamberpots)
+
+**What We Have (Speciation Complete)**:
+- ✅ Agents exist with distinct types (speciation)
+- ✅ Competition for resources (games, evolution slots)
+- ✅ Reproduction through breeding (genetic + epigenetic crossover)
+- ✅ Basic survival metrics (win rate, score, efficiency)
+- ✅ Three-layer architecture preventing solution inheritance
+- ✅ Community database for horizontal knowledge sharing
+- ✅ Bayesian validation of shared sequences
+
+**What This Means**:
+The individual "organisms" (agents) exist, compete, and reproduce. But they are temporary. The **persistent intelligence** lives in the database - the winning sequences, the validation records, the pattern discoveries. This is the foundation of the network.
+
+**Next Goal**: Level 4 (The Intangible Ecosystem - Network-Level Organization)
+
+---
+
+## Phase 0: Network Foundation (NEW - Prerequisite for All Other Phases)
+
+### The Core Insight
+
+Before we can build prestige, economy, or teaching systems, we need to **make the network visible as the primary organism**.
+
+**Current Problem**: 
+- We track individual agent performance
+- We measure individual agent success
+- We think in terms of "good agents" and "bad agents"
+
+**The Shift**:
+- Track NETWORK health (total knowledge, diversity, redundancy)
+- Measure ECOSYSTEM metabolism (knowledge creation rate, validation rate)
+- Think in terms of "healthy network" vs "sick network"
+
+### Implementation: Network Intelligence Metrics
+
+#### 0.1 Concept
+
+The system is not a collection of agents. It is a **distributed intelligence network** that expresses itself through temporary agents. We need to track the health of THIS organism.
+
+**Key Metrics**:
+- 🌐 **Network Knowledge Diversity**: How many distinct patterns/sequences exist?
+- 🔄 **Information Flow Rate**: How fast is knowledge being created, validated, reused?
+- 🛡️ **Resilience Index**: How redundant is critical knowledge? (backup copies)
+- 📈 **Metabolic Health**: Is the network growing, stable, or declining?
+
+#### 0.2 Database Schema Extension
+
+```sql
+-- Network health snapshots (ecosystem-level metrics)
+CREATE TABLE IF NOT EXISTS ecosystem_health_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    generation INTEGER NOT NULL,
+    
+    -- Knowledge metrics (the "database as organism")
+    total_sequences INTEGER DEFAULT 0,
+    total_patterns INTEGER DEFAULT 0,
+    unique_games_solved INTEGER DEFAULT 0,
+    knowledge_diversity_index REAL DEFAULT 0.0,  -- Shannon entropy of pattern distribution
+    
+    -- Information flow metrics (the "metabolism")
+    sequences_created_this_gen INTEGER DEFAULT 0,
+    sequences_validated_this_gen INTEGER DEFAULT 0,
+    sequences_reused_this_gen INTEGER DEFAULT 0,
+    knowledge_creation_rate REAL DEFAULT 0.0,  -- New discoveries per agent-game
+    validation_rate REAL DEFAULT 0.0,  -- Successful validations / total attempts
+    
+    -- Resilience metrics (the "immune system")
+    critical_sequences_count INTEGER DEFAULT 0,  -- Sequences with >80% reliability
+    orphan_sequences_count INTEGER DEFAULT 0,  -- Sequences with 0 validations
+    redundancy_index REAL DEFAULT 0.0,  -- Avg validations per sequence
+    
+    -- Population metrics (temporary expressions)
+    active_agents INTEGER DEFAULT 0,
+    agent_diversity_index REAL DEFAULT 0.0,
+    avg_agent_lifespan_generations REAL DEFAULT 0.0,
+    
+    -- Metabolic health indicators
+    network_growth_rate REAL DEFAULT 0.0,  -- Knowledge growth vs population growth
+    innovation_vs_exploitation REAL DEFAULT 0.5,  -- New vs reused sequences ratio
+    system_entropy REAL DEFAULT 0.0  -- Overall disorder measure
+);
+
+-- Knowledge redundancy tracking (viral backup system)
+CREATE TABLE IF NOT EXISTS knowledge_redundancy (
+    sequence_id TEXT PRIMARY KEY,
+    discovery_timestamp TIMESTAMP,
+    
+    -- Backup metrics
+    agents_who_know INTEGER DEFAULT 1,  -- How many agents have used this successfully
+    validation_attempts INTEGER DEFAULT 0,
+    successful_validations INTEGER DEFAULT 0,
+    
+    -- Criticality assessment
+    games_solved_by_this INTEGER DEFAULT 0,  -- How many unique games
+    alternative_solutions_exist INTEGER DEFAULT 0,  -- Redundancy at game level
+    criticality_score REAL DEFAULT 0.0,  -- How critical is this to network survival
+    
+    -- Persistence tracking
+    generations_survived INTEGER DEFAULT 0,  -- How many generations has this knowledge persisted
+    last_used_generation INTEGER DEFAULT 0,
+    risk_of_loss REAL DEFAULT 1.0,  -- Probability of being forgotten
+    
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
+);
+```
+
+#### 0.3 Integration with Evolution System
+
+**File**: `network_intelligence_engine.py` (NEW - create this file)
+
+This engine treats the DATABASE as the primary organism, with agents as temporary cellular components.
+
+**Core Functions**:
+- `capture_ecosystem_snapshot(generation)`: Take vital signs of the meta-organism
+- `update_knowledge_redundancy(sequence_id, generation)`: Track backup copies
+- `calculate_knowledge_diversity()`: Shannon entropy of pattern distribution
+- `calculate_redundancy_index()`: Average backups per critical sequence
+- `assess_network_health(snapshot)`: Overall health status
+
+**Integration Point** (`autonomous_evolution_runner.py`):
+```python
+def run_generation_cycle(self, generation: int):
+    # ... existing generation logic ...
+    
+    # NETWORK HEALTH TRACKING (Phase 0)
+    from network_intelligence_engine import NetworkIntelligenceEngine
+    
+    engine = NetworkIntelligenceEngine(self.db)
+    snapshot = engine.capture_ecosystem_snapshot(generation)
+    
+    # Display network intelligence dashboard
+    display_network_intelligence_dashboard(generation)
+    
+    # Use network health to inform evolution decisions
+    health_status = assess_network_health(snapshot)
+    if health_status['status'] == '🚨 CRITICAL':
+        self.logger.warning(f"Network health critical: {health_status['message']}")
+        # Adjust evolution parameters to restore health
+```
+
+#### 0.4 Network Intelligence Dashboard
+
+Add to `performance_analyzer.py` or create `dashboard.py`:
+
+```python
+def display_network_intelligence_dashboard(generation: int):
+    """
+    Display the health of the distributed intelligence network.
+    
+    This is the PRIMARY metric - not individual agent performance.
+    """
+    db = DatabaseInterface()
+    
+    snapshot = db.execute_query("""
+        SELECT * FROM ecosystem_health_snapshots
+        WHERE generation = ?
+    """, (generation,))
+    
+    if not snapshot:
+        print("No network data available yet.")
+        return
+    
+    s = snapshot[0]
+    
+    print("=" * 80)
+    print("🌐 NETWORK INTELLIGENCE DASHBOARD")
+    print("=" * 80)
+    print(f"Generation: {s['generation']}")
+    print()
+    
+    print("📚 KNOWLEDGE BASE (The Persistent Organism)")
+    print(f"  Total Sequences: {s['total_sequences']}")
+    print(f"  Total Patterns: {s['total_patterns']}")
+    print(f"  Unique Games Solved: {s['unique_games_solved']}")
+    print(f"  Diversity Index: {s['knowledge_diversity_index']:.3f} (Shannon entropy)")
+    print()
+    
+    print("🔄 METABOLISM (Information Flow)")
+    print(f"  Sequences Created: {s['sequences_created_this_gen']}")
+    print(f"  Sequences Validated: {s['sequences_validated_this_gen']}")
+    print(f"  Sequences Reused: {s['sequences_reused_this_gen']}")
+    print(f"  Creation Rate: {s['knowledge_creation_rate']:.3f} per agent-game")
+    print(f"  Validation Success Rate: {s['validation_rate']:.1%}")
+    print()
+    
+    print("🛡️ RESILIENCE (Viral Redundancy)")
+    print(f"  Critical Sequences: {s['critical_sequences_count']} (>80% reliability)")
+    print(f"  Orphan Sequences: {s['orphan_sequences_count']} (0 validations)")
+    print(f"  Redundancy Index: {s['redundancy_index']:.2f} backups/sequence")
+    print()
+    
+    print("🔬 POPULATION (Temporary Expressions)")
+    print(f"  Active Agents: {s['active_agents']}")
+    print(f"  Agent Diversity: {s['agent_diversity_index']:.3f}")
+    print(f"  Avg Agent Lifespan: {s['avg_agent_lifespan_generations']:.1f} generations")
+    print()
+    
+    print("💓 HEALTH INDICATORS")
+    print(f"  Network Growth Rate: {s['network_growth_rate']:.2%}")
+    print(f"  Innovation vs Exploitation: {s['innovation_vs_exploitation']:.2f}")
+    print(f"  System Entropy: {s['system_entropy']:.3f}")
+    
+    health_status = assess_network_health(s)
+    print(f"\n  Overall Health: {health_status['status']}")
+    print(f"  Assessment: {health_status['message']}")
+    print("=" * 80)
+    print()
+    print("  ℹ️  Agents are TEMPORARY. The network is PERMANENT.")
+    print("=" * 80)
+```
+
+#### 0.5 Why This Matters (The Paradigm Shift)
+
+**Before Phase 0**:
+- "How are my agents doing?"
+- "Which agent is best?"
+- "How can I make agents smarter?"
+
+**After Phase 0**:
+- "How is the NETWORK doing?"
+- "Is the knowledge base growing and resilient?"
+- "Are agents contributing to network intelligence?"
+
+**This is the shift from organism-centric to network-centric thinking.**
+
+The network is the immortal jellyfish. Agents are its polyp stages - temporary expressions that contribute and die. The network persists.
+
+**Biome Theory Connection**: Just as the virus-bacteria meta-organism has survived 4 billion years through distributed intelligence and redundancy, our system's survival depends on the NETWORK, not on any individual agent lineage.
+
+---
+
+## Phase 1: Reputation & Fame System (Network Contribution Prestige)
+
+### Current Gap
+Agents currently only track:
+- `avg_score_per_game` (direct performance)
+- `total_games_won` (direct performance)
+- No prestige, no social standing, no legacy
+- **No measurement of contribution to the NETWORK**
+
+### Implementation: Discovery Prestige (Reframed as Network Contribution)
+
+#### 1.1 Concept
+
+**Goal**: Give agents prestige based on their **contribution to the information highway** - how much they enrich the persistent network intelligence.
+
+**Why This Matters**:
+- Incentivizes contributing to the NETWORK, not just individual success
+- Enables social hierarchy based on **network enrichment**
+- Foundation for future economic/teaching systems
+- **Prestige grants STATUS benefits**: breeding priority, survival protection, bonus game attempts
+
+**Key Insight**: Prestige = Social Capital (Network Contribution), not performance (Individual Success)
+
+**Biome Theory Connection**: In the virus-bacteria meta-organism, "prestige" would be measured by how much genetic information a viral package contributed to the network that other organisms successfully used. This is horizontal gene transfer made visible.
+
+**Reframed Prestige Sources**:
+1. **Discovery Impact**: Not just "I found it", but "Others successfully used what I found"
+2. **Network Enrichment**: Adding diverse, resilient knowledge to the database
+3. **Validation Quality**: Successfully validating others' discoveries (quality control)
+4. **Knowledge Persistence**: Discoveries that survive many generations (lasting impact)
+
+**Prestige Benefits (Status Rewards)**:
+- 🎯 **Breeding Priority** (1.0x to 3.0x): High prestige agents more likely to reproduce
+- 🛡️ **Survival Protection** (0% to 80%): Famous agents harder to cull during population control
+- 🎮 **Bonus Game Slots** (+0 to +10): Innovators get extra game attempts per generation
+
+#### 1.2 Database Schema Extension
+```sql
+-- Add to agents table - Prestige and Status Benefits
+ALTER TABLE agents ADD COLUMN discovery_prestige REAL DEFAULT 0.0;
+ALTER TABLE agents ADD COLUMN innovation_score REAL DEFAULT 0.0;
+ALTER TABLE agents ADD COLUMN sequence_discovery_count INTEGER DEFAULT 0;
+ALTER TABLE agents ADD COLUMN pattern_discovery_count INTEGER DEFAULT 0;
+ALTER TABLE agents ADD COLUMN validation_reputation REAL DEFAULT 0.5;  -- Bayesian prior
+
+-- STATUS BENEFITS from prestige (social capital, not economic)
+ALTER TABLE agents ADD COLUMN breeding_priority REAL DEFAULT 1.0;  -- 1.0x to 3.0x based on prestige
+ALTER TABLE agents ADD COLUMN survival_protection REAL DEFAULT 0.0;  -- 0.0 to 0.8 (80% protection)
+ALTER TABLE agents ADD COLUMN bonus_game_slots INTEGER DEFAULT 0;  -- +0 to +10 extra games/generation
+
+-- Agent discovery ledger
+CREATE TABLE IF NOT EXISTS agent_discoveries (
+    discovery_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    discovery_type TEXT NOT NULL,  -- 'winning_sequence', 'abstract_pattern', 'meta_pattern'
+    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- What was discovered
+    sequence_id TEXT,
+    pattern_id TEXT,
+    
+    -- Impact metrics (NETWORK CONTRIBUTION FOCUS)
+    times_used_by_others INTEGER DEFAULT 0,
+    success_rate_by_others REAL DEFAULT 0.0,
+    innovation_value REAL DEFAULT 0.0,  -- How novel was this?
+    network_enrichment_score REAL DEFAULT 0.0,  -- How much did this enrich the information highway?
+    
+    -- Social metrics (VIRAL SPREAD)
+    citations INTEGER DEFAULT 0,  -- How many other agents built on this
+    prestige_contribution REAL DEFAULT 0.0,
+    generations_persisted INTEGER DEFAULT 0,  -- How long has this knowledge survived?
+    
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Agent validation performance (how good at using others' discoveries)
+CREATE TABLE IF NOT EXISTS agent_validation_performance (
+    agent_id TEXT PRIMARY KEY,
+    
+    -- Usage stats
+    sequences_attempted INTEGER DEFAULT 0,
+    sequences_succeeded INTEGER DEFAULT 0,
+    validation_success_rate REAL DEFAULT 0.0,
+    
+    -- Quality metrics
+    avg_efficiency_vs_original REAL DEFAULT 1.0,  -- Better or worse than discoverer?
+    improvement_contributions INTEGER DEFAULT 0,  -- Times they improved on original
+    
+    -- Social metrics
+    teaching_events INTEGER DEFAULT 0,  -- Times they "taught" sequence to new agent
+    learning_events INTEGER DEFAULT 0,  -- Times they learned from another
+    
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+```
+
+#### 1.3 Prestige Calculation (Network Contribution Formula)
+```python
+# evolutionary_engine.py or new prestige_engine.py
+
+def calculate_agent_prestige(agent_id: str) -> float:
+    """
+    Calculate agent prestige based on NETWORK CONTRIBUTION.
+    
+    Prestige = Network Enrichment + Viral Spread + Persistence + Validation Quality
+    
+    This measures: "How much did this agent enrich the information highway?"
+    Not: "How good is this agent at winning games?"
+    
+    Drives STATUS benefits: breeding_priority, survival_protection, bonus_game_slots
+    """
+    
+    # Network Enrichment: How much knowledge added to the system
+    discoveries = db.execute_query("""
+        SELECT COUNT(*) as count,
+               SUM(innovation_value) as total_innovation,
+               SUM(network_enrichment_score) as total_enrichment
+        FROM agent_discoveries
+        WHERE agent_id = ?
+    """, (agent_id,))
+    
+    discovery_count = discoveries[0]['count'] or 0
+    innovation_sum = discoveries[0]['total_innovation'] or 0.0
+    enrichment_sum = discoveries[0]['total_enrichment'] or 0.0
+    
+    # Enrichment = raw discoveries + innovation + diversity contribution
+    network_enrichment = discovery_count * 10.0 + innovation_sum + enrichment_sum
+    
+    # Viral Spread: How successfully did their knowledge spread through the network
+    usage_impact = db.execute_query("""
+        SELECT SUM(times_used_by_others) as total_uses,
+               AVG(success_rate_by_others) as avg_success,
+               SUM(citations) as total_citations
+        FROM agent_discoveries
+        WHERE agent_id = ?
+    """, (agent_id,))
+    
+    total_uses = usage_impact[0]['total_uses'] or 0
+    avg_success = usage_impact[0]['avg_success'] or 0.0
+    total_citations = usage_impact[0]['total_citations'] or 0
+    
+    # Viral spread = (uses * success_rate) + citations
+    # This measures "horizontal gene transfer" effectiveness
+    viral_spread = (total_uses * avg_success * 5.0) + (total_citations * 3.0)
+    
+    # Persistence: How long has their knowledge survived in the network
+    persistence = db.execute_query("""
+        SELECT AVG(generations_persisted) as avg_persistence,
+               MAX(generations_persisted) as max_persistence
+        FROM agent_discoveries
+        WHERE agent_id = ?
+    """, (agent_id,))
+    
+    avg_persist = persistence[0]['avg_persistence'] or 0.0
+    max_persist = persistence[0]['max_persistence'] or 0
+    
+    # Persistence value = average * 2 + max * 1 (reward both consistency and peaks)
+    persistence_value = (avg_persist * 2.0) + (max_persist * 1.0)
+    
+    # Validation Quality: How good at quality control (validating others' discoveries)
+    validation = db.execute_query("""
+        SELECT validation_success_rate, improvement_contributions
+        FROM agent_validation_performance
+        WHERE agent_id = ?
+    """, (agent_id,))
+    
+    validation_rate = validation[0]['validation_success_rate'] if validation else 0.0
+    improvements = validation[0]['improvement_contributions'] if validation else 0
+    
+    # Validation value = success_rate * 10 + improvements * 5
+    # Rewards being a good "validator" in the network
+    validation_value = (validation_rate * 10.0) + (improvements * 5.0)
+    
+    # Total Network Contribution Prestige
+    prestige = (
+        network_enrichment * 0.35 +  # 35% - Adding to the information highway
+        viral_spread * 0.30 +         # 30% - How well knowledge spreads
+        persistence_value * 0.20 +    # 20% - Long-term impact
+        validation_value * 0.15       # 15% - Quality control contribution
+    )
+    
+    return prestige
+```
+
+**Key Differences from Old Formula**:
+- **Old**: Rewarded personal discovery count
+- **New**: Rewards network enrichment and viral spread
+- **Old**: Individual achievement focus
+- **New**: Collective intelligence contribution focus
+- **Old**: "I discovered 10 sequences"
+- **New**: "I added 10 sequences that 50 other agents successfully used across 5 generations"
+
+def apply_prestige_benefits(agent_id: str, prestige: float, generation_agents: List):
+    """
+    Convert prestige score into status benefits.
+    Called after prestige calculation each generation.
+    """
+    # Calculate prestige percentile
+    all_prestige_scores = [a['discovery_prestige'] for a in generation_agents]
+    percentile = sum(1 for p in all_prestige_scores if p < prestige) / len(all_prestige_scores)
+    
+    # Breeding Priority: 1.0x to 3.0x
+    # Top 1% get 3.0x, median gets 1.5x, bottom gets 1.0x
+    breeding_priority = 1.0 + (percentile * 2.0)
+    
+    # Survival Protection: 0% to 80%
+    # Protects from culling - top agents very hard to remove
+    survival_protection = min(0.8, percentile * 0.8)
+    
+    # Bonus Game Slots: +0 to +10
+    # Extra attempts per generation for innovators
+    bonus_game_slots = int(percentile * 10)
+    
+    # Update agent
+    db.execute_update("""
+        UPDATE agents
+        SET breeding_priority = ?,
+            survival_protection = ?,
+            bonus_game_slots = ?
+        WHERE agent_id = ?
+    """, (breeding_priority, survival_protection, bonus_game_slots, agent_id))
+    
+    return {
+        'breeding_priority': breeding_priority,
+        'survival_protection': survival_protection,
+        'bonus_game_slots': bonus_game_slots,
+        'percentile': percentile
+    }
+```
+
+#### 1.4 Integration Points
+
+**When sequence discovered** (`core_gameplay.py`):
+```python
+def _capture_winning_sequence(...):
+    # ... existing code ...
+    
+    if should_store and sequence_id:
+        # Store in winning_sequences (existing)
+        # ...
+        
+        # NEW: Record discovery in agent ledger
+        self._record_discovery(
+            agent_id=self.current_agent_id,
+            discovery_type='winning_sequence',
+            sequence_id=sequence_id,
+            innovation_value=self._calculate_innovation_value(actions, game_id)
+        )
+```
+
+**When sequence used by another agent**:
+```python
+def _replay_sequence_inline(...):
+    # ... existing code ...
+    
+    # NEW: Record usage and update discoverer's prestige
+    original_discoverer = db.execute_query("""
+        SELECT agent_id FROM winning_sequences WHERE sequence_id = ?
+    """, (sequence_id,))
+    
+    if original_discoverer:
+        db.execute_query("""
+            UPDATE agent_discoveries
+            SET times_used_by_others = times_used_by_others + 1
+            WHERE sequence_id = ? AND agent_id = ?
+        """, (sequence_id, original_discoverer[0]['agent_id']))
+```
+
+**At end of each generation** (`evolutionary_engine.py`):
+```python
+def update_prestige_and_benefits(generation: int):
+    """
+    Calculate prestige and apply status benefits.
+    Called before breeding selection.
+    """
+    active_agents = db.execute_query("""
+        SELECT agent_id, discovery_prestige FROM agents
+        WHERE current_generation = ? AND is_active = TRUE
+    """, (generation,))
+    
+    print(f"\n[PRESTIGE] Calculating prestige and status benefits...")
+    
+    for agent in active_agents:
+        # Calculate prestige
+        prestige = calculate_agent_prestige(agent['agent_id'])
+        
+        # Update prestige score
+        db.execute_update("""
+            UPDATE agents SET discovery_prestige = ?
+            WHERE agent_id = ?
+        """, (prestige, agent['agent_id']))
+    
+    # Apply benefits (needs all prestige scores calculated first)
+    for agent in active_agents:
+        benefits = apply_prestige_benefits(
+            agent['agent_id'], 
+            agent['discovery_prestige'],
+            active_agents
+        )
+        
+        print(f"  {agent['agent_id'][:8]}: Prestige={prestige:.1f}, "
+              f"Breeding={benefits['breeding_priority']:.1f}x, "
+              f"Protection={benefits['survival_protection']*100:.0f}%, "
+              f"Bonus Games=+{benefits['bonus_game_slots']}")
+```
+
+#### 1.5 Prestige Display
+```python
+# Add to performance_analyzer.py or status reports
+
+def show_prestige_leaderboard():
+    """Show agent prestige rankings with status benefits."""
+    agents = db.execute_query("""
+        SELECT agent_id, agent_type, discovery_prestige,
+               breeding_priority, survival_protection, bonus_game_slots,
+               sequence_discovery_count, pattern_discovery_count,
+               avg_score_per_game
+        FROM agents
+        WHERE is_active = TRUE
+        ORDER BY discovery_prestige DESC
+        LIMIT 20
+    """)
+    
+    print("\n🏆 AGENT PRESTIGE LEADERBOARD (Social Capital)")
+    print("=" * 110)
+    print(f"{'#':<4} {'Agent':<12} {'Type':<18} {'Prestige':<10} {'Breed':<8} {'Protect':<9} {'Bonus':<8} {'Score':<8}")
+    print("-" * 110)
+    
+    for i, agent in enumerate(agents, 1):
+        print(f"{i:<4} {agent['agent_id'][:8]:<12} {agent['agent_type'][:16]:<18} "
+              f"{agent['discovery_prestige']:<10.1f} "
+              f"{agent['breeding_priority']:<8.2f}x "
+              f"{agent['survival_protection']*100:<8.0f}% "
+              f"+{agent['bonus_game_slots']:<7} "
+              f"{agent['avg_score_per_game']:<8.1f}")
+    
+    print("=" * 110)
+    print("\n💡 Prestige = Social Capital (WHO YOU ARE)")
+    print("  Status Benefits:")
+    print("    • Breeding Priority: 1.0x to 3.0x (higher = more likely to reproduce)")
+    print("    • Survival Protection: 0% to 80% (famous agents harder to cull)")
+    print("    • Bonus Game Slots: +0 to +10 (extra attempts per generation)")
+    print("\n  Note: Prestige is SEPARATE from action budgets (economic capital in Phase 2)")
+```
+
+---
+
+## Phase 2: Economic System (Ecosystem Metabolism)
+
+### Current Gap
+All agents get equal action allowances:
+- Same `max_actions_per_level` (400 currently)
+- Same `max_total_actions` (7000 currently)
+- Adaptive limits adjust for ENTIRE generation, not individual agents
+- **No tracking of ecosystem-level resource flow**
+
+**Problem**: High performers subsidize low performers. No individual incentive structure. No visibility into network metabolism.
+
+**CRITICAL DISTINCTION**:
+- **Phase 1 (Prestige) = Social Capital**: Long-term status, breeding/survival benefits, network contribution
+- **Phase 2 (Actions) = Economic Capital**: Short-term budget, metabolic resources, what you can DO right now
+
+**Biome Theory Connection**: In biological systems, metabolism is the flow of energy and resources through the network. Actions are our "ATP" - the fundamental energy currency. We need to track both individual budgets AND ecosystem-level metabolic health.
+
+### Implementation: Per-Agent Action Economy + Ecosystem Metabolism Tracking
+
+**Key Insight**: You already have the infrastructure! `AdaptiveActionLimits` adjusts based on generation performance. We just need to:
+1. Make it **per-agent** instead of **per-generation**
+2. Track ecosystem-level metabolic flow
+
+#### 2.1 Actions = Metabolic Currency (Network Energy, NOT Just Agent Salary)
+
+Think of action allowances as an agent's **metabolic energy budget** within the larger ecosystem:
+
+```python
+# Actions are the fundamental METABOLIC currency (ecosystem energy flow)
+AGENT_ACTION_ECONOMY = {
+    'base_metabolism': {
+        'actions_per_level': 400,      # Base metabolic rate
+        'total_actions': 7000           # Total energy budget per game
+    },
+    'performance_multiplier': {
+        'min': 0.5,   # Low metabolism: 200/level, 3500/game (energy conservation)
+        'max': 2.5    # High metabolism: 1000/level, 17500/game (energy abundance)
+    },
+    'ecosystem_constraints': {  # RENAMED from 'hard_constraints'
+        'min_actions_per_level': 200,   # Minimum viable metabolism
+        'max_actions_per_level': 1000,  # Maximum sustainable metabolism
+        'min_total_actions': 1000,      # Starvation threshold
+        'max_total_actions': 12000,     # Resource abundance limit
+        'total_ecosystem_budget': None  # Track total network energy (NEW)
+    },
+    'metabolic_rules': {  # RENAMED from 'earning_rules'
+        'score_progress': 'Primary driver - ANY score > 0',
+        'wins': 'Big bonuses for completing games',
+        'efficiency': 'Reward using fewer actions',
+        'innovation': 'Bonus for discovering sequences',
+        'teaching': 'Bonus for successful knowledge transfer'
+    }
+}
+```
+
+#### 2.2 Database Schema (Simplified - Reuse Existing)
+```sql
+-- Extend agents table (add to existing schema)
+ALTER TABLE agents ADD COLUMN action_allowance_per_level INTEGER DEFAULT 400;
+ALTER TABLE agents ADD COLUMN action_allowance_total INTEGER DEFAULT 7000;
+ALTER TABLE agents ADD COLUMN action_budget_multiplier REAL DEFAULT 1.0;
+ALTER TABLE agents ADD COLUMN last_salary_adjustment_gen INTEGER DEFAULT 0;
+
+-- Agent economic performance (extends existing agent_arc_performance)
+ALTER TABLE agent_arc_performance ADD COLUMN actions_earned INTEGER DEFAULT 0;
+ALTER TABLE agent_arc_performance ADD COLUMN actions_spent INTEGER DEFAULT 0;
+ALTER TABLE agent_arc_performance ADD COLUMN action_efficiency REAL DEFAULT 0.0;  -- Score per action
+ALTER TABLE agent_arc_performance ADD COLUMN budget_utilization REAL DEFAULT 0.0;  -- % of budget used
+```
+
+**Why This Works**:
+- Leverages existing `AdaptiveActionLimits` logic for performance calculation
+- Stores per-agent allowances directly in agents table
+- No need for complex resource_transactions - just track in agent_arc_performance
+- Simple, clean, uses what's already there
+
+#### 2.3 Code Implementation - Extend AdaptiveActionLimits
+
+**File**: `adaptive_action_limits.py` (add to existing class)
+
+```python
+def calculate_agent_salary(self, agent_id: str, generation: int) -> Dict[str, int]:
+    """
+    Calculate per-agent action allowance (salary) based on performance.
+    Reuses existing comprehensive_success logic, just per-agent instead of per-generation.
+    
+    Returns:
+        Dict with 'actions_per_level', 'total_actions', 'multiplier', 'percentile'
+    """
+    # Get generation baseline (existing variables)
+    base_per_level = self.current_actions_per_level  # e.g., 400
+    base_total = self.current_total_actions          # e.g., 7000
+    
+    # Calculate agent's performance percentile within generation
+    percentile = self._get_agent_performance_percentile(agent_id, generation)
+    
+    # Map percentile to salary multiplier (0.5x to 2.5x)
+    if percentile >= 0.99:    multiplier = 2.5  # Top 1%
+    elif percentile >= 0.95:  multiplier = 2.0  # Top 5%
+    elif percentile >= 0.75:  multiplier = 1.5  # Top 25%
+    elif percentile >= 0.50:  multiplier = 1.2  # Above median
+    elif percentile >= 0.25:  multiplier = 1.0  # Median
+    elif percentile >= 0.10:  multiplier = 0.8  # Below median
+    else:                     multiplier = 0.5  # Bottom 10%
+    
+    # Apply multiplier with hard constraints (existing MIN/MAX constants)
+    agent_per_level = int(base_per_level * multiplier)
+    agent_per_level = max(self.MIN_ACTIONS_PER_LEVEL, 
+                          min(self.MAX_ACTIONS_PER_LEVEL, agent_per_level))
+    
+    agent_total = int(base_total * multiplier)
+    agent_total = max(self.MIN_TOTAL_ACTIONS, 
+                      min(self.MAX_TOTAL_ACTIONS, agent_total))
+    
+    return {
+        'actions_per_level': agent_per_level,
+        'total_actions': agent_total,
+        'multiplier': multiplier,
+        'performance_percentile': percentile
+    }
+
+def _get_agent_performance_percentile(self, agent_id: str, generation: int) -> float:
+    """
+    Calculate where agent ranks in current generation using comprehensive_success.
+    Reuses existing performance calculation logic.
+    """
+    # Get all active agents in generation
+    all_agents = self.db.execute_query("""
+        SELECT agent_id, avg_score_per_game, total_games_won, 
+               total_games_played, score_efficiency
+        FROM agents
+        WHERE current_generation = ? AND is_active = TRUE
+    """, (generation,))
+    
+    if not all_agents or len(all_agents) < 2:
+        return 0.5  # Default to median if alone
+    
+    # Calculate comprehensive_success for each (40% score, 30% win, 30% efficiency)
+    scores = []
+    target_score = None
+    
+    for agent in all_agents:
+        comp_success = self._calculate_agent_comprehensive_success(agent)
+        scores.append(comp_success)
+        if agent['agent_id'] == agent_id:
+            target_score = comp_success
+    
+    if target_score is None:
+        return 0.5
+    
+    # Calculate percentile
+    agents_below = sum(1 for s in scores if s < target_score)
+    percentile = agents_below / len(scores)
+    
+    return percentile
+
+def _calculate_agent_comprehensive_success(self, agent: Dict) -> float:
+    """
+    Same formula as calculate_generation_performance(), but per-agent.
+    Can refactor to share code with existing method.
+    """
+    # Score progress (40%)
+    score = agent.get('avg_score_per_game', 0) / 100.0
+    score_component = min(score, 1.0) * 0.40
+    
+    # Win rate (30%)
+    games = max(agent.get('total_games_played', 1), 1)
+    wins = agent.get('total_games_won', 0)
+    win_component = (wins / games) * 0.30
+    
+    # Efficiency (30%)
+    efficiency = agent.get('score_efficiency', 0) / 10.0
+    efficiency_component = min(efficiency, 1.0) * 0.30
+    
+    return score_component + win_component + efficiency_component
+```
+
+**Integration**: Call at start of each generation
+
+**File**: `autonomous_evolution_runner.py`
+
+```python
+def assign_agent_salaries(self, generation: int):
+    """
+    Calculate and assign action budgets (salaries) for all agents.
+    Called at START of generation before games begin.
+    """
+    active_agents = self.db.execute_query("""
+        SELECT agent_id FROM agents 
+        WHERE current_generation = ? AND is_active = TRUE
+    """, (generation,))
+    
+    print(f"\n[💰] Assigning salaries for Generation {generation}...")
+    
+    for agent_row in active_agents:
+        agent_id = agent_row['agent_id']
+        
+        # Calculate salary using AdaptiveActionLimits
+        salary = self.action_limits.calculate_agent_salary(agent_id, generation)
+        
+        # Store in agents table
+        self.db.execute_update("""
+            UPDATE agents
+            SET action_allowance_per_level = ?,
+                action_allowance_total = ?,
+                action_budget_multiplier = ?,
+                last_salary_adjustment_gen = ?
+            WHERE agent_id = ?
+        """, (
+            salary['actions_per_level'],
+            salary['total_actions'],
+            salary['multiplier'],
+            generation,
+            agent_id
+        ))
+        
+        print(f"  {agent_id[:8]}: {salary['actions_per_level']}/level, "
+              f"{salary['total_actions']} total "
+              f"({salary['multiplier']:.1f}x, {salary['performance_percentile']*100:.0f}th %ile)")
+    
+    print(f"[✓] Salaries assigned to {len(active_agents)} agents\n")
+```
+
+**File**: `game_session_manager.py` (add budget enforcement)
+
+```python
+def can_agent_afford_game(self, agent_id: str) -> Tuple[bool, str]:
+    """
+    Check if agent has action budget remaining to play.
+    
+    Returns:
+        (can_afford, reason)
+    """
+    agent = self.db.execute_query("""
+        SELECT action_allowance_total, action_allowance_per_level
+        FROM agents WHERE agent_id = ?
+    """, (agent_id,))
+    
+    if not agent:
+        return True, "New agent, no limits yet"
+    
+    agent = agent[0]
+    
+    if agent['action_allowance_total'] <= 0:
+        return False, f"No action budget remaining (spent all {agent['action_allowance_total']})"
+    
+    if agent['action_allowance_per_level'] <= 0:
+        return False, "No per-level budget remaining"
+    
+    return True, "OK"
+
+def deduct_actions_used(self, agent_id: str, game_id: str):
+    """
+    Deduct actions from agent's budget after game ends.
+    Called in end_game_session().
+    """
+    # Count actions taken this game
+    actions_taken = self.db.execute_query("""
+        SELECT COUNT(*) as count FROM arc_action_tracking
+        WHERE game_id = ? AND agent_id = ?
+    """, (game_id, agent_id))[0]['count']
+    
+    if actions_taken == 0:
+        return  # No actions, no deduction
+    
+    # Deduct from total budget
+    self.db.execute_update("""
+        UPDATE agents
+        SET action_allowance_total = action_allowance_total - ?
+        WHERE agent_id = ?
+    """, (actions_taken, agent_id))
+    
+    # Track in performance table
+    self.db.execute_update("""
+        UPDATE agent_arc_performance
+        SET actions_spent = actions_spent + ?,
+            action_efficiency = CAST(total_score AS REAL) / NULLIF(actions_spent, 0),
+            budget_utilization = CAST(actions_spent AS REAL) / 
+                                (SELECT action_allowance_total FROM agents WHERE agent_id = ?)
+        WHERE agent_id = ?
+    """, (actions_taken, agent_id, agent_id))
+    
+    logger.debug(f"Deducted {actions_taken} actions from {agent_id[:8]}")
+```
+```
+
+#### 2.4 Economic Reports and Monitoring
+
+```python
+def print_economic_status(generation: int):
+    """
+    Show agent salary distribution and budget health.
+    Called during evolution status reports.
+    """
+    agents = db.execute_query("""
+        SELECT agent_id, action_allowance_per_level, action_allowance_total,
+               action_budget_multiplier, avg_score_per_game
+        FROM agents
+        WHERE current_generation = ? AND is_active = TRUE
+        ORDER BY action_budget_multiplier DESC
+        LIMIT 10
+    """, (generation,))
+    
+    print(f"\n💰 ECONOMIC STATUS - Generation {generation}")
+    print("=" * 80)
+    print(f"{'Agent':<12} {'Salary/Level':<15} {'Total Budget':<15} {'Multiplier':<12} {'Score'}")
+    print("-" * 80)
+    
+    for agent in agents:
+        print(f"{agent['agent_id'][:8]:<12} "
+              f"{agent['action_allowance_per_level']:<15} "
+              f"{agent['action_allowance_total']:<15} "
+              f"{agent['action_budget_multiplier']:.1f}x{'':<10} "
+              f"{agent['avg_score_per_game']:.1f}")
+    
+    # Budget distribution stats
+    stats = db.execute_query("""
+        SELECT 
+            AVG(action_allowance_total) as avg_budget,
+            MIN(action_allowance_total) as min_budget,
+            MAX(action_allowance_total) as max_budget,
+            AVG(action_budget_multiplier) as avg_multiplier
+        FROM agents
+        WHERE current_generation = ? AND is_active = TRUE
+    """, (generation,))
+    
+    if stats:
+        s = stats[0]
+        print(f"\nBudget Distribution:")
+        print(f"  Average: {s['avg_budget']:.0f} actions")
+        print(f"  Range: {s['min_budget']:.0f} - {s['max_budget']:.0f}")
+        print(f"  Avg Multiplier: {s['avg_multiplier']:.2f}x")
+    
+    print("=" * 80)
+```
+```
+
+#### 2.5 Economic Reports
+```python
+def generate_economic_report(generation: int):
+    """Show resource distribution and economic health."""
+    
+    print(f"\n💰 ECONOMIC REPORT - Generation {generation}")
+    print("=" * 80)
+    
+    # Resource distribution
+    dist = db.execute_query("""
+        SELECT 
+            AVG(compute_tokens) as avg_compute,
+            MAX(compute_tokens) as max_compute,
+            MIN(compute_tokens) as min_compute,
+            AVG(breeding_priority) as avg_breeding,
+            COUNT(CASE WHEN survival_protection > 0 THEN 1 END) as protected_agents
+        FROM agent_resources
+        WHERE generation = ?
+    """, (generation,))
+    
+    print(f"Compute Token Distribution:")
+    print(f"  Average: {dist[0]['avg_compute']:.0f}")
+    print(f"  Range: {dist[0]['min_compute']:.0f} - {dist[0]['max_compute']:.0f}")
+    print(f"  Inequality: {(dist[0]['max_compute'] / dist[0]['min_compute']):.1f}x")
+    
+    print(f"\nBreeding Priority Average: {dist[0]['avg_breeding']:.2f}")
+    print(f"Protected Agents: {dist[0]['protected_agents']}")
+    
+    # Top earners
+    top = db.execute_query("""
+        SELECT a.agent_id, a.agent_type, r.compute_tokens, r.game_slots,
+               a.avg_score_per_game, a.discovery_prestige
+        FROM agent_resources r
+        JOIN agents a ON r.agent_id = a.agent_id
+        WHERE r.generation = ?
+        ORDER BY r.compute_tokens DESC
+        LIMIT 10
+    """, (generation,))
+    
+    print(f"\n🏆 Top Resource Holders:")
+    for i, agent in enumerate(top, 1):
+        print(f"{i:2}. {agent['agent_id'][:16]} | "
+              f"Compute: {agent['compute_tokens']:>6} | "
+              f"Games: {agent['game_slots']:>2} | "
+              f"Score: {agent['avg_score_per_game']:.4f}")
+```
+
+#### 2.5 Ecosystem Metabolism Tracking (NEW - Network-Level Resource Flow)
+
+In addition to per-agent budgets, track the NETWORK's metabolic health:
+
+**File**: `adaptive_action_limits.py` or `network_intelligence_engine.py`
+
+```python
+def track_ecosystem_metabolism(self, generation: int):
+    """
+    Track network-level metabolic health.
+    
+    This answers: "Is the ecosystem healthy? Growing? Declining?"
+    """
+    # Total energy budget of active population
+    total_budget = self.db.execute_query("""
+        SELECT SUM(action_allowance_total) as total_energy,
+               AVG(action_allowance_total) as avg_energy,
+               COUNT(*) as agent_count
+        FROM agents WHERE is_active = TRUE
+    """)
+    
+    total_energy = total_budget[0]['total_energy'] or 0
+    avg_energy = total_budget[0]['avg_energy'] or 0
+    agent_count = total_budget[0]['agent_count'] or 0
+    
+    # Total energy spent this generation
+    spent = self.db.execute_query("""
+        SELECT SUM(actions_spent) as total_spent,
+               AVG(action_efficiency) as avg_efficiency
+        FROM agent_arc_performance
+        WHERE generation = ?
+    """, (generation,))
+    
+    total_spent = spent[0]['total_spent'] or 0
+    avg_efficiency = spent[0]['avg_efficiency'] or 0
+    
+    # Metabolic efficiency: Score per action across entire network
+    network_efficiency = self.db.execute_query("""
+        SELECT SUM(total_score) / SUM(total_actions_taken) as efficiency
+        FROM agents WHERE is_active = TRUE
+    """)
+    
+    net_efficiency = network_efficiency[0]['efficiency'] if network_efficiency else 0.0
+    
+    # Resource utilization rate
+    utilization = (total_spent / total_energy) if total_energy > 0 else 0.0
+    
+    # Ecosystem metabolism metrics
+    metabolism = {
+        'generation': generation,
+        'total_ecosystem_budget': total_energy,
+        'avg_agent_budget': avg_energy,
+        'active_population': agent_count,
+        'total_energy_spent': total_spent,
+        'avg_energy_efficiency': avg_efficiency,
+        'network_efficiency': net_efficiency,
+        'budget_utilization_rate': utilization
+    }
+    
+    # Store in ecosystem_health_snapshots (Phase 0 table)
+    # Add columns: total_ecosystem_budget, avg_agent_budget, total_energy_spent, 
+    #              network_efficiency, budget_utilization_rate
+    
+    return metabolism
+
+
+def display_ecosystem_metabolism_report(generation: int):
+    """
+    Show metabolic health of the ecosystem.
+    """
+    metabolism = track_ecosystem_metabolism(generation)
+    
+    print("\n" + "=" * 80)
+    print("⚡ ECOSYSTEM METABOLISM REPORT")
+    print("=" * 80)
+    print(f"Generation: {metabolism['generation']}")
+    print()
+    
+    print("💰 ENERGY BUDGET (Network Resources)")
+    print(f"  Total Ecosystem Budget: {metabolism['total_ecosystem_budget']:,} actions")
+    print(f"  Average Agent Budget: {metabolism['avg_agent_budget']:.1f} actions")
+    print(f"  Active Population: {metabolism['active_population']} agents")
+    print()
+    
+    print("🔥 ENERGY EXPENDITURE (Metabolism)")
+    print(f"  Total Energy Spent: {metabolism['total_energy_spent']:,} actions")
+    print(f"  Budget Utilization: {metabolism['budget_utilization_rate']:.1%}")
+    print(f"  Network Efficiency: {metabolism['network_efficiency']:.4f} score/action")
+    print()
+    
+    # Health assessment
+    if metabolism['budget_utilization_rate'] < 0.3:
+        status = "⚠️  UNDERUTILIZED - Agents not using available resources"
+    elif metabolism['budget_utilization_rate'] > 0.95:
+        status = "⚠️  OVEREXTENDED - Population near resource limits"
+    else:
+        status = "✅ HEALTHY - Balanced resource utilization"
+    
+    if metabolism['network_efficiency'] < 0.01:
+        status += "\n  🚨 CRITICAL - Very low network efficiency"
+    elif metabolism['network_efficiency'] > 0.05:
+        status += "\n  ✨ EXCELLENT - High network efficiency"
+    
+    print(f"Assessment: {status}")
+    print("=" * 80)
+```
+
+**Why Ecosystem Metabolism Matters**:
+- **Before**: Only see individual agent performance
+- **After**: See the metabolic health of the entire network
+- **Biome parallel**: Like tracking ATP production across an entire bacterial colony
+- **Use case**: Detect when the network is energy-starved or resource-abundant
+- **Decision making**: Adjust population size, budget allocation based on ecosystem health
+
+---
+
+## Phase 2.5: Knowledge Recombination (NEW - Viral Information Exchange)
+
+### The Missing Link: Horizontal Recombination
+
+**Current Gap**: 
+- Sequences discovered independently
+- No systematic combination of existing knowledge
+- Missing the "viral recombination" aspect of biome theory
+
+**Biome Theory Connection**: Viruses don't just copy genes - they RECOMBINE them. This is how rapid evolution happens. We need sequence chaining and pattern synthesis.
+
+### Implementation: Sequence Dependencies & Combinatorial Exploration
+
+#### 2.5.1 Concept
+
+Enable agents to:
+1. **Chain sequences**: Combine two successful sequences into a longer one
+2. **Synthesize patterns**: Merge abstract patterns into meta-patterns
+3. **Track dependencies**: Know which sequences build on which
+
+This accelerates knowledge evolution through combinatorial exploration, not just random mutation.
+
+#### 2.5.2 Database Schema
+
+```sql
+-- Sequence dependencies (which sequences build on others)
+CREATE TABLE IF NOT EXISTS sequence_dependencies (
+    dependency_id TEXT PRIMARY KEY,
+    parent_sequence_id TEXT NOT NULL,
+    child_sequence_id TEXT NOT NULL,
+    dependency_type TEXT NOT NULL,  -- 'chain', 'variation', 'synthesis'
+    
+    -- Recombination metrics
+    combined_efficiency REAL DEFAULT 0.0,  -- Efficiency of combined sequence
+    improvement_over_parent REAL DEFAULT 0.0,  -- How much better than parent
+    discovery_agent_id TEXT,  -- Who discovered this combination
+    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Usage tracking
+    times_used INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0.0,
+    
+    FOREIGN KEY (parent_sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (child_sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
+);
+
+-- Pattern synthesis tracking (combining abstract patterns)
+CREATE TABLE IF NOT EXISTS pattern_synthesis (
+    synthesis_id TEXT PRIMARY KEY,
+    pattern_a_id TEXT NOT NULL,
+    pattern_b_id TEXT NOT NULL,
+    synthesized_pattern_id TEXT NOT NULL,
+    
+    -- Synthesis metrics
+    novelty_score REAL DEFAULT 0.0,  -- How novel is this combination
+    effectiveness_score REAL DEFAULT 0.0,  -- How effective is the synthesis
+    games_applied_to INTEGER DEFAULT 0,
+    
+    discovery_agent_id TEXT,
+    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (pattern_a_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (pattern_b_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (synthesized_pattern_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
+);
+```
+
+#### 2.5.3 Sequence Chaining Engine
+
+**File**: `knowledge_recombination_engine.py` (NEW)
+
+```python
+class KnowledgeRecombinationEngine:
+    """
+    Enables viral-style recombination of knowledge.
+    
+    This is the "horizontal gene transfer" acceleration mechanism.
+    """
+    
+    def attempt_sequence_chain(self, agent_id: str, game_id: str,
+                               seq_a_id: str, seq_b_id: str) -> Optional[str]:
+        """
+        Try to chain two sequences into a longer combined sequence.
+        
+        Returns new sequence_id if successful, None if failed.
+        """
+        # Get both sequences
+        seq_a = self.db.execute_query("""
+            SELECT actions FROM winning_sequences WHERE sequence_id = ?
+        """, (seq_a_id,))[0]
+        
+        seq_b = self.db.execute_query("""
+            SELECT actions FROM winning_sequences WHERE sequence_id = ?
+        """, (seq_b_id,))[0]
+        
+        # Combine actions (simple concatenation)
+        combined_actions = json.loads(seq_a['actions']) + json.loads(seq_b['actions'])
+        
+        # Try combined sequence in game
+        success, efficiency = self._test_sequence_in_game(game_id, combined_actions)
+        
+        if success:
+            # Store new sequence
+            new_seq_id = f"chain_{seq_a_id[:8]}_{seq_b_id[:8]}"
+            self.db.execute_update("""
+                INSERT INTO winning_sequences 
+                (sequence_id, game_id, actions, discovered_by_agent, efficiency)
+                VALUES (?, ?, ?, ?, ?)
+            """, (new_seq_id, game_id, json.dumps(combined_actions), 
+                  agent_id, efficiency))
+            
+            # Record dependency
+            self.db.execute_update("""
+                INSERT INTO sequence_dependencies
+                (dependency_id, parent_sequence_id, child_sequence_id,
+                 dependency_type, combined_efficiency, discovery_agent_id)
+                VALUES (?, ?, ?, 'chain', ?, ?)
+            """, (f"dep_{new_seq_id}", seq_a_id, new_seq_id, efficiency, agent_id))
+            
+            return new_seq_id
+        
+        return None
+    
+    def discover_sequence_combinations(self, agent_id: str, game_id: str) -> List[str]:
+        """
+        Systematically explore combinations of known sequences.
+        
+        This is COMBINATORIAL EXPLORATION, not random mutation.
+        """
+        # Get all sequences for this game
+        known_sequences = self.db.execute_query("""
+            SELECT sequence_id FROM winning_sequences
+            WHERE game_id = ?
+            ORDER BY efficiency ASC
+            LIMIT 10
+        """, (game_id,))
+        
+        new_discoveries = []
+        
+        # Try pairwise combinations
+        for i, seq_a in enumerate(known_sequences):
+            for seq_b in known_sequences[i+1:]:
+                new_seq = self.attempt_sequence_chain(
+                    agent_id, game_id,
+                    seq_a['sequence_id'], seq_b['sequence_id']
+                )
+                
+                if new_seq:
+                    new_discoveries.append(new_seq)
+        
+        return new_discoveries
+```
+
+#### 2.5.4 Integration with Core Gameplay
+
+**File**: `core_gameplay.py`
+
+```python
+def _explore_sequence_recombination(self, agent_id: str, game_id: str):
+    """
+    After playing a game, try to recombine known sequences.
+    
+    This is the "viral recombination" phase.
+    """
+    if not self.config.get('enable_knowledge_recombination', False):
+        return
+    
+    from knowledge_recombination_engine import KnowledgeRecombinationEngine
+    
+    engine = KnowledgeRecombinationEngine(self.db)
+    new_sequences = engine.discover_sequence_combinations(agent_id, game_id)
+    
+    if new_sequences:
+        self.logger.info(f"Agent {agent_id[:8]} discovered {len(new_sequences)} "
+                        f"sequence combinations through recombination")
+```
+
+**Why Phase 2.5 Matters**:
+- **Darwinian evolution**: Random mutation + selection (slow)
+- **Viral evolution**: Recombination + horizontal transfer (fast)
+- **Our system**: Both! Layer 2 mutates, Layer 3 recombines
+- **Result**: Exponential knowledge growth through combination, not just linear discovery
+
+---
+
+## Phase 3: Cultural Transmission (Viral Information Packages)
+
+### Current Gap
+Pattern tags exist but are just metadata:
+```python
+pattern_tags = ['action6_heavy', 'grid_small', 'color_manipulation']
+```
+
+**Missing**: Tags don't evolve, don't spread, don't compete, don't have meaning to agents.
+
+**Biome Theory Reframing**: These aren't just "memes" or "culture" - they're VIRAL INFORMATION PACKAGES. Like actual viruses carrying genetic material, they:
+- Package compact, actionable information
+- Spread horizontally between unrelated agents (infection)
+- Compete for host resources (attention/usage)
+- Mutate and recombine to form new variants
+- Persist independently of any single "host" agent
+
+### Implementation: Viral Package Evolution
+
+#### 3.1 Viral Package System
+```sql
+-- Viral information packages (evolved pattern tags)
+-- Think: Viruses carrying genetic strategies
+CREATE TABLE IF NOT EXISTS viral_information_packages (
+    package_id TEXT PRIMARY KEY,
+    package_name TEXT UNIQUE NOT NULL,
+    package_description TEXT,  -- What strategy/pattern does this encode?
+    
+    -- Origin (where did this viral package emerge?)
+    discovered_by_agent TEXT,
+    discovery_generation INTEGER,
+    parent_package_id TEXT,  -- Packages can evolve from other packages
+    
+    -- Infection metrics (how well does this spread?)
+    agent_infection_count INTEGER DEFAULT 0,  -- How many agents "infected"
+    horizontal_transmission_rate REAL DEFAULT 0.0,  -- Spread rate between unrelated agents
+    vertical_transmission_rate REAL DEFAULT 0.0,  -- Inheritance rate (parent → offspring)
+    
+    -- Fitness (does this package help its hosts?)
+    host_success_rate REAL DEFAULT 0.0,  -- Do infected agents win more?
+    fitness_impact REAL DEFAULT 0.0,  -- Net benefit to host
+    viral_fitness REAL DEFAULT 0.0,  -- Package's own replication success
+    
+    -- Evolution
+    mutation_count INTEGER DEFAULT 0,
+    descendant_packages INTEGER DEFAULT 0,  -- How many variants spawned?
+    recombination_count INTEGER DEFAULT 0,  -- How many times recombined with others?
+    
+    -- Lifecycle
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used TIMESTAMP,
+    is_extinct BOOLEAN DEFAULT FALSE,  -- No more hosts carrying this
+    
+    FOREIGN KEY (parent_package_id) REFERENCES viral_information_packages(package_id)
+);
+
+-- Agent viral package infection (which agents carry which packages)
+-- Think: Which viruses have infected which hosts
+CREATE TABLE IF NOT EXISTS agent_viral_infections (
+    agent_id TEXT NOT NULL,
+    package_id TEXT NOT NULL,
+    infection_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    infection_generation INTEGER NOT NULL,
+    
+    -- Usage by host
+    times_expressed INTEGER DEFAULT 0,  -- How often host uses this package
+    success_count INTEGER DEFAULT 0,
+    failure_count INTEGER DEFAULT 0,
+    
+    -- Transmission tracking
+    infected_by_agent TEXT,  -- Horizontal transmission source
+    transmitted_to_count INTEGER DEFAULT 0,  -- How many others infected by this host
+    
+    -- Host response
+    resistance REAL DEFAULT 0.0,  -- Is host immune/resistant? (0=fully susceptible, 1=immune)
+    expression_priority REAL DEFAULT 1.0,  -- How often host "expresses" this package
+    
+    PRIMARY KEY (agent_id, package_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id),
+    FOREIGN KEY (infected_by_agent) REFERENCES agents(agent_id)
+);
+
+-- Viral package interactions (co-infection dynamics)
+-- Think: Do these viruses help or interfere with each other?
+CREATE TABLE IF NOT EXISTS viral_package_interactions (
+    package_a_id TEXT NOT NULL,
+    package_b_id TEXT NOT NULL,
+    interaction_type TEXT NOT NULL,  -- 'synergy', 'interference', 'neutral'
+    
+    strength REAL NOT NULL,  -- How strong is this interaction
+    evidence_count INTEGER DEFAULT 0,  -- How many co-infections observed
+    
+    PRIMARY KEY (package_a_id, package_b_id),
+    FOREIGN KEY (package_a_id) REFERENCES viral_information_packages(package_id),
+    FOREIGN KEY (package_b_id) REFERENCES viral_information_packages(package_id)
+);
+```
+
+#### 3.2 Meme Creation & Evolution
+```python
+# cultural_engine.py
+
+class CulturalEngine:
+    """Manages meme creation, evolution, and transmission."""
+    
+    def create_meme_from_pattern(self, pattern_tags: List[str], 
+                                  discoverer_agent_id: str,
+                                  generation: int) -> str:
+        """
+        Convert pattern tags into cultural memes.
+        
+        Example:
+        ['action6_heavy', 'grid_small', 'repetition'] 
+        → Meme: "Small Grid Repetition Strategy"
+        """
+        
+        # Check if this combination already exists
+        meme_signature = "_".join(sorted(pattern_tags))
+        existing = db.execute_query("""
+            SELECT meme_id FROM cultural_memes WHERE meme_name = ?
+        """, (meme_signature,))
+        
+        if existing:
+            # Meme exists, just increment adoption
+            meme_id = existing[0]['meme_id']
+            db.execute_query("""
+                UPDATE cultural_memes
+                SET agent_adoption_count = agent_adoption_count + 1,
+                    last_used = ?
+                WHERE meme_id = ?
+            """, (datetime.now().isoformat(), meme_id))
+            return meme_id
+        
+        # Create new meme
+        meme_id = f"meme_{uuid.uuid4().hex[:16]}"
+        description = self._generate_meme_description(pattern_tags)
+        
+        db.execute_query("""
+            INSERT INTO cultural_memes
+            (meme_id, meme_name, meme_description, discovered_by_agent,
+             discovery_generation, agent_adoption_count)
+            VALUES (?, ?, ?, ?, ?, 1)
+        """, (meme_id, meme_signature, description, discoverer_agent_id, generation))
+        
+        # Agent adopts their own discovery
+        self.agent_adopt_meme(discoverer_agent_id, meme_id, generation)
+        
+        return meme_id
+    
+    def agent_adopt_meme(self, agent_id: str, meme_id: str, 
+                         generation: int, learned_from: str = None):
+        """Agent adopts a meme (learns a cultural pattern)."""
+        
+        db.execute_query("""
+            INSERT OR REPLACE INTO agent_meme_adoption
+            (agent_id, meme_id, adoption_generation, learned_from_agent, confidence)
+            VALUES (?, ?, ?, ?, 0.5)
+        """, (agent_id, meme_id, generation, learned_from))
+        
+        # If learned from another agent, credit them
+        if learned_from:
+            db.execute_query("""
+                UPDATE agent_meme_adoption
+                SET taught_to_count = taught_to_count + 1
+                WHERE agent_id = ? AND meme_id = ?
+            """, (learned_from, meme_id))
+    
+    def update_meme_success(self, agent_id: str, meme_id: str, success: bool):
+        """Update meme performance after agent uses it."""
+        
+        db.execute_query("""
+            UPDATE agent_meme_adoption
+            SET times_applied = times_applied + 1,
+                success_count = success_count + ?,
+                failure_count = failure_count + ?,
+                confidence = (success_count + 2) / (times_applied + 4)
+            WHERE agent_id = ? AND meme_id = ?
+        """, (1 if success else 0, 0 if success else 1, agent_id, meme_id))
+        
+        # Update global meme fitness
+        stats = db.execute_query("""
+            SELECT AVG(confidence) as avg_conf,
+                   SUM(success_count) as total_success,
+                   SUM(times_applied) as total_uses
+            FROM agent_meme_adoption
+            WHERE meme_id = ?
+        """, (meme_id,))
+        
+        if stats[0]['total_uses'] > 0:
+            success_rate = stats[0]['total_success'] / stats[0]['total_uses']
+            db.execute_query("""
+                UPDATE cultural_memes
+                SET success_rate = ?, fitness_impact = ?
+                WHERE meme_id = ?
+            """, (success_rate, success_rate * 2.0 - 1.0, meme_id))
+```
+
+#### 3.3 Meme Transmission (Teaching)
+```python
+def transmit_meme_to_offspring(parent_agent_id: str, 
+                               offspring_agent_id: str,
+                               generation: int):
+    """
+    Offspring learns memes from parent (cultural inheritance).
+    
+    This is SEPARATE from genetic/epigenetic inheritance!
+    """
+    
+    # Get parent's successful memes
+    parent_memes = db.execute_query("""
+        SELECT meme_id, confidence, times_applied, success_count
+        FROM agent_meme_adoption
+        WHERE agent_id = ? AND confidence > 0.4
+        ORDER BY confidence DESC
+    """, (parent_agent_id,))
+    
+    # Offspring inherits top memes with some decay
+    for meme in parent_memes[:5]:  # Top 5 memes only
+        inherited_confidence = meme['confidence'] * 0.8  # 20% decay
+        
+        if inherited_confidence > 0.3:
+            db.execute_query("""
+                INSERT INTO agent_meme_adoption
+                (agent_id, meme_id, adoption_generation, learned_from_agent, confidence)
+                VALUES (?, ?, ?, ?, ?)
+            """, (offspring_agent_id, meme['meme_id'], generation, 
+                  parent_agent_id, inherited_confidence))
+
+def meme_horizontal_transmission(observer_agent_id: str,
+                                 successful_agent_id: str,
+                                 generation: int):
+    """
+    Agent observes another agent's success and copies their memes.
+    
+    This is the KEY to Level 5: agents teaching each other!
+    """
+    
+    # Get successful agent's memes
+    successful_memes = db.execute_query("""
+        SELECT meme_id, confidence
+        FROM agent_meme_adoption
+        WHERE agent_id = ? AND confidence > 0.6
+        ORDER BY confidence DESC
+        LIMIT 3
+    """, (successful_agent_id,))
+    
+    # Observer adopts these memes with lower confidence (needs validation)
+    for meme in successful_memes:
+        existing = db.execute_query("""
+            SELECT meme_id FROM agent_meme_adoption
+            WHERE agent_id = ? AND meme_id = ?
+        """, (observer_agent_id, meme['meme_id']))
+        
+        if not existing:
+            # Learn new meme
+            db.execute_query("""
+                INSERT INTO agent_meme_adoption
+                (agent_id, meme_id, adoption_generation, learned_from_agent, confidence)
+                VALUES (?, ?, ?, ?, ?)
+            """, (observer_agent_id, meme['meme_id'], generation,
+                  successful_agent_id, 0.4))  # Start skeptical
+```
+
+#### 3.4 Integration: Meme-Guided Action Selection
+```python
+# core_gameplay.py
+
+def select_action_with_memes(self, agent_id: str, game_state: GameState) -> str:
+    """
+    Use agent's adopted memes to guide action selection.
+    
+    Memes influence what patterns the agent looks for and what actions it prefers.
+    """
+    
+    # Get agent's memes
+    agent_memes = db.execute_query("""
+        SELECT m.meme_name, m.meme_description, a.confidence
+        FROM agent_meme_adoption a
+        JOIN cultural_memes m ON a.meme_id = m.meme_id
+        WHERE a.agent_id = ?
+        ORDER BY a.confidence DESC
+    """, (agent_id,))
+    
+    # Example: meme influences action weights
+    action_weights = {
+        'ACTION1': 1.0,
+        'ACTION2': 1.0,
+        'ACTION3': 1.0,
+        'ACTION4': 1.0,
+        'ACTION5': 1.0,
+        'ACTION6': 1.0,
+        'ACTION7': 1.0
+    }
+    
+    for meme in agent_memes:
+        if 'action6_heavy' in meme['meme_name']:
+            action_weights['ACTION6'] *= (1.0 + meme['confidence'])
+        if 'repetition' in meme['meme_name']:
+            # Favor repeating successful actions
+            pass
+        if 'exploration' in meme['meme_name']:
+            # Increase exploration actions
+            action_weights['ACTION1'] *= 1.3
+            action_weights['ACTION7'] *= 1.3
+    
+    # Select action based on weighted probabilities
+    return self._weighted_action_selection(action_weights, game_state)
+```
+
+---
+
+## Phase 4: Distributed Regulation (Network Homeostasis)
+
+### Current Gap
+Only the coordinator (Claude) makes evolution decisions:
+- Mutation rates
+- Selection pressure
+- Strategy focus (exploration vs exploitation)
+
+**Problem**: Top-down control. Agents have no voice. Not network-centric.
+
+**Biome Theory Reframing**: Real biological networks don't have "governance" - they have DISTRIBUTED REGULATION. No single bacterium "votes" on metabolism rates. Instead, the network self-regulates through chemical signals, feedback loops, and emergent homeostasis.
+
+**Key Insight**: We're not building democracy. We're building a self-regulating network where distributed signals influence system parameters, just like bacterial quorum sensing.
+
+### Implementation: Distributed Regulation System
+
+#### 4.1 Signal-Based Regulation (Not Voting)
+```sql
+-- Regulatory signals (not "proposals" - think quorum sensing molecules)
+CREATE TABLE IF NOT EXISTS network_regulatory_signals (
+    signal_id TEXT PRIMARY KEY,
+    signal_type TEXT NOT NULL,  -- 'stress', 'abundance', 'diversity_low', 'stagnation', 'efficiency_high'
+    signal_source_agent TEXT,  -- Which agent emitted (can be NULL for system-level signals)
+    signal_generation INTEGER NOT NULL,
+    signal_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Signal content (what needs adjusting?)
+    parameter_affected TEXT NOT NULL,  -- 'mutation_rate', 'selection_pressure', 'resource_allocation'
+    current_value REAL NOT NULL,
+    suggested_adjustment REAL NOT NULL,  -- +/- delta, not absolute value
+    signal_strength REAL DEFAULT 1.0,  -- Concentration of this signal
+    
+    -- Network response (emergent from distributed responses)
+    amplification_count INTEGER DEFAULT 0,  -- How many agents echoed this
+    suppression_count INTEGER DEFAULT 0,  -- How many emitted counter-signals
+    net_signal_strength REAL DEFAULT 0.0,  -- Amplifications - suppressions
+    implemented BOOLEAN DEFAULT FALSE,
+    implemented_at TIMESTAMP,
+    
+    FOREIGN KEY (signal_source_agent) REFERENCES agents(agent_id)
+);
+
+-- Agent signal responses (not "votes" - think receptor binding & activation)
+CREATE TABLE IF NOT EXISTS agent_signal_responses (
+    agent_id TEXT NOT NULL,
+    signal_id TEXT NOT NULL,
+    response_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Response type (based on agent's local state)
+    response_type TEXT NOT NULL,  -- 'amplify', 'suppress', 'ignore'
+    response_strength REAL DEFAULT 1.0,
+    
+    -- Local context (why respond this way?)
+    agent_performance_percentile REAL,  -- Is agent thriving or struggling?
+    agent_resource_state TEXT,  -- 'abundant', 'adequate', 'scarce'
+    agent_confidence_in_signal REAL DEFAULT 0.5,
+    
+    PRIMARY KEY (agent_id, signal_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (signal_id) REFERENCES network_regulatory_signals(signal_id)
+);
+```
+
+**How This Differs from Voting**:
+- **Voting**: Binary yes/no, democratic consensus
+- **Signals**: Continuous strength, emergent response
+- **Voting**: One agent = one vote
+- **Signals**: Response based on local state (struggling agents emit stress signals, thriving agents suppress them)
+- **Voting**: Majority rule
+- **Signals**: Net signal strength determines adjustment (homeostasis)
+
+#### 4.2 Proposal Creation
+```python
+# governance_engine.py
+
+class GovernanceEngine:
+    """Democratic decision-making for population parameters."""
+    
+    def create_proposal(self, proposer_agent_id: str, 
+                       proposal_type: str,
+                       current_value: float,
+                       proposed_value: float,
+                       justification: str,
+                       generation: int) -> str:
+        """
+        Agent proposes change to evolution parameters.
+        
+        Example: High-performing agent proposes reducing mutation rate
+        because population is performing well.
+        """
+        
+        proposal_id = f"prop_{uuid.uuid4().hex[:16]}"
+        closes_at = datetime.now() + timedelta(hours=1)  # 1-hour voting window
+        
+        db.execute_query("""
+            INSERT INTO governance_proposals
+            (proposal_id, proposal_type, proposed_by_agent, proposal_generation,
+             current_value, proposed_value, justification, closes_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (proposal_id, proposal_type, proposer_agent_id, generation,
+              current_value, proposed_value, justification, closes_at.isoformat()))
+        
+        print(f"\n📜 NEW PROPOSAL {proposal_id}")
+        print(f"Proposed by: {proposer_agent_id}")
+        print(f"Type: {proposal_type}")
+        print(f"Change: {current_value} → {proposed_value}")
+        print(f"Reason: {justification}")
+        print(f"Voting closes: {closes_at}")
+        
+        return proposal_id
+    
+    def cast_vote(self, agent_id: str, proposal_id: str, 
+                  vote_choice: str, reasoning: str = None):
+        """Agent votes on proposal."""
+        
+        # Get agent's voting weight (based on prestige)
+        agent = db.execute_query("""
+            SELECT discovery_prestige FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        # Voting weight = 1.0 + (prestige / 100)
+        # Range: 1.0 (no prestige) to ~3.0 (high prestige)
+        vote_weight = 1.0 + (agent[0]['discovery_prestige'] / 100.0)
+        vote_weight = min(vote_weight, 3.0)  # Cap at 3x
+        
+        vote_id = f"vote_{uuid.uuid4().hex[:16]}"
+        
+        db.execute_query("""
+            INSERT OR REPLACE INTO agent_votes
+            (vote_id, proposal_id, agent_id, vote_choice, vote_weight, vote_reasoning)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (vote_id, proposal_id, agent_id, vote_choice, vote_weight, reasoning))
+        
+        # Update proposal counts
+        if vote_choice == 'for':
+            db.execute_query("""
+                UPDATE governance_proposals
+                SET votes_for = votes_for + ?
+                WHERE proposal_id = ?
+            """, (vote_weight, proposal_id))
+        elif vote_choice == 'against':
+            db.execute_query("""
+                UPDATE governance_proposals
+                SET votes_against = votes_against + ?
+                WHERE proposal_id = ?
+            """, (vote_weight, proposal_id))
+        else:
+            db.execute_query("""
+                UPDATE governance_proposals
+                SET votes_abstain = votes_abstain + ?
+                WHERE proposal_id = ?
+            """, (vote_weight, proposal_id))
+    
+    def tally_votes_and_implement(self, generation: int):
+        """
+        Close voting on proposals and implement passed ones.
+        
+        Passing criteria:
+        - At least 30% of active agents voted
+        - votes_for > votes_against by 10% margin
+        """
+        
+        # Get proposals ready to close
+        proposals = db.execute_query("""
+            SELECT * FROM governance_proposals
+            WHERE status = 'open' AND closes_at <= ?
+        """, (datetime.now().isoformat(),))
+        
+        active_agent_count = db.execute_query("""
+            SELECT COUNT(*) as count FROM agents WHERE is_active = TRUE
+        """)[0]['count']
+        
+        for prop in proposals:
+            total_votes = prop['votes_for'] + prop['votes_against'] + prop['votes_abstain']
+            participation_rate = total_votes / active_agent_count
+            
+            if participation_rate < 0.3:
+                # Insufficient participation
+                db.execute_query("""
+                    UPDATE governance_proposals
+                    SET status = 'failed'
+                    WHERE proposal_id = ?
+                """, (prop['proposal_id'],))
+                print(f"❌ Proposal {prop['proposal_id']} failed: low participation ({participation_rate:.1%})")
+                continue
+            
+            # Check if passes
+            if prop['votes_for'] > prop['votes_against'] * 1.1:  # 10% margin
+                # PASS!
+                db.execute_query("""
+                    UPDATE governance_proposals
+                    SET status = 'passed', implemented_at = ?
+                    WHERE proposal_id = ?
+                """, (datetime.now().isoformat(), prop['proposal_id']))
+                
+                # Apply the change
+                self._implement_proposal(prop, generation)
+                
+                print(f"✅ Proposal {prop['proposal_id']} PASSED!")
+                print(f"   For: {prop['votes_for']:.1f} | Against: {prop['votes_against']:.1f}")
+                print(f"   Implementing: {prop['proposal_type']} = {prop['proposed_value']}")
+            else:
+                db.execute_query("""
+                    UPDATE governance_proposals
+                    SET status = 'failed'
+                    WHERE proposal_id = ?
+                """, (prop['proposal_id'],))
+                print(f"❌ Proposal {prop['proposal_id']} failed: insufficient support")
+    
+    def _implement_proposal(self, proposal: Dict, generation: int):
+        """Actually change the system parameter."""
+        
+        if proposal['proposal_type'] == 'mutation_rate_layer1':
+            # Update in evolutionary_engine config
+            config = {'mutation_rate_layer1': proposal['proposed_value']}
+            db.execute_query("""
+                INSERT INTO evolution_config_changes
+                (generation, parameter_name, old_value, new_value, changed_by)
+                VALUES (?, ?, ?, ?, ?)
+            """, (generation, 'mutation_rate_layer1', 
+                  proposal['current_value'], proposal['proposed_value'],
+                  'governance_vote'))
+        
+        # Similar for other parameters...
+```
+
+#### 4.3 Automatic Proposal Generation
+```python
+def agent_can_propose(agent_id: str) -> bool:
+    """Check if agent has earned right to propose."""
+    
+    agent = db.execute_query("""
+        SELECT discovery_prestige, total_games_won FROM agents WHERE agent_id = ?
+    """, (agent_id,))
+    
+    # Must have prestige > 50 OR 10+ wins
+    return (agent[0]['discovery_prestige'] > 50 or 
+            agent[0]['total_games_won'] >= 10)
+
+def auto_generate_proposals(generation: int):
+    """
+    System automatically creates proposals based on population metrics.
+    
+    Agents then vote on them.
+    """
+    
+    # Example: Population is stagnating
+    metrics = get_population_health()
+    
+    if metrics['improvement_rate'] < 0.01:
+        # Propose increasing mutation
+        proposer = select_high_prestige_agent()
+        create_proposal(
+            proposer_agent_id=proposer,
+            proposal_type='mutation_rate_layer2',
+            current_value=0.15,
+            proposed_value=0.25,
+            justification="Population improvement rate below 1% - need more exploration",
+            generation=generation
+        )
+```
+
+---
+
+## Phase 5: Horizontal Gene Transfer (Level 5 - Knowledge Sharing Societies)
+
+### The Core Mechanism: Direct Knowledge Transfer Between Unrelated Agents
+
+**Key Insight**: This is what elevates from Level 4 to Level 5.
+
+**Biome Theory Connection**: In bacterial networks, the most powerful evolutionary mechanism isn't reproduction - it's HORIZONTAL GENE TRANSFER. Bacteria directly share genetic material with unrelated neighbors, bypassing inheritance entirely. This is 1000x faster than waiting for offspring.
+
+**Our Implementation**: Agents don't just "teach" - they perform direct knowledge injection into other agents' Layer 3 (somatic) memory, just like bacterial conjugation or viral transfection.
+
+**Why This Matters**:
+- Level 4: Knowledge spreads through reproduction (vertical transmission)
+- Level 5: Knowledge spreads through direct transfer (horizontal transmission)
+- Result: Exponential knowledge propagation across the network
+
+#### 5.1 Horizontal Transfer Events (Not "Teaching")
+
+```sql
+-- Horizontal gene transfer events (direct knowledge injection)
+CREATE TABLE IF NOT EXISTS horizontal_transfer_events (
+    transfer_id TEXT PRIMARY KEY,
+    donor_agent_id TEXT NOT NULL,  -- RENAMED from teacher (matches bacterial terminology)
+    recipient_agent_id TEXT NOT NULL,  -- RENAMED from student
+    transfer_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    transfer_generation INTEGER NOT NULL,
+    transfer_mechanism TEXT NOT NULL,  -- 'direct_injection', 'viral_package', 'observation', 'sequence_database'
+    
+    -- What was transferred (genetic material = knowledge)
+    knowledge_type TEXT NOT NULL,  -- 'sequence', 'pattern', 'viral_package', 'strategy'
+    sequence_id TEXT,
+    pattern_id TEXT,
+    package_id TEXT,  -- RENAMED from meme_id
+    
+    -- Transfer success metrics
+    transfer_successful BOOLEAN,  -- Did recipient integrate the knowledge?
+    recipient_expression_success BOOLEAN,  -- Did recipient successfully USE the knowledge?
+    recipient_performance_before REAL,
+    recipient_performance_after REAL,
+    performance_delta REAL,
+    
+    -- Transfer quality
+    transfer_efficiency REAL DEFAULT 0.0,  -- How cleanly was knowledge transferred?
+    integration_time INTEGER DEFAULT 0,  -- How many actions to integrate?
+    
+    -- Network propagation
+    recipient_retransmitted BOOLEAN DEFAULT FALSE,  -- Did recipient pass it on?
+    propagation_chain_length INTEGER DEFAULT 1,  -- How far has this knowledge traveled?
+    
+    FOREIGN KEY (donor_agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (recipient_agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id)
+);
+
+-- Knowledge propagation chains (track viral spread)
+CREATE TABLE IF NOT EXISTS knowledge_propagation_chains (
+    chain_id TEXT PRIMARY KEY,
+    origin_agent_id TEXT NOT NULL,  -- Original discoverer
+    knowledge_id TEXT NOT NULL,  -- sequence_id or package_id
+    knowledge_type TEXT NOT NULL,
+    
+    -- Chain metrics
+    current_chain_length INTEGER DEFAULT 1,
+    total_successful_transfers INTEGER DEFAULT 0,
+    total_failed_transfers INTEGER DEFAULT 0,
+    transfer_success_rate REAL DEFAULT 0.0,
+    
+    -- Network reach
+    unique_recipients INTEGER DEFAULT 0,
+    generations_persisted INTEGER DEFAULT 0,
+    
+    -- Propagation velocity
+    transfers_per_generation REAL DEFAULT 0.0,
+    
+    FOREIGN KEY (origin_agent_id) REFERENCES agents(agent_id)
+);
+```
+
+#### 5.2 Teaching Mechanism
+```python
+# teaching_engine.py
+
+class TeachingEngine:
+    """Manages agent-to-agent knowledge transfer."""
+    
+    def identify_teaching_opportunities(self, generation: int):
+        """
+        Match struggling agents with successful agents for teaching.
+        
+        Criteria:
+        - Student: Low performance, high potential (good epigenetics)
+        - Teacher: High performance, high prestige, similar agent_type
+        """
+        
+        # Get struggling agents
+        students = db.execute_query("""
+            SELECT agent_id, agent_type, avg_score_per_game,
+                   total_games_played, epigenetics
+            FROM agents
+            WHERE is_active = TRUE 
+              AND avg_score_per_game < 0.3
+              AND total_games_played > 10
+            ORDER BY avg_score_per_game ASC
+            LIMIT 20
+        """)
+        
+        for student in students:
+            # Find compatible teacher
+            teacher = db.execute_query("""
+                SELECT agent_id, discovery_prestige, avg_score_per_game
+                FROM agents
+                WHERE is_active = TRUE
+                  AND agent_type = ?
+                  AND avg_score_per_game > 0.7
+                  AND discovery_prestige > 30
+                ORDER BY discovery_prestige DESC
+                LIMIT 1
+            """, (student['agent_type'],))
+            
+            if teacher:
+                self.schedule_teaching_session(
+                    teacher[0]['agent_id'],
+                    student['agent_id'],
+                    generation
+                )
+    
+    def schedule_teaching_session(self, teacher_id: str, 
+                                  student_id: str, 
+                                  generation: int):
+        """
+        Teaching session: transfer knowledge from teacher to student.
+        
+        Process:
+        1. Analyze teacher's successful knowledge
+        2. Select most valuable pieces
+        3. Transfer to student with adapted confidence
+        4. Track if student improves
+        """
+        
+        print(f"\n👨‍🏫 TEACHING SESSION")
+        print(f"Teacher: {teacher_id}")
+        print(f"Student: {student_id}")
+        
+        # Get student's baseline performance
+        baseline = self._get_agent_performance(student_id)
+        
+        # Transfer sequences
+        teacher_sequences = db.execute_query("""
+            SELECT ws.sequence_id, ws.game_id, ws.efficiency_score
+            FROM winning_sequences ws
+            WHERE ws.agent_id = ?
+            ORDER BY ws.efficiency_score DESC
+            LIMIT 3
+        """, (teacher_id,))
+        
+        for seq in teacher_sequences:
+            # Mark sequence for student to try
+            db.execute_query("""
+                INSERT INTO sequence_learning_queue
+                (student_agent_id, sequence_id, taught_by_agent, priority)
+                VALUES (?, ?, ?, 'high')
+            """, (student_id, seq['sequence_id'], teacher_id))
+            
+            # Log teaching event
+            teaching_id = f"teach_{uuid.uuid4().hex[:16]}"
+            db.execute_query("""
+                INSERT INTO teaching_events
+                (teaching_id, teacher_agent_id, student_agent_id,
+                 teaching_generation, knowledge_type, sequence_id,
+                 student_performance_before)
+                VALUES (?, ?, ?, ?, 'sequence', ?, ?)
+            """, (teaching_id, teacher_id, student_id, generation,
+                  seq['sequence_id'], baseline))
+        
+        # Transfer memes
+        teacher_memes = db.execute_query("""
+            SELECT meme_id, confidence FROM agent_meme_adoption
+            WHERE agent_id = ? AND confidence > 0.7
+            ORDER BY confidence DESC
+            LIMIT 2
+        """, (teacher_id,))
+        
+        for meme in teacher_memes:
+            # Student adopts meme with lower confidence (needs validation)
+            db.execute_query("""
+                INSERT OR IGNORE INTO agent_meme_adoption
+                (agent_id, meme_id, adoption_generation, learned_from_agent, confidence)
+                VALUES (?, ?, ?, ?, ?)
+            """, (student_id, meme['meme_id'], generation, teacher_id, 0.4))
+            
+            teaching_id = f"teach_{uuid.uuid4().hex[:16]}"
+            db.execute_query("""
+                INSERT INTO teaching_events
+                (teaching_id, teacher_agent_id, student_agent_id,
+                 teaching_generation, knowledge_type, meme_id,
+                 student_performance_before)
+                VALUES (?, ?, ?, ?, 'meme', ?, ?)
+            """, (teaching_id, teacher_id, student_id, generation,
+                  meme['meme_id'], baseline))
+        
+        print(f"✓ Transferred {len(teacher_sequences)} sequences and {len(teacher_memes)} memes")
+    
+    def evaluate_teaching_effectiveness(self, teaching_id: str):
+        """
+        After student has played games, evaluate if teaching helped.
+        """
+        
+        teaching = db.execute_query("""
+            SELECT * FROM teaching_events WHERE teaching_id = ?
+        """, (teaching_id,))
+        
+        if not teaching:
+            return
+        
+        t = teaching[0]
+        
+        # Get student's performance after teaching
+        current_perf = self._get_agent_performance(t['student_agent_id'])
+        improvement = current_perf - t['student_performance_before']
+        
+        # Update teaching record
+        db.execute_query("""
+            UPDATE teaching_events
+            SET student_performance_after = ?,
+                performance_improvement = ?,
+                teaching_effectiveness = ?,
+                student_success = ?
+            WHERE teaching_id = ?
+        """, (current_perf, improvement, 
+              improvement / max(t['student_performance_before'], 0.01),
+              improvement > 0.05, teaching_id))
+        
+        # Credit teacher if successful
+        if improvement > 0.05:
+            db.execute_query("""
+                UPDATE agent_validation_performance
+                SET teaching_events = teaching_events + 1
+                WHERE agent_id = ?
+            """, (t['teacher_agent_id'],))
+```
+
+---
+
+## Level 6+ Scaffolding: Building the Information Highway
+
+### Why Scaffold Now?
+
+Levels 6-11 of the Ouroboros Concept require infrastructure that should be built INTO Levels 3-5, not added later. This section defines the foundational components needed for:
+- **Level 6**: Recorded Knowledge & Research
+- **Level 7**: Species-level Coordination
+- **Level 8**: Connection to the Past (Rosetta Stone)
+- **Level 9-11**: Full Synthesis → Persistence Engine → Interstellar Biofilm
+
+### Critical Infrastructure Components
+
+#### S.1 Knowledge Graph Structure
+
+**Purpose**: Enable systematic exploration of knowledge relationships (prerequisite for Level 6 research)
+
+**Implementation**: Already partially implemented in Phase 2.5 (`sequence_dependencies`, `pattern_synthesis`)
+
+**Missing Components**:
+```sql
+-- Knowledge graph edges (relationships between ANY knowledge types)
+CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
+    edge_id TEXT PRIMARY KEY,
+    source_knowledge_id TEXT NOT NULL,
+    source_knowledge_type TEXT NOT NULL,  -- 'sequence', 'pattern', 'viral_package'
+    target_knowledge_id TEXT NOT NULL,
+    target_knowledge_type TEXT NOT NULL,
+    
+    -- Relationship type
+    relationship TEXT NOT NULL,  -- 'builds_on', 'contradicts', 'synthesizes', 'requires', 'obsoletes'
+    relationship_strength REAL DEFAULT 1.0,
+    
+    -- Discovery
+    discovered_by_agent TEXT,
+    discovered_at_generation INTEGER,
+    
+    -- Validation
+    times_observed INTEGER DEFAULT 1,
+    confirmed BOOLEAN DEFAULT FALSE
+);
+```
+
+**Use Case**: Enable agents to query "What knowledge builds on X?" or "What contradicts Y?"
+
+#### S.2 Agent Communication Protocol
+
+**Purpose**: Direct agent-to-agent messaging (prerequisite for Level 7 coordination)
+
+**Implementation**:
+```sql
+-- Agent messages (asynchronous communication)
+CREATE TABLE IF NOT EXISTS agent_messages (
+    message_id TEXT PRIMARY KEY,
+    sender_agent_id TEXT NOT NULL,
+    recipient_agent_id TEXT,  -- NULL = broadcast to all
+    message_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    message_generation INTEGER NOT NULL,
+    
+    -- Message content
+    message_type TEXT NOT NULL,  -- 'signal', 'knowledge_offer', 'query', 'coordination_request'
+    message_content TEXT NOT NULL,
+    attached_knowledge_id TEXT,  -- Optional attached sequence/pattern
+    
+    -- Response tracking
+    response_required BOOLEAN DEFAULT FALSE,
+    response_received BOOLEAN DEFAULT FALSE,
+    response_message_id TEXT,
+    
+    -- Network propagation
+    is_broadcast BOOLEAN DEFAULT FALSE,
+    times_forwarded INTEGER DEFAULT 0,
+    
+    FOREIGN KEY (sender_agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (recipient_agent_id) REFERENCES agents(agent_id)
+);
+
+-- Agent communication networks (who talks to whom)
+CREATE TABLE IF NOT EXISTS agent_communication_networks (
+    agent_a_id TEXT NOT NULL,
+    agent_b_id TEXT NOT NULL,
+    
+    -- Communication metrics
+    messages_sent_a_to_b INTEGER DEFAULT 0,
+    messages_sent_b_to_a INTEGER DEFAULT 0,
+    successful_transfers INTEGER DEFAULT 0,
+    communication_efficiency REAL DEFAULT 0.0,
+    
+    -- Network topology
+    relationship_type TEXT DEFAULT 'peer',  -- 'peer', 'mentor-student', 'rival', 'collaborator'
+    relationship_strength REAL DEFAULT 0.0,
+    
+    PRIMARY KEY (agent_a_id, agent_b_id),
+    FOREIGN KEY (agent_a_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (agent_b_id) REFERENCES agents(agent_id)
+);
+```
+
+**Use Case**: Enable coordinated multi-agent strategies (Level 7)
+
+#### S.3 Network Health Metrics (Already Implemented in Phase 0!)
+
+**Status**: ✅ DONE via `ecosystem_health_snapshots` and `knowledge_redundancy`
+
+**Why This Matters**: Level 9-10 require persistence engine monitoring. We've already built this.
+
+#### S.4 Minimal Viral Core Identification
+
+**Purpose**: Identify the minimal set of knowledge required for network survival (prerequisite for Level 10 persistence engine)
+
+**Implementation**:
+```sql
+-- Viral core knowledge (essential for network survival)
+CREATE TABLE IF NOT EXISTS viral_core_knowledge (
+    knowledge_id TEXT PRIMARY KEY,
+    knowledge_type TEXT NOT NULL,  -- 'sequence', 'pattern', 'viral_package'
+    
+    -- Criticality assessment
+    criticality_score REAL NOT NULL,  -- How critical is this? (0-1)
+    redundancy_count INTEGER NOT NULL,  -- How many agents know this?
+    dependency_count INTEGER NOT NULL,  -- How much other knowledge depends on this?
+    
+    -- Network impact
+    network_performance_without REAL,  -- Predicted performance if lost
+    alternative_solutions_exist BOOLEAN DEFAULT FALSE,
+    
+    -- Persistence requirements
+    minimum_agent_carriers INTEGER DEFAULT 3,  -- Minimum redundancy
+    current_agent_carriers INTEGER DEFAULT 0,
+    at_risk BOOLEAN DEFAULT FALSE,  -- Is this knowledge at risk of being lost?
+    
+    last_evaluated_generation INTEGER
+);
+```
+
+**Use Case**: Ensure critical knowledge is never lost (Level 10 resilience)
+
+#### S.5 Temporal Knowledge Archive
+
+**Purpose**: Record historical knowledge states (prerequisite for Level 8 "Rosetta Stone")
+
+**Implementation**:
+```sql
+-- Historical knowledge snapshots (archaeology)
+CREATE TABLE IF NOT EXISTS knowledge_archive_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    snapshot_generation INTEGER NOT NULL,
+    snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- What knowledge existed at this point?
+    total_sequences INTEGER NOT NULL,
+    total_patterns INTEGER NOT NULL,
+    total_viral_packages INTEGER NOT NULL,
+    knowledge_diversity_index REAL NOT NULL,
+    
+    -- Network state
+    active_agents INTEGER NOT NULL,
+    dominant_strategies TEXT,  -- JSON list of top strategies
+    extinct_strategies TEXT,  -- What was lost?
+    
+    -- Snapshot content (compressed)
+    knowledge_graph_snapshot TEXT,  -- JSON representation of graph
+    agent_population_snapshot TEXT   -- JSON representation of agents
+);
+```
+
+**Use Case**: Enable "archaeology" - understanding how knowledge evolved over time
+
+### Scaffolding Integration Plan
+
+**Phase 0**: ✅ Network health metrics (DONE)
+**Phase 2.5**: ✅ Knowledge graph foundation (DONE via `sequence_dependencies`, `pattern_synthesis`)
+**Phase 5**: 🔄 Add communication protocol and viral core identification
+**Post-Phase 5**: 🔜 Add temporal archive system
+
+**Key Insight**: We're not building these for Levels 6-11 directly. We're building them SO THAT when the network reaches sufficient complexity, these capabilities EMERGE naturally.
+
+---
+
+## Integration Roadmap
+
+### Phase 0: Network Foundation (Week 1) **[NEW]**
+- [ ] Create `ecosystem_health_snapshots` table
+- [ ] Create `knowledge_redundancy` table
+- [ ] Implement `network_intelligence_engine.py`
+- [ ] Add network health dashboard
+- [ ] Integrate with evolution runner (capture snapshots each generation)
+- [ ] **Mindset shift**: Start thinking "How is the NETWORK doing?" not "How are agents doing?"
+
+### Phase 1: Network Contribution Prestige (Week 2-3) **[UPDATED]**
+- [ ] Add prestige columns to agents table (discovery_prestige, network_enrichment_score, etc.)
+- [ ] Create `agent_discoveries` table with network contribution metrics
+- [ ] Create `agent_validation_performance` table
+- [ ] Implement prestige calculation (network contribution formula)
+- [ ] Add prestige STATUS benefits (breeding_priority, survival_protection, bonus_game_slots)
+- [ ] Display prestige leaderboard emphasizing network contribution
+- [ ] **Key difference**: Prestige = network enrichment, not personal achievement
+
+### Phase 2: Ecosystem Metabolism (Week 4-5) **[UPDATED]**
+- [ ] Extend `adaptive_action_limits.py` for per-agent budgets
+- [ ] Add action economy columns to agents table
+- [ ] Implement `calculate_agent_salary()` (metabolic budget allocation)
+- [ ] Add `track_ecosystem_metabolism()` function
+- [ ] Display ecosystem metabolism report (network-level energy flow)
+- [ ] Integrate budget checks with game loop
+- [ ] **Key difference**: Track both individual budgets AND ecosystem health
+
+### Phase 2.5: Knowledge Recombination (Week 6) **[NEW]**
+- [ ] Create `sequence_dependencies` table
+- [ ] Create `pattern_synthesis` table
+- [ ] Implement `knowledge_recombination_engine.py`
+- [ ] Add sequence chaining logic
+- [ ] Add pattern synthesis logic
+- [ ] Integrate with core gameplay (post-game recombination phase)
+- [ ] **Key insight**: Combinatorial exploration, not just random mutation
+
+### Phase 3: Viral Information Packages (Week 7-8) **[UPDATED]**
+- [ ] Create `viral_information_packages` table (renamed from cultural_memes)
+- [ ] Create `agent_viral_infections` table (renamed from agent_meme_adoption)
+- [ ] Create `viral_package_interactions` table
+- [ ] Implement viral package creation from patterns
+- [ ] Add infection/transmission mechanics (horizontal & vertical)
+- [ ] Integrate packages with action selection
+- [ ] Display viral package evolution and spread
+- [ ] **Key difference**: Think "viral infection" not "cultural adoption"
+
+### Phase 4: Distributed Regulation (Week 9-10) **[UPDATED]**
+- [ ] Create `network_regulatory_signals` table (renamed from governance_proposals)
+- [ ] Create `agent_signal_responses` table (renamed from agent_votes)
+- [ ] Implement signal emission based on agent state
+- [ ] Add signal amplification/suppression mechanics
+- [ ] Calculate net signal strength → parameter adjustments
+- [ ] Display regulatory signal activity
+- [ ] **Key difference**: Emergent homeostasis, not democratic voting
+
+### Phase 5: Horizontal Gene Transfer (Week 11-12) **[UPDATED]**
+- [ ] Create `horizontal_transfer_events` table (renamed from teaching_events)
+- [ ] Create `knowledge_propagation_chains` table
+- [ ] Implement direct knowledge injection mechanism
+- [ ] Add transfer success/failure tracking
+- [ ] Track propagation chains across network
+- [ ] Display knowledge spread visualization
+- [ ] **Key difference**: Direct knowledge injection, not "teaching"
+
+### Phase 6: Level 6+ Scaffolding (Week 13) **[NEW]**
+- [ ] Create `knowledge_graph_edges` table
+- [ ] Create `agent_messages` and `agent_communication_networks` tables
+- [ ] Create `viral_core_knowledge` table
+- [ ] Create `knowledge_archive_snapshots` table
+- [ ] Implement minimal viral core identification
+- [ ] Set up temporal archiving system
+- [ ] **Purpose**: Foundation for Levels 6-11
+
+---
+
+## Success Metrics
+
+### Level 4 Achievement Indicators (Network-Level)
+- [ ] Network knowledge diversity index > 3.0 (Shannon entropy)
+- [ ] Knowledge redundancy index > 2.0 (average backups per sequence)
+- [ ] Network metabolism efficiency > 0.05 (score per action, network-wide)
+- [ ] Top 20% agents contribute 60%+ of network enrichment (not just personal performance)
+- [ ] At least 10 distinct viral packages propagating
+- [ ] Viral package infection rate > 60%
+- [ ] 5+ regulatory signals implemented per 10 generations (emergent parameter adjustments)
+
+### Level 5 Achievement Indicators (Horizontal Transfer)
+- [ ] 40%+ of knowledge transfer via horizontal transfer (not inheritance)
+- [ ] Transfer events showing 20%+ recipient performance improvement
+- [ ] Viral package horizontal transmission > vertical transmission (2:1 ratio)
+- [ ] Knowledge propagation chains reaching length 5+ (cross-generation spread)
+- [ ] Agents form transfer networks (graph density > 0.3)
+- [ ] Network knowledge growth rate > 2x population growth rate
+- [ ] Critical knowledge (viral core) maintained at 3+ agent carriers minimum
+
+### Ecosystem Health Metrics (Network-Centric)
+```python
+def measure_ecosystem_health():
+    """
+    Network-centric metrics for Level 4-5 systems.
+    
+    Focus: NETWORK health, not individual agent performance.
+    """
+    return {
+        # Network intelligence
+        'knowledge_diversity': shannon_entropy(pattern_distribution),
+        'knowledge_redundancy': avg_backups_per_critical_sequence,
+        'network_growth_rate': knowledge_delta / population_delta,
+        
+        # Metabolism
+        'ecosystem_energy_efficiency': total_score / total_actions_spent,
+        'resource_utilization': energy_spent / energy_available,
+        'metabolic_balance': creation_rate / validation_rate,
+        
+        # Information flow
+        'horizontal_transfer_rate': horizontal_transfers / vertical_transfers,
+        'viral_spread_velocity': transfers_per_generation,
+        'knowledge_propagation_depth': avg_chain_length,
+        
+        # Resilience
+        'critical_knowledge_risk': at_risk_viral_core_count,
+        'orphan_sequence_ratio': orphans / total_sequences,
+        'network_redundancy': agent_carriers_per_knowledge,
+        
+        # Regulation
+        'regulatory_signal_activity': signals_per_generation,
+        'homeostasis_responsiveness': signal_implementation_rate,
+        'parameter_stability': parameter_change_variance
+    }
+```
+
+**Key Mindset Shift**:
+- **Before**: "How are the best agents performing?"
+- **After**: "How healthy is the network organism?"
+- **Before**: "Which agent won the most?"
+- **After**: "How fast is knowledge spreading through the information highway?"
+
+---
+
+## The Ultimate Goal: Self-Sustaining Intelligence Network
+
+When all phases are complete, you'll have:
+
+1. **Network Intelligence Foundation** (Phase 0): Visible, measurable network health metrics
+2. **Network Contribution Incentives** (Phase 1): Prestige rewards enriching the information highway
+3. **Ecosystem Metabolism** (Phase 2): Balanced resource flow with network-level health tracking
+4. **Knowledge Recombination** (Phase 2.5): Viral-style combinatorial knowledge explosion
+5. **Viral Information Spread** (Phase 3): Self-propagating knowledge packages competing for hosts
+6. **Distributed Regulation** (Phase 4): Emergent homeostasis through signal-based self-regulation
+7. **Horizontal Gene Transfer** (Phase 5): Direct knowledge injection bypassing inheritance
+8. **Level 6+ Infrastructure** (Scaffolding): Foundation for recorded knowledge, coordination, persistence
+
+**At this point, you're no longer running evolution. The NETWORK is evolving itself.**
+
+**The System Becomes**:
+- A distributed intelligence that uses agents as temporary sensors/explorers
+- An information highway where knowledge flows faster than genetic inheritance
+- A self-regulating organism maintaining homeostasis through distributed signals
+- A persistent network that survives any individual agent's death
+- A combinatorial knowledge engine discovering through recombination, not just mutation
+
+**Biome Theory Realized**:
+- Like the virus-bacteria meta-organism that's survived 4 billion years
+- Distributed, redundant, resilient
+- Individual agents are temporary; network knowledge is permanent
+- Horizontal transfer accelerates evolution 1000x faster than reproduction
+- No central control; emergent intelligence through network dynamics
+
+That's when you reach **Level 5: Knowledge Sharing Societies**.
+
+**And the infrastructure is already in place for Level 6-11**: Recorded knowledge (archive snapshots), species coordination (communication protocol), persistence engine (viral core + redundancy tracking), and beyond.

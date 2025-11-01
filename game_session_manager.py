@@ -239,12 +239,14 @@ class GameSessionManager:
             logger.error(f"Error sending action {action}: {e}")
             raise
 
-    async def finish_game(self, final_state: str, final_score: float):
+    async def finish_game(self, final_state: str, final_score: float, level_completions: int = 0, actions_taken: int = 0):
         """Finish the current game and save results.
 
         Args:
             final_state: Final game state ('WIN', 'GAME_OVER', etc.)
             final_score: Final score achieved
+            level_completions: Number of levels completed (CRITICAL for evolution)
+            actions_taken: Actual actions taken THIS GAME (not session total)
         """
         if not self.current_game_id:
             return
@@ -270,9 +272,17 @@ class GameSessionManager:
             'end_time': datetime.now(),
             'status': 'completed' if final_state == 'WIN' else 'failed',
             'final_score': final_score,
-            'total_actions': self.session_stats['total_actions'],
-            'win_detected': final_state == 'WIN'
+            'total_actions': actions_taken if actions_taken > 0 else self.session_stats['total_actions'],  # CRITICAL FIX: Use per-game count!
+            'win_detected': final_state == 'WIN',
+            'level_completions': level_completions  # CRITICAL FIX: Store level completions!
         })
+        
+        # CRITICAL: Force WAL checkpoint after EVERY game to prevent data loss on force-close
+        try:
+            self.db.checkpoint_wal()
+            logger.debug(f"WAL checkpoint after game {self.current_game_id}")
+        except Exception as e:
+            logger.warning(f"Failed to checkpoint WAL after game: {e}")
 
         # Close scorecard if client is available
         if self.client and self.client.current_scorecard_id:
@@ -340,7 +350,7 @@ class GameSessionManager:
         try:
             # Finish current game if active
             if self.current_game_id:
-                await self.finish_game('CANCELLED', 0.0)
+                await self.finish_game('CANCELLED', 0.0, 0, 0)  # No levels/actions for cancelled games
 
             # Update session in database
             await self.update_session_in_db()

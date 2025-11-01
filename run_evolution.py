@@ -21,9 +21,16 @@ import argparse
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 from autonomous_evolution_runner import AutonomousEvolutionRunner
+from cleanup_temp_files import cleanup_temp_files
 
 
 def main():
+    # Auto-cleanup temporary diagnostic files
+    try:
+        cleanup_temp_files()
+    except Exception as e:
+        print(f"[WARN] Cleanup failed (non-critical): {e}")
+    
     parser = argparse.ArgumentParser(description='Quick Start Evolution')
     
     parser.add_argument('--fast', action='store_true',
