@@ -604,6 +604,13 @@ All agents get equal action allowances:
 - **Phase 1 (Prestige) = Social Capital**: Long-term status, breeding/survival benefits, network contribution
 - **Phase 2 (Actions) = Economic Capital**: Short-term budget, metabolic resources, what you can DO right now
 
+**⚠️ CRITICAL IMPLEMENTATION RULE**: The system must **NEVER conflate** these two currencies:
+- Prestigious agents do NOT automatically get more action budgets
+- Action budgets are based on PERFORMANCE (score, wins, efficiency)
+- Prestige grants STATUS benefits ONLY (breeding priority, survival protection, bonus game slots)
+- The ONLY connection: "bonus_game_slots" (+0 to +10 extra attempts) - prestigious agents get more OPPORTUNITIES, but same action budget per game
+- Keep these currencies completely separate in code, database, and logic
+
 **Biome Theory Connection**: In biological systems, metabolism is the flow of energy and resources through the network. Actions are our "ATP" - the fundamental energy currency. We need to track both individual budgets AND ecosystem-level metabolic health.
 
 ### Implementation: Per-Agent Action Economy + Ecosystem Metabolism Tracking
@@ -1248,24 +1255,47 @@ class KnowledgeRecombinationEngine:
 
 **File**: `core_gameplay.py`
 
+**⚠️ CRITICAL IMPLEMENTATION DETAIL**: The `KnowledgeRecombinationEngine` must be **opportunistic and automatic**, not manually triggered. After EVERY game, agents should attempt recombination of known sequences for that game level. This is NOT optional - it's core to the viral acceleration mechanism.
+
 ```python
 def _explore_sequence_recombination(self, agent_id: str, game_id: str):
     """
     After playing a game, try to recombine known sequences.
     
     This is the "viral recombination" phase.
+    
+    CRITICAL: This runs AUTOMATICALLY after every game, not conditionally.
+    The config flag 'enable_knowledge_recombination' should default to TRUE.
     """
-    if not self.config.get('enable_knowledge_recombination', False):
-        return
+    # REMOVED: if not self.config.get('enable_knowledge_recombination', False):
+    # Recombination is ALWAYS enabled - it's fundamental to the system
     
     from knowledge_recombination_engine import KnowledgeRecombinationEngine
     
     engine = KnowledgeRecombinationEngine(self.db)
+    
+    # Attempt recombination AFTER every game
     new_sequences = engine.discover_sequence_combinations(agent_id, game_id)
     
     if new_sequences:
         self.logger.info(f"Agent {agent_id[:8]} discovered {len(new_sequences)} "
                         f"sequence combinations through recombination")
+        
+        # Update agent's innovation metrics
+        self._record_recombination_discovery(agent_id, new_sequences)
+```
+
+**Integration Point in `end_game_session()`**:
+```python
+def end_game_session(self, game_id: str, final_state: dict):
+    # ... existing game end logic ...
+    
+    # AUTOMATIC RECOMBINATION (Phase 2.5)
+    # This runs after EVERY game, not conditionally
+    if self.current_agent_id:
+        self._explore_sequence_recombination(self.current_agent_id, game_id)
+    
+    # ... rest of end game logic ...
 ```
 
 **Why Phase 2.5 Matters**:
@@ -1273,6 +1303,13 @@ def _explore_sequence_recombination(self, agent_id: str, game_id: str):
 - **Viral evolution**: Recombination + horizontal transfer (fast)
 - **Our system**: Both! Layer 2 mutates, Layer 3 recombines
 - **Result**: Exponential knowledge growth through combination, not just linear discovery
+
+**Implementation Requirements**:
+- ✅ **Automatic**: Runs after EVERY game, not optional
+- ✅ **Opportunistic**: Tries all reasonable pairwise combinations
+- ✅ **Efficient**: Limits attempts to prevent exponential blowup (top 10 sequences max)
+- ✅ **Tracked**: All recombination attempts recorded in `sequence_dependencies`
+- ✅ **Rewarded**: Prestige system rewards successful recombinations (innovation_score)
 
 ---
 
@@ -2270,6 +2307,348 @@ CREATE TABLE IF NOT EXISTS knowledge_archive_snapshots (
 **Post-Phase 5**: 🔜 Add temporal archive system
 
 **Key Insight**: We're not building these for Levels 6-11 directly. We're building them SO THAT when the network reaches sufficient complexity, these capabilities EMERGE naturally.
+
+---
+
+## ⚠️ Critical Warnings & Pitfalls to Avoid
+
+### Pitfall 1: Complexity Creep
+
+You have **5 major phases** (0, 1, 2, 2.5, 3, 4, 5) in this roadmap. Each is substantial. 
+
+**RISK**: Trying to implement everything at once will lead to:
+- Incomplete implementations
+- Hard-to-debug interactions
+- Loss of the core vision
+- Burnout and abandonment
+
+**SAFEGUARD**: 
+- ✅ **Phase 0**: Implement NOW (network foundation)
+- ✅ **Phase 1**: Next (prestige system)
+- ✅ **Phase 2**: Then (economic system)
+- ⏸️ **Phase 2.5-5**: Incremental (after observing network behavior for several generations)
+
+**Rule**: Don't start the next phase until the current phase is:
+1. Fully implemented
+2. Tested with real ARC games
+3. Verified in database (check tables, metrics)
+4. Displaying correct dashboard output
+5. Observably affecting system behavior
+
+### Pitfall 2: Losing the Network-Centric View
+
+As you add prestige, economy, memes, governance... it's **extremely easy** to drift back to "agent leaderboards" thinking.
+
+**SYMPTOMS**:
+- Asking "which agent is best?" instead of "is the network healthy?"
+- Optimizing for top agent performance instead of network growth
+- Celebrating individual wins instead of knowledge diversity
+- Building agent-centric dashboards instead of network dashboards
+
+**SAFEGUARD**: 
+Every new feature must answer: **"How does this enrich the NETWORK, not just individual agents?"**
+
+**Test Questions**:
+- Does this increase knowledge diversity?
+- Does this improve information flow rate?
+- Does this enhance network resilience?
+- Does this accelerate knowledge propagation?
+
+If the answer is "no" to all four, **you're optimizing the wrong thing**.
+
+### Pitfall 3: Conflating Prestige and Economy
+
+**THE TRAP**: "High prestige agents should get more actions because they're successful."
+
+**WHY THIS IS WRONG**:
+- Prestige = **network contribution** (knowledge shared, validated, spread)
+- Economy = **performance** (score, wins, efficiency)
+- These measure DIFFERENT things
+- An agent can have high performance (good economy) but low prestige (doesn't share knowledge)
+- An agent can have high prestige (great discoverer) but low performance (poor execution)
+
+**SAFEGUARD**:
+- **Prestige affects**: breeding_priority, survival_protection, bonus_game_slots
+- **Performance affects**: action_allowance_per_level, action_allowance_total
+- **NEVER**: Give more actions based on prestige alone
+- **ONLY**: "bonus_game_slots" connects them (more opportunities, same budget per game)
+
+**Code Review Checkpoint**: Search codebase for any logic that ties prestige → action budget. Remove it.
+
+### Pitfall 4: Over-Engineering Governance (Phase 4)
+
+**THE TRAP**: Building a complex voting system with proposals, quorums, debates, veto power...
+
+**WHY THIS IS WRONG**:
+- We're not building democracy
+- We're building **bacterial quorum sensing**
+- Real biological networks don't vote - they emit signals based on local state
+- Emergent homeostasis, not deliberative governance
+
+**SAFEGUARD**: Keep Phase 4 simple:
+1. Agents emit signals based on their LOCAL state (struggling → stress signal, thriving → suppress stress)
+2. Coordinator reads NET signal strength (sum of amplifications - suppressions)
+3. Adjusts parameters accordingly (high stress → increase mutation, low stress → maintain)
+4. **No voting, no proposals, no democracy**
+
+**If you find yourself implementing**:
+- Quorum requirements
+- Voting thresholds
+- Debate periods
+- Veto mechanisms
+- **STOP. You've over-engineered it.**
+
+### Pitfall 5: Forgetting Rule 8 (Test Everything)
+
+Your system is complex enough that bugs will **cascade**.
+
+**THE TRAP**: "This looks right in the code, ship it."
+
+**WHY THIS IS WRONG**:
+- Database could be empty
+- API calls might not be happening
+- Metrics could be calculating wrong
+- Network effects might not emerge
+
+**SAFEGUARD**: Every new feature needs:
+1. ✅ Test with real ARC games (not mocks)
+2. ✅ Monitor database for expected behavior (query tables)
+3. ✅ Check network health metrics (are they changing?)
+4. ✅ Verify API calls actually happening (check arc_action_tracking)
+5. ✅ Run for multiple generations (observe trends)
+
+**Rule 8 from Guidelines**: 
+> "Whenever creating an implementation or change, Test the new implementation on the current main active fun script, and then scan the terminal for errors, bugs, and anything else and then fix the issue and rescan, retest etc."
+
+**Apply this to EVERY phase.**
+
+### Pitfall 6: Premature Optimization of Phases 2.5-5
+
+**THE TRAP**: "Let me implement all 5 phases at once so we can see the full system."
+
+**WHY THIS IS WRONG**:
+- Phase 0 is the **paradigm shift** - without it, everything else is meaningless
+- Phase 1-2 establish the **dual currency** system (prestige vs economy)
+- You need to **observe network behavior** for several generations before knowing what Phase 2.5-5 should look like
+- The network might evolve in unexpected ways that change your design assumptions
+
+**SAFEGUARD**: **Stop at Phase 2** and observe for 10-20 generations:
+- Is network knowledge growing?
+- Is diversity increasing?
+- Are agents contributing to the network?
+- Is the prestige/economy separation working?
+
+**Then and only then** proceed to Phase 2.5.
+
+**Minimum Observation Period**:
+- Phase 0 → Phase 1: 5 generations
+- Phase 1 → Phase 2: 10 generations
+- Phase 2 → Phase 2.5: 15 generations
+- Phase 2.5 → Phase 3: 20 generations
+- Phase 3 → Phase 4: 25 generations
+- Phase 4 → Phase 5: 30 generations
+
+**Why**: Each phase needs time to show emergent effects. Rushing causes missed insights.
+
+---
+
+## 🎯 Implementation Priority Order
+
+### **IMMEDIATE PRIORITY (Do First)**
+
+#### Phase 0: Network Foundation (Week 1)
+**WHY FIRST**: This is the **paradigm shift**. Without network-centric metrics, all other phases will drift back to agent-centric thinking.
+
+**Implementation Order**:
+1. Create database tables (`ecosystem_health_snapshots`, `knowledge_redundancy`)
+2. Implement `network_intelligence_engine.py` core functions
+3. Add network dashboard to display
+4. Integrate snapshot capture into evolution loop
+5. **Test**: Run 5 generations, verify snapshots are being captured
+6. **Verify**: Dashboard shows network metrics, not just agent metrics
+
+**Success Criteria**:
+- ✅ Network health dashboard displays after each generation
+- ✅ Ecosystem snapshots stored in database
+- ✅ Knowledge diversity index calculating correctly
+- ✅ You find yourself asking "How is the NETWORK doing?" instead of "How are agents doing?"
+
+**STOP**: Do not proceed to Phase 1 until Phase 0 is complete and you've observed it for 5 generations.
+
+---
+
+### **HIGH PRIORITY (Do Second)**
+
+#### Phase 1: Prestige System (Week 2-3)
+**WHY SECOND**: Establishes the "social capital" currency and incentivizes network contribution.
+
+**Implementation Order**:
+1. Add prestige columns to agents table
+2. Create `agent_discoveries` and `agent_validation_performance` tables
+3. Implement `calculate_agent_prestige()` focusing on NETWORK CONTRIBUTION
+4. Add STATUS benefits (breeding_priority, survival_protection, bonus_game_slots)
+5. **CRITICAL**: Ensure prestige does NOT affect action budgets (except bonus_game_slots)
+6. Display prestige leaderboard emphasizing network enrichment
+7. **Test**: Run 10 generations, verify prestige affects breeding but NOT action budgets
+8. **Verify**: High prestige agents breed more, survive longer, but have same action budget as low prestige peers (unless they ALSO perform well)
+
+**Success Criteria**:
+- ✅ Prestige calculated based on network contribution, not personal wins
+- ✅ High prestige agents have higher breeding_priority (verify in breeding selection)
+- ✅ High prestige agents have survival_protection (verify in culling)
+- ✅ Prestige and action budgets are COMPLETELY SEPARATE
+- ✅ Agents with high prestige but low performance exist (and vice versa)
+
+**STOP**: Do not proceed to Phase 2 until Phase 1 is complete and you've observed prestige effects for 10 generations.
+
+---
+
+### **MEDIUM PRIORITY (Do Third)**
+
+#### Phase 2: Economic System (Week 4-5)
+**WHY THIRD**: Establishes the "economic capital" currency based on performance.
+
+**Implementation Order**:
+1. Extend agents table with action economy columns
+2. Implement `calculate_agent_salary()` in `adaptive_action_limits.py`
+3. Implement `track_ecosystem_metabolism()` for network-level resource flow
+4. Integrate budget assignment at generation start
+5. Add budget enforcement in `game_session_manager.py`
+6. Display both individual budgets AND ecosystem metabolism
+7. **CRITICAL**: Verify salaries based on PERFORMANCE, not prestige
+8. **Test**: Run 15 generations, verify high performers get more actions
+9. **Verify**: Ecosystem metabolism report shows network energy flow
+
+**Success Criteria**:
+- ✅ High performing agents get larger action budgets
+- ✅ Low performing agents get smaller action budgets
+- ✅ Prestige does NOT affect action budgets (only performance does)
+- ✅ Ecosystem metabolism dashboard shows network energy health
+- ✅ Budget utilization rate makes sense (30-90%)
+
+**STOP**: Do not proceed to Phase 2.5 until Phase 2 is complete and you've observed economic effects for 15 generations.
+
+**CHECKPOINT**: At this point, you should have:
+- Network health visible (Phase 0)
+- Social capital currency working (Phase 1)
+- Economic capital currency working (Phase 2)
+- Complete separation between the two currencies
+- Observable network-level effects (diversity, metabolism, growth)
+
+**OBSERVE**: Run 20 generations with just these three phases. Watch for:
+- Is knowledge growing?
+- Is prestige actually incentivizing network contribution?
+- Are high performers dominating the economy?
+- Are the two currencies truly separate?
+- Is the network healthy?
+
+**If any of these is "no", FIX IT before proceeding.**
+
+---
+
+### **LOWER PRIORITY (Do After Observation)**
+
+#### Phase 2.5: Knowledge Recombination (Week 6+)
+**WHY LATER**: Needs stable foundation from Phases 0-2. Adds acceleration, but not fundamental.
+
+**Implementation Order**:
+1. Create `sequence_dependencies` and `pattern_synthesis` tables
+2. Implement `knowledge_recombination_engine.py`
+3. **CRITICAL**: Make recombination AUTOMATIC after every game
+4. Integrate into `end_game_session()` - NOT conditional
+5. Test recombination is happening after EVERY game
+6. Verify new sequences being created and stored
+7. Check prestige system rewards recombination discoveries
+
+**Success Criteria**:
+- ✅ Recombination happens automatically after every game
+- ✅ New sequences being created through chaining
+- ✅ Dependencies tracked in database
+- ✅ Innovation score increases for successful recombinations
+- ✅ Knowledge growth rate accelerates (compare to Phase 0-2 baseline)
+
+**OBSERVATION PERIOD**: 20 generations minimum. Look for exponential knowledge growth.
+
+---
+
+#### Phase 3: Viral Information Packages (Week 7+)
+**WHY LATER**: Builds on recombination. Needs evidence that knowledge is growing first.
+
+**Implementation Order**:
+1. Create viral package tables
+2. Implement package creation, infection, transmission
+3. Integrate with action selection
+4. Track package evolution and spread
+5. Display viral package dashboard
+
+**Success Criteria**:
+- ✅ Packages spread horizontally between unrelated agents
+- ✅ Successful packages infect more hosts
+- ✅ Failed packages go extinct
+- ✅ Co-infection dynamics emerge
+
+**OBSERVATION PERIOD**: 25 generations minimum.
+
+---
+
+#### Phase 4: Distributed Regulation (Week 9+)
+**WHY LATER**: Needs stable network before adding self-regulation.
+
+**Implementation Order**:
+1. Create signal tables
+2. Implement signal emission based on agent state
+3. Add signal response mechanics
+4. Calculate net signal strength
+5. Apply parameter adjustments
+
+**CRITICAL**: Keep it SIMPLE. No voting. Just signals.
+
+**Success Criteria**:
+- ✅ Struggling agents emit stress signals
+- ✅ Thriving agents suppress stress signals
+- ✅ Net signal strength drives parameter changes
+- ✅ Emergent homeostasis observed
+
+**OBSERVATION PERIOD**: 30 generations minimum.
+
+---
+
+#### Phase 5: Horizontal Gene Transfer (Week 11+)
+**WHY LAST**: Most complex. Needs everything else working first.
+
+**Implementation Order**:
+1. Create transfer event tables
+2. Implement direct knowledge injection
+3. Track propagation chains
+4. Display knowledge spread visualization
+
+**Success Criteria**:
+- ✅ Horizontal transfer > vertical transfer (2:1 ratio)
+- ✅ Recipients show performance improvement
+- ✅ Knowledge propagates across unrelated lineages
+- ✅ Network knowledge growth >> population growth
+
+**OBSERVATION PERIOD**: 50 generations minimum.
+
+---
+
+## ⏱️ Realistic Timeline
+
+**Minimum Implementation Timeline**: 
+- **Phase 0**: 1 week (includes testing and observation)
+- **Phase 1**: 2-3 weeks (includes 10 generation observation)
+- **Phase 2**: 2-3 weeks (includes 15 generation observation)
+- **Observation Period**: 2-3 weeks (20 generations of Phases 0-2 together)
+- **Phase 2.5**: 1-2 weeks (includes 20 generation observation)
+- **Phase 3**: 2 weeks (includes 25 generation observation)
+- **Phase 4**: 2 weeks (includes 30 generation observation)
+- **Phase 5**: 2-3 weeks (includes 50 generation observation)
+
+**TOTAL**: ~15-20 weeks (4-5 months) for complete implementation with proper observation periods.
+
+**REALISTIC**: Plan for 6 months. Things will break. Debugging takes time. Observation periods might need extension.
+
+**DO NOT RUSH**. This is a foundational system. Getting it right matters more than getting it fast.
 
 ---
 

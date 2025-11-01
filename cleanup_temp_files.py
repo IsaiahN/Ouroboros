@@ -31,7 +31,8 @@ TEMP_PATTERNS = [
     "verify_*.py",
     "find_*.py",
     "*_summary.*",  # Cleanup summary files (all extensions, case-insensitive)
-    "*_SUMMARY.*"   # Explicit uppercase variant
+    "*_SUMMARY.*",  # Explicit uppercase variant
+    "BugFix_*.*"    # BugFix files with any extension
 ]
 
 # Files to KEEP (whitelist - never delete these)
@@ -100,7 +101,21 @@ def should_delete(filepath: Path) -> bool:
         pattern_lower = pattern.lower()
         
         # Simple wildcard matching
-        if pattern_lower.startswith("*"):
+        if pattern_lower.count("*") == 2:
+            # Pattern like *_summary.* - split into prefix, middle, suffix
+            parts = pattern_lower.split("*")
+            # parts = ["", "_summary.", ""] for *_summary.*
+            if len(parts) == 3:
+                prefix, middle, suffix = parts
+                # Check if middle part is in filename at the right position
+                if middle in filename_lower:
+                    idx = filename_lower.find(middle)
+                    # If prefix is empty (starts with *), just check middle is there
+                    # If suffix is empty (ends with *), just check middle is there
+                    if (not prefix or filename_lower.startswith(prefix)):
+                        if (not suffix or filename_lower[idx + len(middle):].endswith(suffix)):
+                            return True
+        elif pattern_lower.startswith("*"):
             if filename_lower.endswith(pattern_lower[1:]):
                 return True
         elif pattern_lower.endswith("*"):
