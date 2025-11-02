@@ -43,6 +43,7 @@ from evolutionary_engine import EvolutionaryEngine
 from arc_rlvr_framework import ARCRLVRFramework
 from core_gameplay import GameplayEngine
 from adaptive_action_limits import AdaptiveActionLimits
+from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
 
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
@@ -91,6 +92,7 @@ class AutonomousEvolutionRunner:
         self.analyzer = PerformanceAnalyzer(self.db)
         self.factory = AgentFactory(self.db)
         self.adaptive_limits = AdaptiveActionLimits(self.db)  # Adaptive action limit manager
+        self.network_intelligence = NetworkIntelligenceEngine(self.db)  # Network health tracking
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -282,6 +284,7 @@ class AutonomousEvolutionRunner:
                 import json
                 checkpoint = json.loads(result[0]['description'])
                 self.current_generation = checkpoint.get('current_generation', 0)
+                self.total_games_played = checkpoint.get('total_games_played', 0)  # NEW: Load game counter
                 
                 last_evo = checkpoint.get('last_evolution_time')
                 if last_evo:
@@ -777,6 +780,21 @@ class AutonomousEvolutionRunner:
             
             print(f"[OK] Evolution complete - Created {new_agents_created} new agents")
             
+            # PHASE 0: CAPTURE NETWORK INTELLIGENCE SNAPSHOT
+            print(f"\n[NETWORK] Capturing ecosystem snapshot for generation {self.current_generation}...")
+            try:
+                snapshot = self.network_intelligence.capture_ecosystem_snapshot(self.current_generation)
+                print(f"[OK] Network snapshot captured: {snapshot['health_status']} (score: {snapshot['health_score']:.3f})")
+                
+                # Display network intelligence dashboard
+                print()
+                display_network_intelligence_dashboard(self.current_generation)
+                
+            except Exception as e:
+                print(f"[WARN]️  Network snapshot failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
             # Optionally prune worst performers
             if population_size > self.initial_population_size * 2:
                 print(f"\n[?] Population too large ({population_size}), pruning worst performers...")
@@ -916,6 +934,7 @@ class AutonomousEvolutionRunner:
         if checkpoint:
             print(f"\n[DIR] Resuming from checkpoint:")
             print(f"   Generation: {checkpoint.get('current_generation', 0)}")
+            print(f"   Games Played: {checkpoint.get('total_games_played', 0)}")
             print(f"   Last shutdown: {checkpoint.get('shutdown_time', 'unknown')}")
         
         self.print_banner()
@@ -1041,6 +1060,10 @@ class AutonomousEvolutionRunner:
         
         # Get final stats
         try:
+            # CRITICAL: Sync agent performance before final analysis
+            agents_updated = self.db.sync_agent_performance_to_agents_table()
+            print(f"\n[SYNC] Synced performance for {agents_updated} agents before final analysis")
+            
             analysis = self.analyzer.analyze_population_performance()
             pop_stats = analysis.get('population_stats', {})
             
@@ -1056,12 +1079,21 @@ class AutonomousEvolutionRunner:
             if top:
                 print(f"\nTop 3 Agents:")
                 for i, agent in enumerate(top, 1):
-                    print(f"  {i}. {agent['agent_id']}: "
-                          f"{agent.get('win_rate', 0):.2%} win rate, "
-                          f"{agent.get('avg_score', 0):.2f} avg score")
+                    agent_id = agent.get('agent_id', 'unknown')
+                    win_rate = agent.get('win_rate', 0)
+                    avg_score = agent.get('avg_score_per_game', agent.get('avg_score', 0))
+                    total_games = agent.get('total_games_played', 0)
+                    total_wins = agent.get('total_games_won', 0)
+                    score_efficiency = agent.get('score_efficiency', 0)
+                    
+                    print(f"  {i}. {agent_id}:")
+                    print(f"     Win Rate: {win_rate:.2%} ({total_wins}/{total_games} games)")
+                    print(f"     Avg Score: {avg_score:.2f}, Efficiency: {score_efficiency:.4f}")
         
         except Exception as e:
             print(f"  (Could not load final stats: {e})")
+            import traceback
+            traceback.print_exc()
         
         print("="*80)
         print("\n[OK] Autonomous evolution runner stopped")

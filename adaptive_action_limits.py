@@ -266,6 +266,6 @@ class AdaptiveActionLimits:
     
     def print_status(self):
         """Print current limit status."""
-        print(f"\n📊 Adaptive Action Limits:")
+        print(f"\n[CHART] Adaptive Action Limits:")
         print(f"   Per-level: {self.current_actions_per_level} (floor: {self.MIN_ACTIONS_PER_LEVEL}, ceiling: {self.MAX_ACTIONS_PER_LEVEL})")
         print(f"   Total: {self.current_total_actions} (min: {self.MIN_TOTAL_ACTIONS}, max: {self.MAX_TOTAL_ACTIONS})")

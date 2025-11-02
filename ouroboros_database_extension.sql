@@ -702,3 +702,155 @@ CREATE INDEX IF NOT EXISTS idx_game_visual_analysis_game ON game_visual_analysis
 
 -- [CHECKPOINT: META-LEARNING DATABASE SCHEMA ADDED]
 -- Next: Implement meta-learning fitness calculation in evolutionary_engine.py
+
+-- ============================================================================
+-- NETWORK INTELLIGENCE & ECOSYSTEM HEALTH TRACKING
+-- Treats the DATABASE as the primary organism, agents as temporary components
+-- Tracks network-level health: knowledge diversity, information flow, resilience
+-- ============================================================================
+
+-- Ecosystem health snapshots (network vital signs)
+CREATE TABLE IF NOT EXISTS ecosystem_health_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    generation INTEGER NOT NULL,
+    
+    -- Knowledge metrics (the "database as organism")
+    total_sequences INTEGER DEFAULT 0,
+    total_patterns INTEGER DEFAULT 0,
+    total_learned_rules INTEGER DEFAULT 0,
+    unique_games_solved INTEGER DEFAULT 0,
+    knowledge_diversity_index REAL DEFAULT 0.0,  -- Shannon entropy of pattern distribution
+    
+    -- Information flow metrics (the "metabolism")
+    sequences_created_this_gen INTEGER DEFAULT 0,
+    sequences_validated_this_gen INTEGER DEFAULT 0,
+    sequences_reused_this_gen INTEGER DEFAULT 0,
+    rules_learned_this_gen INTEGER DEFAULT 0,
+    rules_transferred_this_gen INTEGER DEFAULT 0,
+    knowledge_creation_rate REAL DEFAULT 0.0,  -- New discoveries per agent-game
+    validation_rate REAL DEFAULT 0.0,  -- Successful validations / total attempts
+    
+    -- Resilience metrics (the "immune system")
+    critical_sequences_count INTEGER DEFAULT 0,  -- Sequences with >80% reliability
+    orphan_sequences_count INTEGER DEFAULT 0,  -- Sequences with 0 validations
+    redundancy_index REAL DEFAULT 0.0,  -- Avg validations per sequence
+    knowledge_backup_ratio REAL DEFAULT 0.0,  -- % of knowledge with multiple agent carriers
+    
+    -- Population metrics (temporary expressions)
+    active_agents INTEGER DEFAULT 0,
+    agent_diversity_index REAL DEFAULT 0.0,
+    avg_agent_lifespan_generations REAL DEFAULT 0.0,
+    agent_turnover_rate REAL DEFAULT 0.0,
+    
+    -- Metabolic health indicators
+    network_growth_rate REAL DEFAULT 0.0,  -- Knowledge growth vs population growth
+    innovation_vs_exploitation REAL DEFAULT 0.5,  -- New vs reused sequences ratio
+    transfer_learning_rate REAL DEFAULT 0.0,  -- Successful rule transfers per agent
+    system_entropy REAL DEFAULT 0.0,  -- Overall disorder measure
+    
+    -- Overall health assessment
+    health_status TEXT DEFAULT 'unknown',  -- 'critical', 'poor', 'fair', 'good', 'excellent'
+    health_score REAL DEFAULT 0.0  -- 0.0 to 1.0
+);
+
+-- Knowledge redundancy tracking (viral backup system)
+CREATE TABLE IF NOT EXISTS knowledge_redundancy (
+    sequence_id TEXT PRIMARY KEY,
+    discovery_timestamp TIMESTAMP,
+    discovery_generation INTEGER,
+    
+    -- Backup metrics (how many agents know this)
+    agents_who_know INTEGER DEFAULT 1,  -- How many agents have used this successfully
+    agent_carriers TEXT,  -- JSON: list of agent IDs who successfully used this
+    validation_attempts INTEGER DEFAULT 0,
+    successful_validations INTEGER DEFAULT 0,
+    
+    -- Criticality assessment
+    games_solved_by_this INTEGER DEFAULT 0,  -- How many unique games
+    alternative_solutions_exist INTEGER DEFAULT 0,  -- Redundancy at game level
+    criticality_score REAL DEFAULT 0.0,  -- How critical is this to network survival
+    is_viral_core BOOLEAN DEFAULT FALSE,  -- Essential knowledge that must not be lost
+    
+    -- Persistence tracking
+    generations_survived INTEGER DEFAULT 0,  -- How many generations has this knowledge persisted
+    last_used_generation INTEGER DEFAULT 0,
+    last_used_timestamp TIMESTAMP,
+    risk_of_loss REAL DEFAULT 1.0,  -- Probability of being forgotten (0=safe, 1=at risk)
+    
+    -- Network contribution
+    times_taught_to_others INTEGER DEFAULT 0,
+    network_enrichment_value REAL DEFAULT 0.0,
+    
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
+);
+
+-- Rule redundancy tracking (abstract knowledge backup)
+CREATE TABLE IF NOT EXISTS rule_redundancy (
+    rule_id TEXT PRIMARY KEY,
+    discovery_timestamp TIMESTAMP,
+    discovery_generation INTEGER,
+    
+    -- Backup metrics
+    agents_who_discovered INTEGER DEFAULT 1,
+    agent_carriers TEXT,  -- JSON: list of agent IDs who independently discovered this
+    independent_discoveries INTEGER DEFAULT 1,
+    
+    -- Criticality for network
+    games_applicable_to INTEGER DEFAULT 0,
+    transfer_success_count INTEGER DEFAULT 0,
+    criticality_score REAL DEFAULT 0.0,
+    is_viral_core BOOLEAN DEFAULT FALSE,
+    
+    -- Persistence
+    generations_survived INTEGER DEFAULT 0,
+    last_used_generation INTEGER DEFAULT 0,
+    risk_of_loss REAL DEFAULT 1.0,
+    
+    FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id)
+);
+
+-- Network knowledge graph (relationships between knowledge pieces)
+CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
+    edge_id TEXT PRIMARY KEY,
+    source_knowledge_id TEXT NOT NULL,
+    target_knowledge_id TEXT NOT NULL,
+    source_knowledge_type TEXT NOT NULL,  -- 'sequence', 'pattern', 'rule'
+    target_knowledge_type TEXT NOT NULL,
+    edge_type TEXT NOT NULL,  -- 'builds_on', 'contradicts', 'generalizes', 'specializes'
+    
+    -- Edge strength
+    confidence REAL DEFAULT 0.5,
+    evidence_count INTEGER DEFAULT 1,
+    
+    -- Discovery
+    discovered_by_agent TEXT,
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    discovered_generation INTEGER,
+    
+    -- Validation
+    validated BOOLEAN DEFAULT FALSE,
+    validation_count INTEGER DEFAULT 0,
+    
+    FOREIGN KEY (discovered_by_agent) REFERENCES agents(agent_id)
+);
+
+-- Ecosystem health indexes
+CREATE INDEX IF NOT EXISTS idx_ecosystem_health_generation ON ecosystem_health_snapshots(generation);
+CREATE INDEX IF NOT EXISTS idx_ecosystem_health_timestamp ON ecosystem_health_snapshots(snapshot_timestamp);
+CREATE INDEX IF NOT EXISTS idx_ecosystem_health_status ON ecosystem_health_snapshots(health_status);
+CREATE INDEX IF NOT EXISTS idx_ecosystem_health_score ON ecosystem_health_snapshots(health_score DESC);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_redundancy_criticality ON knowledge_redundancy(criticality_score DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_redundancy_viral_core ON knowledge_redundancy(is_viral_core);
+CREATE INDEX IF NOT EXISTS idx_knowledge_redundancy_risk ON knowledge_redundancy(risk_of_loss DESC);
+
+CREATE INDEX IF NOT EXISTS idx_rule_redundancy_criticality ON rule_redundancy(criticality_score DESC);
+CREATE INDEX IF NOT EXISTS idx_rule_redundancy_viral_core ON rule_redundancy(is_viral_core);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_graph_source ON knowledge_graph_edges(source_knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_graph_target ON knowledge_graph_edges(target_knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_graph_type ON knowledge_graph_edges(edge_type);
+
+-- [CHECKPOINT: NETWORK INTELLIGENCE DATABASE SCHEMA ADDED]
+-- Network-centric view now possible: track ecosystem as primary organism
