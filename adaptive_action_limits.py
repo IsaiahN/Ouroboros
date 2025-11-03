@@ -34,13 +34,18 @@ class AdaptiveActionLimits:
         
         # Hard constraints
         self.MIN_ACTIONS_PER_LEVEL = 200  # Hard floor (never go below)
-        self.MAX_ACTIONS_PER_LEVEL = 600  # Ceiling (REDUCED for faster games)
+        self.MAX_ACTIONS_PER_LEVEL = 300  # Ceiling (REDUCED: 600 → 300 to force efficiency)
         self.MIN_TOTAL_ACTIONS = 1000     # Minimum total
-        self.MAX_TOTAL_ACTIONS = 4000     # Maximum total (REDUCED: 7000 → 4000 for ~27min games)
+        self.MAX_TOTAL_ACTIONS = 1500     # Maximum total (REDUCED: 4000 → 1500 for ~10min games)
+        
+        # BIOME THEORY: Metabolic constraints force efficiency evolution
+        # Old: 4000-135k actions = thrashing without progress
+        # New: 1500 max = agents MUST learn efficient strategies or fail
+        # This creates evolutionary pressure toward levels/action optimization
         
         # Starting defaults (REDUCED for reasonable game times)
-        self.current_actions_per_level = 300  # REDUCED: 400 → 300
-        self.current_total_actions = 3500     # REDUCED: 7000 → 3500 (~23 min/game)
+        self.current_actions_per_level = 250  # REDUCED: 300 → 250
+        self.current_total_actions = 1250     # REDUCED: 3500 → 1250 (~8 min/game)
         
         # Adjustment parameters
         self.ADJUSTMENT_RATE = 0.15  # 15% adjustment per generation

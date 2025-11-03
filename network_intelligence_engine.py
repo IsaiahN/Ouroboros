@@ -180,6 +180,37 @@ class NetworkIntelligenceEngine:
             """)[0]['count'] or 0
             validation_rate = successful_validations / sequences_validated
         
+        # NETWORK LEVEL PROGRESS METRICS (BIOME THEORY: Gradual Evolution)
+        # Track incremental progress across the entire network
+        level_progress = self.db.execute_query("""
+            SELECT 
+                SUM(final_score) as total_levels,
+                AVG(final_score) as avg_levels,
+                SUM(total_actions) as total_actions,
+                COUNT(*) as game_count
+            FROM agent_arc_performance
+            WHERE game_timestamp >= datetime('now', '-1 day')
+        """)[0]
+        
+        total_levels_this_gen = level_progress['total_levels'] or 0
+        avg_levels_per_game = level_progress['avg_levels'] or 0.0
+        total_actions_this_gen = level_progress['total_actions'] or 1
+        
+        # Metabolic efficiency: levels per action (network-wide)
+        avg_actions_per_level = total_actions_this_gen / max(total_levels_this_gen, 1)
+        
+        # Network learning rate: change in levels/game over last N generations
+        prev_gen_data = self.db.execute_query("""
+            SELECT avg_levels_per_game FROM ecosystem_health_snapshots
+            WHERE generation < ?
+            ORDER BY generation DESC LIMIT 1
+        """, (generation,))
+        
+        network_learning_rate = 0.0
+        if prev_gen_data and prev_gen_data[0]['avg_levels_per_game']:
+            prev_avg = prev_gen_data[0]['avg_levels_per_game']
+            network_learning_rate = (avg_levels_per_game - prev_avg) / max(prev_avg, 0.01)
+        
         return {
             'sequences_created_this_gen': sequences_created,
             'sequences_validated_this_gen': sequences_validated,
@@ -187,7 +218,12 @@ class NetworkIntelligenceEngine:
             'rules_learned_this_gen': rules_learned,
             'rules_transferred_this_gen': rules_transferred,
             'knowledge_creation_rate': knowledge_creation_rate,
-            'validation_rate': validation_rate
+            'validation_rate': validation_rate,
+            # NEW: Network-level progress tracking
+            'total_levels_completed_this_gen': total_levels_this_gen,
+            'avg_levels_per_game': avg_levels_per_game,
+            'avg_actions_per_level': avg_actions_per_level,
+            'network_learning_rate': network_learning_rate
         }
     
     def _calculate_resilience_metrics(self) -> Dict:
@@ -565,6 +601,12 @@ def display_network_intelligence_dashboard(generation: int):
     print(f"  Rules Transferred: {s['rules_transferred_this_gen']}")
     print(f"  Creation Rate: {s['knowledge_creation_rate']:.3f} per agent-game")
     print(f"  Validation Success Rate: {s['validation_rate']:.1%}")
+    print()
+    print("  [PROGRESS] Network-Level Achievement (Biome Theory)")
+    print(f"    Total Levels Completed: {s.get('total_levels_completed_this_gen', 0)}")
+    print(f"    Avg Levels/Game: {s.get('avg_levels_per_game', 0.0):.2f}")
+    print(f"    Avg Actions/Level: {s.get('avg_actions_per_level', 0.0):.1f}")
+    print(f"    Network Learning Rate: {s.get('network_learning_rate', 0.0):.2%}")
     print()
     
     print("[SHIELD] RESILIENCE (Viral Redundancy)")

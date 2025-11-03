@@ -219,9 +219,11 @@ class EvolutionaryEngine:
             perf_data = self.db.execute_query("""
                 SELECT 
                     COUNT(*) as games_played,
-                    SUM(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END) as level_wins,
-                    AVG(final_score) as avg_score,
+                    SUM(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END) as game_wins,
+                    SUM(final_score) as total_levels_completed,
+                    AVG(final_score) as avg_levels_per_game,
                     AVG(total_actions) as avg_actions,
+                    SUM(total_actions) as total_actions_sum,
                     AVG(score_efficiency) as avg_efficiency,
                     MIN(game_timestamp) as first_game,
                     MAX(game_timestamp) as last_game
@@ -234,13 +236,19 @@ class EvolutionaryEngine:
             
             perf = perf_data[0]
             games_played = perf['games_played']
-            level_wins = perf['level_wins'] or 0
-            avg_score = perf['avg_score'] or 0.0
+            game_wins = perf['game_wins'] or 0
+            total_levels_completed = perf['total_levels_completed'] or 0
+            avg_levels_per_game = perf['avg_levels_per_game'] or 0.0
             avg_actions = perf['avg_actions'] or 1.0
+            total_actions_sum = perf['total_actions_sum'] or 1.0
             avg_efficiency = perf['avg_efficiency'] or 0.0
             
-            # Calculate discovery_speed (wins per game played)
-            discovery_speed = level_wins / games_played if games_played > 0 else 0.0
+            # CRITICAL: Use LEVELS as primary metric, not wins
+            # This rewards reaching level 3 (3 levels) vs level 1 (1 level)
+            # BIOME THEORY: Gradual evolution - incremental progress matters!
+            
+            # Calculate discovery_speed (levels per game played)
+            discovery_speed = total_levels_completed / games_played if games_played > 0 else 0.0
             
             # Calculate age_factor using log to penalize older agents who haven't learned much
             # log(games_played + 1) ensures new agents aren't penalized too heavily
@@ -248,13 +256,16 @@ class EvolutionaryEngine:
             age_factor = math.log(games_played + 1)
             
             # Age-adjusted mastery: discovery_speed / age_factor
-            # Fast learners win quickly, slow learners need many games
+            # Fast learners complete more levels quickly, slow learners need many games
             age_adjusted_mastery = discovery_speed / age_factor if age_factor > 0 else 0.0
             
-            # Execution efficiency: how many actions needed per score point
-            # Lower is better, so we invert it
-            moves_per_win = avg_actions / (level_wins / games_played) if level_wins > 0 else avg_actions
-            execution_efficiency = 1.0 / (1.0 + moves_per_win / 10.0)  # Normalize
+            # Execution efficiency: LEVELS per ACTION (not score per action)
+            # BIOME THEORY: Metabolic efficiency - more levels with fewer actions
+            # Example: 3 levels in 500 actions = 0.006 efficiency
+            #          1 level in 135k actions = 0.0000074 efficiency (811x worse!)
+            execution_efficiency = total_levels_completed / total_actions_sum if total_actions_sum > 0 else 0.0
+            # Normalize to reasonable range (0.001 = good, 0.01 = excellent)
+            execution_efficiency = min(1.0, execution_efficiency * 1000)
             
             # Calculate consistency (lower variance = higher consistency)
             # Get score variance
@@ -279,21 +290,25 @@ class EvolutionaryEngine:
             else:
                 consistency = 0.5  # Neutral for single game
             
-            # Main formula: (level_wins^1.5 / age_factor) * execution_efficiency * consistency
-            # The ^1.5 exponent rewards agents with more wins exponentially
-            wins_component = (level_wins ** 1.5) / age_factor if age_factor > 0 else 0.0
+            # Main formula: (total_levels^1.5 / age_factor) * execution_efficiency * consistency
+            # The ^1.5 exponent rewards agents with MORE LEVELS exponentially
+            # BIOME THEORY: Gradual evolution through level progress, not binary wins
+            levels_component = (total_levels_completed ** 1.5) / age_factor if age_factor > 0 and total_levels_completed > 0 else 0.0
             
-            learning_speed_fitness = wins_component * execution_efficiency * consistency
+            learning_speed_fitness = levels_component * execution_efficiency * consistency
             
             # Log metrics for analysis
             self._log_evolution_event("learning_speed_calculated", {
                 "agent_id": agent_id,
                 "games_played": games_played,
-                "level_wins": level_wins,
+                "game_wins": game_wins,
+                "total_levels_completed": total_levels_completed,
+                "avg_levels_per_game": avg_levels_per_game,
                 "discovery_speed": discovery_speed,
                 "age_factor": age_factor,
                 "age_adjusted_mastery": age_adjusted_mastery,
                 "execution_efficiency": execution_efficiency,
+                "execution_efficiency_raw": total_levels_completed / total_actions_sum if total_actions_sum > 0 else 0.0,
                 "consistency": consistency,
                 "learning_speed_fitness": learning_speed_fitness
             })
@@ -342,8 +357,10 @@ class EvolutionaryEngine:
             query = f"""
                 SELECT 
                     COUNT(*) as games_played,
-                    SUM(CASE WHEN win_achieved THEN 1 ELSE 0 END) as wins,
-                    AVG(final_score) as avg_score,
+                    SUM(CASE WHEN win_achieved THEN 1 ELSE 0 END) as game_wins,
+                    SUM(final_score) as total_levels_completed,
+                    AVG(final_score) as avg_levels_per_game,
+                    SUM(total_actions) as total_actions_sum,
                     AVG(score_efficiency) as avg_efficiency,
                     MAX(final_score) as best_score
                 FROM agent_arc_performance
@@ -358,26 +375,29 @@ class EvolutionaryEngine:
             
             perf = result[0]
             games_played = perf['games_played']
-            wins = perf['wins'] or 0
-            avg_score = perf['avg_score'] or 0.0
+            game_wins = perf['game_wins'] or 0
+            total_levels_completed = perf['total_levels_completed'] or 0
+            avg_levels_per_game = perf['avg_levels_per_game'] or 0.0
+            total_actions_sum = perf['total_actions_sum'] or 1.0
             avg_efficiency = perf['avg_efficiency'] or 0.0
             best_score = perf['best_score'] or 0.0
             
-            # NEW: Use learning speed formula (Task 6)
-            # Formula: (level_wins^1.5 / age_factor) * execution_efficiency * consistency
-            # Rewards fast learners who get more efficient over time
+            # USE LEVEL PROGRESS FORMULA (same as learning speed fitness)
+            # Formula: (total_levels^1.5 / age_factor) * execution_efficiency * consistency
+            # Rewards specialists who complete MORE LEVELS on their assigned games
             
             import math
             
             # Age factor: log(games_played + 1) - penalizes agents who need many games to learn
             age_factor = math.log(games_played + 1)
             
-            # Wins component: level_wins^1.5 rewards more wins exponentially
-            wins_component = (wins ** 1.5) / age_factor if age_factor > 0 else 0.0
+            # Levels component: total_levels^1.5 rewards more levels exponentially
+            levels_component = (total_levels_completed ** 1.5) / age_factor if age_factor > 0 and total_levels_completed > 0 else 0.0
             
-            # Execution efficiency: score per action (already computed by database)
-            # Normalize to 0-1 range (assuming 1.0 is excellent)
-            execution_efficiency = min(avg_efficiency, 1.0)
+            # Execution efficiency: LEVELS per ACTION (not score per action)
+            # BIOME THEORY: Metabolic efficiency in specialist niche
+            execution_efficiency = total_levels_completed / total_actions_sum if total_actions_sum > 0 else 0.0
+            execution_efficiency = min(1.0, execution_efficiency * 1000)  # Normalize
             
             # Calculate consistency on assigned games
             # Get all scores for consistency calculation
@@ -401,9 +421,9 @@ class EvolutionaryEngine:
             else:
                 consistency = 0.5  # Neutral for single game
             
-            # Apply the learning speed formula (Task 6)
-            # This rewards agents who learn FAST and get efficient, not those who inherit solutions
-            specialist_fitness = wins_component * execution_efficiency * consistency
+            # Apply the learning speed formula (Task 6 - modified for LEVEL PROGRESS)
+            # This rewards agents who complete MORE LEVELS FAST and efficiently
+            specialist_fitness = levels_component * execution_efficiency * consistency
             
             # Bonus for deep mastery (achieving high scores quickly)
             if best_score >= 3.0 and games_played <= 15:
@@ -416,10 +436,13 @@ class EvolutionaryEngine:
                 "agent_id": agent_id,
                 "assigned_games": assigned_games,
                 "games_played": games_played,
-                "wins": wins,
+                "game_wins": game_wins,
+                "total_levels_completed": total_levels_completed,
+                "avg_levels_per_game": avg_levels_per_game,
                 "age_factor": age_factor,
-                "wins_component": wins_component,
+                "levels_component": levels_component,
                 "execution_efficiency": execution_efficiency,
+                "execution_efficiency_raw": total_levels_completed / total_actions_sum if total_actions_sum > 0 else 0.0,
                 "consistency": consistency,
                 "specialist_fitness": specialist_fitness
             })

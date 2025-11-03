@@ -487,7 +487,22 @@ class AutonomousEvolutionRunner:
                 print("[?] No active agents found")
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
             
-            games_per_agent = max(1, num_games // len(agents))
+            # CRITICAL FIX: Distribute games_per_generation ACROSS all agents, not per agent
+            # Old logic: games_per_agent = num_games // len(agents) meant 419 agents × 1 game = 419 games (70+ hours!)
+            # New logic: Select subset of agents to play the total num_games
+            # This ensures evolution completes in reasonable time (30-60 min)
+            
+            if len(agents) > num_games:
+                # More agents than games: sample a subset of agents
+                import random
+                selected_agents = random.sample(agents, num_games)
+                games_per_agent = 1  # Each selected agent plays 1 game
+                print(f"  [NETWORK] Selected {len(selected_agents)} agents from {len(agents)} to play {num_games} games")
+            else:
+                # Fewer agents than games: each agent plays multiple games
+                selected_agents = agents
+                games_per_agent = max(1, num_games // len(agents))
+                print(f"  [NETWORK] All {len(agents)} agents playing {games_per_agent} games each")
             
             async with GameplayEngine(api_key, db_path=self.db.db_path) as engine:
                 
@@ -501,25 +516,25 @@ class AutonomousEvolutionRunner:
                 # SPECIALIST MODE: Auto-assign games if not already assigned (for resumed checkpoints)
                 if self.specialist_mode and self.specialist_coordinator:
                     # Check if assignments exist
-                    first_agent = agents[0] if agents else None
+                    first_agent = selected_agents[0] if selected_agents else None
                     if first_agent:
                         assignments = self.specialist_coordinator.get_games_for_specialist(first_agent['agent_id'])
                         if not assignments:
                             print(f"\n[>] Auto-assigning specialists (resuming from checkpoint)...")
                             game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
                             self.specialist_coordinator.initialize_specialist_assignments(
-                                agents,
+                                selected_agents,  # FIXED: Use selected_agents
                                 game_ids,
                                 games_per_specialist=2
                             )
-                            print(f"[OK] Assigned {len(game_ids)} games across {len(agents)} specialists")
+                            print(f"[OK] Assigned {len(game_ids)} games across {len(selected_agents)} specialists")
                 
                 results = []
                 total_wins = 0
                 total_score = 0
                 rules_learned = 0  # NEW: Track rule learning
                 
-                for agent_idx, agent in enumerate(agents):
+                for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
                     agent_id = agent['agent_id']
                     
                     # SPECIALIST MODE: Use specialist coordinator for game selection (NEW)
