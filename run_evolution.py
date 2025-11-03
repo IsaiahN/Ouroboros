@@ -39,6 +39,8 @@ def main():
                        help='Thorough mode: 90 min intervals, 50 games/gen')
     parser.add_argument('--quick', action='store_true',
                        help='Quick test: 5 generations max')
+    parser.add_argument('--max-generations', type=int, default=None,
+                       help='Override max generations (useful when resuming from checkpoint)')
     parser.add_argument('--diversity', action='store_true',
                        help='Diversity mode: Diverse games, anti-overfitting, generalization focus')
     parser.add_argument('--specialist', action='store_true',
@@ -51,7 +53,7 @@ def main():
         print(">> FAST MODE - Quick iterations")
         config = {
             'initial_population_size': 8,
-            'games_per_generation': 10,
+            'games_per_generation': 5,  # REDUCED: 10 → 5 for faster cycles
             'evolution_interval_minutes': 30,
             'max_generations': 30,
             'target_win_rate': 0.50
@@ -60,7 +62,7 @@ def main():
         print(">> THOROUGH MODE - Deep evaluation")
         config = {
             'initial_population_size': 15,
-            'games_per_generation': 50,
+            'games_per_generation': 20,  # REDUCED: 50 → 20 for reasonable times
             'evolution_interval_minutes': 90,
             'max_generations': 20,
             'target_win_rate': 0.50
@@ -69,7 +71,7 @@ def main():
         print(">> QUICK TEST - 5 generations")
         config = {
             'initial_population_size': 5,
-            'games_per_generation': 10,
+            'games_per_generation': 5,  # REDUCED: 10 → 5
             'evolution_interval_minutes': 15,
             'max_generations': 5,
             'target_win_rate': 0.50
@@ -78,11 +80,16 @@ def main():
         print(">> STANDARD MODE - Balanced evolution")
         config = {
             'initial_population_size': 10,
-            'games_per_generation': 20,
+            'games_per_generation': 10,  # REDUCED: 20 → 10 for reasonable times
             'evolution_interval_minutes': 60,
             'max_generations': 50,
             'target_win_rate': 0.50
         }
+    
+    # Override max_generations if specified (useful when resuming)
+    if args.max_generations:
+        config['max_generations'] = args.max_generations
+        print(f"[OVERRIDE] Max Generations set to {args.max_generations}")
     
     # Check API key
     api_key = os.getenv('ARC_API_KEY')

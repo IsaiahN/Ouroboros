@@ -291,6 +291,14 @@ class AutonomousEvolutionRunner:
                     from dateutil import parser
                     self.last_evolution_time = parser.parse(last_evo)
                 
+                # ADDITIVE MAX GENERATIONS: If resuming from checkpoint, add configured generations to current
+                # This makes --quick mean "5 MORE generations" instead of "max 5 total"
+                if self.current_generation > 0:
+                    original_max = self.max_generations
+                    self.max_generations = self.current_generation + self.max_generations
+                    print(f"[CHECKPOINT] Resuming from Generation {self.current_generation}")
+                    print(f"[CHECKPOINT] Adjusted max_generations: {original_max} → {self.max_generations} (current + {original_max})")
+                
                 return checkpoint
             
         except Exception:

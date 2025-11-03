@@ -81,6 +81,10 @@ class GameplayEngine:
             Game results dictionary
         """
         logger.info(f"Starting game: {game_id}" + (f" (agent: {agent_id})" if agent_id else ""))
+        
+        # Store agent_id in game_config for sequence capture (CRITICAL FIX)
+        if agent_id:
+            self.game_config['agent_id'] = agent_id
 
         # Start session if not already running
         if not self.session_manager.is_running:
@@ -247,21 +251,39 @@ class GameplayEngine:
 
                 except RuntimeError as e:
                     # Handle session shutdown gracefully
-                    if "No active session" in str(e) or "No active" in str(e):
-                        logger.info(f"⚠️ Session shutdown detected during action {action_count}, ending game gracefully")
+                    error_msg = str(e).lower()
+                    if ("shutting down" in error_msg or 
+                        "no active session" in error_msg or 
+                        "no active" in error_msg or
+                        "client session closed" in error_msg):
+                        logger.info(f"⚠️ Session no longer running, ending game gracefully")
                         break
                     else:
-                        logger.error(f"Runtime error in action {action_count}: {e}", exc_info=True)
+                        logger.error(f"Runtime error in action {action_count}: {e}")
+                        break
+                except AttributeError as e:
+                    # Handle NoneType errors during shutdown (API client session is None)
+                    if "'NoneType' object has no attribute" in str(e):
+                        logger.info(f"⚠️ API client unavailable (shutdown in progress), ending game gracefully")
+                        break
+                    else:
+                        logger.error(f"Attribute error in action {action_count}: {e}")
                         break
                 except Exception as e:
-                    logger.error(f"Error in action {action_count}: {e}", exc_info=True)
-                    # Continue with next action unless it's a critical error
-                    if "authentication" in str(e).lower() or "api_key" in str(e).lower():
-                        break
-                    # Also break on session/client errors
-                    if "session" in str(e).lower() or "client" in str(e).lower():
+                    error_msg = str(e).lower()
+                    # Check for shutdown-related errors
+                    if ("shutting down" in error_msg or 
+                        "session" in error_msg or 
+                        "client" in error_msg or
+                        "nonetype" in error_msg):
                         logger.info(f"⚠️ Session/client error detected, ending game gracefully")
                         break
+                    # Critical errors that should stop
+                    if "authentication" in error_msg or "api_key" in error_msg:
+                        logger.error(f"Critical error in action {action_count}: {e}")
+                        break
+                    # Log other errors but don't show full traceback during shutdown
+                    logger.error(f"Error in action {action_count}: {e}")
 
             # Calculate results
             end_time = datetime.now()
@@ -828,19 +850,32 @@ class GameplayEngine:
                 # Calculate frame transitions for pattern matching
                 frame_transitions = self._extract_frame_transitions(action_traces)
                 
+                # Get actual agent_id and generation (not hardcoded 'core_agent')
+                agent_id = self.game_config.get('agent_id', 'unknown')
+                
+                # Get agent's generation from database
+                generation = 0
+                if agent_id != 'unknown':
+                    agent_data = self.db.execute_query(
+                        "SELECT generation FROM agents WHERE agent_id = ?", (agent_id,)
+                    )
+                    if agent_data:
+                        generation = agent_data[0]['generation']
+                
                 self.db.execute_query("""
                     INSERT INTO winning_sequences (
                         sequence_id, game_id, level_number, agent_id, session_id,
                         action_sequence, coordinate_sequence, total_actions, total_score,
                         efficiency_score, initial_frame, final_frame, frame_transitions,
-                        pattern_tags, game_type, discovered_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        pattern_tags, game_type, discovered_at, generation_discovered
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    sequence_id, game_id, level_number, 'core_agent', session_id,
+                    sequence_id, game_id, level_number, agent_id, session_id,
                     json.dumps(actions), json.dumps(coordinates), len(actions),
                     final_score, efficiency, json.dumps(initial_frame),
                     json.dumps(final_frame), json.dumps(frame_transitions),
-                    json.dumps(pattern_tags), game_type, datetime.now().isoformat()
+                    json.dumps(pattern_tags), game_type, datetime.now().isoformat(),
+                    generation
                 ))
                 
                 # Try to detect and store abstract pattern (only if we have valid sequence_id)

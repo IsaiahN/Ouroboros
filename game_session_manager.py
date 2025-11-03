@@ -40,6 +40,7 @@ class GameSessionManager:
         self.current_session_id = None
         self.current_game_id = None
         self.is_running = False
+        self.is_shutting_down = False  # NEW: Track shutdown state
         self.shutdown_handlers = []
 
         # Statistics
@@ -58,6 +59,7 @@ class GameSessionManager:
         """Setup signal handlers for graceful shutdown."""
         def signal_handler(signum, frame):
             logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+            self.is_shutting_down = True  # Set flag immediately
             asyncio.create_task(self.shutdown())
 
         signal.signal(signal.SIGINT, signal_handler)
@@ -158,6 +160,11 @@ class GameSessionManager:
         Returns:
             New game state
         """
+        # Check if shutting down FIRST before any API calls
+        if self.is_shutting_down:
+            logger.warning("Action request ignored - system is shutting down")
+            raise RuntimeError("System is shutting down, cannot send actions")
+        
         if not self.is_running or not self.client:
             raise RuntimeError("No active session or client")
 
@@ -166,6 +173,9 @@ class GameSessionManager:
         
         # Check if client session is still valid, recreate if needed
         if self.client and not self.client.session:
+            # Don't recreate during shutdown
+            if self.is_shutting_down:
+                raise RuntimeError("Client session closed during shutdown")
             logger.warning("Client session lost, recreating...")
             await self.client.__aenter__()
 
@@ -235,6 +245,25 @@ class GameSessionManager:
 
             return game_state
 
+        except AttributeError as e:
+            # Handle NoneType errors during shutdown gracefully
+            if "'NoneType' object has no attribute" in str(e):
+                if self.is_shutting_down:
+                    # Don't log error during shutdown - this is expected
+                    raise RuntimeError("System is shutting down") from e
+                else:
+                    logger.error(f"Error sending action {action}: {e}")
+                    raise
+            else:
+                logger.error(f"Error sending action {action}: {e}")
+                raise
+        except RuntimeError as e:
+            # RuntimeError during shutdown is expected, just re-raise
+            if "shutting down" in str(e).lower():
+                raise
+            else:
+                logger.error(f"Error sending action {action}: {e}")
+                raise
         except Exception as e:
             logger.error(f"Error sending action {action}: {e}")
             raise
@@ -345,6 +374,8 @@ class GameSessionManager:
         if not self.is_running:
             return
 
+        # Set shutdown flag immediately to prevent new actions
+        self.is_shutting_down = True
         logger.info("Shutting down game session...")
 
         try:

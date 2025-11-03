@@ -34,13 +34,13 @@ class AdaptiveActionLimits:
         
         # Hard constraints
         self.MIN_ACTIONS_PER_LEVEL = 200  # Hard floor (never go below)
-        self.MAX_ACTIONS_PER_LEVEL = 1000  # Ceiling (increased for multi-level discovery)
-        self.MIN_TOTAL_ACTIONS = 1000     # Minimum total (increased from 600)
-        self.MAX_TOTAL_ACTIONS = 12000     # Maximum total (increased from 3000 for multi-level runs)
+        self.MAX_ACTIONS_PER_LEVEL = 600  # Ceiling (REDUCED for faster games)
+        self.MIN_TOTAL_ACTIONS = 1000     # Minimum total
+        self.MAX_TOTAL_ACTIONS = 4000     # Maximum total (REDUCED: 7000 → 4000 for ~27min games)
         
-        # Starting defaults (generous for discovery, will adapt down)
-        self.current_actions_per_level = 400  # Increased from 200
-        self.current_total_actions = 7000     # Increased from 1000 for multi-level discovery
+        # Starting defaults (REDUCED for reasonable game times)
+        self.current_actions_per_level = 300  # REDUCED: 400 → 300
+        self.current_total_actions = 3500     # REDUCED: 7000 → 3500 (~23 min/game)
         
         # Adjustment parameters
         self.ADJUSTMENT_RATE = 0.15  # 15% adjustment per generation
