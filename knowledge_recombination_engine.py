@@ -65,12 +65,12 @@ class KnowledgeRecombinationEngine:
         """
         # Get both sequences
         seq_a_result = self.db.execute_query("""
-            SELECT sequence_id, actions, score_achieved, actions_count, game_id
+            SELECT sequence_id, action_sequence, total_score, total_actions, game_id
             FROM winning_sequences WHERE sequence_id = ?
         """, (seq_a_id,))
         
         seq_b_result = self.db.execute_query("""
-            SELECT sequence_id, actions, score_achieved, actions_count, game_id
+            SELECT sequence_id, action_sequence, total_score, total_actions, game_id
             FROM winning_sequences WHERE sequence_id = ?
         """, (seq_b_id,))
         
@@ -82,8 +82,8 @@ class KnowledgeRecombinationEngine:
         
         # Parse action sequences
         try:
-            actions_a = json.loads(seq_a['actions'])
-            actions_b = json.loads(seq_b['actions'])
+            actions_a = json.loads(seq_a['action_sequence'])
+            actions_b = json.loads(seq_b['action_sequence'])
         except (json.JSONDecodeError, TypeError):
             # Warning: Failed to parse sequences
             return None
@@ -95,7 +95,7 @@ class KnowledgeRecombinationEngine:
         chain_id = f"chain_{uuid.uuid4().hex[:8]}_{seq_a_id[:6]}_{seq_b_id[:6]}"
         
         # Calculate efficiency metrics
-        parent_efficiency = (seq_a['score_achieved'] + seq_b['score_achieved']) / (seq_a['actions_count'] + seq_b['actions_count'])
+        parent_efficiency = (seq_a['total_score'] + seq_b['total_score']) / (seq_a['total_actions'] + seq_b['total_actions'])
         
         # For now, we'll mark this as an untested chain
         # The actual testing happens when agents try to USE this sequence
@@ -132,10 +132,9 @@ class KnowledgeRecombinationEngine:
         # Store in winning_sequences (marked as untested recombination)
         self.db.execute_query("""
             INSERT OR IGNORE INTO winning_sequences
-            (sequence_id, game_id, level_index, actions, actions_count,
-             score_achieved, discovered_by_agent, discovery_generation,
-             is_recombination, times_used, success_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0)
+            (sequence_id, game_id, level_number, action_sequence, total_actions,
+             total_score, agent_id, generation_discovered, is_recombination)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
         """, (
             chain_id,
             game_id,
@@ -197,15 +196,15 @@ class KnowledgeRecombinationEngine:
         # Get all validated sequences for this game and level
         # Prioritize high-reliability sequences (community validated)
         known_sequences = self.db.execute_query("""
-            SELECT ws.sequence_id, ws.actions_count, ws.score_achieved,
+            SELECT ws.sequence_id, ws.total_actions as actions_count, ws.total_score as score_achieved,
                    COALESCE(
-                       (sv.success_count + 2.0) / (sv.total_attempts + 4.0),
+                       (sr.successful_validations + 2.0) / (sr.total_validation_attempts + 4.0),
                        0.5
                    ) as reliability
             FROM winning_sequences ws
-            LEFT JOIN sequence_validation sv ON ws.sequence_id = sv.sequence_id
-            WHERE ws.game_id = ? AND ws.level_index = ?
-            ORDER BY reliability DESC, ws.score_achieved DESC
+            LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
+            WHERE ws.game_id = ? AND ws.level_number = ?
+            ORDER BY reliability DESC, ws.total_score DESC
             LIMIT 10
         """, (game_id, level_index))
         
@@ -375,8 +374,8 @@ class KnowledgeRecombinationEngine:
             SELECT 
                 ws.sequence_id,
                 ws.game_id,
-                ws.level_index,
-                ws.discovered_by_agent,
+                ws.level_number,
+                ws.agent_id,
                 COUNT(DISTINCT sd.child_sequence_id) as descendant_count,
                 COUNT(DISTINCT sd.discovery_agent_id) as recombined_by_agents
             FROM winning_sequences ws
