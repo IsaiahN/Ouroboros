@@ -24,6 +24,7 @@ from game_session_manager import GameSessionManager
 from action_handler import ActionHandler
 from arc_api_client import GameState
 from database_interface import DatabaseInterface
+from prestige_engine import PrestigeEngine
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class GameplayEngine:
         self.session_manager = GameSessionManager(api_key, db_path)
         self.action_handler = ActionHandler(self.session_manager)
         self.db = DatabaseInterface(db_path)  # Pattern learning database access
+        self.prestige_engine = PrestigeEngine(self.db)  # Phase 1: Prestige tracking
         self.game_config = {
             'max_actions_per_level': 400,  # Max actions per level (increased for multi-level discovery)
             'max_total_actions': 7000,  # Max total actions across all levels (increased for multi-level runs)
@@ -81,6 +83,21 @@ class GameplayEngine:
             Game results dictionary
         """
         logger.info(f"Starting game: {game_id}" + (f" (agent: {agent_id})" if agent_id else ""))
+        
+        # PHASE 2: Check if agent can afford to play this game
+        if agent_id:
+            can_afford, reason = self.session_manager.can_agent_afford_game(agent_id, game_id)
+            if not can_afford:
+                logger.warning(f"Agent {agent_id[:8]} cannot afford game: {reason}")
+                return {
+                    'game_id': game_id,
+                    'final_state': 'BUDGET_EXHAUSTED',
+                    'final_score': 0.0,
+                    'actions_taken': 0,
+                    'win': False,
+                    'method': 'budget_denied',
+                    'reason': reason
+                }
         
         # Store agent_id in game_config for sequence capture (CRITICAL FIX)
         if agent_id:
@@ -133,6 +150,17 @@ class GameplayEngine:
                         actions_taken = len(json.loads(known_sequence['action_sequence']))
                         await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
                         
+                        # PHASE 2: Deduct actions from agent's budget
+                        if agent_id:
+                            self.session_manager.deduct_actions_used(agent_id, game_id)
+                        
+                        # PHASE 2.5: Knowledge Recombination (AUTOMATIC)
+                        recombinations = []
+                        if agent_id:
+                            recombinations = self._explore_sequence_recombination(
+                                agent_id, game_id, level_completions
+                            )
+                        
                         return {
                             'game_id': game_id,
                             'final_state': game_state.state,
@@ -140,7 +168,8 @@ class GameplayEngine:
                             'actions_taken': actions_taken,
                             'win': True,
                             'method': 'pattern_replay',
-                            'sequence_id': known_sequence['sequence_id']
+                            'sequence_id': known_sequence['sequence_id'],
+                            'recombinations_created': len(recombinations)
                         }
                     elif replay_success:
                         logger.info(f"✅ Partial replay success, continuing to next level")
@@ -231,17 +260,16 @@ class GameplayEngine:
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
                         logger.warning(f"⏱️ Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
-                        logger.info(f"Level {current_level} timed out - continuing with remaining game actions if available")
+                        logger.info(f"Level {current_level} timed out - ENFORCING LIMIT (Biome Theory: metabolic constraints)")
                         
-                        # Don't break! Just reset level counter and continue trying
-                        # The game should only end when:
-                        # 1. Total action limit reached (max_total_actions)
-                        # 2. Game state is WIN or GAME_OVER
-                        # 3. API returns finished state
+                        # BIOME THEORY FIX: ENFORCE the limit instead of resetting counter
+                        # This creates evolutionary pressure for efficiency
+                        # The game ends when per-level limit reached OR total limit reached
+                        # This is CRITICAL for adaptive action limits to work properly
                         
-                        # Reset level action counter to allow continued play
-                        level_action_count = 0
-                        current_level += 1  # Move to "next level" tracking (even if not truly completed)
+                        # End the game - agent failed to complete level efficiently
+                        logger.info(f"Game ending: Level action limit enforced (efficiency pressure)")
+                        break  # Exit game loop
                     
                     logger.debug(f"Action {action_count} (Level {current_level}-{level_action_count}): State={game_state.state}, Score={game_state.score}")
 
@@ -308,6 +336,10 @@ class GameplayEngine:
 
             # Finish game in session manager (CRITICAL FIX: Pass level_completions AND actions_taken!)
             await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, action_count)
+            
+            # PHASE 2: Deduct actions from agent's budget
+            if agent_id:
+                self.session_manager.deduct_actions_used(agent_id, game_id)
 
             # Pattern Learning: Capture final WIN sequence (Rule 2: Database-only)
             if results['win'] and self.game_config.get('enable_pattern_learning', True):
@@ -322,6 +354,18 @@ class GameplayEngine:
                     if sequence_id:
                         results['learned_sequence_id'] = sequence_id
                         logger.info(f"✅ Captured full game winning sequence: {sequence_id}")
+            
+            # PHASE 2.5: Knowledge Recombination (AUTOMATIC - runs after EVERY game)
+            # This is the viral evolution accelerator - opportunistic recombination
+            if agent_id:
+                recombinations = self._explore_sequence_recombination(
+                    agent_id, 
+                    game_id,
+                    current_level
+                )
+                if recombinations:
+                    results['recombinations_created'] = len(recombinations)
+                    logger.info(f"🧬 Agent {agent_id[:8]} created {len(recombinations)} sequence recombinations")
 
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
                        f"Actions: {action_count}, Levels Completed: {level_completions}/{current_level}")
@@ -884,6 +928,23 @@ class GameplayEngine:
                     pattern_tags, efficiency
                 )
                 
+                # Phase 1: Record discovery for prestige tracking
+                if agent_id != 'unknown':
+                    try:
+                        innovation_value = 0.5 if not existing else 0.8  # Higher for improvements
+                        enrichment_score = efficiency * 2.0  # Efficiency-based enrichment
+                        
+                        self.prestige_engine.record_discovery(
+                            agent_id=agent_id,
+                            discovery_type='winning_sequence',
+                            sequence_id=sequence_id,
+                            innovation_value=innovation_value,
+                            network_enrichment_score=enrichment_score
+                        )
+                        logger.debug(f"Recorded prestige discovery for agent {agent_id[:8]}")
+                    except Exception as e:
+                        logger.warning(f"Failed to record prestige discovery: {e}")
+                
                 logger.info(f"✅ Captured winning sequence {sequence_id}: "
                            f"{len(actions)} actions, efficiency {efficiency:.4f}, "
                            f"tags: {pattern_tags}, pattern: {pattern_signature.get('transformation_type', 'unknown')}")
@@ -893,6 +954,60 @@ class GameplayEngine:
         except Exception as e:
             logger.error(f"Error capturing winning sequence: {e}")
             return None
+    
+    def _explore_sequence_recombination(self, agent_id: str, game_id: str, 
+                                       level_index: int) -> List[str]:
+        """
+        Explore sequence recombination after EVERY game (AUTOMATIC - Phase 2.5).
+        
+        This is the viral evolution accelerator - attempts to combine known sequences
+        into new hypothetical sequences for the network to test.
+        
+        CRITICAL: This is OPPORTUNISTIC and runs automatically, not optional.
+        The roadmap explicitly states this should happen after every game.
+        
+        Args:
+            agent_id: Agent that just finished playing
+            game_id: Game context
+            level_index: Level reached (use this to target recombination)
+        
+        Returns:
+            List of newly created sequence_ids
+        """
+        try:
+            from knowledge_recombination_engine import KnowledgeRecombinationEngine
+            
+            # Get current generation for tracking
+            agent_data = self.db.execute_query(
+                "SELECT generation FROM agents WHERE agent_id = ?", (agent_id,)
+            )
+            generation = agent_data[0]['generation'] if agent_data else 0
+            
+            # Create recombination engine
+            engine = KnowledgeRecombinationEngine(self.db)
+            
+            # Attempt recombination for all levels up to current level
+            all_new_sequences = []
+            
+            for level in range(1, level_index + 1):
+                new_sequences = engine.discover_sequence_combinations(
+                    agent_id=agent_id,
+                    game_id=game_id,
+                    level_index=level - 1,  # 0-based for database
+                    generation=generation,
+                    max_attempts=5  # Limit to prevent exponential blowup
+                )
+                all_new_sequences.extend(new_sequences)
+            
+            return all_new_sequences
+            
+        except ImportError:
+            # Knowledge recombination engine not available
+            logger.warning("KnowledgeRecombinationEngine not found, skipping recombination")
+            return []
+        except Exception as e:
+            logger.error(f"Error during sequence recombination: {e}")
+            return []
 
     def _detect_pattern_tags(self, actions: List[int], coordinates: List) -> List[str]:
         """Detect pattern tags in action sequence."""
@@ -1296,6 +1411,19 @@ class GameplayEngine:
             
             # Update sequence reputation
             self._update_sequence_reputation(sequence_id)
+            
+            # Phase 1: Record validation attempt for prestige tracking
+            if agent_id and agent_id != 'unknown':
+                try:
+                    self.prestige_engine.record_validation_attempt(
+                        agent_id=agent_id,
+                        sequence_id=sequence_id,
+                        success=success,
+                        efficiency_vs_original=efficiency_ratio
+                    )
+                    logger.debug(f"Recorded prestige validation for agent {agent_id[:8]}")
+                except Exception as e:
+                    logger.warning(f"Failed to record prestige validation: {e}")
             
             logger.info(f"📊 Recorded validation: {sequence_id} by {agent_id} - "
                        f"{'✓ Success' if success else '✗ Failed'} "

@@ -11,6 +11,7 @@ import copy
 from datetime import datetime
 from typing import Dict, List, Any, Tuple
 from database_interface import DatabaseInterface
+from prestige_engine import PrestigeEngine
 
 
 class EvolutionaryEngine:
@@ -21,6 +22,7 @@ class EvolutionaryEngine:
 
     def __init__(self, database_interface: DatabaseInterface):
         self.db = database_interface
+        self.prestige_engine = PrestigeEngine(database_interface)  # Phase 1: Prestige system
         self.crossover_ops = CrossoverOperations()
         self.mutation_strategies = MutationStrategies()
         self.engine_id = f"evol_{uuid.uuid4().hex[:8]}"
@@ -84,6 +86,26 @@ class EvolutionaryEngine:
 
             # 7. Update population in database
             self._update_population_database(new_population, generation)
+            
+            # Phase 1: Calculate and apply prestige for all agents
+            try:
+                self._log_evolution_event("prestige_calculation_started", {
+                    "generation": generation,
+                    "population_size": len(new_population)
+                })
+                
+                prestige_benefits = self.prestige_engine.update_all_agent_prestige(generation)
+                
+                self._log_evolution_event("prestige_calculation_completed", {
+                    "generation": generation,
+                    "agents_updated": len(prestige_benefits),
+                    "avg_prestige": sum(b['prestige'] for b in prestige_benefits.values()) / len(prestige_benefits) if prestige_benefits else 0
+                })
+            except Exception as e:
+                self._log_evolution_event("prestige_calculation_error", {
+                    "generation": generation,
+                    "error": str(e)
+                })
 
             self._log_evolution_event("evolution_cycle_completed", {
                 "generation": generation,
@@ -596,7 +618,8 @@ class EvolutionaryEngine:
                             fitness_scores: Dict[str, float],
                             selection_pressure: float) -> Dict[str, Any]:
         """
-        Tournament selection based on ARC fitness
+        Tournament selection based on ARC fitness with prestige weighting.
+        Phase 1: breeding_priority multiplies selection probability (1.0x to 3.0x).
         Higher selection pressure = more emphasis on fitness
         """
         tournament_size = max(2, int(len(population) * selection_pressure))
@@ -605,9 +628,15 @@ class EvolutionaryEngine:
         # Select random candidates for tournament
         tournament_candidates = random.sample(population, tournament_size)
 
-        # Select winner based on fitness
-        winner = max(tournament_candidates,
-                    key=lambda agent: fitness_scores.get(agent['agent_id'], 0.0))
+        # Phase 1: Apply prestige breeding priority to fitness scores
+        # High prestige agents get 1.0x to 3.0x multiplier on their fitness
+        def effective_fitness(agent):
+            base_fitness = fitness_scores.get(agent['agent_id'], 0.0)
+            breeding_priority = agent.get('breeding_priority', 1.0)
+            return base_fitness * breeding_priority
+
+        # Select winner based on prestige-weighted fitness
+        winner = max(tournament_candidates, key=effective_fitness)
 
         return winner
 
@@ -674,8 +703,9 @@ class EvolutionaryEngine:
                              fitness_scores: Dict[str, float],
                              evolution_strategy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
-        Select new population from current population + offspring
-        Maintains population size while favoring high-fitness agents
+        Select new population from current population + offspring.
+        Phase 1: Applies survival_protection from prestige (0% to 80% protection).
+        Maintains population size while favoring high-fitness agents.
         """
         # Use population_size from strategy, or default to reasonable size
         target_population_size = evolution_strategy.get('population_size', 50)
@@ -700,15 +730,39 @@ class EvolutionaryEngine:
                 else:
                     fitness_scores[agent['agent_id']] = 0.0
 
-        # Sort by fitness and select top agents
-        sorted_candidates = sorted(
-            all_candidates,
+        # Phase 1: Separate agents with survival protection
+        protected_agents = []
+        unprotected_agents = []
+        
+        for agent in all_candidates:
+            survival_protection = agent.get('survival_protection', 0.0)
+            
+            # Roll for protection (0% to 80% chance of automatic survival)
+            if survival_protection > 0 and random.random() < survival_protection:
+                protected_agents.append(agent)
+            else:
+                unprotected_agents.append(agent)
+        
+        # Sort unprotected by fitness
+        sorted_unprotected = sorted(
+            unprotected_agents,
             key=lambda agent: fitness_scores.get(agent['agent_id'], 0.0),
             reverse=True
         )
-
-        # Select top performers, but ensure some diversity
-        new_population = sorted_candidates[:target_population_size]
+        
+        # Fill population: protected agents first, then best unprotected
+        slots_remaining = target_population_size - len(protected_agents)
+        
+        if slots_remaining > 0:
+            new_population = protected_agents + sorted_unprotected[:slots_remaining]
+        else:
+            # Too many protected agents - sort by fitness and take top
+            sorted_protected = sorted(
+                protected_agents,
+                key=lambda agent: fitness_scores.get(agent['agent_id'], 0.0),
+                reverse=True
+            )
+            new_population = sorted_protected[:target_population_size]
 
         return new_population
 

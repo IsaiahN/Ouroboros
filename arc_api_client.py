@@ -166,6 +166,8 @@ class ARCClient:
         """Async context manager exit."""
         if self.session:
             await self.session.close()
+            # Give aiohttp time to close connections
+            await asyncio.sleep(0.25)
             self.session = None
         self._reset_state()
 
@@ -173,6 +175,8 @@ class ARCClient:
         """Manually close the session and cleanup resources."""
         if self.session:
             await self.session.close()
+            # Give aiohttp time to close connections
+            await asyncio.sleep(0.25)
             self.session = None
         self._reset_state()
 

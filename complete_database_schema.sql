@@ -146,6 +146,18 @@ CREATE TABLE IF NOT EXISTS agents (
     crossover_count INTEGER DEFAULT 0,
     last_performance_update TIMESTAMP,
 
+    -- Phase 1: Prestige System (Network Contribution Currency)
+    discovery_prestige REAL DEFAULT 0.0,           -- Total prestige from network contributions
+    innovation_score REAL DEFAULT 0.0,             -- Novelty value of discoveries
+    sequence_discovery_count INTEGER DEFAULT 0,     -- Count of sequences discovered
+    pattern_discovery_count INTEGER DEFAULT 0,      -- Count of patterns discovered
+    validation_reputation REAL DEFAULT 0.5,         -- Quality of validation work (Bayesian prior)
+    
+    -- Phase 1: Status Benefits (derived from prestige, NOT action budgets)
+    breeding_priority REAL DEFAULT 1.0,            -- 1.0x to 3.0x breeding weight
+    survival_protection REAL DEFAULT 0.0,          -- 0% to 80% protection from culling
+    bonus_game_slots INTEGER DEFAULT 0,            -- +0 to +10 extra game attempts per generation
+
     -- Status
     is_active BOOLEAN DEFAULT TRUE,
     retirement_reason TEXT
@@ -417,6 +429,55 @@ CREATE TABLE IF NOT EXISTS sequence_validation_attempts (
     context_match_score REAL,              -- Overall context similarity
     
     FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- Phase 1: Agent discoveries tracking (network contribution prestige)
+CREATE TABLE IF NOT EXISTS agent_discoveries (
+    discovery_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    discovery_type TEXT NOT NULL,         -- 'winning_sequence', 'pattern', 'rule', 'primitive'
+    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Discovery references
+    sequence_id TEXT,                     -- If discovery is a winning sequence
+    pattern_id TEXT,                      -- If discovery is a pattern
+    rule_id TEXT,                         -- If discovery is a learned rule
+    
+    -- Network impact metrics (for prestige calculation)
+    times_used_by_others INTEGER DEFAULT 0,        -- Viral spread metric
+    success_rate_by_others REAL DEFAULT 0.0,       -- Quality when others use it
+    innovation_value REAL DEFAULT 0.0,             -- Novelty score (0.0 to 1.0)
+    network_enrichment_score REAL DEFAULT 0.0,     -- Overall network value added
+    
+    -- Prestige tracking
+    citations INTEGER DEFAULT 0,                   -- How many times referenced
+    prestige_contribution REAL DEFAULT 0.0,        -- Prestige points from this discovery
+    generations_persisted INTEGER DEFAULT 0,       -- How long has it survived?
+    
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (pattern_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id)
+);
+
+-- Phase 1: Agent validation performance tracking (quality control prestige)
+CREATE TABLE IF NOT EXISTS agent_validation_performance (
+    agent_id TEXT PRIMARY KEY,
+    
+    -- Validation metrics
+    sequences_attempted INTEGER DEFAULT 0,
+    sequences_succeeded INTEGER DEFAULT 0,
+    validation_success_rate REAL DEFAULT 0.0,
+    
+    -- Quality metrics
+    avg_efficiency_vs_original REAL DEFAULT 1.0,   -- How efficient vs original? <1.0 = improved
+    improvement_contributions INTEGER DEFAULT 0,    -- Times agent improved on original
+    
+    -- Teaching/learning tracking
+    teaching_events INTEGER DEFAULT 0,              -- Times agent's discoveries taught others
+    learning_events INTEGER DEFAULT 0,              -- Times agent learned from others
+    
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
@@ -869,6 +930,16 @@ CREATE INDEX IF NOT EXISTS idx_sequence_validation_attempts_agent ON sequence_va
 CREATE INDEX IF NOT EXISTS idx_sequence_validation_attempts_sequence ON sequence_validation_attempts(sequence_id);
 CREATE INDEX IF NOT EXISTS idx_sequence_reputation_success_rate ON sequence_reputation(success_rate DESC);
 
+-- Phase 1: Prestige system indexes
+CREATE INDEX IF NOT EXISTS idx_agents_discovery_prestige ON agents(discovery_prestige DESC);
+CREATE INDEX IF NOT EXISTS idx_agents_breeding_priority ON agents(breeding_priority DESC);
+CREATE INDEX IF NOT EXISTS idx_agents_survival_protection ON agents(survival_protection DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_discoveries_agent ON agent_discoveries(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_discoveries_type ON agent_discoveries(discovery_type);
+CREATE INDEX IF NOT EXISTS idx_agent_discoveries_prestige ON agent_discoveries(prestige_contribution DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_discoveries_viral ON agent_discoveries(times_used_by_others DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_validation_perf_success ON agent_validation_performance(validation_success_rate DESC);
+
 -- AGI diversity indexes
 CREATE INDEX IF NOT EXISTS idx_agent_game_diversity_agent ON agent_game_diversity(agent_id);
 CREATE INDEX IF NOT EXISTS idx_agent_game_diversity_novel ON agent_game_diversity(is_novel_game);
@@ -1003,3 +1074,181 @@ FROM agents a
 WHERE a.is_active = TRUE
 ORDER BY win_rate DESC, a.score_efficiency DESC
 LIMIT 10;
+
+-- ============================================================================
+-- PHASE 2: ECONOMIC SYSTEM (ECOSYSTEM METABOLISM)
+-- Per-agent action budgets + network-level resource flow tracking
+-- CRITICAL: Keep prestige (social capital) COMPLETELY SEPARATE from actions (economic capital)
+-- ============================================================================
+
+-- Phase 2: Per-Agent Action Economy (extends agents table)
+-- Actions = Metabolic Currency (ATP of the network)
+ALTER TABLE agents ADD COLUMN action_allowance_per_level INTEGER DEFAULT 400;
+ALTER TABLE agents ADD COLUMN action_allowance_total INTEGER DEFAULT 7000;
+ALTER TABLE agents ADD COLUMN action_budget_multiplier REAL DEFAULT 1.0;
+ALTER TABLE agents ADD COLUMN last_salary_adjustment_gen INTEGER DEFAULT 0;
+
+-- Phase 2: Agent Economic Performance (extends agent_arc_performance table)
+-- Track actions earned, spent, and efficiency per game
+ALTER TABLE agent_arc_performance ADD COLUMN actions_earned INTEGER DEFAULT 0;
+ALTER TABLE agent_arc_performance ADD COLUMN actions_spent INTEGER DEFAULT 0;
+ALTER TABLE agent_arc_performance ADD COLUMN action_efficiency REAL DEFAULT 0.0;  -- Score per action
+ALTER TABLE agent_arc_performance ADD COLUMN budget_utilization REAL DEFAULT 0.0;  -- % of budget used
+
+-- Phase 2: Ecosystem Metabolism Snapshots (network-level resource flow)
+CREATE TABLE IF NOT EXISTS ecosystem_metabolism_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Total metabolic capacity (network ATP pool)
+    total_actions_available INTEGER NOT NULL,
+    total_actions_budgeted INTEGER NOT NULL,
+    total_actions_spent INTEGER NOT NULL,
+    total_actions_wasted INTEGER NOT NULL,  -- Budgeted but not used
+    
+    -- Resource distribution metrics
+    gini_coefficient REAL DEFAULT 0.0,  -- Action inequality (0=equal, 1=one agent has all)
+    top_10_percent_share REAL DEFAULT 0.0,  -- % of actions held by top 10% agents
+    bottom_50_percent_share REAL DEFAULT 0.0,  -- % of actions held by bottom 50%
+    
+    -- Metabolic rates (network dynamics)
+    action_creation_rate REAL DEFAULT 0.0,  -- Actions earned per generation
+    action_destruction_rate REAL DEFAULT 0.0,  -- Actions spent per generation
+    metabolic_efficiency REAL DEFAULT 0.0,  -- Score produced per action spent
+    
+    -- Network health indicators
+    resource_scarcity_index REAL DEFAULT 0.0,  -- How constrained is the network?
+    budget_inflation_rate REAL DEFAULT 0.0,  -- Change in average budget
+    
+    -- Population economics
+    active_agent_count INTEGER NOT NULL,
+    agents_above_baseline INTEGER DEFAULT 0,  -- Agents earning >1.0x multiplier
+    agents_below_baseline INTEGER DEFAULT 0   -- Agents earning <1.0x multiplier
+);
+
+-- Index for fast ecosystem metabolism queries
+CREATE INDEX IF NOT EXISTS idx_ecosystem_metabolism_generation 
+ON ecosystem_metabolism_snapshots(generation);
+
+CREATE INDEX IF NOT EXISTS idx_agent_budget_multiplier 
+ON agents(action_budget_multiplier);
+
+CREATE INDEX IF NOT EXISTS idx_agent_arc_performance_actions 
+ON agent_arc_performance(actions_earned, actions_spent);
+
+-- ============================================================================
+-- PHASE 2.5: KNOWLEDGE RECOMBINATION (VIRAL EVOLUTION ACCELERATOR)
+-- Horizontal gene transfer through sequence chaining and pattern synthesis
+-- CRITICAL: This enables EXPONENTIAL knowledge growth, not just linear discovery
+-- ============================================================================
+
+-- Phase 2.5: Sequence Dependencies (tracking which sequences build on others)
+-- This is the "horizontal gene transfer" mechanism from biome theory
+CREATE TABLE IF NOT EXISTS sequence_dependencies (
+    dependency_id TEXT PRIMARY KEY,
+    parent_sequence_id TEXT NOT NULL,
+    child_sequence_id TEXT NOT NULL,
+    dependency_type TEXT NOT NULL CHECK(dependency_type IN ('chain', 'variation', 'synthesis')),
+    
+    -- Recombination metrics
+    combined_efficiency REAL DEFAULT 0.0,  -- Efficiency of combined sequence
+    improvement_over_parent REAL DEFAULT 0.0,  -- How much better than parent alone
+    discovery_agent_id TEXT,  -- Who discovered this combination
+    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    discovery_generation INTEGER DEFAULT 0,
+    
+    -- Usage tracking (does this recombination spread?)
+    times_used INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0.0,
+    viral_spread_count INTEGER DEFAULT 0,  -- How many OTHER agents use this
+    
+    -- Fitness evaluation
+    is_beneficial BOOLEAN DEFAULT NULL,  -- Does this improve on parent?
+    fitness_impact REAL DEFAULT 0.0,  -- Net benefit over individual sequences
+    
+    FOREIGN KEY (parent_sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (child_sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
+);
+
+-- Phase 2.5: Pattern Synthesis (combining abstract patterns into meta-patterns)
+CREATE TABLE IF NOT EXISTS pattern_synthesis (
+    synthesis_id TEXT PRIMARY KEY,
+    pattern_a_id TEXT NOT NULL,
+    pattern_b_id TEXT NOT NULL,
+    synthesized_pattern_id TEXT NOT NULL,
+    
+    -- Synthesis metrics
+    novelty_score REAL DEFAULT 0.0,  -- How novel is this combination
+    effectiveness_score REAL DEFAULT 0.0,  -- How effective is the synthesis
+    games_applied_to INTEGER DEFAULT 0,
+    success_count INTEGER DEFAULT 0,
+    
+    -- Discovery tracking
+    discovery_agent_id TEXT,
+    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    discovery_generation INTEGER DEFAULT 0,
+    
+    -- Evolution tracking
+    times_recombined INTEGER DEFAULT 0,  -- How many times this synthesis was further combined
+    descendant_count INTEGER DEFAULT 0,  -- How many patterns descended from this
+    
+    FOREIGN KEY (pattern_a_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (pattern_b_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (synthesized_pattern_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
+);
+
+-- Phase 2.5: Recombination Attempts Log (track all attempts, not just successes)
+CREATE TABLE IF NOT EXISTS recombination_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    attempt_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    generation INTEGER NOT NULL,
+    
+    -- What was attempted
+    sequence_a_id TEXT NOT NULL,
+    sequence_b_id TEXT NOT NULL,
+    combination_type TEXT NOT NULL CHECK(combination_type IN ('chain', 'interleave', 'conditional')),
+    
+    -- Outcome
+    was_successful BOOLEAN NOT NULL,
+    resulting_sequence_id TEXT,  -- NULL if failed
+    resulting_score INTEGER DEFAULT 0,
+    actions_used INTEGER DEFAULT 0,
+    
+    -- Analysis
+    failure_reason TEXT,  -- If failed, why?
+    
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (game_id) REFERENCES game_results(game_id),
+    FOREIGN KEY (sequence_a_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (sequence_b_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (resulting_sequence_id) REFERENCES winning_sequences(sequence_id)
+);
+
+-- Indexes for fast recombination queries
+CREATE INDEX IF NOT EXISTS idx_sequence_dependencies_parent 
+ON sequence_dependencies(parent_sequence_id);
+
+CREATE INDEX IF NOT EXISTS idx_sequence_dependencies_child 
+ON sequence_dependencies(child_sequence_id);
+
+CREATE INDEX IF NOT EXISTS idx_sequence_dependencies_agent 
+ON sequence_dependencies(discovery_agent_id, discovery_generation);
+
+CREATE INDEX IF NOT EXISTS idx_pattern_synthesis_patterns 
+ON pattern_synthesis(pattern_a_id, pattern_b_id);
+
+CREATE INDEX IF NOT EXISTS idx_recombination_attempts_agent 
+ON recombination_attempts(agent_id, generation);
+
+CREATE INDEX IF NOT EXISTS idx_recombination_attempts_game 
+ON recombination_attempts(game_id);
+
+-- Phase 2.5: Extend agents table to track recombination success
+ALTER TABLE agents ADD COLUMN recombination_discoveries INTEGER DEFAULT 0;
+ALTER TABLE agents ADD COLUMN successful_recombinations INTEGER DEFAULT 0;
+ALTER TABLE agents ADD COLUMN recombination_success_rate REAL DEFAULT 0.0;

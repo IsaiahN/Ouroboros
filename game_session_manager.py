@@ -149,6 +149,138 @@ class GameSessionManager:
         logger.info(f"Created game: {game_id} with actions: {game_data.get('available_actions', [])}")
 
         return game_data
+    
+    # ========================================================================
+    # PHASE 2: PER-AGENT ACTION BUDGET ENFORCEMENT
+    # ========================================================================
+    
+    def can_agent_afford_game(self, agent_id: str, game_id: str) -> tuple[bool, str]:
+        """
+        Check if agent has enough action budget to play a game.
+        
+        PHASE 2: Enforce economic capital (action budgets).
+        Agents with depleted budgets cannot play until next salary cycle.
+        
+        Args:
+            agent_id: Agent attempting to play
+            game_id: Game they want to play
+            
+        Returns:
+            Tuple of (can_afford: bool, reason: str)
+        """
+        try:
+            # Get agent's current budget
+            agent_data = self.db.execute_query("""
+                SELECT 
+                    action_allowance_total,
+                    action_budget_multiplier
+                FROM agents 
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if not agent_data or not agent_data[0]:
+                # Agent not found or no budget data - allow game with default budget
+                return True, "OK"
+            
+            agent = agent_data[0]
+            budget = agent['action_allowance_total']
+            
+            # Get total actions already spent by this agent this generation
+            # (sum actions from all games played since last salary adjustment)
+            actions_spent = self.db.execute_query("""
+                SELECT COALESCE(SUM(actions_spent), 0) as total_spent
+                FROM agent_arc_performance
+                WHERE agent_id = ?
+                  AND game_timestamp >= (
+                      SELECT MAX(last_salary_adjustment_gen) 
+                      FROM agents 
+                      WHERE agent_id = ?
+                  )
+            """, (agent_id, agent_id))
+            
+            if actions_spent and actions_spent[0]:
+                spent = actions_spent[0]['total_spent']
+            else:
+                spent = 0
+            
+            remaining = budget - spent
+            
+            # Check if agent has any budget left
+            # We need at least some minimal amount to make playing worthwhile
+            min_actions_needed = 100  # Minimum to make game attempt reasonable
+            
+            if remaining < min_actions_needed:
+                return False, f"Insufficient action budget (need {min_actions_needed}, have {remaining})"
+            
+            return True, "OK"
+            
+        except Exception as e:
+            logger.warning(f"Budget check failed for {agent_id}: {e}")
+            # On error, allow game (fail-open to avoid breaking evolution)
+            return True, "Budget check error - allowing game"
+    
+    def deduct_actions_used(self, agent_id: str, game_id: str):
+        """
+        Deduct actions used from agent's budget after game completes.
+        
+        PHASE 2: Track economic capital expenditure.
+        Updates agent_arc_performance with actions_spent for this game.
+        
+        Args:
+            agent_id: Agent who played the game
+            game_id: Game that was played
+        """
+        try:
+            # Get actions taken in this game from game_results
+            game_result = self.db.execute_query("""
+                SELECT total_actions 
+                FROM game_results 
+                WHERE game_id = ? 
+                  AND session_id = ?
+                ORDER BY end_time DESC 
+                LIMIT 1
+            """, (game_id, self.current_session_id))
+            
+            if not game_result or not game_result[0]:
+                logger.warning(f"No game result found for {game_id}, cannot deduct actions")
+                return
+            
+            actions_taken = game_result[0]['total_actions']
+            
+            # Get the corresponding agent_arc_performance record
+            # Update it with actions_spent
+            perf_records = self.db.execute_query("""
+                SELECT performance_id, final_score, total_actions
+                FROM agent_arc_performance 
+                WHERE agent_id = ? 
+                  AND game_id = ?
+                  AND session_id = ?
+                ORDER BY game_timestamp DESC
+                LIMIT 1
+            """, (agent_id, game_id, self.current_session_id))
+            
+            if perf_records and perf_records[0]:
+                perf_id = perf_records[0]['performance_id']
+                final_score = perf_records[0]['final_score']
+                
+                # Calculate efficiency
+                action_efficiency = final_score / max(actions_taken, 1)
+                
+                # Update with economic data
+                self.db.execute_query("""
+                    UPDATE agent_arc_performance 
+                    SET actions_spent = ?,
+                        action_efficiency = ?
+                    WHERE performance_id = ?
+                """, (actions_taken, action_efficiency, perf_id))
+                
+                logger.debug(f"Deducted {actions_taken} actions from {agent_id[:8]}")
+            else:
+                logger.warning(f"No performance record found for agent {agent_id[:8]} game {game_id[:8]}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to deduct actions for {agent_id}: {e}")
+            # Non-critical, just log and continue
 
     async def send_action(self, action: str, **kwargs) -> GameState:
         """Send an action to the current game.
@@ -319,6 +451,15 @@ class GameSessionManager:
                 await self.client.close_scorecard()
             except Exception as e:
                 logger.warning(f"Error closing scorecard: {e}")
+        
+        # CRITICAL: Close client session after each game to prevent leaks
+        if self.client and self.client.session:
+            try:
+                await self.client.close()
+                logger.debug(f"Closed ARC client session for game {self.current_game_id}")
+            except Exception as e:
+                logger.warning(f"Error closing client session: {e}")
+            # Client will be recreated on next game
 
         logger.info(f"Finished game {self.current_game_id}: {final_state}, Score: {final_score}")
         self.current_game_id = None
