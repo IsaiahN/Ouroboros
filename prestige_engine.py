@@ -396,6 +396,9 @@ class PrestigeEngine:
         """
         Record a sequence validation attempt by an agent.
         
+        CRITICAL FOR PRESTIGE: This updates viral spread metrics when agents
+        use each other's sequences.
+        
         Args:
             agent_id: Agent attempting validation
             sequence_id: Sequence being validated
@@ -438,6 +441,62 @@ class PrestigeEngine:
                 update_query,
                 (success_int, success_int, efficiency_vs_original, improved, agent_id)
             )
+            
+            # CRITICAL: Update viral spread metrics for the ORIGINAL DISCOVERER
+            # Find who discovered this sequence
+            discoverer_query = """
+                SELECT agent_id as discoverer_id
+                FROM winning_sequences
+                WHERE sequence_id = ?
+            """
+            discoverer_result = self.db.execute_query(discoverer_query, (sequence_id,))
+            
+            if discoverer_result and discoverer_result[0]['discoverer_id']:
+                discoverer_id = discoverer_result[0]['discoverer_id']
+                
+                # Only count if different agent is using the sequence
+                if discoverer_id != agent_id:
+                    # Find the discovery record
+                    discovery_query = """
+                        SELECT discovery_id, times_used_by_others, success_rate_by_others
+                        FROM agent_discoveries
+                        WHERE agent_id = ? AND sequence_id = ?
+                        LIMIT 1
+                    """
+                    discovery_result = self.db.execute_query(
+                        discovery_query, 
+                        (discoverer_id, sequence_id)
+                    )
+                    
+                    if discovery_result:
+                        # Update existing discovery record with viral spread
+                        current_uses = discovery_result[0]['times_used_by_others'] or 0
+                        current_success_rate = discovery_result[0]['success_rate_by_others'] or 0.0
+                        
+                        new_uses = current_uses + 1
+                        # Running average of success rate
+                        new_success_rate = (
+                            (current_success_rate * current_uses + success_int) / new_uses
+                        )
+                        
+                        update_discovery_query = """
+                            UPDATE agent_discoveries
+                            SET 
+                                times_used_by_others = ?,
+                                success_rate_by_others = ?
+                            WHERE agent_id = ? AND sequence_id = ?
+                        """
+                        self.db.execute_query(
+                            update_discovery_query,
+                            (new_uses, new_success_rate, discoverer_id, sequence_id)
+                        )
+                        
+                        self.logger.info(
+                            f"🦠 VIRAL SPREAD: Agent {agent_id[:8]} used {discoverer_id[:8]}'s "
+                            f"sequence {sequence_id[:8]} - "
+                            f"{'SUCCESS' if success else 'FAILED'} "
+                            f"(total uses: {new_uses}, success rate: {new_success_rate:.1%})"
+                        )
             
             self.logger.debug(
                 f"Recorded validation attempt for {agent_id}: "
