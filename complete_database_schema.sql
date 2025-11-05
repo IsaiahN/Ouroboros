@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS training_sessions (
 CREATE TABLE IF NOT EXISTS game_results (
     game_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
+    scorecard_id TEXT,                     -- ARC API scorecard ID for tracking/debugging
     start_time TIMESTAMP NOT NULL,
     end_time TIMESTAMP,
     status TEXT NOT NULL, -- 'completed', 'failed', 'timeout', 'cancelled'
@@ -317,11 +318,13 @@ CREATE TABLE IF NOT EXISTS winning_sequences (
     game_id TEXT NOT NULL,
     level_number INTEGER,
     agent_id TEXT NOT NULL,
+    scorecard_id TEXT,                     -- ARC API scorecard ID linking to game_results
     
     -- Sequence data
     action_sequence TEXT NOT NULL,         -- JSON array of actions
     coordinate_sequence TEXT,              -- JSON array of coordinates (for ACTION6)
     total_actions INTEGER NOT NULL,
+    frame_transitions TEXT,                -- JSON array of frame states for partial matching
     
     -- Context
     initial_frame TEXT,                    -- JSON initial game state
@@ -338,6 +341,7 @@ CREATE TABLE IF NOT EXISTS winning_sequences (
     generation_discovered INTEGER NOT NULL,
     times_successfully_replayed INTEGER DEFAULT 0,
     times_attempted_replay INTEGER DEFAULT 0,
+    times_referenced INTEGER DEFAULT 0,    -- Total times this sequence was queried/used
     
     -- Pattern tags for abstraction
     pattern_tags TEXT,                     -- JSON array of pattern identifiers
@@ -868,6 +872,7 @@ CREATE INDEX IF NOT EXISTS idx_training_sessions_start_time ON training_sessions
 CREATE INDEX IF NOT EXISTS idx_game_results_session_id ON game_results(session_id);
 CREATE INDEX IF NOT EXISTS idx_game_results_status ON game_results(status);
 CREATE INDEX IF NOT EXISTS idx_game_results_final_score ON game_results(final_score);
+CREATE INDEX IF NOT EXISTS idx_game_results_scorecard ON game_results(scorecard_id);
 
 CREATE INDEX IF NOT EXISTS idx_action_traces_session_id ON action_traces(session_id);
 CREATE INDEX IF NOT EXISTS idx_action_traces_game_id ON action_traces(game_id);
@@ -924,6 +929,8 @@ CREATE INDEX IF NOT EXISTS idx_arc_action_accepted ON arc_action_tracking(action
 -- Pattern learning indexes
 CREATE INDEX IF NOT EXISTS idx_winning_sequences_game_id ON winning_sequences(game_id);
 CREATE INDEX IF NOT EXISTS idx_winning_sequences_efficiency ON winning_sequences(efficiency_score);
+CREATE INDEX IF NOT EXISTS idx_winning_sequences_scorecard ON winning_sequences(scorecard_id);
+CREATE INDEX IF NOT EXISTS idx_winning_sequences_times_referenced ON winning_sequences(times_referenced DESC);
 CREATE INDEX IF NOT EXISTS idx_discovered_patterns_success_rate ON discovered_patterns(success_rate);
 CREATE INDEX IF NOT EXISTS idx_pattern_applications_success ON pattern_applications(success);
 CREATE INDEX IF NOT EXISTS idx_sequence_validation_attempts_agent ON sequence_validation_attempts(agent_id);

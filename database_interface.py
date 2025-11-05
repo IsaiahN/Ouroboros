@@ -226,14 +226,15 @@ class DatabaseInterface:
         with self._get_connection() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO game_results (
-                    game_id, session_id, start_time, end_time, status,
+                    game_id, session_id, scorecard_id, start_time, end_time, status,
                     final_score, total_actions, actions_taken, available_actions, win_detected,
                     level_completions, frame_changes, coordinate_attempts,
                     coordinate_successes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 game_data['game_id'],
                 game_data['session_id'],
+                game_data.get('scorecard_id'),  # Store ARC scorecard ID
                 game_data.get('start_time', datetime.now()),
                 game_data.get('end_time', datetime.now()),
                 game_data['status'],

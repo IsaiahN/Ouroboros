@@ -248,14 +248,40 @@ class GameplayEngine:
                         level_action_count = 0  # Reset level action counter
                         level_start_action = action_count  # Mark where this level starts
                         
-                        # Check if we have a winning sequence for the NEW level
+                        # NEW: Try partial sequence matching for current state
+                        # This allows "jumping in" to known sequences mid-game
                         if self.game_config.get('enable_pattern_learning', True):
-                            next_level_sequence = self._get_best_sequence_for_game(game_id, current_level)
-                            if next_level_sequence:
-                                logger.info(f"🎯 Found winning sequence for level {current_level}, attempting replay...")
-                                # Try to replay just this level's sequence
-                                # Note: This would need frame state management for mid-game replay
-                                # For now, log that we have it available for next full game
+                            partial_match = self._find_partial_sequence_match(
+                                game_id, game_state.frame, current_level
+                            )
+                            
+                            if partial_match:
+                                logger.info(f"⚡ CHECKPOINT FOUND: Resuming from known sequence, "
+                                          f"skipping {partial_match['actions_skipped']} actions!")
+                                
+                                # Replay from checkpoint
+                                replay_result = await self._replay_sequence_inline(
+                                    game_state,
+                                    partial_match['sequence'],
+                                    start_index=partial_match['start_index']
+                                )
+                                
+                                if replay_result and replay_result['success']:
+                                    game_state = replay_result['game_state']
+                                    logger.info(f"✨ Checkpoint replay successful! State: {game_state.state}, Score: {game_state.score}")
+                                    
+                                    # If we won or progressed significantly, update stats
+                                    if game_state.state == "WIN":
+                                        logger.info(f"🏆 WON via checkpoint replay!")
+                                        break  # Exit main loop, game is won
+                            else:
+                                # No partial match, check for complete sequence for new level
+                                next_level_sequence = self._get_best_sequence_for_game(game_id, current_level)
+                                if next_level_sequence:
+                                    logger.info(f"🎯 Found winning sequence for level {current_level}, attempting replay...")
+                                    # Try to replay just this level's sequence
+                                    # Note: This would need frame state management for mid-game replay
+                                    # For now, log that we have it available for next full game
                     
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
@@ -906,15 +932,28 @@ class GameplayEngine:
                     if agent_data:
                         generation = agent_data[0]['generation']
                 
+                # Get scorecard_id from game_results for tracking
+                scorecard_id = None
+                try:
+                    scorecard_data = self.db.execute_query("""
+                        SELECT scorecard_id FROM game_results 
+                        WHERE game_id = ? AND session_id = ?
+                        LIMIT 1
+                    """, (game_id, session_id))
+                    if scorecard_data:
+                        scorecard_id = scorecard_data[0]['scorecard_id']
+                except Exception:
+                    pass  # scorecard_id is optional
+                
                 self.db.execute_query("""
                     INSERT INTO winning_sequences (
-                        sequence_id, game_id, level_number, agent_id, session_id,
+                        sequence_id, game_id, level_number, agent_id, session_id, scorecard_id,
                         action_sequence, coordinate_sequence, total_actions, total_score,
                         efficiency_score, initial_frame, final_frame, frame_transitions,
                         pattern_tags, game_type, discovered_at, generation_discovered
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    sequence_id, game_id, level_number, agent_id, session_id,
+                    sequence_id, game_id, level_number, agent_id, session_id, scorecard_id,
                     json.dumps(actions), json.dumps(coordinates), len(actions),
                     final_score, efficiency, json.dumps(initial_frame),
                     json.dumps(final_frame), json.dumps(frame_transitions),
@@ -1047,6 +1086,99 @@ class GameplayEngine:
             return 'diverse_actions'
         else:
             return 'mixed_actions'
+    def _find_partial_sequence_match(self, game_id: str, current_frame, level_number: int = 1) -> Optional[Dict]:
+        """
+        Find sequences where current frame matches ANY point in the sequence.
+        Returns the sequence and the starting index (checkpoint) to continue from.
+        
+        This enables "jumping in" to known winning sequences mid-game, significantly
+        reducing actions needed by skipping the early exploration phase.
+        
+        Args:
+            game_id: Current game ID
+            current_frame: Current game frame state
+            level_number: Current level number
+            
+        Returns:
+            Dict with 'sequence', 'start_index', 'actions_skipped' or None
+        """
+        if not current_frame or len(current_frame) == 0:
+            return None
+            
+        try:
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            # Get all sequences for this game type and level with frame transitions
+            sequences = self.db.execute_query("""
+                SELECT ws.*, 
+                       COALESCE(sr.reliability_score, 0.5) as reliability
+                FROM winning_sequences ws
+                LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
+                WHERE ws.game_id LIKE ? AND ws.level_number = ?
+                  AND ws.frame_transitions IS NOT NULL
+                ORDER BY reliability DESC, ws.efficiency_score DESC
+                LIMIT 10
+            """, (f"{game_type}-%", level_number))
+            
+            if not sequences:
+                return None
+            
+            best_match = None
+            latest_index = -1
+            
+            # Search each sequence for matching frames
+            for seq in sequences:
+                if seq['reliability'] < 0.3:
+                    continue
+                    
+                # Parse frame transitions (list of frames at each step)
+                try:
+                    frame_transitions = json.loads(seq.get('frame_transitions', '[]'))
+                    if not frame_transitions:
+                        continue
+                    
+                    # Search for current frame in this sequence
+                    # Start from the END to find latest occurrence (closest to victory)
+                    for idx in range(len(frame_transitions) - 1, -1, -1):
+                        if self._compare_frames(current_frame, frame_transitions[idx]):
+                            # Found a match! Calculate how many actions we can skip
+                            actions_skipped = idx
+                            actions_remaining = len(frame_transitions) - idx
+                            
+                            # Prefer matches that:
+                            # 1. Are later in the sequence (more actions skipped)
+                            # 2. Have higher reliability
+                            # 3. Are more efficient
+                            match_score = actions_skipped + (seq['reliability'] * 10)
+                            
+                            if best_match is None or match_score > best_match['match_score']:
+                                best_match = {
+                                    'sequence': seq,
+                                    'start_index': idx,
+                                    'actions_skipped': actions_skipped,
+                                    'actions_remaining': actions_remaining,
+                                    'match_score': match_score,
+                                    'reliability': seq['reliability']
+                                }
+                                logger.info(f"🎯 Found partial match in {seq['sequence_id']}: "
+                                          f"Skip {actions_skipped} actions, {actions_remaining} remaining "
+                                          f"(reliability: {seq['reliability']:.2f})")
+                            break  # Found match in this sequence, check next sequence
+                            
+                except (json.JSONDecodeError, KeyError, TypeError) as e:
+                    logger.debug(f"Error parsing frame transitions for {seq['sequence_id']}: {e}")
+                    continue
+            
+            if best_match:
+                logger.info(f"✨ PARTIAL MATCH: {best_match['sequence']['sequence_id']} - "
+                          f"Resuming from action {best_match['start_index']}, "
+                          f"skipping {best_match['actions_skipped']} actions!")
+                return best_match
+                
+        except Exception as e:
+            logger.debug(f"Error in partial sequence matching: {e}")
+            
+        return None
 
     def _get_best_sequence_for_game(self, game_id: str, level_number: int = 1, 
                                    current_frame=None) -> Optional[Dict]:
@@ -1067,7 +1199,12 @@ class GameplayEngine:
             return None
             
         try:
+            # Extract game type prefix (e.g., 'vc33' from 'vc33-6ae7bf49eea5')
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
             # Query sequences with reputation scores (community memory)
+            # FIXED: Match by game TYPE prefix, not exact session ID
+            # This allows sequences from previous sessions to be reused
             # Prioritize: reliability_score, then efficiency, then fewest actions
             sequences = self.db.execute_query("""
                 SELECT ws.*, 
@@ -1077,10 +1214,10 @@ class GameplayEngine:
                        COALESCE(sr.trending, 'stable') as trend
                 FROM winning_sequences ws
                 LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
-                WHERE ws.game_id = ? AND ws.level_number = ?
+                WHERE ws.game_id LIKE ? AND ws.level_number = ?
                 ORDER BY reliability DESC, ws.efficiency_score DESC, ws.total_actions ASC
                 LIMIT 5
-            """, (game_id, level_number))
+            """, (f"{game_type}-%", level_number))
             
             if sequences:
                 # Filter out sequences with very low reliability (< 0.3)
@@ -1088,13 +1225,13 @@ class GameplayEngine:
                 
                 if reliable_sequences:
                     seq = reliable_sequences[0]
-                    logger.info(f"📖 Found winning sequence for {game_id} level {level_number}: "
+                    logger.info(f"📖 Found winning sequence for game type {game_type} level {level_number}: "
                                f"{seq['total_actions']} actions, efficiency {seq['efficiency_score']:.4f}, "
                                f"community reliability {seq['reliability']:.2f} "
                                f"({seq['validators']} agents validated, trend: {seq['trend']})")
                     return seq
                 else:
-                    logger.info(f"⚠️ Found sequences for {game_id} but all have low reliability (<0.3)")
+                    logger.info(f"⚠️ Found sequences for game type {game_type} but all have low reliability (<0.3)")
             
             # No reliable exact match - try pattern matching if we have current frame
             if current_frame is not None:
@@ -1118,14 +1255,15 @@ class GameplayEngine:
                                       f"as starting point (reliability: {example_seq[0]['reliability']:.2f})")
                             return example_seq[0]
             
-            logger.debug(f"No reliable winning sequence found for {game_id} level {level_number}")
+            logger.debug(f"No reliable winning sequence found for game type {game_type} level {level_number}")
                 
         except Exception as e:
-            logger.debug(f"Error retrieving winning sequence for {game_id}: {e}")
+            logger.debug(f"Error retrieving winning sequence for game type {game_type}: {e}")
             
         return None
 
-    async def _replay_sequence_inline(self, game_state: GameState, sequence: Dict) -> Optional[Dict]:
+    async def _replay_sequence_inline(self, game_state: GameState, sequence: Dict, 
+                                      start_index: int = 0) -> Optional[Dict]:
         """
         Replay a sequence INLINE within the existing game session.
         Does NOT create a new game or finish the game.
@@ -1133,6 +1271,7 @@ class GameplayEngine:
         Args:
             game_state: Current game state (starting state)
             sequence: Winning sequence to replay
+            start_index: Index to start replay from (for partial matches, default 0)
             
         Returns:
             Dict with 'game_state' (updated) and 'success' (bool), or None if error
@@ -1141,15 +1280,25 @@ class GameplayEngine:
             sequence_id = sequence['sequence_id']
             logger.info(f"🔄 Replaying sequence {sequence_id} inline (level {sequence['level_number']})")
             
-            # Verify initial frame matches (critical for replay success)
-            expected_initial_frame = json.loads(sequence['initial_frame'])
-            current_frame = game_state.frame
-            
-            # Simple frame comparison
-            frames_match = self._compare_frames(expected_initial_frame, current_frame)
-            if not frames_match:
-                logger.warning(f"⚠️ Initial frame mismatch - aborting replay for {sequence_id}")
-                return {'game_state': game_state, 'success': False}
+            # NEW: Partial sequence matching support
+            if start_index > 0:
+                logger.info(f"⚡ CHECKPOINT REPLAY: Starting from action {start_index} "
+                          f"(skipping {start_index} actions)")
+            else:
+                # Verify initial frame matches (if frame data available and starting from beginning)
+                # NOTE: Frame matching skipped if initial_frame is empty (frame data not captured)
+                # For same-session resets, frames should match. For cross-session, game type matching is sufficient.
+                expected_initial_frame = json.loads(sequence['initial_frame'])
+                current_frame = game_state.frame
+                
+                # Skip frame comparison if no frame data was captured
+                if expected_initial_frame and len(expected_initial_frame) > 0:
+                    frames_match = self._compare_frames(expected_initial_frame, current_frame)
+                    if not frames_match:
+                        logger.warning(f"⚠️ Initial frame mismatch - aborting replay for {sequence_id}")
+                        return {'game_state': game_state, 'success': False}
+                else:
+                    logger.debug(f"🔄 No frame data available, allowing replay based on game type match")
             
             # Track that we're referencing this sequence
             self.db.execute_query("""
@@ -1164,10 +1313,10 @@ class GameplayEngine:
             coordinates = json.loads(sequence.get('coordinate_sequence', '[]'))
             
             action_count = 0
-            coord_index = 0
+            coord_index = start_index  # Start from checkpoint for coordinates
             
-            # Execute actions
-            for action_num in actions:
+            # Execute actions starting from checkpoint
+            for idx, action_num in enumerate(actions[start_index:], start=start_index):
                 if game_state.state != "NOT_FINISHED":
                     break
                 
@@ -1666,36 +1815,36 @@ class GameplayEngine:
     
     def _extract_frame_transitions(self, action_traces: List[Dict]) -> List[Dict]:
         """
-        Extract key frame transitions where significant changes occurred.
-        This helps identify critical moments in winning sequences.
+        Extract frame states at each action for partial sequence matching.
+        Returns list of frame states that can be used to find checkpoints.
+        
+        This is CRITICAL for partial sequence matching - allows agents to "jump in"
+        to known sequences by matching current frame to any point in the sequence.
         """
-        transitions = []
+        frame_states = []
         
         try:
             for i, trace in enumerate(action_traces):
-                # Record transitions where frame actually changed
-                if trace.get('frame_changed'):
-                    transition = {
-                        'action_index': i,
-                        'action_number': trace.get('action_number'),
-                        'score_before': trace.get('score_before', 0),
-                        'score_after': trace.get('score_after', 0),
-                        'score_delta': trace.get('score_change', 0)
-                    }
-                    
-                    # Include coordinates if ACTION6
-                    if trace.get('action_number') == 6 and trace.get('coordinates'):
-                        try:
-                            transition['coordinates'] = json.loads(trace['coordinates'])
-                        except:
-                            pass
-                    
-                    transitions.append(transition)
+                # Extract the actual frame state after this action
+                frame_after = trace.get('frame_after')
+                
+                if frame_after:
+                    try:
+                        # Parse frame and store it
+                        frame_data = json.loads(frame_after) if isinstance(frame_after, str) else frame_after
+                        frame_states.append(frame_data)
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.debug(f"Failed to parse frame at action {i}: {e}")
+                        # Store empty frame placeholder to maintain index alignment
+                        frame_states.append([])
+                else:
+                    # No frame data available for this action
+                    frame_states.append([])
         
         except Exception as e:
             logger.debug(f"Frame transition extraction error: {e}")
         
-        return transitions
+        return frame_states
     
     def _detect_and_store_abstract_pattern(self, sequence_id: str, game_id: str, 
                                           level_number: int, pattern_signature: Dict,

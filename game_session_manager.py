@@ -134,10 +134,11 @@ class GameSessionManager:
         # Create game via API
         game_data = await self.client.create_game(game_id, tags)
 
-        # Store game start in database
+        # Store game start in database (including scorecard_id for tracking)
         self.db.save_game_result({
             'game_id': game_id,
             'session_id': self.current_session_id,
+            'scorecard_id': game_data.get('scorecard_id'),  # Track ARC scorecard
             'start_time': datetime.now(),
             'status': 'started',
             'final_score': game_data.get('score', 0.0),
@@ -333,15 +334,16 @@ class GameSessionManager:
             # Update session statistics
             self.session_stats['total_actions'] += 1
 
-            # Save action trace (DO NOT save frames - they are too large and unhashable)
+            # Save action trace WITH frames for partial sequence matching
+            # Frames are essential for checkpoint detection (finding current state in known sequences)
             self.db.save_action_trace({
                 'session_id': self.current_session_id,
                 'game_id': self.current_game_id,
                 'action_number': action_number,
                 'coordinates': kwargs.get('coordinates') if action == 'ACTION6' else None,
                 'timestamp': action_start_time,
-                'frame_before': None,  # Don't save frame - too large
-                'frame_after': None,   # Don't save frame - too large
+                'frame_before': kwargs.get('frame_before'),  # CRITICAL for partial matching
+                'frame_after': game_state.frame,             # CRITICAL for partial matching
                 'frame_changed': kwargs.get('frame_changed', False),
                 'score_before': kwargs.get('score_before', 0.0),
                 'score_after': game_state.score,
