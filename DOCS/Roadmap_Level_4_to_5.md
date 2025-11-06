@@ -1313,7 +1313,7 @@ def end_game_session(self, game_id: str, final_state: dict):
 
 ---
 
-## Phase 3: Cultural Transmission (Viral Information Packages)
+## Phase 3: Cultural Transmission (Viral Information Packages & Pariahs)
 
 ### Current Gap
 Pattern tags exist but are just metadata:
@@ -1330,7 +1330,46 @@ pattern_tags = ['action6_heavy', 'grid_small', 'color_manipulation']
 - Mutate and recombine to form new variants
 - Persist independently of any single "host" agent
 
-### Implementation: Viral Package Evolution
+**NEW: Pariahs (Negative Patterns/Failure Antibodies)**
+
+Just as viral packages spread successful patterns, **Pariahs** spread warnings about failure patterns:
+- **What they are**: Anti-patterns extracted from failed game attempts
+- **Purpose**: Network immunity - learn what NOT to do
+- **Mechanism**: Agents carrying Pariahs avoid those action sequences/coordinates
+- **Biological parallel**: Antibodies in immune systems - recognize and avoid threats
+- **Value**: Prevent the network from rediscovering the same dead ends
+
+**Key Insight from action_traces**:
+- **Currently**: We know sequence X won with score Y
+- **With traces**: We know action 6 at coordinate (5,3) gave +1.0 points
+- **Value**: Precise reward attribution - exactly which actions work
+
+**Failure Analysis Enabled by Traces**:
+- **Currently**: We know agent failed
+- **With traces**: We know agent tried actions [1,2,6,6,3] and scored 0.5 then got stuck
+- **Value**: Learn what NOT to do, avoid dead ends, build failure antibodies
+
+**Why This Matters**:
+- **Viral packages** = positive selection (spread what works)
+- **Pariahs** = negative selection (avoid what fails)
+- **Together**: Bidirectional evolution - accelerate toward success AND away from failure
+
+**The Network Becomes an Immune System**:
+- Just like biological immune systems recognize pathogens (failures)
+- Network develops "antibodies" (pariahs) against bad strategies
+- Awareness spreads horizontally (herd immunity)
+- Agents with both packages + pariah awareness learn 2x faster:
+  - Packages say "try this" (positive guidance)
+  - Pariahs say "avoid this" (negative guidance)
+  - Combination = efficient search space pruning
+
+**Why action_traces Are Essential for This**:
+Without traces, we only know "sequence X won" or "agent Y failed". With traces:
+- **Viral Packages**: Extract WHICH specific actions scored (precise reward attribution)
+- **Pariahs**: Identify WHERE agent got stuck (failure pattern extraction)
+- **Result**: Both systems built on evidence-based learning, not guesses
+
+### Implementation: Viral Package Evolution + Pariah System
 
 #### 3.1 Viral Package System
 ```sql
@@ -1410,14 +1449,348 @@ CREATE TABLE IF NOT EXISTS viral_package_interactions (
     FOREIGN KEY (package_a_id) REFERENCES viral_information_packages(package_id),
     FOREIGN KEY (package_b_id) REFERENCES viral_information_packages(package_id)
 );
+
+-- Pariahs (Negative Patterns / Failure Antibodies)
+-- Think: Network immunity against failed strategies
+CREATE TABLE IF NOT EXISTS pariahs (
+    pariah_id TEXT PRIMARY KEY,
+    pariah_name TEXT UNIQUE NOT NULL,
+    pariah_description TEXT,  -- What failure pattern does this encode?
+    
+    -- Origin (where was this failure discovered?)
+    discovered_by_agent TEXT,
+    discovery_generation INTEGER,
+    game_id TEXT,  -- Which game revealed this failure?
+    
+    -- Failure pattern details
+    failure_action_sequence TEXT,  -- JSON: Actions that led to failure
+    failure_coordinates TEXT,  -- JSON: Specific coordinates that failed
+    failure_context TEXT,  -- JSON: Game state when failure occurred
+    avg_score_before_failure REAL DEFAULT 0.0,
+    failure_severity REAL DEFAULT 1.0,  -- How bad is this pattern? (0=minor, 1=catastrophic)
+    
+    -- Evidence tracking (how many times has this failed?)
+    confirmed_failure_count INTEGER DEFAULT 1,
+    false_positive_count INTEGER DEFAULT 0,  -- Times this pattern actually worked
+    reliability REAL DEFAULT 1.0,  -- Bayesian: (failures + 2) / (total + 4)
+    
+    -- Spread metrics (network immunity)
+    agent_awareness_count INTEGER DEFAULT 0,  -- How many agents know to avoid this
+    avoidance_success_rate REAL DEFAULT 0.0,  -- Do aware agents avoid it successfully?
+    
+    -- Evolution
+    parent_pariah_id TEXT,  -- Pariahs can evolve from related failures
+    variant_count INTEGER DEFAULT 0,  -- How many variations of this failure exist?
+    
+    -- Lifecycle
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_encountered TIMESTAMP,
+    is_obsolete BOOLEAN DEFAULT FALSE,  -- Game/level changed, this no longer relevant
+    
+    FOREIGN KEY (discovered_by_agent) REFERENCES agents(agent_id),
+    FOREIGN KEY (parent_pariah_id) REFERENCES pariahs(pariah_id)
+);
+
+-- Agent pariah awareness (which agents know which failure patterns)
+-- Think: Which agents have developed immunity to which failures
+CREATE TABLE IF NOT EXISTS agent_pariah_awareness (
+    agent_id TEXT NOT NULL,
+    pariah_id TEXT NOT NULL,
+    awareness_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    awareness_generation INTEGER NOT NULL,
+    
+    -- How did they learn this?
+    learned_from_agent TEXT,  -- Horizontal transmission (another agent warned them)
+    learned_from_failure BOOLEAN DEFAULT FALSE,  -- Discovered it themselves the hard way
+    
+    -- Usage tracking
+    times_avoided INTEGER DEFAULT 0,  -- How many times successfully avoided this pattern
+    times_triggered INTEGER DEFAULT 0,  -- How many times fell into this trap anyway
+    avoidance_success_rate REAL DEFAULT 0.0,
+    
+    -- Awareness strength
+    confidence REAL DEFAULT 0.5,  -- How strongly do they believe this is a failure pattern
+    memory_strength REAL DEFAULT 1.0,  -- Decays over time if not reinforced (0-1)
+    
+    PRIMARY KEY (agent_id, pariah_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
+    FOREIGN KEY (learned_from_agent) REFERENCES agents(agent_id)
+);
+
+-- Pariah-Package interactions (do viral packages prevent/cause failures?)
+-- Think: Does this viral strategy protect against or trigger this failure?
+CREATE TABLE IF NOT EXISTS pariah_package_interactions (
+    pariah_id TEXT NOT NULL,
+    package_id TEXT NOT NULL,
+    interaction_type TEXT NOT NULL,  -- 'protective', 'causative', 'neutral'
+    
+    strength REAL NOT NULL,  -- How strong is this relationship
+    evidence_count INTEGER DEFAULT 0,
+    
+    PRIMARY KEY (pariah_id, package_id),
+    FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
+    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id)
+);
 ```
 
-#### 3.2 Meme Creation & Evolution
+#### 3.2 Package & Pariah Creation from action_traces
 ```python
-# cultural_engine.py
+# viral_package_engine.py
 
-class CulturalEngine:
-    """Manages meme creation, evolution, and transmission."""
+class ViralPackageEngine:
+    """
+    Manages viral package and pariah creation, evolution, and transmission.
+    
+    Uses action_traces to extract:
+    - Viral packages from successful action patterns
+    - Pariahs from failed action patterns
+    """
+    
+    def create_package_from_winning_sequence(self, sequence_id: str, 
+                                             discoverer_agent_id: str,
+                                             generation: int) -> str:
+        """
+        Create viral package from successful sequence.
+        
+        Uses action_traces to understand WHICH actions scored points.
+        """
+        
+        # Get sequence details
+        sequence = db.execute_query("""
+            SELECT * FROM winning_sequences WHERE sequence_id = ?
+        """, (sequence_id,))[0]
+        
+        # Get action traces to understand score progression
+        traces = db.execute_query("""
+            SELECT action_number, coordinates, score_before, score_after, score_change
+            FROM action_traces
+            WHERE session_id IN (
+                SELECT session_id FROM game_results 
+                WHERE sequence_id = ?
+            )
+            ORDER BY timestamp ASC
+        """, (sequence_id,))
+        
+        # Analyze which actions actually scored (PRECISE ATTRIBUTION)
+        scoring_actions = [t for t in traces if t['score_change'] > 0]
+        action_pattern = self._extract_action_pattern(scoring_actions)
+        
+        # Create package
+        package_id = f"vpkg_{uuid.uuid4().hex[:16]}"
+        package_name = self._generate_package_name(action_pattern)
+        
+        db.execute_query("""
+            INSERT INTO viral_information_packages
+            (package_id, package_name, package_description,
+             discovered_by_agent, discovery_generation)
+            VALUES (?, ?, ?, ?, ?)
+        """, (package_id, package_name, 
+              json.dumps(action_pattern), 
+              discoverer_agent_id, generation))
+        
+        # Discoverer is patient zero
+        self.infect_agent(discoverer_agent_id, package_id, generation)
+        
+        return package_id
+    
+    def create_pariah_from_failure(self, session_id: str, game_id: str,
+                                    agent_id: str, generation: int) -> str:
+        """
+        Create Pariah (negative pattern) from failed game attempt.
+        
+        Uses action_traces to understand WHERE the agent got stuck.
+        
+        KEY INSIGHT: With traces, we know:
+        - Agent tried actions [1,2,6,6,3]
+        - Scored 0.5 then got stuck
+        - This is a DEAD END pattern
+        """
+        
+        # Get action traces from failed game
+        traces = db.execute_query("""
+            SELECT action_number, coordinates, 
+                   score_before, score_after, score_change,
+                   frame_before, frame_after
+            FROM action_traces
+            WHERE session_id = ? AND game_id = ?
+            ORDER BY timestamp ASC
+        """, (session_id, game_id))
+        
+        if not traces:
+            return None
+        
+        # Analyze failure pattern
+        failure_analysis = self._analyze_failure_pattern(traces)
+        
+        # Check if similar pariah already exists
+        similar_pariah = self._find_similar_pariah(
+            failure_analysis['action_sequence'],
+            game_id
+        )
+        
+        if similar_pariah:
+            # Update existing pariah with more evidence
+            db.execute_query("""
+                UPDATE pariahs
+                SET confirmed_failure_count = confirmed_failure_count + 1,
+                    last_encountered = ?
+                WHERE pariah_id = ?
+            """, (datetime.now().isoformat(), similar_pariah))
+            return similar_pariah
+        
+        # Create new pariah
+        pariah_id = f"pariah_{uuid.uuid4().hex[:16]}"
+        pariah_name = self._generate_pariah_name(failure_analysis)
+        
+        db.execute_query("""
+            INSERT INTO pariahs
+            (pariah_id, pariah_name, pariah_description,
+             discovered_by_agent, discovery_generation, game_id,
+             failure_action_sequence, failure_coordinates, failure_context,
+             avg_score_before_failure, failure_severity)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (pariah_id, pariah_name,
+              failure_analysis['description'],
+              agent_id, generation, game_id,
+              json.dumps(failure_analysis['action_sequence']),
+              json.dumps(failure_analysis['coordinates']),
+              json.dumps(failure_analysis['context']),
+              failure_analysis['avg_score'],
+              failure_analysis['severity']))
+        
+        # Discoverer gains awareness (learned the hard way)
+        self.make_agent_aware(agent_id, pariah_id, generation, 
+                              learned_from_failure=True)
+        
+        return pariah_id
+    
+    def _analyze_failure_pattern(self, traces: List[Dict]) -> Dict:
+        """
+        Extract failure pattern from action traces.
+        
+        Returns:
+            {
+                'action_sequence': [1, 2, 6, 6, 3],
+                'coordinates': [(5,3), (5,4), ...],
+                'context': {'grid_size': 'small', 'got_stuck_after': 5},
+                'avg_score': 0.5,
+                'severity': 0.8  # High severity = scored then completely stalled
+            }
+        """
+        
+        actions = [t['action_number'] for t in traces]
+        coordinates = [
+            json.loads(t['coordinates']) 
+            for t in traces 
+            if t['coordinates']
+        ]
+        
+        # Find where agent got stuck (repeated actions with no score change)
+        stuck_point = None
+        for i in range(len(traces) - 3):
+            if all(t['score_change'] == 0 for t in traces[i:i+3]):
+                stuck_point = i
+                break
+        
+        # Calculate severity (did they score then get stuck? = high severity)
+        max_score = max(t['score_after'] for t in traces)
+        final_score = traces[-1]['score_after']
+        severity = 1.0 if (max_score > 0 and final_score < max_score * 1.5) else 0.5
+        
+        return {
+            'action_sequence': actions,
+            'coordinates': coordinates,
+            'context': {
+                'stuck_at_action': stuck_point,
+                'total_actions': len(actions),
+                'max_score_reached': max_score
+            },
+            'avg_score': final_score,
+            'severity': severity,
+            'description': f"Dead end: actions {actions[:stuck_point+3]} led to stall"
+        }
+    
+    def _extract_action_pattern(self, scoring_actions: List[Dict]) -> Dict:
+        """
+        Extract pattern from actions that actually scored.
+        
+        Returns package-worthy pattern:
+            {
+                'key_actions': [6, 6, 6],  # Actions that scored
+                'key_coordinates': [(5,3), (6,3), (7,3)],
+                'score_progression': [1.0, 1.0, 1.0],
+                'pattern_type': 'coordinate_sequence'
+            }
+        """
+        
+        if not scoring_actions:
+            return {'pattern_type': 'unknown'}
+        
+        actions = [a['action_number'] for a in scoring_actions]
+        coordinates = [
+            json.loads(a['coordinates']) 
+            for a in scoring_actions 
+            if a['coordinates']
+        ]
+        scores = [a['score_change'] for a in scoring_actions]
+        
+        # Detect pattern type
+        if len(set(actions)) == 1:
+            pattern_type = f"action{actions[0]}_focused"
+        elif coordinates and self._is_linear_sequence(coordinates):
+            pattern_type = "linear_progression"
+        elif coordinates and self._is_radial_pattern(coordinates):
+            pattern_type = "radial_expansion"
+        else:
+            pattern_type = "mixed_strategy"
+        
+        return {
+            'key_actions': actions,
+            'key_coordinates': coordinates,
+            'score_progression': scores,
+            'pattern_type': pattern_type,
+            'total_score': sum(scores)
+        }
+    
+    def infect_agent(self, agent_id: str, package_id: str, generation: int,
+                     infected_by: str = None):
+        """Agent becomes infected with viral package."""
+        
+        db.execute_query("""
+            INSERT OR REPLACE INTO agent_viral_infections
+            (agent_id, package_id, infection_generation, infected_by_agent)
+            VALUES (?, ?, ?, ?)
+        """, (agent_id, package_id, generation, infected_by))
+        
+        db.execute_query("""
+            UPDATE viral_information_packages
+            SET agent_infection_count = agent_infection_count + 1
+            WHERE package_id = ?
+        """, (package_id,))
+    
+    def make_agent_aware(self, agent_id: str, pariah_id: str, generation: int,
+                         learned_from_failure: bool = False,
+                         learned_from_agent: str = None):
+        """Agent becomes aware of failure pattern (gains immunity)."""
+        
+        db.execute_query("""
+            INSERT OR REPLACE INTO agent_pariah_awareness
+            (agent_id, pariah_id, awareness_generation,
+             learned_from_failure, learned_from_agent, confidence)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (agent_id, pariah_id, generation,
+              learned_from_failure, learned_from_agent,
+              1.0 if learned_from_failure else 0.7))  # Higher confidence if learned firsthand
+        
+        db.execute_query("""
+            UPDATE pariahs
+            SET agent_awareness_count = agent_awareness_count + 1
+            WHERE pariah_id = ?
+        """, (pariah_id,))
+```
+
+#### 3.3 Integration with Core Gameplay
     
     def create_meme_from_pattern(self, pattern_tags: List[str], 
                                   discoverer_agent_id: str,
@@ -1511,15 +1884,372 @@ class CulturalEngine:
             """, (success_rate, success_rate * 2.0 - 1.0, meme_id))
 ```
 
-#### 3.3 Meme Transmission (Teaching)
+#### 3.3 Integration with Core Gameplay
+
+**File**: `core_gameplay.py`
+
 ```python
-def transmit_meme_to_offspring(parent_agent_id: str, 
-                               offspring_agent_id: str,
-                               generation: int):
+def end_game_session(self, game_id: str, final_state: dict):
     """
-    Offspring learns memes from parent (cultural inheritance).
+    End game and extract viral packages + pariahs.
     
-    This is SEPARATE from genetic/epigenetic inheritance!
+    CRITICAL: This runs AFTER every game, automatically.
+    """
+    # ... existing game end logic ...
+    
+    # === VIRAL PACKAGE & PARIAH EXTRACTION ===
+    from viral_package_engine import ViralPackageEngine
+    
+    vp_engine = ViralPackageEngine(self.db)
+    
+    # If game was won, create viral package from winning sequence
+    if game_won:
+        sequence_id = final_state.get('sequence_id')
+        if sequence_id:
+            package_id = vp_engine.create_package_from_winning_sequence(
+                sequence_id, agent_id, current_generation
+            )
+            self.logger.info(f"✅ Created viral package {package_id} from winning sequence")
+    
+    # If game was failed (score < threshold), create pariah
+    elif final_score < win_threshold * 0.8:  # Failed significantly
+        pariah_id = vp_engine.create_pariah_from_failure(
+            session_id, game_id, agent_id, current_generation
+        )
+        if pariah_id:
+            self.logger.warning(f"⚠️ Created pariah {pariah_id} from failure pattern")
+            
+            # Spread pariah awareness to related agents (horizontal transmission)
+            self._spread_pariah_awareness(agent_id, pariah_id, current_generation)
+    
+    # ... rest of end game logic ...
+
+def _spread_pariah_awareness(self, discoverer_id: str, pariah_id: str, generation: int):
+    """
+    Spread pariah awareness to network (immune system response).
+    
+    When one agent discovers a failure, warn related agents.
+    """
+    vp_engine = ViralPackageEngine(self.db)
+    
+    # Get agents in same "family" (share breeding history)
+    related_agents = self.db.execute_query("""
+        SELECT DISTINCT agent_id FROM agents
+        WHERE agent_id IN (
+            SELECT parent1_id FROM agents WHERE agent_id = ?
+            UNION
+            SELECT parent2_id FROM agents WHERE agent_id = ?
+            UNION
+            SELECT agent_id FROM agents 
+            WHERE parent1_id = ? OR parent2_id = ?
+        )
+        AND agent_id != ?
+        AND is_active = TRUE
+    """, (discoverer_id, discoverer_id, discoverer_id, discoverer_id, discoverer_id))
+    
+    # Spread awareness with 30% probability (not everyone learns)
+    for agent in related_agents:
+        if random.random() < 0.3:  # 30% transmission rate
+            vp_engine.make_agent_aware(
+                agent['agent_id'], pariah_id, generation,
+                learned_from_agent=discoverer_id
+            )
+
+def select_action_with_viral_influence(self, agent_id: str, game_state: GameState) -> str:
+    """
+    Select action influenced by viral packages AND pariah avoidance.
+    
+    BIDIRECTIONAL EVOLUTION:
+    - Viral packages ATTRACT toward successful patterns
+    - Pariahs REPEL away from failure patterns
+    """
+    
+    # Get agent's viral infections (positive patterns)
+    infections = self.db.execute_query("""
+        SELECT vi.package_id, vi.expression_priority, vi.success_count, vi.failure_count,
+               vp.package_description
+        FROM agent_viral_infections vi
+        JOIN viral_information_packages vp ON vi.package_id = vp.package_id
+        WHERE vi.agent_id = ? AND vp.is_extinct = FALSE
+        ORDER BY vi.expression_priority DESC
+    """, (agent_id,))
+    
+    # Get agent's pariah awareness (negative patterns)
+    pariahs = self.db.execute_query("""
+        SELECT pa.pariah_id, pa.confidence, pa.memory_strength,
+               p.failure_action_sequence, p.failure_coordinates, p.failure_severity
+        FROM agent_pariah_awareness pa
+        JOIN pariahs p ON pa.pariah_id = p.pariah_id
+        WHERE pa.agent_id = ? AND p.is_obsolete = FALSE
+        AND pa.memory_strength > 0.3  -- Only strong memories
+        ORDER BY pa.confidence DESC
+    """, (agent_id,))
+    
+    # Build action weights (1.0 = baseline)
+    action_weights = {str(i): 1.0 for i in range(1, 8)}
+    
+    # POSITIVE INFLUENCE: Viral packages increase action weights
+    for infection in infections:
+        pattern = json.loads(infection['package_description'])
+        key_actions = pattern.get('key_actions', [])
+        
+        for action in key_actions:
+            action_str = str(action)
+            # Boost weight based on package success rate and expression priority
+            success_rate = infection['success_count'] / max(1, infection['success_count'] + infection['failure_count'])
+            boost = infection['expression_priority'] * (1 + success_rate)
+            action_weights[action_str] *= (1 + boost * 0.3)  # Up to +30% boost
+    
+    # NEGATIVE INFLUENCE: Pariahs decrease action weights
+    for pariah in pariahs:
+        failure_actions = json.loads(pariah['failure_action_sequence'])
+        
+        for action in failure_actions:
+            action_str = str(action)
+            # Reduce weight based on confidence and severity
+            penalty = pariah['confidence'] * pariah['memory_strength'] * pariah['failure_severity']
+            action_weights[action_str] *= (1 - penalty * 0.5)  # Up to -50% penalty
+    
+    # Normalize weights
+    total_weight = sum(action_weights.values())
+    action_probs = {k: v/total_weight for k, v in action_weights.items()}
+    
+    # Weighted random selection
+    return self._weighted_action_selection(action_probs, game_state)
+
+def check_pariah_triggered(self, agent_id: str, game_id: str, recent_actions: List[int],
+                           recent_coordinates: List[Tuple[int, int]]) -> Optional[str]:
+    """
+    Check if agent is about to trigger a known pariah (failure pattern).
+    
+    Returns pariah_id if triggered, None otherwise.
+    """
+    
+    # Get agent's known pariahs
+    pariahs = self.db.execute_query("""
+        SELECT pa.pariah_id, p.failure_action_sequence, p.failure_coordinates
+        FROM agent_pariah_awareness pa
+        JOIN pariahs p ON pa.pariah_id = p.pariah_id
+        WHERE pa.agent_id = ? AND p.game_id = ?
+        AND pa.memory_strength > 0.5
+    """, (agent_id, game_id))
+    
+    for pariah in pariahs:
+        failure_actions = json.loads(pariah['failure_action_sequence'])
+        
+        # Check if recent actions match failure pattern (first N actions)
+        match_length = min(len(recent_actions), len(failure_actions))
+        if recent_actions[-match_length:] == failure_actions[:match_length]:
+            # Pattern match! Agent is repeating a known failure
+            
+            # Update avoidance tracking
+            self.db.execute_query("""
+                UPDATE agent_pariah_awareness
+                SET times_triggered = times_triggered + 1
+                WHERE agent_id = ? AND pariah_id = ?
+            """, (agent_id, pariah['pariah_id']))
+            
+            return pariah['pariah_id']
+    
+    return None
+```
+
+#### 3.4 Viral Package & Pariah Evolution
+
+**Package Mutation**: Successful packages spawn variants
+```python
+def mutate_viral_package(self, parent_package_id: str, generation: int) -> str:
+    """
+    Create mutant variant of successful package.
+    
+    Example: "action6_focused" → "action6_focused_with_repetition"
+    """
+    parent = self.db.execute_query("""
+        SELECT * FROM viral_information_packages WHERE package_id = ?
+    """, (parent_package_id,))[0]
+    
+    pattern = json.loads(parent['package_description'])
+    mutated_pattern = self._apply_pattern_mutation(pattern)
+    
+    child_id = f"vpkg_{uuid.uuid4().hex[:16]}"
+    
+    self.db.execute_query("""
+        INSERT INTO viral_information_packages
+        (package_id, package_name, package_description,
+         parent_package_id, discovery_generation, mutation_count)
+        VALUES (?, ?, ?, ?, ?, 1)
+    """, (child_id, f"{parent['package_name']}_v2",
+          json.dumps(mutated_pattern), parent_package_id, generation))
+    
+    return child_id
+```
+
+**Pariah Obsolescence**: Failed patterns become irrelevant when games change
+```python
+def check_pariah_obsolescence(self, generation: int):
+    """
+    Mark pariahs as obsolete if they haven't been encountered in 20+ generations.
+    
+    Games evolve, old failure patterns may no longer apply.
+    """
+    
+    self.db.execute_query("""
+        UPDATE pariahs
+        SET is_obsolete = TRUE
+        WHERE last_encountered < datetime('now', '-20 generations')
+        AND is_obsolete = FALSE
+    """)
+```
+
+#### 3.5 Why This Justifies Keeping action_traces (Selective Retention)
+
+**The Case for Keeping Score-Changing Traces**:
+
+With Pariahs + Viral Packages, `action_traces` become **essential** for:
+
+1. **Precise Reward Attribution** (Viral Packages):
+   - **Without traces**: "Sequence [1,2,6,6,3] scored 10 points"
+   - **With traces**: "Action 6 at (5,3) scored +1.0, action 6 at (6,3) scored +1.0"
+   - **Value**: Know EXACTLY which actions work, create accurate viral packages
+
+2. **Failure Pattern Extraction** (Pariahs):
+   - **Without traces**: "Agent failed with score 0.5"
+   - **With traces**: "Agent did [1,2,6,6,3], scored 0.5, then got stuck at action 6"
+   - **Value**: Know WHERE agent got stuck, avoid dead ends
+
+3. **Package Effectiveness Tracking**:
+   - Track which actions in a viral package actually contribute to score
+   - Refine packages by removing non-scoring actions
+   - Measure package fitness based on score progression
+
+**Recommendation: Keep Only Score-Changing Traces** (Option 2 from earlier)
+
+```sql
+-- Keep only traces with score changes (2,477 traces = ~9 MB)
+DELETE FROM action_traces WHERE score_change = 0;
+VACUUM;
+```
+
+**Why This Works**:
+- ✅ Keeps all reward attribution data (every scoring action preserved)
+- ✅ Enables precise viral package creation
+- ✅ Maintains failure checkpoints (where score stopped increasing)
+- ✅ Reduces database from 9.1 GB to ~20 MB
+- ✅ Still allows pariah creation (failed games have final trace showing stuck point)
+
+**What We Lose**:
+- ❌ Frame-by-frame progression (but winning_sequences has initial/final frames)
+- ❌ Zero-score action exploration patterns (but less valuable for learning)
+
+**What We Keep**:
+- ✅ Every action that scored points (viral package extraction)
+- ✅ Final state of failed games (pariah creation)
+- ✅ Credit assignment for sequence effectiveness
+
+**Net Result**: ~6.5 GB freed, critical learning data preserved for Phase 3.
+
+---
+
+#### 3.6 Pariah & Package Dashboard
+
+```python
+def display_viral_ecosystem_dashboard(generation: int):
+    """
+    Display the viral package and pariah ecosystem.
+    
+    Shows BIDIRECTIONAL evolution: what works + what fails.
+    """
+    db = DatabaseInterface()
+    
+    print("=" * 80)
+    print("🦠 VIRAL ECOSYSTEM DASHBOARD")
+    print("=" * 80)
+    print(f"Generation: {generation}")
+    print()
+    
+    # VIRAL PACKAGES (Positive Selection)
+    packages = db.execute_query("""
+        SELECT package_id, package_name, agent_infection_count,
+               host_success_rate, viral_fitness, is_extinct
+        FROM viral_information_packages
+        WHERE is_extinct = FALSE
+        ORDER BY viral_fitness DESC
+        LIMIT 10
+    """)
+    
+    print("🦠 VIRAL PACKAGES (Successful Patterns)")
+    print(f"  Total Active: {len(packages)}")
+    for pkg in packages[:5]:
+        print(f"  • {pkg['package_name']}")
+        print(f"    Infections: {pkg['agent_infection_count']} agents")
+        print(f"    Success Rate: {pkg['host_success_rate']:.1%}")
+        print(f"    Viral Fitness: {pkg['viral_fitness']:.2f}")
+    print()
+    
+    # PARIAHS (Negative Selection)
+    pariahs = db.execute_query("""
+        SELECT pariah_id, pariah_name, agent_awareness_count,
+               confirmed_failure_count, reliability, failure_severity
+        FROM pariahs
+        WHERE is_obsolete = FALSE
+        ORDER BY agent_awareness_count DESC
+        LIMIT 10
+    """)
+    
+    print("☠️ PARIAHS (Failure Patterns / Network Immunity)")
+    print(f"  Total Active: {len(pariahs)}")
+    for pariah in pariahs[:5]:
+        print(f"  • {pariah['pariah_name']}")
+        print(f"    Awareness: {pariah['agent_awareness_count']} agents warned")
+        print(f"    Failed: {pariah['confirmed_failure_count']} times")
+        print(f"    Reliability: {pariah['reliability']:.1%}")
+        print(f"    Severity: {'🔴 HIGH' if pariah['failure_severity'] > 0.7 else '🟡 MEDIUM'}")
+    print()
+    
+    # INFECTION STATISTICS
+    infection_stats = db.execute_query("""
+        SELECT 
+            COUNT(DISTINCT agent_id) as infected_agents,
+            COUNT(DISTINCT package_id) as unique_packages,
+            AVG(times_expressed) as avg_expression,
+            AVG(success_count * 1.0 / NULLIF(success_count + failure_count, 0)) as avg_success
+        FROM agent_viral_infections
+    """)[0]
+    
+    awareness_stats = db.execute_query("""
+        SELECT
+            COUNT(DISTINCT agent_id) as aware_agents,
+            COUNT(DISTINCT pariah_id) as unique_pariahs,
+            AVG(times_avoided) as avg_avoidance,
+            AVG(avoidance_success_rate) as avg_avoidance_success
+        FROM agent_pariah_awareness
+    """)[0]
+    
+    print("📊 ECOSYSTEM METRICS")
+    print(f"  Viral Infections: {infection_stats['infected_agents']} agents")
+    print(f"  Unique Packages: {infection_stats['unique_packages']}")
+    print(f"  Avg Package Success: {infection_stats['avg_success']:.1%}")
+    print()
+    print(f"  Pariah Awareness: {awareness_stats['aware_agents']} agents")
+    print(f"  Unique Pariahs: {awareness_stats['unique_pariahs']}")
+    print(f"  Avg Avoidance Success: {awareness_stats['avg_avoidance_success']:.1%}")
+    print()
+    
+    # BIDIRECTIONAL PRESSURE
+    total_agents = db.execute_query("SELECT COUNT(*) as c FROM agents WHERE is_active = TRUE")[0]['c']
+    package_coverage = (infection_stats['infected_agents'] / total_agents * 100) if total_agents > 0 else 0
+    pariah_coverage = (awareness_stats['aware_agents'] / total_agents * 100) if total_agents > 0 else 0
+    
+    print("⚖️ BIDIRECTIONAL SELECTION PRESSURE")
+    print(f"  Positive Selection (Viral Packages): {package_coverage:.1f}% of population")
+    print(f"  Negative Selection (Pariahs): {pariah_coverage:.1f}% of population")
+    print()
+    print("  🎯 GOAL: High package coverage + high pariah coverage = fast learning")
+    print("         (Agents know what works AND what fails)")
+    print("=" * 80)
+```
+
+---
     """
     
     # Get parent's successful memes
@@ -2660,16 +3390,18 @@ Your system is complex enough that bugs will **cascade**.
 - [ ] Implement `network_intelligence_engine.py`
 - [ ] Add network health dashboard
 - [ ] Integrate with evolution runner (capture snapshots each generation)
-- [ ] **Mindset shift**: Start thinking "How is the NETWORK doing?" not "How are agents doing?"
+- [x] **Mindset shift**: Start thinking "How is the NETWORK doing?" not "How are agents doing?"
 
-### Phase 1: Network Contribution Prestige (Week 2-3) **[UPDATED]**
-- [ ] Add prestige columns to agents table (discovery_prestige, network_enrichment_score, etc.)
-- [ ] Create `agent_discoveries` table with network contribution metrics
-- [ ] Create `agent_validation_performance` table
-- [ ] Implement prestige calculation (network contribution formula)
-- [ ] Add prestige STATUS benefits (breeding_priority, survival_protection, bonus_game_slots)
-- [ ] Display prestige leaderboard emphasizing network contribution
-- [ ] **Key difference**: Prestige = network enrichment, not personal achievement
+### Phase 1: Network Contribution Prestige (Week 2-3) **[COMPLETED]**
+- [x] Add prestige columns to agents table (discovery_prestige, network_enrichment_score, etc.)
+- [x] Create `agent_discoveries` table with network contribution metrics
+- [x] Create `agent_validation_performance` table
+- [x] Implement prestige calculation (network contribution formula)
+- [x] Add prestige STATUS benefits (breeding_priority, survival_protection, bonus_game_slots)
+- [x] Display prestige leaderboard emphasizing network contribution
+- [x] **Integration**: Added to `autonomous_evolution_runner.py` after each generation
+- [x] **Testing**: Run `python trigger_prestige_calculation.py` to verify
+- [x] **Key difference**: Prestige = network enrichment, not personal achievement
 
 ### Phase 2: Ecosystem Metabolism (Week 4-5) **[UPDATED]**
 - [ ] Extend `adaptive_action_limits.py` for per-agent budgets
@@ -2689,15 +3421,68 @@ Your system is complex enough that bugs will **cascade**.
 - [ ] Integrate with core gameplay (post-game recombination phase)
 - [ ] **Key insight**: Combinatorial exploration, not just random mutation
 
-### Phase 3: Viral Information Packages (Week 7-8) **[UPDATED]**
-- [ ] Create `viral_information_packages` table (renamed from cultural_memes)
-- [ ] Create `agent_viral_infections` table (renamed from agent_meme_adoption)
-- [ ] Create `viral_package_interactions` table
-- [ ] Implement viral package creation from patterns
-- [ ] Add infection/transmission mechanics (horizontal & vertical)
-- [ ] Integrate packages with action selection
-- [ ] Display viral package evolution and spread
-- [ ] **Key difference**: Think "viral infection" not "cultural adoption"
+### Phase 3: Viral Packages & Pariahs (Week 7-8) **[UPDATED - NOW INCLUDES PARIAHS]**
+- [ ] **Database Setup**:
+  - [ ] Create `viral_information_packages` table
+  - [ ] Create `agent_viral_infections` table
+  - [ ] Create `viral_package_interactions` table
+  - [ ] Create `pariahs` table (NEW - negative patterns)
+  - [ ] Create `agent_pariah_awareness` table (NEW - failure immunity)
+  - [ ] Create `pariah_package_interactions` table (NEW - protective/causative relationships)
+
+- [ ] **Cleanup action_traces for Phase 3** (DECISION POINT):
+  - [ ] **Option A**: Keep only score-changing traces (2,477 traces → ~9 MB)
+    - Enables precise reward attribution for viral packages
+    - Maintains failure checkpoints for pariah creation
+    - Frees ~6.5 GB database space
+  - [ ] **Option B**: Delete all traces after extracting current data
+    - Extract all existing score progressions first
+    - Pre-populate pariahs from existing failed games
+    - Future viral packages rely on winning_sequences only
+  - [ ] Run `DELETE FROM action_traces WHERE score_change = 0; VACUUM;`
+
+- [ ] **Viral Package System**:
+  - [ ] Implement `viral_package_engine.py`
+  - [ ] Add `create_package_from_winning_sequence()` using action_traces
+  - [ ] Add package mutation/evolution logic
+  - [ ] Add infection/transmission mechanics (horizontal & vertical)
+  - [ ] Integrate packages with action selection (positive influence)
+
+- [ ] **Pariah System** (NEW):
+  - [ ] Add `create_pariah_from_failure()` using action_traces
+  - [ ] Implement failure pattern extraction (`_analyze_failure_pattern()`)
+  - [ ] Add pariah awareness spreading (immune system response)
+  - [ ] Integrate pariahs with action selection (negative influence - avoidance)
+  - [ ] Add pariah obsolescence checking (old failures become irrelevant)
+
+- [ ] **Bidirectional Action Selection**:
+  - [ ] Modify `select_action_with_viral_influence()` to include both:
+    - Viral packages: ATTRACT toward successful patterns (+boost)
+    - Pariahs: REPEL away from failure patterns (-penalty)
+  - [ ] Add `check_pariah_triggered()` to detect when agent repeats known failures
+
+- [ ] **Integration with Core Gameplay**:
+  - [ ] Auto-extract viral packages from winning sequences (post-game)
+  - [ ] Auto-extract pariahs from failed games (post-game)
+  - [ ] Spread pariah awareness to related agents (horizontal transmission)
+
+- [ ] **Dashboard & Monitoring**:
+  - [ ] Display viral ecosystem dashboard (packages + pariahs)
+  - [ ] Show bidirectional selection pressure metrics
+  - [ ] Track package infection rate and pariah awareness rate
+  
+- [ ] **Testing**:
+  - [ ] Verify viral packages created from wins
+  - [ ] Verify pariahs created from failures
+  - [ ] Confirm agents avoid known pariahs
+  - [ ] Confirm agents prefer viral package actions
+  - [ ] Observe network immunity (pariah coverage) increase over generations
+
+- [ ] **Key insights**: 
+  - Viral packages = positive selection (what works)
+  - Pariahs = negative selection (what fails)
+  - Together = bidirectional evolution (faster learning)
+  - action_traces enable BOTH through precise credit assignment
 
 ### Phase 4: Distributed Regulation (Week 9-10) **[UPDATED]**
 - [ ] Create `network_regulatory_signals` table (renamed from governance_proposals)
@@ -2737,7 +3522,18 @@ Your system is complex enough that bugs will **cascade**.
 - [ ] Top 20% agents contribute 60%+ of network enrichment (not just personal performance)
 - [ ] At least 10 distinct viral packages propagating
 - [ ] Viral package infection rate > 60%
+- [ ] **NEW - Pariahs**: At least 5 distinct failure patterns (pariahs) identified
+- [ ] **NEW - Pariahs**: Pariah awareness rate > 50% (half of agents know failure patterns)
+- [ ] **NEW - Pariahs**: Avoidance success rate > 70% (aware agents successfully avoid pariahs)
 - [ ] 5+ regulatory signals implemented per 10 generations (emergent parameter adjustments)
+
+### Level 4.5 Achievement Indicators (Bidirectional Selection) **[NEW]**
+- [ ] Agents with both viral infections AND pariah awareness > 40% of population
+- [ ] Package-guided actions show 20%+ higher success rate than random
+- [ ] Pariah-avoiding agents show 30%+ lower failure rate than unaware agents
+- [ ] Protective packages identified (packages that prevent pariah triggers)
+- [ ] Causative packages identified (packages that increase pariah risk)
+- [ ] Network learning speed: Time to solve new game decreases by 25%+ (due to bidirectional learning)
 
 ### Level 5 Achievement Indicators (Horizontal Transfer)
 - [ ] 40%+ of knowledge transfer via horizontal transfer (not inheritance)

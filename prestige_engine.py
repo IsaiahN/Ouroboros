@@ -297,7 +297,8 @@ class PrestigeEngine:
             
             # Calculate prestige for all agents
             agent_prestige_list = []
-            for (agent_id,) in agents:
+            for agent in agents:
+                agent_id = agent['agent_id']
                 prestige = self.calculate_agent_prestige(agent_id, current_generation)
                 agent_prestige_list.append((agent_id, prestige))
             

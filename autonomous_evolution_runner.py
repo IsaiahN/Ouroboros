@@ -44,6 +44,7 @@ from arc_rlvr_framework import ARCRLVRFramework
 from core_gameplay import GameplayEngine
 from adaptive_action_limits import AdaptiveActionLimits
 from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
+from prestige_engine import PrestigeEngine, display_prestige_leaderboard
 
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
@@ -93,6 +94,7 @@ class AutonomousEvolutionRunner:
         self.factory = AgentFactory(self.db)
         self.adaptive_limits = AdaptiveActionLimits(self.db)  # Adaptive action limit manager
         self.network_intelligence = NetworkIntelligenceEngine(self.db)  # Network health tracking
+        self.prestige_engine = PrestigeEngine(self.db)  # PHASE 1: Network contribution prestige
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -815,6 +817,21 @@ class AutonomousEvolutionRunner:
                 
             except Exception as e:
                 print(f"[WARN]️  Network snapshot failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # PHASE 1: UPDATE PRESTIGE & STATUS BENEFITS
+            print(f"\n[PRESTIGE] Calculating network contribution prestige for generation {self.current_generation}...")
+            try:
+                benefits_map = self.prestige_engine.update_all_agent_prestige(self.current_generation)
+                print(f"[OK] Updated prestige for {len(benefits_map)} agents")
+                
+                # Display top 5 prestige leaders
+                print()
+                display_prestige_leaderboard(self.db, limit=5)
+                
+            except Exception as e:
+                print(f"[WARN]️  Prestige calculation failed: {e}")
                 import traceback
                 traceback.print_exc()
             
