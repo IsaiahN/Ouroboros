@@ -17,6 +17,7 @@ from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime
 
 from database_interface import DatabaseInterface
+from prestige_engine import PrestigeEngine
 
 
 class KnowledgeRecombinationEngine:
@@ -36,6 +37,7 @@ class KnowledgeRecombinationEngine:
     
     def __init__(self, db: DatabaseInterface):
         self.db = db
+        self.prestige_engine = PrestigeEngine(db)
     
     def attempt_sequence_chain(
         self, 
@@ -65,12 +67,14 @@ class KnowledgeRecombinationEngine:
         """
         # Get both sequences
         seq_a_result = self.db.execute_query("""
-            SELECT sequence_id, action_sequence, total_score, total_actions, game_id
+            SELECT sequence_id, action_sequence, total_score, total_actions, 
+                   efficiency_score, game_id
             FROM winning_sequences WHERE sequence_id = ?
         """, (seq_a_id,))
         
         seq_b_result = self.db.execute_query("""
-            SELECT sequence_id, action_sequence, total_score, total_actions, game_id
+            SELECT sequence_id, action_sequence, total_score, total_actions,
+                   efficiency_score, game_id
             FROM winning_sequences WHERE sequence_id = ?
         """, (seq_b_id,))
         
@@ -96,6 +100,11 @@ class KnowledgeRecombinationEngine:
         
         # Calculate efficiency metrics
         parent_efficiency = (seq_a['total_score'] + seq_b['total_score']) / (seq_a['total_actions'] + seq_b['total_actions'])
+        parent_avg_efficiency = (seq_a.get('efficiency_score', 0) + seq_b.get('efficiency_score', 0)) / 2
+        
+        # Estimate combined efficiency (conservative: assume similar efficiency)
+        # This will be updated when the sequence is actually tested
+        estimated_combined_efficiency = parent_efficiency
         
         # For now, we'll mark this as an untested chain
         # The actual testing happens when agents try to USE this sequence
@@ -109,6 +118,8 @@ class KnowledgeRecombinationEngine:
             'combined_actions': combined_actions,
             'combined_length': len(combined_actions),
             'parent_efficiency': parent_efficiency,
+            'parent_avg_efficiency': parent_avg_efficiency,
+            'estimated_combined_efficiency': estimated_combined_efficiency,
             'discovery_agent': agent_id,
             'discovery_generation': generation
         }
@@ -163,6 +174,44 @@ class KnowledgeRecombinationEngine:
                 chain_result['discovery_generation'],
                 chain_result['parent_efficiency']
             ))
+        
+        # PRESTIGE REWARD: Give prestige for creating recombination
+        # This completes the viral evolution cycle with selection pressure
+        try:
+            parent_avg_efficiency = chain_result.get('parent_avg_efficiency', 0.0)
+            estimated_efficiency = chain_result.get('estimated_combined_efficiency', parent_avg_efficiency)
+            
+            # Base innovation value for recombination (higher than regular discovery)
+            innovation_value = 0.6  # Recombination is inherently innovative
+            
+            # Efficiency-based enrichment score
+            # Use 3.0 multiplier (vs 2.0 for regular sequences) to reward recombination
+            enrichment_score = estimated_efficiency * 3.0
+            
+            # Bonus for potentially efficient recombinations
+            # (Actual efficiency will be validated when used)
+            if estimated_efficiency > parent_avg_efficiency * 1.1:  # >10% estimated improvement
+                innovation_value = 0.8
+                enrichment_score = estimated_efficiency * 4.0
+            elif estimated_efficiency > parent_avg_efficiency:
+                innovation_value = 0.7
+                enrichment_score = estimated_efficiency * 3.5
+            
+            # Record the discovery for prestige tracking
+            self.prestige_engine.record_discovery(
+                agent_id=chain_result['discovery_agent'],
+                discovery_type='recombined_sequence',
+                sequence_id=chain_id,
+                innovation_value=innovation_value,
+                network_enrichment_score=enrichment_score
+            )
+            
+            # Log prestige reward
+            # Info: Awarded prestige for recombination
+            
+        except Exception as e:
+            # Warning: Failed to record prestige for recombination
+            pass
         
         # Info: Stored sequence chain combining parent sequences
         

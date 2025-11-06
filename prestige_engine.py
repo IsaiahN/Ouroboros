@@ -497,6 +497,43 @@ class PrestigeEngine:
                             f"{'SUCCESS' if success else 'FAILED'} "
                             f"(total uses: {new_uses}, success rate: {new_success_rate:.1%})"
                         )
+                        
+                        # BONUS: Extra prestige for validated recombinations
+                        # Check if this is a recombined sequence
+                        if success:
+                            recomb_check = self.db.execute_query("""
+                                SELECT sd.combined_efficiency, sd.parent_sequence_id
+                                FROM sequence_dependencies sd
+                                WHERE sd.child_sequence_id = ? AND sd.dependency_type = 'chain'
+                                LIMIT 1
+                            """, (sequence_id,))
+                            
+                            if recomb_check:
+                                # This is a validated recombination! Bonus prestige
+                                combined_efficiency = recomb_check[0].get('combined_efficiency', 0.0)
+                                
+                                # Extra innovation value for validated recombination
+                                bonus_innovation = 0.3  # Bonus on top of original
+                                bonus_enrichment = combined_efficiency * 1.5  # Validation bonus
+                                
+                                # Record bonus discovery for validated recombination
+                                bonus_discovery_id = f"disc_{uuid.uuid4().hex[:16]}"
+                                self.db.execute_query("""
+                                    INSERT INTO agent_discoveries (
+                                        discovery_id, agent_id, discovery_type,
+                                        sequence_id, innovation_value, 
+                                        network_enrichment_score, discovery_timestamp
+                                    ) VALUES (?, ?, 'validated_recombination', ?, ?, ?, ?)
+                                """, (
+                                    bonus_discovery_id, discoverer_id,
+                                    sequence_id, bonus_innovation, 
+                                    bonus_enrichment, datetime.now().isoformat()
+                                ))
+                                
+                                self.logger.info(
+                                    f"🧬 RECOMBINATION VALIDATED: Bonus prestige for {discoverer_id[:8]} - "
+                                    f"sequence {sequence_id[:8]} validated by {agent_id[:8]}"
+                                )
             
             self.logger.debug(
                 f"Recorded validation attempt for {agent_id}: "

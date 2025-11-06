@@ -29,6 +29,11 @@ class ActionHandler:
         self.last_score = 0.0
         self.visual_analyzer = VisualAnalyzer()  # Add visual analyzer
         
+        # Frame dimension tracking (expected 64x64 for ARC-AGI)
+        self.expected_frame_size = (64, 64)  # (height, width)
+        self.last_frame_size = None
+        self.frame_size_warnings = 0
+        
         # Action diversity tracking (similar to coordinate diversity)
         self.recent_actions = []  # Track last N actions
         self.max_action_history = 10
@@ -48,6 +53,59 @@ class ActionHandler:
         self.level_max_actions = 100  # Max actions per level (from config)
         self.spam_allowed_early = 10  # Allow up to 10 similar clicks early in level
         self.spam_allowed_late = 3   # Reduce to 3 similar clicks late in level
+
+    def _validate_frame_dimensions(self, frame: List[List[int]], context: str = "") -> bool:
+        """
+        Validate frame dimensions and check if they match expected 64x64.
+        Logs warnings if dimensions are unexpected.
+        
+        Args:
+            frame: Frame to validate
+            context: Context string for logging (e.g., "ACTION6 selection")
+            
+        Returns:
+            True if frame is valid (has data), False if corrupted/empty
+        """
+        if not frame:
+            logger.error(f"❌ FRAME CORRUPTION: Empty frame {context}")
+            return False
+        
+        if not frame[0]:
+            logger.error(f"❌ FRAME CORRUPTION: Frame has no columns {context}")
+            return False
+        
+        height = len(frame)
+        width = len(frame[0])
+        current_size = (height, width)
+        
+        # Check if dimensions changed
+        if self.last_frame_size and self.last_frame_size != current_size:
+            logger.warning(f"⚠️ FRAME DIMENSION CHANGE: {self.last_frame_size} → {current_size} {context}")
+            self.frame_size_warnings += 1
+        
+        # Check if dimensions are NOT the expected 64x64
+        if current_size != self.expected_frame_size:
+            logger.warning(
+                f"🔍 NON-STANDARD FRAME SIZE: {height}x{width} (expected {self.expected_frame_size[0]}x{self.expected_frame_size[1]}) {context}"
+            )
+            
+            # Double-check: verify frame structure is consistent
+            inconsistent_rows = []
+            for i, row in enumerate(frame):
+                if len(row) != width:
+                    inconsistent_rows.append((i, len(row)))
+            
+            if inconsistent_rows:
+                logger.error(f"❌ FRAME CORRUPTION: Inconsistent row widths at rows {inconsistent_rows[:5]} {context}")
+                return False
+            
+            # Non-standard but consistent - might be legitimate level variation
+            logger.info(f"✅ Frame structure consistent at {height}x{width}, continuing {context}")
+        
+        # Update tracking
+        self.last_frame_size = current_size
+        
+        return True
 
     def _validate_coordinates(self, x: int, y: int, frame: List[List[int]]) -> bool:
         """Validate that coordinates are within frame bounds.
@@ -303,6 +361,10 @@ class ActionHandler:
         Returns:
             New game state
         """
+        # Validate frame dimensions if provided
+        if frame:
+            self._validate_frame_dimensions(frame, context="at send_action_6")
+        
         # Validate coordinates if frame is provided
         if frame and not self._validate_coordinates(x, y, frame):
             logger.warning(f"Invalid coordinates ({x}, {y}) for frame size {len(frame)}x{len(frame[0]) if frame else 0}")
@@ -417,6 +479,12 @@ class ActionHandler:
         Returns:
             Tuple of (x, y, reason)
         """
+        # CRITICAL: Validate frame dimensions first
+        if not self._validate_frame_dimensions(frame, context="at get_smart_coordinates entry"):
+            logger.error("❌ Frame validation failed, falling back to safe coordinates")
+            # Return safe fallback coordinates
+            return 32, 32, "Fallback center (frame validation failed)"
+        
         if not frame or not frame[0]:
             raise ValueError("Invalid frame for coordinate generation")
 
@@ -457,8 +525,17 @@ class ActionHandler:
                     )
                     if combination_target:
                         x, y, reason = combination_target
-                        reason = f"Pseudo-button pathfinding: {reason}"
-                        logger.info(f"🎯 Pathfinding target: ({x}, {y})")
+                        # CRITICAL: Validate coordinates are within frame bounds
+                        if not self._validate_coordinates(x, y, frame):
+                            logger.warning(f"⚠️ Pathfinding target ({x}, {y}) outside frame bounds, using exploratory")
+                            x, y = self.visual_analyzer.get_exploratory_coordinates(
+                                frame,
+                                radius=self.visual_analyzer.exploration_radius
+                            )
+                            reason = "Exploratory (invalid pathfinding target)"
+                        else:
+                            reason = f"Pseudo-button pathfinding: {reason}"
+                            logger.info(f"🎯 Pathfinding target: ({x}, {y})")
                     else:
                         # Force wide exploration
                         self.visual_analyzer.exploration_radius = min(
@@ -478,6 +555,15 @@ class ActionHandler:
                 elif 'Productive spam' in diversity_check['reason'] or 'Productive oscillation' in diversity_check['reason']:
                     # Log productive spam/oscillation (frame is changing)
                     logger.info(f"✅ {diversity_check['reason']} at ({x}, {y})")
+                
+                # FINAL VALIDATION: Ensure coordinates are within bounds before returning
+                if not self._validate_coordinates(x, y, frame):
+                    logger.error(f"❌ Final validation failed: ({x}, {y}) outside bounds for frame {len(frame)}x{len(frame[0]) if frame else 0}")
+                    # Fallback to safe center coordinates
+                    x = len(frame[0]) // 2 if frame and frame[0] else 0
+                    y = len(frame) // 2 if frame else 0
+                    reason = "Fallback to center (validation failed)"
+                    logger.warning(f"⚠️ Using fallback coordinates: ({x}, {y})")
                 
                 # Mark this coordinate as clicked to avoid spamming
                 self.visual_analyzer.mark_coordinate_clicked(x, y)
