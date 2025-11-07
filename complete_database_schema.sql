@@ -1259,3 +1259,235 @@ ON recombination_attempts(game_id);
 ALTER TABLE agents ADD COLUMN recombination_discoveries INTEGER DEFAULT 0;
 ALTER TABLE agents ADD COLUMN successful_recombinations INTEGER DEFAULT 0;
 ALTER TABLE agents ADD COLUMN recombination_success_rate REAL DEFAULT 0.0;
+
+-- ============================================================================
+-- PHASE 3: VIRAL PACKAGES & PARIAHS (BIDIRECTIONAL EVOLUTION)
+-- Viral packages = positive selection (successful patterns that spread)
+-- Pariahs = negative selection (failure patterns to avoid)
+-- Together = accelerate evolution through bidirectional learning
+-- ============================================================================
+
+-- Viral information packages (successful patterns packaged as "viruses")
+-- Think: Gene sequences that carry successful strategies
+CREATE TABLE IF NOT EXISTS viral_information_packages (
+    package_id TEXT PRIMARY KEY,
+    package_name TEXT NOT NULL,
+    package_type TEXT NOT NULL,  -- 'action_sequence', 'coordinate_pattern', 'meta_strategy'
+    
+    -- Package content (what does this virus carry?)
+    action_sequence TEXT,  -- JSON array of action IDs (e.g., [1,2,6,6,3])
+    coordinate_pattern TEXT,  -- JSON array of (x,y) coordinates
+    meta_strategy_description TEXT,  -- High-level strategy description
+    
+    -- Package characteristics
+    virulence REAL DEFAULT 0.5,  -- How strongly does this influence host behavior? (0-1)
+    transmission_rate REAL DEFAULT 0.3,  -- How easily does this spread? (0-1)
+    mutation_rate REAL DEFAULT 0.05,  -- How stable is this package? (0-1)
+    
+    -- Package fitness (network-level evaluation)
+    success_rate REAL DEFAULT 0.0,  -- % of hosts that succeed using this
+    avg_score_contribution REAL DEFAULT 0.0,  -- Average score boost from this package
+    total_infections INTEGER DEFAULT 0,  -- How many agents carry this?
+    active_infections INTEGER DEFAULT 0,  -- How many currently active carriers?
+    
+    -- Origins and evolution
+    discovery_generation INTEGER NOT NULL,
+    source_sequence_id TEXT,  -- Original winning_sequence this came from
+    parent_package_id TEXT,  -- If this is a mutated variant
+    generation_discovered INTEGER NOT NULL,
+    
+    -- Lifecycle
+    is_active BOOLEAN DEFAULT TRUE,
+    obsolescence_score REAL DEFAULT 0.0,  -- Is this package becoming irrelevant?
+    last_successful_use_generation INTEGER,
+    
+    FOREIGN KEY (source_sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (parent_package_id) REFERENCES viral_information_packages(package_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_viral_packages_active ON viral_information_packages(is_active);
+CREATE INDEX IF NOT EXISTS idx_viral_packages_type ON viral_information_packages(package_type);
+CREATE INDEX IF NOT EXISTS idx_viral_packages_success ON viral_information_packages(success_rate DESC);
+
+-- Agent viral infections (which agents carry which packages)
+-- Think: Which hosts are infected with which viruses?
+CREATE TABLE IF NOT EXISTS agent_viral_infections (
+    agent_id TEXT NOT NULL,
+    package_id TEXT NOT NULL,
+    
+    -- Infection details
+    infection_generation INTEGER NOT NULL,
+    infection_source TEXT NOT NULL,  -- 'discovery', 'horizontal_transfer', 'inheritance', 'mutation'
+    infected_by_agent TEXT,  -- If horizontal transfer, who spread it?
+    
+    -- Infection strength (how much does host express this?)
+    infection_strength REAL DEFAULT 0.5,  -- 0-1, affects action selection weight
+    expression_level REAL DEFAULT 0.5,  -- 0-1, how actively is host using this?
+    
+    -- Host response to infection
+    success_count INTEGER DEFAULT 0,  -- Times this package helped host
+    failure_count INTEGER DEFAULT 0,  -- Times this package failed host
+    total_uses INTEGER DEFAULT 0,
+    avg_score_boost REAL DEFAULT 0.0,  -- Average score change when using
+    
+    -- Infection lifecycle
+    is_active BOOLEAN DEFAULT TRUE,
+    last_used_generation INTEGER,
+    immunity_developed BOOLEAN DEFAULT FALSE,  -- Host rejected this package?
+    
+    PRIMARY KEY (agent_id, package_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id),
+    FOREIGN KEY (infected_by_agent) REFERENCES agents(agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_infections_agent ON agent_viral_infections(agent_id);
+CREATE INDEX IF NOT EXISTS idx_infections_package ON agent_viral_infections(package_id);
+CREATE INDEX IF NOT EXISTS idx_infections_active ON agent_viral_infections(is_active);
+
+-- Viral package interactions (co-infection dynamics)
+-- Think: Do these viruses help or interfere with each other?
+CREATE TABLE IF NOT EXISTS viral_package_interactions (
+    package_a_id TEXT NOT NULL,
+    package_b_id TEXT NOT NULL,
+    
+    interaction_type TEXT NOT NULL,  -- 'synergistic', 'antagonistic', 'neutral'
+    interaction_strength REAL DEFAULT 0.0,  -- -1.0 (interfere) to +1.0 (synergy)
+    
+    -- Evidence
+    co_infection_count INTEGER DEFAULT 0,  -- Times both packages in same host
+    synergy_score_boost REAL DEFAULT 0.0,  -- Extra score when both present
+    observations INTEGER DEFAULT 0,
+    
+    PRIMARY KEY (package_a_id, package_b_id),
+    FOREIGN KEY (package_a_id) REFERENCES viral_information_packages(package_id),
+    FOREIGN KEY (package_b_id) REFERENCES viral_information_packages(package_id)
+);
+
+-- ============================================================================
+-- PARIAHS (Negative Patterns / Failure Antibodies)
+-- ============================================================================
+-- Pariahs are the "antibodies" of the network - patterns to AVOID
+-- Just as immune systems recognize pathogens, the network recognizes failures
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS pariahs (
+    pariah_id TEXT PRIMARY KEY,
+    pariah_name TEXT NOT NULL,
+    pariah_type TEXT NOT NULL,  -- 'action_sequence', 'coordinate_trap', 'strategy_failure'
+    
+    -- Failure pattern (what should agents avoid?)
+    action_sequence TEXT,  -- JSON array - this sequence leads to failure
+    coordinate_pattern TEXT,  -- JSON array - these coordinates are traps
+    failure_description TEXT,  -- Why does this fail?
+    
+    -- Pariah characteristics
+    toxicity REAL DEFAULT 0.5,  -- How harmful is this pattern? (0-1)
+    detection_difficulty REAL DEFAULT 0.3,  -- How hard to recognize? (0-1)
+    context_specificity REAL DEFAULT 0.5,  -- Game-specific or universal? (0-1)
+    
+    -- Pariah impact (network-level damage)
+    trigger_count INTEGER DEFAULT 0,  -- Times agents fell into this trap
+    avg_score_loss REAL DEFAULT 0.0,  -- Average score lost when triggered
+    total_awareness INTEGER DEFAULT 0,  -- How many agents know this?
+    active_awareness INTEGER DEFAULT 0,  -- How many actively avoid this?
+    
+    -- Origins
+    discovery_generation INTEGER NOT NULL,
+    source_game_id TEXT,  -- Game where this failure was discovered
+    source_agent_id TEXT,  -- Agent who discovered (failed)
+    parent_pariah_id TEXT,  -- If this is a variant of another failure
+    
+    -- Lifecycle
+    is_active BOOLEAN DEFAULT TRUE,
+    obsolescence_score REAL DEFAULT 0.0,  -- Is this pariah no longer relevant?
+    last_triggered_generation INTEGER,
+    avoidance_success_rate REAL DEFAULT 0.0,  -- % of aware agents who avoid
+    
+    FOREIGN KEY (source_agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (parent_pariah_id) REFERENCES pariahs(pariah_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pariahs_active ON pariahs(is_active);
+CREATE INDEX IF NOT EXISTS idx_pariahs_type ON pariahs(pariah_type);
+CREATE INDEX IF NOT EXISTS idx_pariahs_toxicity ON pariahs(toxicity DESC);
+
+-- Agent pariah awareness (network immunity)
+-- Think: Which agents have developed "antibodies" to which failures?
+CREATE TABLE IF NOT EXISTS agent_pariah_awareness (
+    agent_id TEXT NOT NULL,
+    pariah_id TEXT NOT NULL,
+    
+    -- Awareness details
+    awareness_generation INTEGER NOT NULL,
+    awareness_source TEXT NOT NULL,  -- 'self_discovery', 'horizontal_transfer', 'inheritance'
+    learned_from_agent TEXT,  -- If learned from another agent
+    
+    -- Awareness strength
+    awareness_level REAL DEFAULT 0.5,  -- 0-1, how well does agent recognize this?
+    avoidance_priority REAL DEFAULT 0.5,  -- 0-1, how strongly to avoid?
+    
+    -- Agent response to pariah
+    avoidance_success_count INTEGER DEFAULT 0,  -- Times agent avoided this
+    trigger_count INTEGER DEFAULT 0,  -- Times agent fell into trap despite awareness
+    total_encounters INTEGER DEFAULT 0,
+    avg_score_saved REAL DEFAULT 0.0,  -- Score saved by avoiding
+    
+    -- Awareness lifecycle
+    is_active BOOLEAN DEFAULT TRUE,
+    last_encountered_generation INTEGER,
+    false_positive_count INTEGER DEFAULT 0,  -- Times avoided when shouldn't have
+    
+    PRIMARY KEY (agent_id, pariah_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
+    FOREIGN KEY (learned_from_agent) REFERENCES agents(agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pariah_awareness_agent ON agent_pariah_awareness(agent_id);
+CREATE INDEX IF NOT EXISTS idx_pariah_awareness_pariah ON agent_pariah_awareness(pariah_id);
+CREATE INDEX IF NOT EXISTS idx_pariah_awareness_active ON agent_pariah_awareness(is_active);
+
+-- Pariah-Package interactions (protective/causative relationships)
+-- Think: Does this strategy protect against or cause this failure?
+CREATE TABLE IF NOT EXISTS pariah_package_interactions (
+    pariah_id TEXT NOT NULL,
+    package_id TEXT NOT NULL,
+    
+    interaction_type TEXT NOT NULL,  -- 'protective', 'causative', 'neutral'
+    interaction_strength REAL DEFAULT 0.0,  -- -1.0 (causes) to +1.0 (protects)
+    
+    -- Evidence
+    co_occurrence_count INTEGER DEFAULT 0,  -- Times package + pariah in same context
+    protection_score REAL DEFAULT 0.0,  -- Does package prevent pariah?
+    causation_score REAL DEFAULT 0.0,  -- Does package trigger pariah?
+    observations INTEGER DEFAULT 0,
+    
+    PRIMARY KEY (pariah_id, package_id),
+    FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
+    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id)
+);
+
+-- ============================================================================
+-- PHASE 3 SUMMARY
+-- ============================================================================
+-- Phase 3 implements bidirectional evolution:
+-- 
+-- VIRAL PACKAGES (Positive Selection):
+-- - Extract successful patterns from winning_sequences
+-- - Package as "information viruses" that spread horizontally
+-- - Agents infected with packages prefer those actions
+-- - Successful packages spread, failed packages die out
+-- 
+-- PARIAHS (Negative Selection):
+-- - Extract failure patterns from lost games
+-- - Mark as "toxic" patterns to avoid
+-- - Agents aware of pariahs actively avoid those actions
+-- - Network develops "herd immunity" to failures
+-- 
+-- TOGETHER:
+-- - Packages say "DO this" (positive guidance)
+-- - Pariahs say "DON'T do this" (negative guidance)
+-- - Bidirectional selection = faster evolution
+-- - Network learns both what works AND what fails
+-- ============================================================================

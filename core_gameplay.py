@@ -392,6 +392,93 @@ class GameplayEngine:
                 if recombinations:
                     results['recombinations_created'] = len(recombinations)
                     logger.info(f"🧬 Agent {agent_id[:8]} created {len(recombinations)} sequence recombinations")
+            
+            # PHASE 3: Viral Packages & Pariahs (AUTOMATIC - runs after EVERY game)
+            # Bidirectional evolution: extract success patterns AND failure patterns
+            if agent_id:
+                generation = self.game_config.get('generation', 0)
+                
+                # Import viral engine (lazy load to avoid circular dependencies)
+                from viral_package_engine import ViralPackageEngine
+                viral_engine = ViralPackageEngine(self.db)
+                
+                # If WIN: Create viral package from winning sequence
+                if results['win'] and results.get('learned_sequence_id'):
+                    package_id = viral_engine.create_viral_package_from_sequence(
+                        results['learned_sequence_id'],
+                        agent_id,
+                        generation
+                    )
+                    if package_id:
+                        results['viral_package_created'] = package_id
+                        logger.info(f"🦠 Created viral package {package_id[:12]} from winning sequence")
+                        
+                        # Spread to nearby agents (horizontal transfer opportunity)
+                        # Get 3 random other agents for potential infection
+                        nearby_agents = self.db.execute_query("""
+                            SELECT agent_id FROM agents 
+                            WHERE is_active = TRUE AND agent_id != ?
+                            ORDER BY RANDOM()
+                            LIMIT 3
+                        """, (agent_id,))
+                        
+                        spread_count = 0
+                        for target in nearby_agents:
+                            if viral_engine.spread_viral_package(package_id, agent_id, target['agent_id'], generation):
+                                spread_count += 1
+                        
+                        if spread_count > 0:
+                            logger.info(f"🦠 Viral package spread to {spread_count} agents")
+                
+                # If LOSS: Create pariah from failure pattern
+                elif not results['win'] and game_state.score < 1.0:
+                    # Get failed action sequence
+                    action_traces = self.db.execute_query("""
+                        SELECT action_number, coordinates
+                        FROM action_traces
+                        WHERE game_id = ? AND session_id = ?
+                        ORDER BY timestamp ASC
+                    """, (game_id, self.session_manager.current_session_id))
+                    
+                    if action_traces:
+                        failed_actions = [t['action_number'] for t in action_traces]
+                        failed_coords = []
+                        for t in action_traces:
+                            if t.get('coordinates'):
+                                try:
+                                    coord = json.loads(t['coordinates'])
+                                    failed_coords.append(tuple(coord))
+                                except:
+                                    pass
+                        
+                        pariah_id = viral_engine.create_pariah_from_failure(
+                            game_id,
+                            agent_id,
+                            failed_actions,
+                            failed_coords,
+                            game_state.score,
+                            generation
+                        )
+                        
+                        if pariah_id:
+                            results['pariah_created'] = pariah_id
+                            logger.info(f"☠️  Created pariah {pariah_id[:12]} from failure (score: {game_state.score:.2f})")
+                            
+                            # Spread awareness to nearby agents (horizontal transfer)
+                            nearby_agents = self.db.execute_query("""
+                                SELECT agent_id FROM agents 
+                                WHERE is_active = TRUE AND agent_id != ?
+                                ORDER BY RANDOM()
+                                LIMIT 3
+                            """, (agent_id,))
+                            
+                            aware_count = 0
+                            for target in nearby_agents:
+                                if viral_engine.spread_pariah_awareness(pariah_id, agent_id, target['agent_id'], generation):
+                                    aware_count += 1
+                            
+                            if aware_count > 0:
+                                logger.info(f"☠️  Pariah awareness spread to {aware_count} agents")
 
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
                        f"Actions: {action_count}, Levels Completed: {level_completions}/{current_level}")
@@ -412,7 +499,11 @@ class GameplayEngine:
     async def _select_action(self, game_state: GameState) -> str:
         """Select the next action to take.
         
-        Uses meta-learning to discover patterns before falling back to default strategy.
+        Uses:
+        1. PHASE 3: Viral package influence (prefer successful patterns)
+        2. PHASE 3: Pariah avoidance (avoid known failures)
+        3. Meta-learning pattern detection
+        4. Default strategy
 
         Args:
             game_state: Current game state
@@ -420,7 +511,31 @@ class GameplayEngine:
         Returns:
             Action to take
         """
-        # Try meta-learning pattern detection first
+        # PHASE 3: Get viral package and pariah influence
+        agent_id = self.game_config.get('agent_id')
+        action_weights = {}
+        action_penalties = {}
+        
+        if agent_id:
+            try:
+                from viral_package_engine import ViralPackageEngine
+                viral_engine = ViralPackageEngine(self.db)
+                
+                # Get positive influence from viral packages
+                action_weights = viral_engine.get_package_action_weights(agent_id)
+                
+                # Get negative influence from pariahs
+                action_penalties = viral_engine.get_pariah_action_penalties(agent_id)
+                
+                if action_weights:
+                    logger.debug(f"🦠 Viral packages suggest: {list(action_weights.keys())[:3]}")
+                if action_penalties:
+                    logger.debug(f"☠️  Pariahs warn against: {list(action_penalties.keys())[:3]}")
+                    
+            except Exception as e:
+                logger.debug(f"Phase 3 influence error: {e}")
+        
+        # Try meta-learning pattern detection
         if (self.game_config.get('enable_pattern_learning', True) and 
             game_state.frame is not None):
             
@@ -465,9 +580,43 @@ class GameplayEngine:
                 logger.info(f"🎯 Continuing pattern execution: ACTION6 at {next_action['coordinate']}")
                 return "ACTION6"
         
-        # Fall back to default action selection
+        # Fall back to default action selection WITH viral/pariah influence
         strategy = self.game_config.get('strategy', 'balanced')
-        return await self.action_handler.smart_action_selection(game_state, strategy)
+        base_action = await self.action_handler.smart_action_selection(game_state, strategy)
+        
+        # PHASE 3: Apply viral package / pariah influence to action selection
+        if action_weights or action_penalties:
+            # Convert base_action to int
+            action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
+            
+            # Calculate net influence
+            weight = action_weights.get(action_num, 0.0)
+            penalty = action_penalties.get(action_num, 0.0)
+            net_influence = weight - penalty
+            
+            # If net influence is strongly negative (pariah > package), try alternative
+            if net_influence < -0.3:
+                logger.info(f"☠️  Avoiding {base_action} (pariah warning: {penalty:.2f})")
+                
+                # Find best alternative action (highest weight, lowest penalty)
+                alternatives = []
+                for act_num in range(1, 8):  # ACTION1-ACTION7
+                    alt_weight = action_weights.get(act_num, 0.0)
+                    alt_penalty = action_penalties.get(act_num, 0.0)
+                    alternatives.append((act_num, alt_weight - alt_penalty))
+                
+                # Sort by net influence
+                alternatives.sort(key=lambda x: x[1], reverse=True)
+                
+                if alternatives and alternatives[0][1] > net_influence:
+                    best_alt = alternatives[0][0]
+                    logger.info(f"🦠 Switching to ACTION{best_alt} (viral package suggestion)")
+                    return f"ACTION{best_alt}"
+            
+            elif net_influence > 0.3:
+                logger.info(f"🦠 Reinforcing {base_action} (viral package boost: {weight:.2f})")
+        
+        return base_action
 
     async def _execute_action(self, action: str, game_state: GameState) -> GameState:
         """Execute an action.

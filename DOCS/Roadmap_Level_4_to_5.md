@@ -3403,25 +3403,35 @@ Your system is complex enough that bugs will **cascade**.
 - [x] **Testing**: Run `python trigger_prestige_calculation.py` to verify
 - [x] **Key difference**: Prestige = network enrichment, not personal achievement
 
-### Phase 2: Ecosystem Metabolism (Week 4-5) **[UPDATED]**
-- [ ] Extend `adaptive_action_limits.py` for per-agent budgets
-- [ ] Add action economy columns to agents table
-- [ ] Implement `calculate_agent_salary()` (metabolic budget allocation)
-- [ ] Add `track_ecosystem_metabolism()` function
-- [ ] Display ecosystem metabolism report (network-level energy flow)
-- [ ] Integrate budget checks with game loop
-- [ ] **Key difference**: Track both individual budgets AND ecosystem health
+### Phase 2: Ecosystem Metabolism (Week 4-5) **[COMPLETED]**
+- [x] Extend `adaptive_action_limits.py` for per-agent budgets
+- [x] Add action economy columns to agents table
+- [x] Implement `calculate_agent_salary()` (metabolic budget allocation)
+- [x] Add `track_ecosystem_metabolism()` function
+- [x] Display ecosystem metabolism report (network-level energy flow)
+- [x] Integrate budget checks with game loop
+- [x] **Production Status**: 15,273 agents with action budgets (avg 387 per-level, 6518 total)
+- [x] **Key difference**: Track both individual budgets AND ecosystem health
+- [x] **Code Drift Check**: ✅ No conflicts with prestige system
 
-### Phase 2.5: Knowledge Recombination (Week 6) **[NEW]**
-- [ ] Create `sequence_dependencies` table
-- [ ] Create `pattern_synthesis` table
-- [ ] Implement `knowledge_recombination_engine.py`
-- [ ] Add sequence chaining logic
-- [ ] Add pattern synthesis logic
-- [ ] Integrate with core gameplay (post-game recombination phase)
-- [ ] **Key insight**: Combinatorial exploration, not just random mutation
+### Phase 2.5: Knowledge Recombination (Week 6) **[COMPLETED]**
+- [x] Create `sequence_dependencies` table
+- [x] Create `pattern_synthesis` table
+- [x] Implement `knowledge_recombination_engine.py`
+- [x] Add sequence chaining logic
+- [x] Add pattern synthesis logic
+- [x] Integrate with core gameplay (post-game recombination phase)
+- [x] **Production Status**: 3,746 sequence dependencies recorded
+- [x] **Key insight**: Combinatorial exploration, not just random mutation
+- [x] **Code Drift Check**: ✅ Builds on winning_sequences, no conflicts
 
-### Phase 3: Viral Packages & Pariahs (Week 7-8) **[UPDATED - NOW INCLUDES PARIAHS]**
+### Phase 3: Viral Packages & Pariahs (Week 7-8) **[IN PROGRESS]**
+- [ ] **⚠️ Code Drift Check BEFORE Implementation**:
+  - [ ] Verify prestige system doesn't conflict with viral packages
+  - [ ] Verify action economy doesn't interfere with package spread
+  - [ ] Check that recombination engine can feed viral packages
+  - [ ] Ensure all changes flow through `run_evolution.py`
+
 - [ ] **Database Setup**:
   - [ ] Create `viral_information_packages` table
   - [ ] Create `agent_viral_infections` table
@@ -3478,13 +3488,24 @@ Your system is complex enough that bugs will **cascade**.
   - [ ] Confirm agents prefer viral package actions
   - [ ] Observe network immunity (pariah coverage) increase over generations
 
+- [ ] **✅ Code Drift Check AFTER Implementation**:
+  - [ ] Verify integration with `run_evolution.py`
+  - [ ] Run comprehensive tests with real ARC games
+  - [ ] Check database for expected viral/pariah data
+  - [ ] Confirm no conflicts with Phases 0-2.5
+
 - [ ] **Key insights**: 
   - Viral packages = positive selection (what works)
   - Pariahs = negative selection (what fails)
   - Together = bidirectional evolution (faster learning)
   - action_traces enable BOTH through precise credit assignment
 
-### Phase 4: Distributed Regulation (Week 9-10) **[UPDATED]**
+### Phase 4: Distributed Regulation (Week 9-10) **[PENDING]**
+- [ ] **⚠️ Code Drift Check BEFORE Implementation**:
+  - [ ] Verify no conflicts with viral package system
+  - [ ] Check signal emission doesn't break action economy
+  - [ ] Ensure integration with `autonomous_evolution_runner.py`
+
 - [ ] Create `network_regulatory_signals` table (renamed from governance_proposals)
 - [ ] Create `agent_signal_responses` table (renamed from agent_votes)
 - [ ] Implement signal emission based on agent state
@@ -3493,7 +3514,17 @@ Your system is complex enough that bugs will **cascade**.
 - [ ] Display regulatory signal activity
 - [ ] **Key difference**: Emergent homeostasis, not democratic voting
 
-### Phase 5: Horizontal Gene Transfer (Week 11-12) **[UPDATED]**
+- [ ] **✅ Code Drift Check AFTER Implementation**:
+  - [ ] Test signal-based regulation with real evolution
+  - [ ] Verify emergent homeostasis actually working
+  - [ ] Check no conflicts with earlier phases
+
+### Phase 5: Horizontal Gene Transfer (Week 11-12) **[PENDING]**
+- [ ] **⚠️ Code Drift Check BEFORE Implementation**:
+  - [ ] Verify viral packages ready for horizontal spread
+  - [ ] Check knowledge graph structure supports transfer
+  - [ ] Ensure no conflicts with prestige/economy systems
+
 - [ ] Create `horizontal_transfer_events` table (renamed from teaching_events)
 - [ ] Create `knowledge_propagation_chains` table
 - [ ] Implement direct knowledge injection mechanism

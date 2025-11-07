@@ -45,6 +45,7 @@ from core_gameplay import GameplayEngine
 from adaptive_action_limits import AdaptiveActionLimits
 from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
 from prestige_engine import PrestigeEngine, display_prestige_leaderboard
+from viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
 
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
@@ -95,6 +96,7 @@ class AutonomousEvolutionRunner:
         self.adaptive_limits = AdaptiveActionLimits(self.db)  # Adaptive action limit manager
         self.network_intelligence = NetworkIntelligenceEngine(self.db)  # Network health tracking
         self.prestige_engine = PrestigeEngine(self.db)  # PHASE 1: Network contribution prestige
+        self.viral_engine = ViralPackageEngine(self.db)  # PHASE 3: Viral packages & pariahs
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -835,17 +837,96 @@ class AutonomousEvolutionRunner:
                 import traceback
                 traceback.print_exc()
             
-            # Optionally prune worst performers
+            # PHASE 3: VIRAL ECOSYSTEM STATUS
+            print(f"\n[VIRAL] Checking viral packages & pariahs...")
+            try:
+                # Check for obsolete packages/pariahs
+                self.viral_engine.check_package_obsolescence(self.current_generation, threshold_generations=20)
+                self.viral_engine.check_pariah_obsolescence(self.current_generation, threshold_generations=30)
+                
+                # Display viral ecosystem dashboard
+                print()
+                display_viral_ecosystem_dashboard(self.db, self.current_generation)
+                
+            except Exception as e:
+                print(f"[WARN]️  Viral ecosystem check failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # Optionally prune worst performers (GAME-AWARE, LEVEL-PRESERVING)
             if population_size > self.initial_population_size * 2:
-                print(f"\n[?] Population too large ({population_size}), pruning worst performers...")
-                worst_performers = analysis.get('top_performers', [])[-3:]  # Get worst 3
+                print(f"\n[🔪] Population too large ({population_size}), pruning with specialist protection...")
+                
+                # STEP 1: Identify game specialists (top level achievers per game)
+                game_specialists = {}
+                all_agents = analysis.get('top_performers', [])
+                
+                for agent in all_agents:
+                    # Query agent's best level achievement per game
+                    best_levels = self.db.execute_query('''
+                        SELECT game_id, MAX(level_progressions) as max_level, 
+                               MAX(final_score) as best_score
+                        FROM agent_arc_performance
+                        WHERE agent_id = ?
+                        GROUP BY game_id
+                    ''', (agent['agent_id'],))
+                    
+                    for level_data in best_levels:
+                        game_id = level_data['game_id']
+                        max_level = level_data['max_level']
+                        best_score = level_data['best_score']
+                        
+                        if game_id not in game_specialists:
+                            game_specialists[game_id] = []
+                        game_specialists[game_id].append({
+                            'agent': agent,
+                            'max_level': max_level,
+                            'best_score': best_score
+                        })
+                
+                # STEP 2: Preserve top 3 level achievers per game
+                protected_agents = set()
+                print(f"  [🛡️] Protecting specialists across {len(game_specialists)} games:")
+                
+                for game_id, specialists in game_specialists.items():
+                    # Sort by max level (desc), then by best score (desc)
+                    specialists.sort(
+                        key=lambda x: (x['max_level'], x['best_score']), 
+                        reverse=True
+                    )
+                    
+                    # Protect top 3 per game
+                    top_specialists = specialists[:3]
+                    for spec in top_specialists:
+                        protected_agents.add(spec['agent']['agent_id'])
+                    
+                    if top_specialists:
+                        print(f"    {game_id[:12]}...: Level {top_specialists[0]['max_level']} specialists protected")
+                
+                print(f"  [OK] {len(protected_agents)} specialist agents protected from pruning")
+                
+                # STEP 3: Prune only non-specialists from worst performers
+                worst_performers = analysis.get('top_performers', [])[-10:]  # Check worst 10
+                pruned_count = 0
                 
                 for agent in worst_performers:
-                    self.db.execute_query(
-                        "UPDATE agents SET is_active = 0 WHERE agent_id = ?",
-                        (agent['agent_id'],)
-                    )
-                    print(f"  Deactivated: {agent['agent_id']}")
+                    if agent['agent_id'] not in protected_agents:
+                        # Safe to prune - not a specialist on any game
+                        self.db.execute_query(
+                            "UPDATE agents SET is_active = 0 WHERE agent_id = ?",
+                            (agent['agent_id'],)
+                        )
+                        print(f"    Deactivated: {agent['agent_id'][:12]}... (non-specialist)")
+                        pruned_count += 1
+                        
+                        # Stop after pruning 3 agents
+                        if pruned_count >= 3:
+                            break
+                
+                if pruned_count == 0:
+                    print(f"  [OK] No non-specialists found to prune - all worst performers are specialists!")
+                else:
+                    print(f"  [OK] Pruned {pruned_count} non-specialist agents")
             
             return True
             
