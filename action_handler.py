@@ -3,6 +3,27 @@ Action Handler
 
 Provides clean interfaces for sending actions to the ARC-AGI-3 API.
 Handles action validation, coordinate processing, and response parsing.
+
+ARC-AGI-3 ACTION REFERENCE:
+==========================
+ACTION1: Context-specific action (often directional movement: UP)
+ACTION2: Context-specific action (often directional movement: DOWN)  
+ACTION3: Context-specific action (often directional movement: LEFT)
+ACTION4: Context-specific action (often directional movement: RIGHT)
+ACTION5: Context-specific interaction (SELECT/INTERACT/USE)
+ACTION6: Universal targeting system - click/touch coordinates (x, y)
+         Think of grid as touchscreen - ACTION6(x, y) = "touch pixel at (x, y)"
+         Effects depend on what's at that location (buttons, objects, portals, etc.)
+ACTION7: UNDO - reverts last action, potentially restoring previous state
+
+STRATEGY FOR UNBEATEN GAMES:
+===========================
+For games with 0 level completions (sp80, ls20, etc.):
+1. Try ALL actions 1-7 systematically for maximum exploration
+2. Use ACTION6 with visual analysis to target interesting frame features
+3. Actions 1-5,7 often have predictable effects, try these first
+4. ACTION6 requires coordinate analysis - look for color anomalies, patterns, bright spots
+5. Use increased action budgets (2x-3x) to allow thorough exploration
 """
 
 import logging
@@ -417,18 +438,25 @@ class ActionHandler:
         return game_state
 
     def get_random_action(self, available_actions: Optional[List[str]] = None,
-                         exclude_actions: Optional[List[str]] = None) -> str:
+                         exclude_actions: Optional[List[str]] = None,
+                         prefer_full_action_set: bool = False) -> str:
         """Get a random action from available actions.
 
         Args:
             available_actions: List of available actions
             exclude_actions: Actions to exclude from selection
+            prefer_full_action_set: If True, tries to use all actions 1-7 for exploration
 
         Returns:
             Random action name
         """
         if not available_actions:
-            available_actions = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION7"]
+            if prefer_full_action_set:
+                # For unbeaten games, ensure we try all action types 1-7
+                available_actions = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION6", "ACTION7"]
+            else:
+                # Default: exclude ACTION6 unless specifically requested
+                available_actions = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION7"]
 
         if exclude_actions:
             available_actions = [a for a in available_actions if a not in exclude_actions]
@@ -698,12 +726,14 @@ class ActionHandler:
         return self.session_manager.db.get_score_history(game_id=game_id)
 
     async def smart_action_selection(self, game_state: GameState,
-                                   strategy: str = "balanced") -> str:
+                                   strategy: str = "balanced", 
+                                   is_unbeaten_game: bool = False) -> str:
         """Select action using basic strategy with diversity tracking.
 
         Args:
             game_state: Current game state
-            strategy: Selection strategy ('random', 'balanced', 'conservative')
+            strategy: Selection strategy ('random', 'balanced', 'conservative', 'unbeaten_exploration')
+            is_unbeaten_game: True if this game has never had level completions by any agent
 
         Returns:
             Selected action
@@ -715,7 +745,24 @@ class ActionHandler:
         # Track action diversity to prevent spamming same action
         selected_action = None
 
-        if strategy == "random":
+        if strategy == "unbeaten_exploration" or is_unbeaten_game:
+            # For unbeaten games: Ensure ALL available actions 1-7 are tried
+            # This gives maximum exploration for difficult games
+            logger.info(f"🎯 UNBEATEN GAME MODE: Trying full action set for exploration")
+            
+            # Check if we've been missing any action types
+            all_possible = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION6", "ACTION7"]
+            untried_actions = [a for a in all_possible if a in available and a not in self.recent_actions]
+            
+            if untried_actions:
+                # Prioritize actions we haven't tried recently
+                selected_action = random.choice(untried_actions)
+                logger.info(f"✨ Trying untested action: {selected_action}")
+            else:
+                # All actions tried recently, use normal diversity selection but include ACTION6
+                selected_action = self._select_with_diversity(available)
+
+        elif strategy == "random":
             selected_action = self._select_with_diversity(available)
 
         elif strategy == "conservative":

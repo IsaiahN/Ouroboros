@@ -582,7 +582,18 @@ class GameplayEngine:
         
         # Fall back to default action selection WITH viral/pariah influence
         strategy = self.game_config.get('strategy', 'balanced')
-        base_action = await self.action_handler.smart_action_selection(game_state, strategy)
+        
+        # Check if this is an unbeaten game (no level completions by any agent)
+        current_game_id = self.session_manager.current_game_id
+        if current_game_id:
+            is_unbeaten_game = self._is_unbeaten_game(current_game_id)
+            if is_unbeaten_game:
+                logger.info(f"🔥 UNBEATEN GAME DETECTED: {current_game_id} - using full exploration mode")
+                strategy = "unbeaten_exploration"
+        else:
+            is_unbeaten_game = False
+        
+        base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
         
         # PHASE 3: Apply viral package / pariah influence to action selection
         if action_weights or action_penalties:
@@ -2701,6 +2712,32 @@ class GameplayEngine:
         
         except Exception as e:
             logger.error(f"Error storing discovered pattern: {e}")
+
+    def _is_unbeaten_game(self, game_id: str) -> bool:
+        """
+        Check if a game has never had any level completions by any agent.
+        
+        Args:
+            game_id: Game ID to check
+            
+        Returns:
+            True if no agent has ever completed a level in this game
+        """
+        try:
+            level_completions = self.db.execute_query("""
+                SELECT COUNT(*) as completions
+                FROM agent_arc_performance 
+                WHERE game_id = ? AND level_progressions > 0
+            """, (game_id,))
+            
+            if level_completions and level_completions[0]:
+                return level_completions[0]['completions'] == 0
+            else:
+                return True  # No data means unbeaten
+                
+        except Exception as e:
+            logger.warning(f"Error checking unbeaten game status for {game_id}: {e}")
+            return False  # Safe default
 
 
 # Simple gameplay strategies that can be used as action callbacks

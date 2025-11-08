@@ -46,6 +46,7 @@ from adaptive_action_limits import AdaptiveActionLimits
 from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
 from prestige_engine import PrestigeEngine, display_prestige_leaderboard
 from viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
+from game_diversity_preservation import GameDiversityPreserver  # Game diversity protection
 
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
@@ -97,6 +98,7 @@ class AutonomousEvolutionRunner:
         self.network_intelligence = NetworkIntelligenceEngine(self.db)  # Network health tracking
         self.prestige_engine = PrestigeEngine(self.db)  # PHASE 1: Network contribution prestige
         self.viral_engine = ViralPackageEngine(self.db)  # PHASE 3: Viral packages & pariahs
+        self.diversity_preserver = GameDiversityPreserver(self.db, min_specialists_per_game=1)  # Game diversity protection
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -543,14 +545,20 @@ class AutonomousEvolutionRunner:
                     
                     # SPECIALIST MODE: Use specialist coordinator for game selection (NEW)
                     if self.specialist_mode and self.specialist_coordinator:
-                        # Select only assigned games for this specialist
-                        agent_games = self.specialist_coordinator.select_games_for_agent(
-                            agent_id,
-                            [g.get('id', g.get('game_id')) for g in available_games],
-                            games_per_agent
-                        )
+                        # FIX: Specialists must play ALL assigned games (not just games_per_agent)
+                        # This ensures game diversity - each specialist covers their full assignment
                         assigned = self.specialist_coordinator.get_games_for_specialist(agent_id)
-                        print(f"  [>] Agent {agent_id[:8]} - Specialist on {assigned}: {len(agent_games)} games")
+                        if assigned:
+                            # Play each assigned game at least once
+                            agent_games = list(assigned) * games_per_agent  # Repeat if needed
+                            print(f"  [>] Agent {agent_id[:8]} - Specialist on {len(assigned)} games: {assigned} × {games_per_agent}")
+                        else:
+                            # No assignment - fallback to random
+                            agent_games = random.sample(
+                                [g.get('id', g.get('game_id')) for g in available_games],
+                                min(games_per_agent, len(available_games))
+                            )
+                            print(f"  [>] Agent {agent_id[:8]} - No assignment, playing {len(agent_games)} random games")
                     
                     # META-LEARNING: Use curriculum for game selection
                     elif self.curriculum:
@@ -622,6 +630,39 @@ class AutonomousEvolutionRunner:
                         
                         # CRITICAL FIX: Store reward data so agents get credited for their games!
                         self.db.store_arc_reward_data(agent_id, reward_data)
+                        
+                        # PHASE 3: Track viral package usage and effectiveness
+                        try:
+                            from viral_package_engine import ViralPackageEngine
+                            viral_engine = ViralPackageEngine(self.db)
+                            
+                            # Get packages this agent carries
+                            infections = self.db.execute_query("""
+                                SELECT package_id 
+                                FROM agent_viral_infections 
+                                WHERE agent_id = ? AND is_active = TRUE
+                            """, (agent_id,))
+                            
+                            # Record usage for each package
+                            success = result.get('win', False) or result.get('final_score', 0) > 0
+                            score_change = result.get('final_score', 0)
+                            current_gen = self.db.execute_query(
+                                "SELECT generation FROM agents WHERE agent_id = ?", 
+                                (agent_id,)
+                            )
+                            generation = current_gen[0]['generation'] if current_gen else self.generation
+                            
+                            for infection in infections:
+                                viral_engine.record_package_usage(
+                                    agent_id=agent_id,
+                                    package_id=infection['package_id'],
+                                    success=success,
+                                    score_change=score_change,
+                                    generation=generation
+                                )
+                        except Exception as e:
+                            # Non-critical - don't break evolution if Phase 3 fails
+                            pass
                         
                         if result.get('win', False):
                             total_wins += 1
@@ -905,18 +946,33 @@ class AutonomousEvolutionRunner:
                 
                 print(f"  [OK] {len(protected_agents)} specialist agents protected from pruning")
                 
-                # STEP 3: Prune only non-specialists from worst performers
+                # STEP 3: GAME DIVERSITY PROTECTION
+                # Get all known games
+                all_games = self.db.execute_query("""
+                    SELECT DISTINCT game_id FROM agent_arc_performance
+                """)
+                all_game_ids = [g['game_id'] for g in all_games]
+                
+                # Run diversity check and get protected agents
+                diversity_result = self.diversity_preserver.ensure_game_diversity(all_game_ids)
+                diversity_protected = set(diversity_result['protected_agents'])
+                
+                # Merge with specialist protection
+                protected_agents.update(diversity_protected)
+                print(f"  [DIVERSITY] {len(diversity_protected)} additional agents protected (last specialists per game)")
+                
+                # STEP 4: Prune only non-protected agents from worst performers
                 worst_performers = analysis.get('top_performers', [])[-10:]  # Check worst 10
                 pruned_count = 0
                 
                 for agent in worst_performers:
                     if agent['agent_id'] not in protected_agents:
-                        # Safe to prune - not a specialist on any game
+                        # Safe to prune - not protected
                         self.db.execute_query(
                             "UPDATE agents SET is_active = 0 WHERE agent_id = ?",
                             (agent['agent_id'],)
                         )
-                        print(f"    Deactivated: {agent['agent_id'][:12]}... (non-specialist)")
+                        print(f"    Deactivated: {agent['agent_id'][:12]}... (non-protected)")
                         pruned_count += 1
                         
                         # Stop after pruning 3 agents
@@ -924,9 +980,9 @@ class AutonomousEvolutionRunner:
                             break
                 
                 if pruned_count == 0:
-                    print(f"  [OK] No non-specialists found to prune - all worst performers are specialists!")
+                    print(f"  [OK] No non-protected agents found to prune - all worst performers are protected!")
                 else:
-                    print(f"  [OK] Pruned {pruned_count} non-specialist agents")
+                    print(f"  [OK] Pruned {pruned_count} non-protected agents")
             
             return True
             

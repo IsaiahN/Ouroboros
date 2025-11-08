@@ -490,7 +490,8 @@ class ViralPackageEngine:
                 vi.infection_strength,
                 vi.expression_level,
                 vp.action_sequence,
-                vp.success_rate
+                vp.success_rate,
+                vi.total_uses
             FROM agent_viral_infections vi
             JOIN viral_information_packages vp ON vi.package_id = vp.package_id
             WHERE vi.agent_id = ? AND vi.is_active = TRUE AND vp.is_active = TRUE
@@ -503,10 +504,14 @@ class ViralPackageEngine:
             try:
                 actions = json.loads(infection['action_sequence'])
                 
+                # Use success_rate if available, otherwise use baseline of 0.5 for untested packages
+                # This allows new packages to be tried before they have usage data
+                success_rate = infection['success_rate'] if infection['total_uses'] > 0 else 0.5
+                
                 # Weight each action by infection strength, expression level, and success rate
                 weight = (infection['infection_strength'] * 
                          infection['expression_level'] * 
-                         infection['success_rate'])
+                         success_rate)
                 
                 for action in actions:
                     action_weights[action] = action_weights.get(action, 0.0) + weight
@@ -555,6 +560,129 @@ class ViralPackageEngine:
                 continue
         
         return action_penalties
+    
+    # ========================================================================
+    # USAGE TRACKING (Critical for Phase 3 to work!)
+    # ========================================================================
+    
+    def record_package_usage(self, agent_id: str, package_id: str, 
+                            success: bool, score_change: float, generation: int):
+        """
+        Record that an agent used a viral package and track its effectiveness.
+        
+        This is CRITICAL for Phase 3 - without usage tracking, success_rate stays 0!
+        
+        Args:
+            agent_id: Agent that used the package
+            package_id: Package that was used
+            success: Whether the package led to success
+            score_change: Score change from using this package
+            generation: Current generation
+        """
+        # Update infection usage stats
+        self.db.execute_query("""
+            UPDATE agent_viral_infections
+            SET total_uses = total_uses + 1,
+                success_count = success_count + ?,
+                failure_count = failure_count + ?,
+                avg_score_boost = ((avg_score_boost * total_uses) + ?) / (total_uses + 1),
+                last_used_generation = ?
+            WHERE agent_id = ? AND package_id = ?
+        """, (
+            1 if success else 0,
+            0 if success else 1,
+            score_change,
+            generation,
+            agent_id,
+            package_id
+        ))
+        
+        # Update package-level stats
+        self.db.execute_query("""
+            UPDATE viral_information_packages
+            SET total_infections = (
+                    SELECT COUNT(*) FROM agent_viral_infections 
+                    WHERE package_id = ? AND is_active = TRUE
+                ),
+                active_infections = (
+                    SELECT COUNT(*) FROM agent_viral_infections
+                    WHERE package_id = ? AND is_active = TRUE 
+                    AND last_used_generation >= ? - 5
+                ),
+                success_rate = (
+                    SELECT CAST(SUM(success_count) AS REAL) / 
+                           NULLIF(SUM(total_uses), 0)
+                    FROM agent_viral_infections
+                    WHERE package_id = ?
+                ),
+                avg_score_contribution = (
+                    SELECT AVG(avg_score_boost)
+                    FROM agent_viral_infections
+                    WHERE package_id = ? AND total_uses > 0
+                ),
+                last_successful_use_generation = CASE WHEN ? THEN ? ELSE last_successful_use_generation END
+            WHERE package_id = ?
+        """, (
+            package_id,
+            package_id,
+            generation,
+            package_id,
+            package_id,
+            success,
+            generation,
+            package_id
+        ))
+    
+    def record_pariah_encounter(self, agent_id: str, pariah_id: str,
+                               triggered: bool, score_impact: float, generation: int):
+        """
+        Record that an agent encountered a pariah (either avoided it or triggered it).
+        
+        Args:
+            agent_id: Agent that encountered the pariah
+            pariah_id: Pariah that was encountered
+            triggered: Whether agent fell into the trap (True) or avoided it (False)
+            score_impact: Score change from this encounter
+            generation: Current generation
+        """
+        # Update awareness stats
+        self.db.execute_query("""
+            UPDATE agent_pariah_awareness
+            SET total_encounters = total_encounters + 1,
+                avoidance_success_count = avoidance_success_count + ?,
+                trigger_count = trigger_count + ?,
+                avg_score_saved = ((avg_score_saved * total_encounters) + ?) / (total_encounters + 1),
+                last_encountered_generation = ?
+            WHERE agent_id = ? AND pariah_id = ?
+        """, (
+            0 if triggered else 1,
+            1 if triggered else 0,
+            score_impact,
+            generation,
+            agent_id,
+            pariah_id
+        ))
+        
+        # Update pariah-level stats
+        if triggered:
+            self.db.execute_query("""
+                UPDATE pariahs
+                SET trigger_count = trigger_count + 1,
+                    avg_score_loss = ((avg_score_loss * trigger_count) + ?) / (trigger_count + 1),
+                    last_triggered_generation = ?,
+                    avoidance_success_rate = (
+                        SELECT CAST(SUM(avoidance_success_count) AS REAL) /
+                               NULLIF(SUM(total_encounters), 0)
+                        FROM agent_pariah_awareness
+                        WHERE pariah_id = ?
+                    )
+                WHERE pariah_id = ?
+            """, (
+                abs(score_impact),
+                generation,
+                pariah_id,
+                pariah_id
+            ))
     
     # ========================================================================
     # PACKAGE/PARIAH MANAGEMENT

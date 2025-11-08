@@ -347,6 +347,11 @@ class AdaptiveActionLimits:
         else:
             # Top quartile: 1.5x to 3.0x
             budget_multiplier = 1.5 + ((percentile - 0.75) / 0.25) * 1.5
+            
+        # NEW: Check for unbeaten game bonus (2x multiplier for difficult games)
+        unbeaten_bonus = self._check_unbeaten_game_bonus(agent_id)
+        if unbeaten_bonus > 1.0:
+            budget_multiplier *= unbeaten_bonus
         
         # Apply multiplier to generation baseline
         action_allowance_per_level = int(self.current_actions_per_level * budget_multiplier)
@@ -361,8 +366,64 @@ class AdaptiveActionLimits:
         return {
             'action_allowance_per_level': action_allowance_per_level,
             'action_allowance_total': action_allowance_total,
-            'budget_multiplier': budget_multiplier
+            'budget_multiplier': budget_multiplier,
+            'unbeaten_bonus': unbeaten_bonus if 'unbeaten_bonus' in locals() else 1.0
         }
+    
+    def _check_unbeaten_game_bonus(self, agent_id: str) -> float:
+        """
+        Check if agent is working on games with 0 level completions and needs action budget boost.
+        
+        CRITICAL: Only applies to games where NO AGENT has ever completed a level
+        (not just this agent - ANY agent in the population)
+        
+        Returns multiplier:
+        - 1.0: Normal (agent working on games that have been beaten by someone)
+        - 2.0: Boost (agent assigned to games with 0 level completions by anyone)
+        - 3.0: High boost (agent assigned ONLY to unbeaten games)
+        """
+        # Get agent's assigned games from specialization
+        agent_info = self.db.execute_query("""
+            SELECT specialization FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if not agent_info:
+            return 1.0
+            
+        try:
+            import json
+            spec = json.loads(agent_info[0]['specialization'])
+            assigned_games = spec.get('assigned_games', [])
+            
+            if not assigned_games:
+                return 1.0  # No assignment, no bonus
+                
+            # Check which assigned games have NEVER had level wins BY ANY AGENT
+            unbeaten_count = 0
+            total_assigned = len(assigned_games)
+            
+            for game_id in assigned_games:
+                # Check if ANY agent has EVER completed a level in this game
+                level_wins = self.db.execute_query("""
+                    SELECT COUNT(*) as wins
+                    FROM agent_arc_performance 
+                    WHERE game_id = ? AND level_progressions > 0
+                """, (game_id,))
+                
+                # If no agent has ever completed a level in this game
+                if level_wins and level_wins[0]['wins'] == 0:
+                    unbeaten_count += 1
+                    
+            # Calculate bonus based on proportion of unbeaten games
+            if unbeaten_count == 0:
+                return 1.0  # No unbeaten games, no bonus
+            elif unbeaten_count == total_assigned:
+                return 3.0  # ALL assigned games unbeaten by anyone, high boost
+            else:
+                return 2.0  # SOME assigned games unbeaten by anyone, moderate boost
+                
+        except (json.JSONDecodeError, KeyError):
+            return 1.0  # Can't parse specialization, no bonus
     
     def _get_agent_performance_percentile(self, agent_id: str, generation: int) -> float:
         """
