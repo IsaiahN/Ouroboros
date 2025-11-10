@@ -25,6 +25,7 @@ from action_handler import ActionHandler
 from arc_api_client import GameState
 from database_interface import DatabaseInterface
 from prestige_engine import PrestigeEngine
+from sensation_engine import SensationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class GameplayEngine:
         self.action_handler = ActionHandler(self.session_manager)
         self.db = DatabaseInterface(db_path)  # Pattern learning database access
         self.prestige_engine = PrestigeEngine(self.db)  # Phase 1: Prestige tracking
+        self.sensation_engine = SensationEngine(self.db)  # Phase 4.5: Emotional intelligence
         self.game_config = {
             'max_actions_per_level': 400,  # Max actions per level (increased for multi-level discovery)
             'max_total_actions': 7000,  # Max total actions across all levels (increased for multi-level runs)
@@ -52,6 +54,7 @@ class GameplayEngine:
             'coordinate_retry_limit': 3,
             'enable_pattern_learning': True,  # Toggle pattern learning
             'learning_mode': 'smart_exploration',  # 'exploit', 'explore', 'smart_exploration'
+            'enable_sensation_navigation': True,  # Phase 4.5: Toggle sensation-based emotional intelligence
             
             # Diversity-focused settings (generalization over specialization)
             'diversity_mode': False,              # Enable diversity and generalization focus
@@ -220,6 +223,10 @@ class GameplayEngine:
 
                     action_count += 1
                     level_action_count += 1
+                    
+                    # Phase 4.5: Learn from action outcome for sensation system
+                    if agent_id and self.game_config.get('enable_sensation_navigation', True):
+                        self._learn_from_action_outcome(action, previous_score, game_state, agent_id)
                     
                     # Check for significant score increase (level completion)
                     score_increase = game_state.score - previous_score
@@ -500,10 +507,11 @@ class GameplayEngine:
         """Select the next action to take.
         
         Uses:
-        1. PHASE 3: Viral package influence (prefer successful patterns)
-        2. PHASE 3: Pariah avoidance (avoid known failures)
-        3. Meta-learning pattern detection
-        4. Default strategy
+        1. PHASE 4.5: Sensation-based navigation (emotional intelligence for actions 1-7)
+        2. PHASE 3: Viral package influence (prefer successful patterns)
+        3. PHASE 3: Pariah avoidance (avoid known failures)
+        4. Meta-learning pattern detection
+        5. Default strategy
 
         Args:
             game_state: Current game state
@@ -511,8 +519,51 @@ class GameplayEngine:
         Returns:
             Action to take
         """
-        # PHASE 3: Get viral package and pariah influence
         agent_id = self.game_config.get('agent_id')
+        
+        # PHASE 4.5: Sensation-based analysis for navigation actions
+        sensation_biases = {}
+        navigation_state = 0.0
+        
+        if agent_id and self.game_config.get('enable_sensation_navigation', True):
+            try:
+                # Analyze frame for emotional context
+                frame_data = self._convert_game_state_for_sensation_analysis(game_state)
+                
+                # Update agent's navigation state based on perceptions
+                sensation_context = self._analyze_sensation_context(frame_data, agent_id)
+                navigation_state = self.sensation_engine.update_navigation_state(
+                    agent_id, 
+                    sensation_context.get('dominant_sensation', 0.0),
+                    {
+                        'game_id': self.session_manager.current_game_id,
+                        'generation': self.game_config.get('generation', 0),
+                        'game_score': game_state.score,
+                        'recent_success_rate': self._calculate_recent_success_rate_from_game_state(game_state)
+                    }
+                )
+                
+                # Get sensation-based action biases for navigation actions (1-7)
+                available_navigation_actions = [1, 2, 3, 4, 5, 6, 7]  # All navigation actions
+                biased_actions = self.sensation_engine.bias_action_selection(
+                    agent_id, available_navigation_actions, navigation_state
+                )
+                
+                sensation_biases = {action: bias for action, bias in biased_actions}
+                
+                # Store perceived objects for learning
+                self._last_perceived_objects = sensation_context.get('perceived_objects', [])
+                
+                if sensation_biases:
+                    emotion = self._get_emotion_label(navigation_state)
+                    logger.debug(f"🧠 Agent feeling {emotion} (state: {navigation_state:.2f})")
+                    logger.debug(f"   Action biases: {sensation_biases}")
+                    logger.debug(f"   Perceived objects: {self._last_perceived_objects}")
+                
+            except Exception as e:
+                logger.debug(f"Phase 4.5 sensation error: {e}")
+        
+        # PHASE 3: Get viral package and pariah influence
         action_weights = {}
         action_penalties = {}
         
@@ -594,6 +645,32 @@ class GameplayEngine:
             is_unbeaten_game = False
         
         base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
+        
+        # PHASE 4.5: Apply sensation-based biasing for navigation actions (1-7)
+        if sensation_biases and agent_id:
+            action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
+            
+            # Check if current action has sensation bias
+            if action_num in sensation_biases:
+                current_bias = sensation_biases[action_num]
+                
+                # If current action has strong negative bias, consider alternatives
+                if current_bias < -0.4:
+                    emotion = self._get_emotion_label(navigation_state)
+                    logger.info(f"🧠 {emotion.capitalize()} agent avoiding {base_action} (sensation bias: {current_bias:.2f})")
+                    
+                    # Find best sensation-biased alternative
+                    alternatives = [(act, bias) for act, bias in sensation_biases.items() if bias > 0.1]
+                    
+                    if alternatives:
+                        best_alt, best_bias = max(alternatives, key=lambda x: x[1])
+                        logger.info(f"🧠 Switching to ACTION{best_alt} (positive sensation bias: {best_bias:.2f})")
+                        base_action = f"ACTION{best_alt}"
+                
+                # If current action has positive bias, reinforce it
+                elif current_bias > 0.2:
+                    emotion = self._get_emotion_label(navigation_state)
+                    logger.info(f"🧠 {emotion.capitalize()} agent reinforcing {base_action} (positive sensation: {current_bias:.2f})")
         
         # PHASE 3: Apply viral package / pariah influence to action selection
         if action_weights or action_penalties:
@@ -2738,6 +2815,188 @@ class GameplayEngine:
         except Exception as e:
             logger.warning(f"Error checking unbeaten game status for {game_id}: {e}")
             return False  # Safe default
+
+    # Phase 4.5: Sensation-based navigation helper methods
+    
+    def _convert_game_state_for_sensation_analysis(self, game_state: GameState) -> Dict[str, Any]:
+        """Convert GameState to format suitable for sensation analysis."""
+        
+        frame_data = {
+            'current_frame': {},
+            'game_id': self.session_manager.current_game_id or '',
+            'generation': self.game_config.get('generation', 0),
+            'current_score': game_state.score
+        }
+        
+        # Extract grid data from frame
+        if game_state.frame is not None:
+            frame = game_state.frame
+            if isinstance(frame, (list, np.ndarray)):
+                frame_data['current_frame']['grid'] = frame
+            else:
+                frame_data['current_frame']['grid'] = []
+        else:
+            frame_data['current_frame']['grid'] = []
+        
+        return frame_data
+
+    def _analyze_sensation_context(self, frame_data: Dict[str, Any], agent_id: str) -> Dict[str, Any]:
+        """Analyze frame data for sensation context."""
+        
+        sensation_context = {
+            'dominant_sensation': 0.0,
+            'perceived_objects': [],
+            'complexity_score': 0.0
+        }
+        
+        grid = frame_data.get('current_frame', {}).get('grid', [])
+        
+        if not grid:
+            return sensation_context
+        
+        try:
+            # Convert to numpy array for analysis
+            if not isinstance(grid, np.ndarray):
+                grid = np.array(grid)
+            
+            if grid.size == 0:
+                return sensation_context
+            
+            # Analyze grid properties
+            unique_colors = len(np.unique(grid))
+            non_zero_cells = np.count_nonzero(grid)
+            total_cells = grid.size
+            
+            # Determine perceived objects based on grid analysis
+            perceived_objects = []
+            
+            if unique_colors > 1:
+                perceived_objects.append('multi_color_pattern')
+            if unique_colors > 3:
+                perceived_objects.append('complex_color_pattern')
+            if non_zero_cells > total_cells * 0.5:
+                perceived_objects.append('dense_pattern')
+            if non_zero_cells < total_cells * 0.1:
+                perceived_objects.append('sparse_pattern')
+            if grid.shape[0] > 10 or grid.shape[1] > 10:
+                perceived_objects.append('large_grid')
+            
+            # Calculate complexity score
+            complexity_score = (unique_colors / 10.0) + (non_zero_cells / total_cells)
+            
+            # Calculate dominant sensation from perceived objects
+            total_sensation = 0.0
+            sensation_count = 0
+            
+            for obj_type in perceived_objects:
+                obj_sensation = self.sensation_engine.perceive_object(
+                    agent_id, obj_type, {'complexity': complexity_score}
+                )
+                total_sensation += obj_sensation
+                sensation_count += 1
+            
+            if sensation_count > 0:
+                sensation_context['dominant_sensation'] = total_sensation / sensation_count
+            
+            sensation_context['perceived_objects'] = perceived_objects
+            sensation_context['complexity_score'] = complexity_score
+        
+        except Exception as e:
+            logger.debug(f"Error in sensation analysis: {e}")
+        
+        return sensation_context
+
+    def _calculate_recent_success_rate_from_game_state(self, game_state: GameState) -> float:
+        """Calculate recent success rate from current game context."""
+        
+        try:
+            # Use current score as proxy for recent success
+            current_score = game_state.score
+            
+            # Simple heuristic: higher score = higher success rate
+            # This can be enhanced with more sophisticated tracking
+            if current_score >= 3.0:  # Multiple levels completed
+                return 0.8
+            elif current_score >= 1.0:  # At least one level completed
+                return 0.6
+            elif current_score > 0.0:  # Some progress
+                return 0.4
+            else:  # No progress yet
+                return 0.2
+        
+        except Exception as e:
+            logger.debug(f"Error calculating recent success rate: {e}")
+            return 0.5  # Neutral default
+
+    def _get_emotion_label(self, navigation_state: float) -> str:
+        """Get emotion label from navigation state."""
+        
+        if navigation_state > 0.5:
+            return 'confident'
+        elif navigation_state > 0.1:
+            return 'curious'
+        elif navigation_state > -0.1:
+            return 'neutral'
+        elif navigation_state > -0.5:
+            return 'cautious'
+        else:
+            return 'frustrated'
+
+    def _learn_from_action_outcome(self, action: str, previous_score: float, 
+                                 current_game_state: GameState, agent_id: str) -> None:
+        """Learn from action outcome using sensation system."""
+        
+        try:
+            # Extract action number
+            if isinstance(action, str) and action.startswith('ACTION'):
+                action_num = int(action.replace('ACTION', ''))
+            elif isinstance(action, int):
+                action_num = action
+            else:
+                return  # Can't process this action format
+            
+            # Only learn from navigation actions (1-7)
+            if action_num not in {1, 2, 3, 4, 5, 6, 7}:
+                return
+            
+            # Calculate reward from score change
+            score_change = current_game_state.score - previous_score
+            
+            # Create outcome dictionary
+            outcome = {
+                'game_id': self.session_manager.current_game_id or '',
+                'generation': self.game_config.get('generation', 0),
+                'score_change': score_change,
+                'action_success': score_change > 0,  # Positive score change = success
+                'game_won': current_game_state.state in ['FINISHED', 'WON'],
+                'game_state': current_game_state.state
+            }
+            
+            # Get perceived objects from last sensation analysis
+            perceived_objects = getattr(self, '_last_perceived_objects', ['unknown_object'])
+            if not perceived_objects:
+                perceived_objects = ['unknown_object']
+            
+            # Get current navigation state
+            agent_result = self.db.execute_query(
+                "SELECT navigation_state FROM agents WHERE agent_id = ?",
+                (agent_id,)
+            )
+            navigation_state = agent_result[0]['navigation_state'] if agent_result else 0.0
+            
+            # Learn from each perceived object
+            learning_occurred = False
+            for obj_type in perceived_objects:
+                if self.sensation_engine.learn_from_outcome(
+                    agent_id, obj_type, action_num, outcome, navigation_state
+                ):
+                    learning_occurred = True
+            
+            if learning_occurred:
+                logger.debug(f"🧠 Agent learned from action {action_num} outcome (score change: {score_change:+.1f})")
+        
+        except Exception as e:
+            logger.debug(f"Error in sensation learning: {e}")
 
 
 # Simple gameplay strategies that can be used as action callbacks

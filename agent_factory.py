@@ -2,6 +2,7 @@
 Agent Factory - Creates specialized agents that integrate with existing GameplayEngine
 Following Rule 3: Clean integration with existing codebase
 Rule 7: All agents use real ARC actions through existing ActionHandler
+Phase 4.5: Enhanced with sensation-based navigation for emotional intelligence
 """
 
 import json
@@ -9,6 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable
 from database_interface import DatabaseInterface
+from sensation_engine import SensationEngine
 
 
 class AgentFactory:
@@ -20,6 +22,9 @@ class AgentFactory:
     def __init__(self, database_interface: DatabaseInterface):
         self.db = database_interface
         self.factory_id = f"factory_{uuid.uuid4().hex[:8]}"
+        
+        # Phase 4.5: Initialize sensation engine for emotional intelligence
+        self.sensation_engine = SensationEngine(database_interface)
 
     def create_agent(self, agent_type: str, genome: Dict[str, Any], 
                     epigenetics: Optional[Dict[str, Any]] = None) -> 'ARCAgent':
@@ -46,8 +51,24 @@ class AgentFactory:
         # Create agent using appropriate factory method
         agent = agent_types[agent_type](genome, epigenetics)
 
+        # Phase 4.5: Initialize sensation profile for emotional intelligence
+        sensation_profile = self.sensation_engine.initialize_agent_sensations(
+            agent.agent_id, agent_type
+        )
+        
+        # Update agent with sensation capabilities
+        agent_dict = agent.to_dict()
+        agent_dict.update({
+            'sensation_profile': json.dumps(sensation_profile),
+            'navigation_state': 0.0,
+            'action_biases': json.dumps({}),
+            'sensation_learning_rate': 0.3,
+            'state_update_sensitivity': 0.7,
+            'emotional_intelligence_score': 0.0
+        })
+
         # Store agent in database (Rule 2)
-        self.db.store_agent(agent.to_dict())
+        self.db.store_agent(agent_dict)
 
         self._log_factory_event("agent_created", {
             "agent_id": agent.agent_id,
@@ -259,6 +280,12 @@ class ARCAgent:
         # This is what makes agents "prepared to learn" without inheriting solutions
         self.epigenetics = epigenetics or self._initialize_default_epigenetics()
 
+        # Phase 4.5: Sensation-based navigation capabilities
+        self.sensation_engine = SensationEngine(database_interface)
+        self.navigation_state = 0.0  # Current emotional state
+        self.sensation_profile = {}  # Object-emotion mappings (initialized by factory)
+        self.action_biases = {}  # Action preference modifiers
+
         # Performance tracking
         self.games_played = 0
         self.wins = 0
@@ -313,12 +340,27 @@ class ARCAgent:
     def select_action(self, game_state: Dict[str, Any], available_actions: List[int],
                      action_handler) -> Dict[str, Any]:
         """
-        Select action for current game state
+        Select action for current game state with Phase 4.5 sensation-based enhancement
         Rule 3: Uses existing ActionHandler for actual action execution
         Rule 7: Ensures real actions are sent to ARC API
+        Phase 4.5: Adds emotional intelligence to navigation actions (1-7)
         """
         # Set action handler for this game
         self.action_handler = action_handler
+
+        # Phase 4.5: Sensation-based pre-processing for navigation actions
+        sensation_context = self._analyze_game_state_for_sensations(game_state)
+        
+        # Update navigation state based on current perceptions
+        self.navigation_state = self.sensation_engine.update_navigation_state(
+            self.agent_id, sensation_context.get('dominant_sensation', 0.0), 
+            {
+                'game_id': game_state.get('game_id', ''),
+                'generation': game_state.get('generation', 0),
+                'game_score': game_state.get('current_score', 0),
+                'recent_success_rate': self._calculate_recent_success_rate()
+            }
+        )
 
         # Agent-specific action selection based on specialization
         if self.agent_type == 'pattern_specialist':
@@ -334,6 +376,10 @@ class ARCAgent:
         else:
             # Fallback to balanced selection
             action = self._balanced_action_selection(game_state, available_actions)
+
+        # Phase 4.5: Apply sensation-based biasing for navigation actions (1-7)
+        if action['action_type'] in {1, 2, 3, 4, 5, 6, 7}:
+            action = self._apply_sensation_biasing(action, available_actions, sensation_context)
 
         # Track action for learning
         self._track_action(action, game_state)
@@ -609,5 +655,163 @@ class ARCAgent:
         else:
             return 'balanced'
 
-# [CHECKPOINT 6 COMPLETED: AGENT FACTORY IMPLEMENTATION]
+    # Phase 4.5: Sensation-based navigation methods
+    def _analyze_game_state_for_sensations(self, game_state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Analyze current game state to extract objects and calculate sensation responses.
+        
+        This is the "Perceive" step in the sensation loop.
+        """
+        sensation_context = {
+            'dominant_sensation': 0.0,
+            'perceived_objects': [],
+            'overall_emotional_tone': 'neutral'
+        }
+        
+        # Analyze current frame for objects
+        current_frame = game_state.get('current_frame', {})
+        
+        # Extract objects from frame (simplified - can be enhanced)
+        perceived_objects = []
+        
+        # Grid analysis for object types
+        grid_data = current_frame.get('grid', [])
+        if grid_data:
+            # Simplified object detection
+            unique_colors = set()
+            pattern_complexity = 0
+            
+            for row in grid_data:
+                for cell in row:
+                    if cell != 0:  # Non-empty cell
+                        unique_colors.add(cell)
+                        pattern_complexity += 1
+            
+            # Create object types based on analysis
+            if len(unique_colors) > 1:
+                perceived_objects.append('multi_color_pattern')
+            if pattern_complexity > 10:
+                perceived_objects.append('complex_pattern')
+            if len(grid_data) > 5:
+                perceived_objects.append('large_grid')
+        
+        # Calculate sensation for each perceived object
+        total_sensation = 0.0
+        sensation_count = 0
+        
+        for obj_type in perceived_objects:
+            obj_sensation = self.sensation_engine.perceive_object(
+                self.agent_id, obj_type, {'complexity': pattern_complexity}
+            )
+            total_sensation += obj_sensation
+            sensation_count += 1
+        
+        # Calculate dominant sensation
+        if sensation_count > 0:
+            sensation_context['dominant_sensation'] = total_sensation / sensation_count
+        
+        sensation_context['perceived_objects'] = perceived_objects
+        
+        # Determine emotional tone
+        dominant = sensation_context['dominant_sensation']
+        if dominant > 0.3:
+            sensation_context['overall_emotional_tone'] = 'positive'
+        elif dominant < -0.3:
+            sensation_context['overall_emotional_tone'] = 'negative'
+        else:
+            sensation_context['overall_emotional_tone'] = 'neutral'
+        
+        return sensation_context
+
+    def _calculate_recent_success_rate(self) -> float:
+        """Calculate recent success rate for emotional context."""
+        
+        if len(self.action_history) < 3:
+            return 0.5  # Neutral for insufficient data
+        
+        # Look at last 5 actions
+        recent_actions = self.action_history[-5:]
+        successes = sum(1 for action_record in recent_actions 
+                       if action_record.get('success', False))
+        
+        return successes / len(recent_actions)
+
+    def _apply_sensation_biasing(self, action: Dict[str, Any], available_actions: List[int], 
+                               sensation_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Apply sensation-based biasing to navigation actions (1-7).
+        
+        This is the "Bias action" step in the sensation loop.
+        """
+        
+        action_type = action['action_type']
+        
+        # Only bias navigation actions (1-7)
+        if action_type not in {1, 2, 3, 4, 5, 6, 7}:
+            return action
+        
+        # Get sensation-based action biases
+        biased_actions = self.sensation_engine.bias_action_selection(
+            self.agent_id, available_actions, self.navigation_state
+        )
+        
+        if not biased_actions:
+            return action
+        
+        # Find if current action has a bias
+        action_biases = {a: bias for a, bias in biased_actions}
+        current_bias = action_biases.get(action_type, 0.0)
+        
+        # If current action has negative bias, consider switching
+        if current_bias < -0.3 and len(biased_actions) > 1:
+            # Find most positively biased action
+            best_action, best_bias = max(biased_actions, key=lambda x: x[1])
+            
+            if best_bias > 0.2:  # Significant positive bias
+                action = {
+                    'action_type': best_action,
+                    'reasoning': f'sensation_bias_{self.navigation_state:.2f}',
+                    'original_action': action_type,
+                    'bias_applied': True
+                }
+        else:
+            # Keep original action but mark as sensation-influenced
+            action['sensation_bias'] = current_bias
+            action['emotional_state'] = self.navigation_state
+        
+        return action
+
+    def learn_from_action_outcome(self, action: Dict[str, Any], outcome: Dict[str, Any], 
+                                game_state: Dict[str, Any]) -> None:
+        """
+        Learn from action outcome using sensation system.
+        
+        This is the "Learn from outcome" step in the sensation loop.
+        """
+        
+        action_type = action.get('action_type', 0)
+        
+        # Only learn from navigation actions (1-7)
+        if action_type not in {1, 2, 3, 4, 5, 6, 7}:
+            return
+        
+        # Determine object type that was acted upon
+        perceived_objects = getattr(self, '_last_perceived_objects', ['unknown_object'])
+        
+        if not perceived_objects:
+            perceived_objects = ['unknown_object']
+        
+        # Learn from each perceived object
+        for obj_type in perceived_objects:
+            learning_occurred = self.sensation_engine.learn_from_outcome(
+                self.agent_id, obj_type, action_type, outcome, self.navigation_state
+            )
+            
+            if learning_occurred:
+                # Update emotional intelligence score
+                ei_score = self.sensation_engine.get_agent_emotional_intelligence(self.agent_id)
+                # Store updated EI score (handled by sensation engine)
+
+# [CHECKPOINT 6 COMPLETED: AGENT FACTORY IMPLEMENTATION WITH PHASE 4.5]
+# Phase 4.5: Sensation-based navigation integrated with existing agent architecture
 # Next: Integration with existing codebase (core_gameplay.py, action_handler.py, main_runner.py)

@@ -392,7 +392,17 @@ class AdaptiveActionLimits:
             
         try:
             import json
-            spec = json.loads(agent_info[0]['specialization'])
+            
+            def safe_json_parse(json_str, default=None):
+                """Safely parse JSON string, returning default if invalid or empty."""
+                if not json_str or json_str.strip() == '':
+                    return default or {}
+                try:
+                    return json.loads(json_str)
+                except (json.JSONDecodeError, TypeError):
+                    return default or {}
+            
+            spec = safe_json_parse(agent_info[0]['specialization'])
             assigned_games = spec.get('assigned_games', [])
             
             if not assigned_games:

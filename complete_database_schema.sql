@@ -1,6 +1,6 @@
 -- ============================================================================
--- COMPLETE BITTERTRUTH-AI DATABASE SCHEMA
--- Combines core gameplay and Ouroboros evolutionary framework
+-- COMPLETE BITTERTRUTH-AI DATABASE SCHEMA (UPDATED)
+-- Generated from current database state including all Phase implementations
 -- Following Rule 2: Database-Only Storage - All data in SQLite
 -- ============================================================================
 
@@ -8,49 +8,8 @@
 -- CORE GAME MECHANICS TABLES
 -- ============================================================================
 
--- System sessions and training runs
-CREATE TABLE IF NOT EXISTS training_sessions (
-    session_id TEXT PRIMARY KEY,
-    game_id TEXT, -- Optional game_id for session context
-    start_time TIMESTAMP NOT NULL,
-    end_time TIMESTAMP,
-    mode TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'running',
-    total_actions INTEGER DEFAULT 0,
-    total_wins INTEGER DEFAULT 0,
-    total_games INTEGER DEFAULT 0,
-    win_rate REAL DEFAULT 0.0,
-    avg_score REAL DEFAULT 0.0,
-    energy_level REAL DEFAULT 100.0,
-    memory_operations INTEGER DEFAULT 0,
-    sleep_cycles INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Individual game results within sessions
-CREATE TABLE IF NOT EXISTS game_results (
-    game_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
-    scorecard_id TEXT,                     -- ARC API scorecard ID for tracking/debugging
-    start_time TIMESTAMP NOT NULL,
-    end_time TIMESTAMP,
-    status TEXT NOT NULL, -- 'completed', 'failed', 'timeout', 'cancelled'
-    final_score REAL DEFAULT 0.0,
-    total_actions INTEGER DEFAULT 0,
-    actions_taken TEXT, -- JSON array of action numbers
-    available_actions TEXT, -- JSON array of available actions at game start
-    win_detected BOOLEAN DEFAULT FALSE,
-    level_completions INTEGER DEFAULT 0,
-    frame_changes INTEGER DEFAULT 0,
-    coordinate_attempts INTEGER DEFAULT 0,
-    coordinate_successes INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (game_id, session_id),
-    FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
-);
-
--- Action traces for detailed analysis
-CREATE TABLE IF NOT EXISTS action_traces (
+-- action_traces
+CREATE TABLE action_traces (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
     game_id TEXT NOT NULL,
@@ -68,21 +27,37 @@ CREATE TABLE IF NOT EXISTS action_traces (
     FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
 );
 
--- Action effectiveness tracking
-CREATE TABLE IF NOT EXISTS action_effectiveness (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+-- game_results
+CREATE TABLE game_results (
     game_id TEXT NOT NULL,
-    action_number INTEGER NOT NULL,
-    attempts INTEGER DEFAULT 0,
-    successes INTEGER DEFAULT 0,
-    success_rate REAL DEFAULT 0.0,
-    avg_score_impact REAL DEFAULT 0.0,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    session_id TEXT NOT NULL,
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    status TEXT NOT NULL, -- 'completed', 'failed', 'timeout', 'cancelled'
+    final_score REAL DEFAULT 0.0,
+    total_actions INTEGER DEFAULT 0,
+    actions_taken TEXT, -- JSON array of action numbers
+    available_actions TEXT, -- JSON array of available actions at game start
+    win_detected BOOLEAN DEFAULT FALSE,
+    level_completions INTEGER DEFAULT 0,
+    frame_changes INTEGER DEFAULT 0,
+    coordinate_attempts INTEGER DEFAULT 0,
+    coordinate_successes INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, scorecard_id TEXT,
+    PRIMARY KEY (game_id, session_id),
+    FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
 );
 
--- Score tracking for performance analysis
-CREATE TABLE IF NOT EXISTS score_history (
+-- global_counters
+CREATE TABLE global_counters (
+    counter_name TEXT PRIMARY KEY,
+    counter_value INTEGER DEFAULT 0,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    description TEXT
+);
+
+-- score_history
+CREATE TABLE score_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
     game_id TEXT NOT NULL,
@@ -92,16 +67,8 @@ CREATE TABLE IF NOT EXISTS score_history (
     FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
 );
 
--- Global counters for system state
-CREATE TABLE IF NOT EXISTS global_counters (
-    counter_name TEXT PRIMARY KEY,
-    counter_value INTEGER DEFAULT 0,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    description TEXT
-);
-
--- System logs table for all application logging
-CREATE TABLE IF NOT EXISTS system_logs (
+-- system_logs
+CREATE TABLE system_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     level TEXT NOT NULL,
@@ -117,16 +84,34 @@ CREATE TABLE IF NOT EXISTS system_logs (
     extra_data TEXT -- JSON for additional context
 );
 
+-- training_sessions
+CREATE TABLE training_sessions (
+    session_id TEXT PRIMARY KEY,
+    game_id TEXT, -- Optional game_id for session context
+    start_time TIMESTAMP NOT NULL,
+    end_time TIMESTAMP,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    total_actions INTEGER DEFAULT 0,
+    total_wins INTEGER DEFAULT 0,
+    total_games INTEGER DEFAULT 0,
+    win_rate REAL DEFAULT 0.0,
+    avg_score REAL DEFAULT 0.0,
+    energy_level REAL DEFAULT 100.0,
+    memory_operations INTEGER DEFAULT 0,
+    sleep_cycles INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================================================
 -- OUROBOROS EVOLUTIONARY FRAMEWORK TABLES
 -- ============================================================================
 
--- Enhanced agent management table
-CREATE TABLE IF NOT EXISTS agents (
+-- agents
+CREATE TABLE agents (
     agent_id TEXT PRIMARY KEY,
     agent_type TEXT NOT NULL,
-    genome TEXT NOT NULL,              -- JSON strategy parameters (Layer 1: Static Genome)
-    epigenetics TEXT,                  -- JSON epigenetic inheritance (Layer 2: Epigenetic)
+    genome TEXT NOT NULL,              -- JSON strategy parameters
     generation INTEGER NOT NULL,
     parent_ids TEXT,                   -- JSON array of parent agent IDs
     specialization TEXT NOT NULL,
@@ -147,25 +132,45 @@ CREATE TABLE IF NOT EXISTS agents (
     crossover_count INTEGER DEFAULT 0,
     last_performance_update TIMESTAMP,
 
-    -- Phase 1: Prestige System (Network Contribution Currency)
-    discovery_prestige REAL DEFAULT 0.0,           -- Total prestige from network contributions
-    innovation_score REAL DEFAULT 0.0,             -- Novelty value of discoveries
-    sequence_discovery_count INTEGER DEFAULT 0,     -- Count of sequences discovered
-    pattern_discovery_count INTEGER DEFAULT 0,      -- Count of patterns discovered
-    validation_reputation REAL DEFAULT 0.5,         -- Quality of validation work (Bayesian prior)
-    
-    -- Phase 1: Status Benefits (derived from prestige, NOT action budgets)
-    breeding_priority REAL DEFAULT 1.0,            -- 1.0x to 3.0x breeding weight
-    survival_protection REAL DEFAULT 0.0,          -- 0% to 80% protection from culling
-    bonus_game_slots INTEGER DEFAULT 0,            -- +0 to +10 extra game attempts per generation
-
     -- Status
     is_active BOOLEAN DEFAULT TRUE,
     retirement_reason TEXT
+, epigenetics TEXT, discovery_prestige REAL DEFAULT 0.0, innovation_score REAL DEFAULT 0.0, sequence_discovery_count INTEGER DEFAULT 0, pattern_discovery_count INTEGER DEFAULT 0, validation_reputation REAL DEFAULT 0.5, breeding_priority REAL DEFAULT 1.0, survival_protection REAL DEFAULT 0.0, bonus_game_slots INTEGER DEFAULT 0, action_allowance_per_level INTEGER DEFAULT 400, action_allowance_total INTEGER DEFAULT 7000, action_budget_multiplier REAL DEFAULT 1.0, last_salary_adjustment_gen INTEGER DEFAULT 0, recombination_discoveries INTEGER DEFAULT 0, successful_recombinations INTEGER DEFAULT 0, recombination_success_rate REAL DEFAULT 0.0, sensation_profile TEXT DEFAULT '{}', navigation_state REAL DEFAULT 0.0, action_biases TEXT DEFAULT '{}', sensation_learning_rate REAL DEFAULT 0.3, state_update_sensitivity REAL DEFAULT 0.7, emotional_intelligence_score REAL DEFAULT 0.0);
+
+-- arc_action_tracking
+CREATE TABLE arc_action_tracking (
+    action_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    action_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Action details
+    action_type TEXT NOT NULL,
+    action_data TEXT NOT NULL,             -- JSON action parameters
+    coordinate_x INTEGER,                  -- For ACTION6 tracking (0-63 range)
+    coordinate_y INTEGER,                  -- For ACTION6 tracking (0-63 range)
+
+    -- API verification (Rule 7: Verify real actions sent to ARC games)
+    api_request_sent BOOLEAN NOT NULL,
+    api_response_received BOOLEAN NOT NULL,
+    api_response_data TEXT,                -- JSON API response
+
+    -- Effectiveness tracking
+    score_before_action REAL,
+    score_after_action REAL,
+    score_delta REAL,
+    immediate_reward REAL,
+
+    -- Validation
+    coordinate_valid BOOLEAN,              -- Within 0-63 range check
+    action_accepted BOOLEAN,               -- ARC API accepted action
+    error_message TEXT,
+
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
--- Evolution cycle tracking (Claude Code decisions)
-CREATE TABLE IF NOT EXISTS claude_evolution_decisions (
+-- claude_evolution_decisions
+CREATE TABLE claude_evolution_decisions (
     decision_id TEXT PRIMARY KEY,
     generation INTEGER NOT NULL,
     decision_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -192,8 +197,132 @@ CREATE TABLE IF NOT EXISTS claude_evolution_decisions (
     notes TEXT
 );
 
--- Agent ARC game performance (detailed tracking with ARC-native rewards)
-CREATE TABLE IF NOT EXISTS agent_arc_performance (
+-- claude_memory
+CREATE TABLE claude_memory (
+    memory_id TEXT PRIMARY KEY,
+    memory_type TEXT NOT NULL,             -- 'successful_strategy', 'failed_approach', 'pattern_discovery'
+    content TEXT NOT NULL,                 -- JSON memory content
+    relevance_score REAL DEFAULT 1.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_accessed TIMESTAMP,
+    access_count INTEGER DEFAULT 0,
+
+    -- Memory linking
+    related_agents TEXT,                   -- JSON array of related agent IDs
+    related_decisions TEXT,                -- JSON array of related decision IDs
+    context_tags TEXT,                     -- JSON array of context tags
+
+    -- Memory validation
+    validation_status TEXT DEFAULT 'unverified',  -- 'verified', 'contradicted', 'unverified'
+    validation_evidence TEXT              -- JSON evidence for/against memory
+);
+
+-- population_health_metrics
+CREATE TABLE population_health_metrics (
+    metric_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    measurement_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Diversity measurements
+    genetic_diversity_score REAL NOT NULL,
+    strategy_distribution TEXT NOT NULL,    -- JSON distribution of agent types
+    performance_variance REAL NOT NULL,
+
+    -- Health indicators
+    stagnation_indicator REAL NOT NULL,
+    improvement_rate REAL NOT NULL,
+    population_size INTEGER NOT NULL,
+    active_agents INTEGER NOT NULL,
+
+    -- Performance benchmarks
+    best_win_rate REAL NOT NULL,
+    average_win_rate REAL NOT NULL,
+    worst_win_rate REAL NOT NULL,
+    win_rate_std_dev REAL NOT NULL,
+
+    -- Strategic analysis
+    dominant_strategies TEXT,              -- JSON list of most successful strategies
+    emerging_patterns TEXT,                -- JSON patterns Claude Code has identified
+    recommendations TEXT                   -- JSON Claude Code recommendations
+);
+
+-- ============================================================================
+-- PHASE IMPLEMENTATION TABLES
+-- (Phases 0-5: Network Intelligence, Prestige, Economy, Recombination,
+--  Viral Packages, Distributed Regulation, Sensation System, Horizontal Transfer)
+-- ============================================================================
+
+-- action_bias_events
+CREATE TABLE action_bias_events (
+        bias_id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        game_id TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        
+        -- Action context
+        action_taken INTEGER NOT NULL, -- 1-7
+        navigation_state REAL NOT NULL,
+        sensation_bias REAL NOT NULL, -- How much sensation influenced this action
+        
+        -- Outcome tracking
+        action_success BOOLEAN DEFAULT NULL,
+        score_change INTEGER DEFAULT 0,
+        emotional_reward REAL DEFAULT 0.0, -- Internal satisfaction from action
+        
+        -- Learning impact
+        bias_adjustment REAL DEFAULT 0.0, -- How much bias changed due to outcome
+        
+        -- Timestamp
+        bias_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        
+        FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+    );
+
+-- action_effectiveness
+CREATE TABLE action_effectiveness (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    action_number INTEGER NOT NULL,
+    attempts INTEGER DEFAULT 0,
+    successes INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0.0,
+    avg_score_impact REAL DEFAULT 0.0,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- agent_agi_metrics
+CREATE TABLE agent_agi_metrics (
+    agent_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    
+    -- Diversity metrics
+    unique_games_played INTEGER DEFAULT 0,
+    unique_games_scored INTEGER DEFAULT 0,      -- Games with ANY score > 0
+    game_diversity_ratio REAL DEFAULT 0.0,      -- scored/played ratio
+    
+    -- Generalization metrics
+    novel_game_performance REAL DEFAULT 0.0,    -- Avg score on first-time games
+    novel_games_attempted INTEGER DEFAULT 0,
+    novel_games_scored INTEGER DEFAULT 0,
+    
+    -- Few-shot learning metrics
+    few_shot_improvement_avg REAL DEFAULT 0.0,  -- Avg improvement attempt 1â†’2
+    few_shot_success_rate REAL DEFAULT 0.0,     -- % games improved on 2nd try
+    
+    -- Anti-overfitting metrics
+    max_repeats_on_single_game INTEGER DEFAULT 0,
+    overfitting_penalty REAL DEFAULT 0.0,       -- Penalty if too focused on one game
+    
+    -- AGI fitness score (50% novel + 30% few-shot + 20% diversity)
+    agi_fitness_score REAL DEFAULT 0.0,
+    
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- agent_arc_performance
+CREATE TABLE agent_arc_performance (
     performance_id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
     game_id TEXT NOT NULL,
@@ -223,526 +352,206 @@ CREATE TABLE IF NOT EXISTS agent_arc_performance (
     win_bonus REAL DEFAULT 0.0,
     efficiency_bonus REAL DEFAULT 0.0,
     level_progression_bonus REAL DEFAULT 0.0,
-    total_evolutionary_reward REAL NOT NULL,
+    total_evolutionary_reward REAL NOT NULL, actions_earned INTEGER DEFAULT 0, actions_spent INTEGER DEFAULT 0, action_efficiency REAL DEFAULT 0.0, budget_utilization REAL DEFAULT 0.0,
 
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
     FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
 );
 
--- Population diversity and health metrics
-CREATE TABLE IF NOT EXISTS population_health_metrics (
-    metric_id TEXT PRIMARY KEY,
-    generation INTEGER NOT NULL,
-    measurement_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+-- agent_discoveries
+CREATE TABLE agent_discoveries (discovery_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, discovery_type TEXT NOT NULL, discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP, sequence_id TEXT, pattern_id TEXT, times_used_by_others INTEGER DEFAULT 0, success_rate_by_others REAL DEFAULT 0.0, innovation_value REAL DEFAULT 0.0, network_enrichment_score REAL DEFAULT 0.0, citations INTEGER DEFAULT 0, prestige_contribution REAL DEFAULT 0.0, generations_persisted INTEGER DEFAULT 0, rule_id TEXT, FOREIGN KEY (agent_id) REFERENCES agents(agent_id));
 
-    -- Diversity measurements
-    genetic_diversity_score REAL NOT NULL,
-    strategy_distribution TEXT NOT NULL,    -- JSON distribution of agent types
-    performance_variance REAL NOT NULL,
-
-    -- Health indicators
-    stagnation_indicator REAL NOT NULL,
-    improvement_rate REAL NOT NULL,
-    population_size INTEGER NOT NULL,
-    active_agents INTEGER NOT NULL,
-
-    -- Performance benchmarks
-    best_win_rate REAL NOT NULL,
-    average_win_rate REAL NOT NULL,
-    worst_win_rate REAL NOT NULL,
-    win_rate_std_dev REAL NOT NULL,
-
-    -- Strategic analysis
-    dominant_strategies TEXT,              -- JSON list of most successful strategies
-    emerging_patterns TEXT,                -- JSON patterns Claude Code has identified
-    recommendations TEXT                   -- JSON Claude Code recommendations
-);
-
--- Claude Code memory and learning (LLM self-management per Rule 4)
-CREATE TABLE IF NOT EXISTS claude_memory (
-    memory_id TEXT PRIMARY KEY,
-    memory_type TEXT NOT NULL,             -- 'successful_strategy', 'failed_approach', 'pattern_discovery'
-    content TEXT NOT NULL,                 -- JSON memory content
-    relevance_score REAL DEFAULT 1.0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_accessed TIMESTAMP,
-    access_count INTEGER DEFAULT 0,
-
-    -- Memory linking
-    related_agents TEXT,                   -- JSON array of related agent IDs
-    related_decisions TEXT,                -- JSON array of related decision IDs
-    context_tags TEXT,                     -- JSON array of context tags
-
-    -- Memory validation
-    validation_status TEXT DEFAULT 'unverified',  -- 'verified', 'contradicted', 'unverified'
-    validation_evidence TEXT              -- JSON evidence for/against memory
-);
-
--- Real-time ARC action tracking (Rule 7: Real Actions Only)
-CREATE TABLE IF NOT EXISTS arc_action_tracking (
-    action_id TEXT PRIMARY KEY,
+-- agent_game_diversity
+CREATE TABLE agent_game_diversity (
     agent_id TEXT NOT NULL,
     game_id TEXT NOT NULL,
-    action_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    -- Action details
-    action_type TEXT NOT NULL,
-    action_data TEXT NOT NULL,             -- JSON action parameters
-    coordinate_x INTEGER,
-    coordinate_y INTEGER,
-    coordinate_valid BOOLEAN,
-
-    -- API interaction (Rule 7 compliance)
-    api_request_sent BOOLEAN DEFAULT FALSE,
-    api_response_received BOOLEAN DEFAULT FALSE,
-    api_response_time_ms INTEGER,
-    action_accepted BOOLEAN,
-    error_message TEXT,
-
-    -- Action result
-    frame_changed BOOLEAN DEFAULT FALSE,
-    score_changed BOOLEAN DEFAULT FALSE,
-    score_before REAL,
-    score_after REAL,
-
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- ============================================================================
--- PATTERN LEARNING & ABSTRACTION TABLES (Layer 3 - Community Knowledge)
--- ============================================================================
-
--- Winning action sequences (the gold standard - what actually worked)
-CREATE TABLE IF NOT EXISTS winning_sequences (
-    sequence_id TEXT PRIMARY KEY,
-    game_id TEXT NOT NULL,
-    level_number INTEGER,
-    agent_id TEXT NOT NULL,
-    scorecard_id TEXT,                     -- ARC API scorecard ID linking to game_results
-    
-    -- Sequence data
-    action_sequence TEXT NOT NULL,         -- JSON array of actions
-    coordinate_sequence TEXT,              -- JSON array of coordinates (for ACTION6)
-    total_actions INTEGER NOT NULL,
-    frame_transitions TEXT,                -- JSON array of frame states for partial matching
-    
-    -- Context
-    initial_frame TEXT,                    -- JSON initial game state
-    final_frame TEXT,                      -- JSON final game state
-    score_achieved REAL NOT NULL,
-    win_achieved BOOLEAN NOT NULL,
-    
-    -- Performance metrics
-    efficiency_score REAL NOT NULL,        -- score per action
-    execution_time_seconds REAL,
-    
-    -- Discovery metadata
-    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation_discovered INTEGER NOT NULL,
-    times_successfully_replayed INTEGER DEFAULT 0,
-    times_attempted_replay INTEGER DEFAULT 0,
-    times_referenced INTEGER DEFAULT 0,    -- Total times this sequence was queried/used
-    
-    -- Pattern tags for abstraction
-    pattern_tags TEXT,                     -- JSON array of pattern identifiers
-    
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- Discovered patterns (abstractions across multiple wins)
-CREATE TABLE IF NOT EXISTS discovered_patterns (
-    pattern_id TEXT PRIMARY KEY,
-    pattern_type TEXT NOT NULL,            -- 'action_sequence', 'coordinate_path', 'strategy'
-    pattern_description TEXT NOT NULL,
-    
-    -- Pattern definition
-    abstract_sequence TEXT NOT NULL,       -- JSON abstract representation
-    required_preconditions TEXT,           -- JSON conditions for applicability
-    expected_outcomes TEXT,                -- JSON expected results
-    
-    -- Performance tracking
-    total_applications INTEGER DEFAULT 0,
-    successful_applications INTEGER DEFAULT 0,
-    success_rate REAL DEFAULT 0.0,
-    avg_efficiency REAL DEFAULT 0.0,
-    
-    -- Meta information
-    discovered_by_agent TEXT,
-    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation_discovered INTEGER NOT NULL,
-    
-    -- Pattern evolution
-    parent_pattern_id TEXT,                -- For pattern refinement
-    derived_from_sequences TEXT,           -- JSON array of sequence_ids
-    
-    -- Validation
-    confidence_score REAL DEFAULT 0.5,
-    times_validated INTEGER DEFAULT 0,
-    last_validated TIMESTAMP,
-    
-    FOREIGN KEY (discovered_by_agent) REFERENCES agents(agent_id)
-);
-
--- Pattern application attempts
-CREATE TABLE IF NOT EXISTS pattern_applications (
-    application_id TEXT PRIMARY KEY,
-    pattern_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    game_id TEXT NOT NULL,
-    
-    -- Application details
-    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation INTEGER NOT NULL,
-    
-    -- Results
-    success BOOLEAN NOT NULL,
-    score_achieved REAL,
-    actions_taken INTEGER,
-    
-    -- Context
-    preconditions_met TEXT,                -- JSON which preconditions were satisfied
-    adaptation_required TEXT,              -- JSON any modifications made
-    
-    FOREIGN KEY (pattern_id) REFERENCES discovered_patterns(pattern_id),
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- Community memory: Sequence validation tracking (Layer 3 - Somatic/Community)
-CREATE TABLE IF NOT EXISTS sequence_validation_attempts (
-    validation_id TEXT PRIMARY KEY,
-    sequence_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,
-    game_id TEXT NOT NULL,
-    
-    -- Attempt details
-    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation INTEGER NOT NULL,
-    
-    -- Results
-    validation_success BOOLEAN NOT NULL,
-    score_achieved REAL,
-    actions_taken INTEGER,
-    exact_match BOOLEAN DEFAULT FALSE,     -- Did sequence work exactly as recorded?
-    
-    -- Adaptation tracking
-    modifications_made TEXT,               -- JSON any changes required
-    failure_reason TEXT,                   -- If failed, why?
-    
-    -- Context similarity
-    frame_similarity_score REAL,           -- How similar was initial state?
-    context_match_score REAL,              -- Overall context similarity
-    
-    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id),
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- Phase 1: Agent discoveries tracking (network contribution prestige)
-CREATE TABLE IF NOT EXISTS agent_discoveries (
-    discovery_id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    discovery_type TEXT NOT NULL,         -- 'winning_sequence', 'pattern', 'rule', 'primitive'
-    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    -- Discovery references
-    sequence_id TEXT,                     -- If discovery is a winning sequence
-    pattern_id TEXT,                      -- If discovery is a pattern
-    rule_id TEXT,                         -- If discovery is a learned rule
-    
-    -- Network impact metrics (for prestige calculation)
-    times_used_by_others INTEGER DEFAULT 0,        -- Viral spread metric
-    success_rate_by_others REAL DEFAULT 0.0,       -- Quality when others use it
-    innovation_value REAL DEFAULT 0.0,             -- Novelty score (0.0 to 1.0)
-    network_enrichment_score REAL DEFAULT 0.0,     -- Overall network value added
-    
-    -- Prestige tracking
-    citations INTEGER DEFAULT 0,                   -- How many times referenced
-    prestige_contribution REAL DEFAULT 0.0,        -- Prestige points from this discovery
-    generations_persisted INTEGER DEFAULT 0,       -- How long has it survived?
-    
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
-    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id),
-    FOREIGN KEY (pattern_id) REFERENCES discovered_patterns(pattern_id),
-    FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id)
-);
-
--- Phase 1: Agent validation performance tracking (quality control prestige)
-CREATE TABLE IF NOT EXISTS agent_validation_performance (
-    agent_id TEXT PRIMARY KEY,
-    
-    -- Validation metrics
-    sequences_attempted INTEGER DEFAULT 0,
-    sequences_succeeded INTEGER DEFAULT 0,
-    validation_success_rate REAL DEFAULT 0.0,
-    
-    -- Quality metrics
-    avg_efficiency_vs_original REAL DEFAULT 1.0,   -- How efficient vs original? <1.0 = improved
-    improvement_contributions INTEGER DEFAULT 0,    -- Times agent improved on original
-    
-    -- Teaching/learning tracking
-    teaching_events INTEGER DEFAULT 0,              -- Times agent's discoveries taught others
-    learning_events INTEGER DEFAULT 0,              -- Times agent learned from others
-    
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- Sequence reputation scores (computed from validation attempts)
-CREATE TABLE IF NOT EXISTS sequence_reputation (
-    sequence_id TEXT PRIMARY KEY,
-    
-    -- Reputation metrics (Bayesian)
-    total_validation_attempts INTEGER DEFAULT 0,
-    successful_validations INTEGER DEFAULT 0,
-    failed_validations INTEGER DEFAULT 0,
-    
-    -- Calculated scores
-    success_rate REAL DEFAULT 0.0,
-    reliability_score REAL DEFAULT 0.5,    -- Bayesian: (successes + 2) / (total + 4)
-    
-    -- Usage tracking
-    total_agents_attempted INTEGER DEFAULT 0,
-    total_agents_succeeded INTEGER DEFAULT 0,
-    
-    -- Temporal tracking
-    last_validation_attempt TIMESTAMP,
-    last_successful_validation TIMESTAMP,
-    generations_since_last_success INTEGER DEFAULT 0,
-    
-    -- Decay tracking
-    reputation_decay_factor REAL DEFAULT 1.0,
-    
-    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
-);
-
--- ============================================================================
--- AGI-FOCUSED GAME DIVERSITY TRACKING
--- ============================================================================
-
--- Game diversity tracking per agent
-CREATE TABLE IF NOT EXISTS agent_game_diversity (
-    agent_id TEXT NOT NULL,
-    game_id TEXT NOT NULL,
-    first_played_generation INTEGER NOT NULL,
-    times_played INTEGER DEFAULT 1,
+    attempts INTEGER DEFAULT 0,
+    first_attempt_score REAL DEFAULT 0.0,
     best_score REAL DEFAULT 0.0,
-    win_achieved BOOLEAN DEFAULT FALSE,
-    is_novel_game BOOLEAN DEFAULT TRUE,    -- Was this a new game for this agent?
+    last_attempt_score REAL DEFAULT 0.0,
+    is_novel_game BOOLEAN DEFAULT TRUE,        -- First time this agent saw this game
+    few_shot_improvement REAL DEFAULT 0.0,     -- Score improvement from attempt 1 to 2
     last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (agent_id, game_id),
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
--- AGI performance metrics (generalization focus)
-CREATE TABLE IF NOT EXISTS agent_agi_metrics (
+-- agent_meta_learning
+CREATE TABLE agent_meta_learning (
     agent_id TEXT PRIMARY KEY,
-    
-    -- Diversity metrics
-    unique_games_played INTEGER DEFAULT 0,
-    unique_games_won INTEGER DEFAULT 0,
-    game_diversity_score REAL DEFAULT 0.0,
-    
-    -- Generalization metrics
-    first_attempt_success_rate REAL DEFAULT 0.0,  -- Win rate on novel games
-    transfer_learning_score REAL DEFAULT 0.0,      -- Performance on new games
-    specialization_penalty REAL DEFAULT 0.0,       -- Penalty for narrow focus
-    
-    -- Adaptability
-    avg_games_to_win REAL DEFAULT 0.0,            -- How fast does agent learn?
-    novel_game_performance REAL DEFAULT 0.0,       -- Avg score on unseen games
-    
-    -- AGI fitness (combines everything)
-    agi_fitness_score REAL DEFAULT 0.0,
-    
-    -- Temporal tracking
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     generation INTEGER NOT NULL,
     
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- Game exposure tracking (prevent overfitting)
-CREATE TABLE IF NOT EXISTS game_exposure_history (
-    game_id TEXT NOT NULL,
-    generation INTEGER NOT NULL,
-    times_played INTEGER DEFAULT 0,
-    times_won INTEGER DEFAULT 0,
-    unique_agents_played INTEGER DEFAULT 0,
-    is_retired BOOLEAN DEFAULT FALSE,      -- Has this game been overused?
-    last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (game_id, generation)
-);
-
--- ============================================================================
--- META-LEARNING EXTENSION - Learn to Learn Capability
--- ============================================================================
-
--- Learned visual primitives (building blocks for reasoning)
-CREATE TABLE IF NOT EXISTS visual_primitives (
-    primitive_id TEXT PRIMARY KEY,
-    primitive_type TEXT NOT NULL,          -- 'shape', 'color_pattern', 'spatial_relation', 'transformation'
-    primitive_definition TEXT NOT NULL,    -- JSON definition
-    agent_id TEXT NOT NULL,
-    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    times_observed INTEGER DEFAULT 1,
-    times_used_successfully INTEGER DEFAULT 0,
-    success_rate REAL DEFAULT 0.0,
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- Learned transformation rules (abstract IF-THEN rules)
-CREATE TABLE IF NOT EXISTS learned_rules (
-    rule_id TEXT PRIMARY KEY,
-    rule_type TEXT NOT NULL,               -- 'visual', 'spatial', 'logical', 'sequential'
-    
-    -- Rule definition
-    preconditions TEXT NOT NULL,           -- JSON conditions that trigger rule
-    transformations TEXT NOT NULL,         -- JSON transformations to apply
-    expected_outcomes TEXT NOT NULL,       -- JSON expected results
-    
-    -- Learning context
-    agent_id TEXT NOT NULL,
-    learned_from_games TEXT NOT NULL,      -- JSON array of game_ids
-    learned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation_learned INTEGER NOT NULL,
-    
-    -- Performance tracking
-    times_applied INTEGER DEFAULT 0,
-    times_successful INTEGER DEFAULT 0,
-    confidence REAL DEFAULT 0.5,
+    -- Rule acquisition
+    total_rules_learned INTEGER DEFAULT 0,
+    rules_created_this_gen INTEGER DEFAULT 0,
+    avg_rules_per_game REAL DEFAULT 0.0,
     
     -- Transfer learning
-    transferred_to_novel_games INTEGER DEFAULT 0,
-    transferred_successfully INTEGER DEFAULT 0,
-    transfer_success_rate REAL DEFAULT 0.0,
-    
-    -- Abstraction level
-    abstraction_level INTEGER DEFAULT 1,   -- 1=concrete, 5=highly abstract
-    generality_score REAL DEFAULT 0.0,     -- How broadly applicable?
-    
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- Rule transfer attempts (learning history)
-CREATE TABLE IF NOT EXISTS rule_transfers (
-    transfer_id TEXT PRIMARY KEY,
-    rule_id TEXT NOT NULL,
-    source_game_id TEXT NOT NULL,          -- Where rule was learned
-    target_game_id TEXT NOT NULL,          -- Where rule was applied
-    agent_id TEXT NOT NULL,
-    
-    -- Transfer details
-    transfer_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation INTEGER NOT NULL,
-    
-    -- Context similarity
-    context_similarity REAL NOT NULL,      -- How similar were the games?
-    precondition_match REAL NOT NULL,      -- How well did preconditions match?
-    
-    -- Results
-    transfer_successful BOOLEAN NOT NULL,
-    performance_improvement REAL,          -- Score improvement vs baseline
-    
-    -- Adaptation
-    rule_adapted BOOLEAN DEFAULT FALSE,
-    adaptations_made TEXT,                 -- JSON modifications
-    
-    FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id),
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-);
-
--- Meta-learning metrics per agent (learning to learn)
-CREATE TABLE IF NOT EXISTS agent_meta_learning (
-    agent_id TEXT PRIMARY KEY,
-    
-    -- Rule library
-    total_rules_learned INTEGER DEFAULT 0,
-    active_rules INTEGER DEFAULT 0,
-    rule_diversity_score REAL DEFAULT 0.0,
-    
-    -- Transfer performance
-    total_transfer_attempts INTEGER DEFAULT 0,
     successful_transfers INTEGER DEFAULT 0,
+    failed_transfers INTEGER DEFAULT 0,
     transfer_success_rate REAL DEFAULT 0.0,
     
-    -- Learning speed
-    avg_actions_to_learn_rule REAL DEFAULT 0.0,
-    avg_games_to_learn_rule REAL DEFAULT 0.0,
-    learning_rate REAL DEFAULT 0.0,
+    -- Generalization capability
+    avg_rule_generality REAL DEFAULT 0.0,  -- Avg games each rule works on
+    novel_game_success_rate REAL DEFAULT 0.0,
+    learning_rate REAL DEFAULT 0.0,        -- How fast agent learns new rules
     
-    -- Abstraction capability
-    avg_rule_generality REAL DEFAULT 0.0,
-    max_abstraction_level INTEGER DEFAULT 1,
-    
-    -- Meta-fitness (learning to learn score)
+    -- Meta-fitness (30% of total fitness in diversity mode)
     meta_fitness_score REAL DEFAULT 0.0,
     
-    -- Temporal tracking
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation INTEGER NOT NULL,
+    -- Visual reasoning capability
+    visual_primitives_learned INTEGER DEFAULT 0,
+    visual_understanding_score REAL DEFAULT 0.0,
     
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
--- Curriculum stage tracking (4-stage learning progression)
-CREATE TABLE IF NOT EXISTS curriculum_progress (
+-- agent_pariah_awareness
+CREATE TABLE agent_pariah_awareness (
     agent_id TEXT NOT NULL,
-    stage_number INTEGER NOT NULL,         -- 1=Foundation, 2=Pattern, 3=Abstraction, 4=Transfer
+    pariah_id TEXT NOT NULL,
     
-    -- Stage status
-    stage_started TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    stage_completed TIMESTAMP,
-    is_active BOOLEAN DEFAULT FALSE,
+    -- Awareness details
+    awareness_generation INTEGER NOT NULL,
+    awareness_source TEXT NOT NULL,  -- 'self_discovery', 'horizontal_transfer', 'inheritance'
+    learned_from_agent TEXT,  -- If learned from another agent
     
-    -- Stage metrics
-    games_in_stage INTEGER DEFAULT 0,
-    wins_in_stage INTEGER DEFAULT 0,
+    -- Awareness strength
+    awareness_level REAL DEFAULT 0.5,  -- 0-1, how well does agent recognize this?
+    avoidance_priority REAL DEFAULT 0.5,  -- 0-1, how strongly to avoid?
+    
+    -- Agent response to pariah
+    avoidance_success_count INTEGER DEFAULT 0,  -- Times agent avoided this
+    trigger_count INTEGER DEFAULT 0,  -- Times agent fell into trap despite awareness
+    total_encounters INTEGER DEFAULT 0,
+    avg_score_saved REAL DEFAULT 0.0,  -- Score saved by avoiding
+    
+    -- Awareness lifecycle
+    is_active BOOLEAN DEFAULT TRUE,
+    last_encountered_generation INTEGER,
+    false_positive_count INTEGER DEFAULT 0,  -- Times avoided when shouldn't have
+    
+    PRIMARY KEY (agent_id, pariah_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
+    FOREIGN KEY (learned_from_agent) REFERENCES agents(agent_id)
+);
+
+-- agent_signal_responses
+CREATE TABLE agent_signal_responses (
+        response_id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        signal_id TEXT NOT NULL,
+        response_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        generation INTEGER NOT NULL,
+        response_type TEXT NOT NULL,
+        response_strength REAL NOT NULL DEFAULT 1.0,
+        agent_performance_percentile REAL,
+        agent_stress_level REAL DEFAULT 0.5,
+        agent_recent_success BOOLEAN DEFAULT FALSE,
+        local_diversity REAL DEFAULT 0.0,
+        viral_infection_count INTEGER DEFAULT 0,
+        pariah_awareness_count INTEGER DEFAULT 0,
+        predicted_benefit REAL DEFAULT 0.0,
+        actual_impact REAL DEFAULT 0.0,
+        FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+        FOREIGN KEY (signal_id) REFERENCES network_regulatory_signals(signal_id),
+        UNIQUE(agent_id, signal_id)
+    );
+
+-- agent_validation_performance
+CREATE TABLE agent_validation_performance (agent_id TEXT PRIMARY KEY, sequences_attempted INTEGER DEFAULT 0, sequences_succeeded INTEGER DEFAULT 0, validation_success_rate REAL DEFAULT 0.0, avg_efficiency_vs_original REAL DEFAULT 1.0, improvement_contributions INTEGER DEFAULT 0, teaching_events INTEGER DEFAULT 0, learning_events INTEGER DEFAULT 0, FOREIGN KEY (agent_id) REFERENCES agents(agent_id));
+
+-- agent_viral_infections
+CREATE TABLE agent_viral_infections (
+    agent_id TEXT NOT NULL,
+    package_id TEXT NOT NULL,
+    
+    -- Infection details
+    infection_generation INTEGER NOT NULL,
+    infection_source TEXT NOT NULL,  -- 'discovery', 'horizontal_transfer', 'inheritance', 'mutation'
+    infected_by_agent TEXT,  -- If horizontal transfer, who spread it?
+    
+    -- Infection strength (how much does host express this?)
+    infection_strength REAL DEFAULT 0.5,  -- 0-1, affects action selection weight
+    expression_level REAL DEFAULT 0.5,  -- 0-1, how actively is host using this?
+    
+    -- Host response to infection
+    success_count INTEGER DEFAULT 0,  -- Times this package helped host
+    failure_count INTEGER DEFAULT 0,  -- Times this package failed host
+    total_uses INTEGER DEFAULT 0,
+    avg_score_boost REAL DEFAULT 0.0,  -- Average score change when using
+    
+    -- Infection lifecycle
+    is_active BOOLEAN DEFAULT TRUE,
+    last_used_generation INTEGER,
+    immunity_developed BOOLEAN DEFAULT FALSE,  -- Host rejected this package?
+    
+    PRIMARY KEY (agent_id, package_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id),
+    FOREIGN KEY (infected_by_agent) REFERENCES agents(agent_id)
+);
+
+-- curriculum_progress
+CREATE TABLE curriculum_progress (
+    agent_id TEXT NOT NULL,
+    stage_number INTEGER NOT NULL,         -- 1: specialization, 2: near_transfer, 3: diversification, 4: generalization
+    stage_name TEXT NOT NULL,
+    entered_stage TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    exited_stage TIMESTAMP,
+    
+    -- Stage requirements
+    required_win_rate REAL NOT NULL,
+    achieved_win_rate REAL DEFAULT 0.0,
+    required_transfer_rate REAL,
+    achieved_transfer_rate REAL DEFAULT 0.0,
+    
+    -- Stage performance
+    games_played_in_stage INTEGER DEFAULT 0,
+    games_won_in_stage INTEGER DEFAULT 0,
     rules_learned_in_stage INTEGER DEFAULT 0,
+    successful_transfers_in_stage INTEGER DEFAULT 0,
     
-    -- Progression criteria
-    mastery_score REAL DEFAULT 0.0,        -- 0.0 to 1.0
-    ready_for_next_stage BOOLEAN DEFAULT FALSE,
+    -- Advancement
+    stage_completed BOOLEAN DEFAULT FALSE,
+    completion_timestamp TIMESTAMP,
     
     PRIMARY KEY (agent_id, stage_number),
     FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
--- Game session visual analysis (store frame analyses for rule learning)
-CREATE TABLE IF NOT EXISTS game_visual_analysis (
-    analysis_id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    game_id TEXT NOT NULL,
-    session_id TEXT NOT NULL,
+-- discovered_patterns
+CREATE TABLE discovered_patterns (
+    pattern_id TEXT PRIMARY KEY,
+    pattern_name TEXT NOT NULL,
+    pattern_type TEXT NOT NULL,            -- 'action_sequence', 'coordinate_cluster', 'color_pattern'
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    -- Frame data
-    frame_number INTEGER NOT NULL,
-    frame_data TEXT NOT NULL,              -- JSON frame state
+    -- Pattern definition
+    pattern_signature TEXT NOT NULL,       -- JSON: abstract pattern description
+    concrete_examples TEXT NOT NULL,       -- JSON: array of sequence_ids that match
+    occurrence_count INTEGER DEFAULT 1,
+    success_count INTEGER DEFAULT 1,
     
-    -- Visual analysis
-    detected_primitives TEXT,              -- JSON array of primitive_ids
-    detected_patterns TEXT,                -- JSON patterns observed
-    spatial_relationships TEXT,            -- JSON spatial analysis
+    -- Effectiveness metrics
+    success_rate REAL NOT NULL,            -- % of times pattern leads to win
+    avg_score_achieved REAL NOT NULL,
+    avg_efficiency REAL NOT NULL,
+    confidence_score REAL NOT NULL,        -- statistical confidence
     
-    -- Transformation analysis
-    transformation_from_prev TEXT,         -- JSON what changed from previous frame
-    likely_action TEXT,                    -- Inferred action that caused change
+    -- Application context
+    applicable_game_types TEXT,            -- JSON: which game types this works on
     
-    -- Rule induction
-    triggered_rule_ids TEXT,               -- JSON rules that matched this context
-    used_in_rule_id TEXT,                  -- If this frame was used to learn a rule
-    
-    -- Metadata
-    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
-    FOREIGN KEY (session_id) REFERENCES training_sessions(session_id),
-    FOREIGN KEY (used_in_rule_id) REFERENCES learned_rules(rule_id)
+    -- Learning status
+    validation_status TEXT DEFAULT 'hypothesis',  -- 'hypothesis', 'validated', 'invalidated'
+    validation_games INTEGER DEFAULT 0,
+    last_validated TIMESTAMP
 );
 
--- ============================================================================
--- NETWORK INTELLIGENCE & ECOSYSTEM HEALTH TRACKING
--- ============================================================================
-
--- Ecosystem health snapshots (network vital signs)
-CREATE TABLE IF NOT EXISTS ecosystem_health_snapshots (
+-- ecosystem_health_snapshots
+CREATE TABLE ecosystem_health_snapshots (
     snapshot_id TEXT PRIMARY KEY,
     snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     generation INTEGER NOT NULL,
@@ -784,594 +593,346 @@ CREATE TABLE IF NOT EXISTS ecosystem_health_snapshots (
     -- Overall health assessment
     health_status TEXT DEFAULT 'unknown',  -- 'critical', 'poor', 'fair', 'good', 'excellent'
     health_score REAL DEFAULT 0.0  -- 0.0 to 1.0
+, total_levels_completed_this_gen INTEGER DEFAULT 0, avg_levels_per_game REAL DEFAULT 0.0, avg_actions_per_level REAL DEFAULT 0.0, network_learning_rate REAL DEFAULT 0.0);
+
+-- ecosystem_metabolism_snapshots
+CREATE TABLE ecosystem_metabolism_snapshots (
+            snapshot_id TEXT PRIMARY KEY,
+            generation INTEGER NOT NULL,
+            snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            
+            -- Total metabolic capacity (network ATP pool)
+            total_actions_available INTEGER NOT NULL,
+            total_actions_budgeted INTEGER NOT NULL,
+            total_actions_spent INTEGER NOT NULL,
+            total_actions_wasted INTEGER NOT NULL,
+            
+            -- Resource distribution metrics
+            gini_coefficient REAL DEFAULT 0.0,
+            top_10_percent_share REAL DEFAULT 0.0,
+            bottom_50_percent_share REAL DEFAULT 0.0,
+            
+            -- Metabolic rates (network dynamics)
+            action_creation_rate REAL DEFAULT 0.0,
+            action_destruction_rate REAL DEFAULT 0.0,
+            metabolic_efficiency REAL DEFAULT 0.0,
+            
+            -- Network health indicators
+            resource_scarcity_index REAL DEFAULT 0.0,
+            budget_inflation_rate REAL DEFAULT 0.0,
+            
+            -- Population economics
+            active_agent_count INTEGER NOT NULL,
+            agents_above_baseline INTEGER DEFAULT 0,
+            agents_below_baseline INTEGER DEFAULT 0
+        );
+
+-- game_exposure_history
+CREATE TABLE game_exposure_history (
+    game_id TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    times_played INTEGER DEFAULT 0,
+    unique_agents_played INTEGER DEFAULT 0,
+    avg_score REAL DEFAULT 0.0,
+    best_score REAL DEFAULT 0.0,
+    is_retired BOOLEAN DEFAULT FALSE,           -- Retired if played too much
+    retirement_reason TEXT,
+    last_played TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (game_id, generation)
 );
 
--- Knowledge redundancy tracking (viral backup system)
-CREATE TABLE IF NOT EXISTS knowledge_redundancy (
-    sequence_id TEXT PRIMARY KEY,
+-- game_visual_analysis
+CREATE TABLE game_visual_analysis (
+    analysis_id TEXT PRIMARY KEY,
+    game_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    frame_number INTEGER NOT NULL,
+    analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    -- Redundancy metrics
-    total_agent_carriers INTEGER DEFAULT 0,  -- How many agents can execute this?
-    active_agent_carriers INTEGER DEFAULT 0,  -- How many are still active?
-    generation_spread INTEGER DEFAULT 0,  -- How many generations have seen this?
+    -- Frame data
+    frame_data TEXT NOT NULL,              -- JSON: the actual frame
     
-    -- Backup status
-    is_backed_up BOOLEAN DEFAULT FALSE,  -- Multiple carriers exist
-    backup_count INTEGER DEFAULT 0,
-    last_backup_generation INTEGER,
+    -- Visual features (from visual_reasoning_engine)
+    symmetry_detected TEXT,                -- JSON: symmetry types and confidence
+    patterns_found TEXT,                   -- JSON: repeating patterns
+    colors_analyzed TEXT,                  -- JSON: color distribution
+    shapes_detected TEXT,                  -- JSON: shape information
+    spatial_relations TEXT,                -- JSON: relationships between objects
+    complexity_metrics TEXT,               -- JSON: complexity scores
     
-    -- Risk assessment
-    risk_of_loss REAL DEFAULT 1.0,  -- 1.0 = high risk, 0.0 = well protected
-    criticality_score REAL DEFAULT 0.0,  -- Based on success rate and usage
-    is_viral_core BOOLEAN DEFAULT FALSE,  -- Part of critical knowledge base?
+    -- Transformation suggestions
+    likely_transformations TEXT,           -- JSON: suggested actions based on visual analysis
     
-    -- Temporal tracking
-    first_discovered_generation INTEGER NOT NULL,
-    last_used_generation INTEGER,
-    generations_since_last_use INTEGER DEFAULT 0,
+    -- Used for rule learning
+    used_in_rule_id TEXT,
     
-    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+    FOREIGN KEY (used_in_rule_id) REFERENCES learned_rules(rule_id)
 );
 
--- Rule redundancy tracking (abstract knowledge backup)
-CREATE TABLE IF NOT EXISTS rule_redundancy (
-    rule_id TEXT PRIMARY KEY,
-    
-    -- Redundancy metrics
-    total_agent_carriers INTEGER DEFAULT 0,
-    active_agent_carriers INTEGER DEFAULT 0,
-    independent_discoveries INTEGER DEFAULT 0,  -- How many agents learned this independently?
-    
-    -- Backup status
-    is_backed_up BOOLEAN DEFAULT FALSE,
-    backup_count INTEGER DEFAULT 0,
-    
-    -- Risk assessment
-    risk_of_loss REAL DEFAULT 1.0,
-    criticality_score REAL DEFAULT 0.0,
-    is_viral_core BOOLEAN DEFAULT FALSE,
-    
-    FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id)
-);
+-- horizontal_transfer_events
+CREATE TABLE horizontal_transfer_events (
+                transfer_id TEXT PRIMARY KEY,
+                donor_agent_id TEXT NOT NULL,
+                recipient_agent_id TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                
+                -- Transfer classification
+                transfer_type TEXT NOT NULL,  -- 'layer_1_genome', 'layer_2_epigenetic', 'layer_3_somatic'
+                transfer_layer INTEGER NOT NULL,  -- 1, 2, or 3
+                
+                -- Emotional compatibility (Phase 4.5 enhancement)
+                emotional_compatibility REAL NOT NULL,
+                success_probability REAL NOT NULL,
+                transfer_successful BOOLEAN NOT NULL,
+                
+                -- Transfer content and results
+                knowledge_content TEXT,  -- JSON: what was transferred
+                emotional_context TEXT,  -- JSON: emotional state during transfer
+                knowledge_transferred BOOLEAN DEFAULT FALSE,
+                performance_impact REAL DEFAULT 0.0,  -- Recipient performance change
+                
+                -- Metadata
+                transfer_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT,
+                
+                FOREIGN KEY (donor_agent_id) REFERENCES agents(agent_id),
+                FOREIGN KEY (recipient_agent_id) REFERENCES agents(agent_id)
+            );
 
--- Network knowledge graph (relationships between knowledge pieces)
-CREATE TABLE IF NOT EXISTS knowledge_graph_edges (
+-- knowledge_graph_edges
+CREATE TABLE knowledge_graph_edges (
     edge_id TEXT PRIMARY KEY,
-    
-    -- Edge definition
-    source_knowledge_id TEXT NOT NULL,  -- sequence_id or rule_id or pattern_id
+    source_knowledge_id TEXT NOT NULL,
     target_knowledge_id TEXT NOT NULL,
-    source_type TEXT NOT NULL,  -- 'sequence', 'rule', 'pattern'
-    target_type TEXT NOT NULL,
+    source_knowledge_type TEXT NOT NULL,  -- 'sequence', 'pattern', 'rule'
+    target_knowledge_type TEXT NOT NULL,
+    edge_type TEXT NOT NULL,  -- 'builds_on', 'contradicts', 'generalizes', 'specializes'
     
-    -- Relationship type
-    edge_type TEXT NOT NULL,  -- 'derives_from', 'depends_on', 'contradicts', 'reinforces'
-    relationship_strength REAL DEFAULT 1.0,
+    -- Edge strength
+    confidence REAL DEFAULT 0.5,
+    evidence_count INTEGER DEFAULT 1,
     
     -- Discovery
     discovered_by_agent TEXT,
     discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation INTEGER NOT NULL,
+    discovered_generation INTEGER,
     
     -- Validation
-    times_observed INTEGER DEFAULT 1,
-    confidence REAL DEFAULT 0.5,
+    validated BOOLEAN DEFAULT FALSE,
+    validation_count INTEGER DEFAULT 0,
     
     FOREIGN KEY (discovered_by_agent) REFERENCES agents(agent_id)
 );
 
--- ============================================================================
--- INDEXES FOR PERFORMANCE
--- ============================================================================
+-- knowledge_propagation_chains
+CREATE TABLE knowledge_propagation_chains (
+                chain_id TEXT PRIMARY KEY,
+                origin_agent_id TEXT NOT NULL,
+                knowledge_type TEXT NOT NULL,  -- 'sequence', 'sensation_mapping', 'pattern', etc.
+                knowledge_identifier TEXT NOT NULL,  -- sequence_id, pattern_id, etc.
+                
+                -- Chain tracking
+                chain_length INTEGER DEFAULT 1,
+                current_carriers INTEGER DEFAULT 1,
+                max_carriers_reached INTEGER DEFAULT 1,
+                
+                -- Performance tracking
+                avg_performance_improvement REAL DEFAULT 0.0,
+                total_games_won_with_knowledge INTEGER DEFAULT 0,
+                
+                -- Metadata
+                chain_start_generation INTEGER NOT NULL,
+                last_transfer_generation INTEGER,
+                is_active BOOLEAN DEFAULT TRUE,
+                
+                FOREIGN KEY (origin_agent_id) REFERENCES agents(agent_id)
+            );
 
--- Core game mechanics indexes
-CREATE INDEX IF NOT EXISTS idx_training_sessions_mode ON training_sessions(mode);
-CREATE INDEX IF NOT EXISTS idx_training_sessions_status ON training_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_training_sessions_start_time ON training_sessions(start_time);
-
-CREATE INDEX IF NOT EXISTS idx_game_results_session_id ON game_results(session_id);
-CREATE INDEX IF NOT EXISTS idx_game_results_status ON game_results(status);
-CREATE INDEX IF NOT EXISTS idx_game_results_final_score ON game_results(final_score);
-CREATE INDEX IF NOT EXISTS idx_game_results_scorecard ON game_results(scorecard_id);
-
-CREATE INDEX IF NOT EXISTS idx_action_traces_session_id ON action_traces(session_id);
-CREATE INDEX IF NOT EXISTS idx_action_traces_game_id ON action_traces(game_id);
-CREATE INDEX IF NOT EXISTS idx_action_traces_timestamp ON action_traces(timestamp);
-
-CREATE INDEX IF NOT EXISTS idx_action_effectiveness_game_id ON action_effectiveness(game_id);
-CREATE INDEX IF NOT EXISTS idx_action_effectiveness_action_number ON action_effectiveness(action_number);
-CREATE INDEX IF NOT EXISTS idx_action_effectiveness_success_rate ON action_effectiveness(success_rate);
-
-CREATE INDEX IF NOT EXISTS idx_score_history_session_id ON score_history(session_id);
-CREATE INDEX IF NOT EXISTS idx_score_history_game_id ON score_history(game_id);
-CREATE INDEX IF NOT EXISTS idx_score_history_timestamp ON score_history(timestamp);
-
-CREATE INDEX IF NOT EXISTS idx_system_logs_timestamp ON system_logs(timestamp);
-CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs(level);
-CREATE INDEX IF NOT EXISTS idx_system_logs_logger_name ON system_logs(logger_name);
-CREATE INDEX IF NOT EXISTS idx_system_logs_session_id ON system_logs(session_id);
-CREATE INDEX IF NOT EXISTS idx_system_logs_game_id ON system_logs(game_id);
-
--- Agent performance indexes
-CREATE INDEX IF NOT EXISTS idx_agents_agent_type ON agents(agent_type);
-CREATE INDEX IF NOT EXISTS idx_agents_generation ON agents(generation);
-CREATE INDEX IF NOT EXISTS idx_agents_is_active ON agents(is_active);
-CREATE INDEX IF NOT EXISTS idx_agents_total_games_won ON agents(total_games_won);
-CREATE INDEX IF NOT EXISTS idx_agents_score_efficiency ON agents(score_efficiency);
-
--- Evolution decisions indexes
-CREATE INDEX IF NOT EXISTS idx_claude_decisions_generation ON claude_evolution_decisions(generation);
-CREATE INDEX IF NOT EXISTS idx_claude_decisions_timestamp ON claude_evolution_decisions(decision_timestamp);
-CREATE INDEX IF NOT EXISTS idx_claude_decisions_strategy_focus ON claude_evolution_decisions(strategy_focus);
-
--- Agent ARC performance indexes
-CREATE INDEX IF NOT EXISTS idx_agent_arc_perf_agent_id ON agent_arc_performance(agent_id);
-CREATE INDEX IF NOT EXISTS idx_agent_arc_perf_win_achieved ON agent_arc_performance(win_achieved);
-CREATE INDEX IF NOT EXISTS idx_agent_arc_perf_timestamp ON agent_arc_performance(game_timestamp);
-CREATE INDEX IF NOT EXISTS idx_agent_arc_perf_total_reward ON agent_arc_performance(total_evolutionary_reward);
-
--- Population health indexes
-CREATE INDEX IF NOT EXISTS idx_pop_health_generation ON population_health_metrics(generation);
-CREATE INDEX IF NOT EXISTS idx_pop_health_timestamp ON population_health_metrics(measurement_timestamp);
-CREATE INDEX IF NOT EXISTS idx_pop_health_improvement_rate ON population_health_metrics(improvement_rate);
-
--- Claude memory indexes
-CREATE INDEX IF NOT EXISTS idx_claude_memory_type ON claude_memory(memory_type);
-CREATE INDEX IF NOT EXISTS idx_claude_memory_relevance ON claude_memory(relevance_score);
-CREATE INDEX IF NOT EXISTS idx_claude_memory_created_at ON claude_memory(created_at);
-
--- ARC action tracking indexes
-CREATE INDEX IF NOT EXISTS idx_arc_action_agent_id ON arc_action_tracking(agent_id);
-CREATE INDEX IF NOT EXISTS idx_arc_action_timestamp ON arc_action_tracking(action_timestamp);
-CREATE INDEX IF NOT EXISTS idx_arc_action_coordinate_valid ON arc_action_tracking(coordinate_valid);
-CREATE INDEX IF NOT EXISTS idx_arc_action_accepted ON arc_action_tracking(action_accepted);
-
--- Pattern learning indexes
-CREATE INDEX IF NOT EXISTS idx_winning_sequences_game_id ON winning_sequences(game_id);
-CREATE INDEX IF NOT EXISTS idx_winning_sequences_efficiency ON winning_sequences(efficiency_score);
-CREATE INDEX IF NOT EXISTS idx_winning_sequences_scorecard ON winning_sequences(scorecard_id);
-CREATE INDEX IF NOT EXISTS idx_winning_sequences_times_referenced ON winning_sequences(times_referenced DESC);
-CREATE INDEX IF NOT EXISTS idx_discovered_patterns_success_rate ON discovered_patterns(success_rate);
-CREATE INDEX IF NOT EXISTS idx_pattern_applications_success ON pattern_applications(success);
-CREATE INDEX IF NOT EXISTS idx_sequence_validation_attempts_agent ON sequence_validation_attempts(agent_id);
-CREATE INDEX IF NOT EXISTS idx_sequence_validation_attempts_sequence ON sequence_validation_attempts(sequence_id);
-CREATE INDEX IF NOT EXISTS idx_sequence_reputation_success_rate ON sequence_reputation(success_rate DESC);
-
--- Phase 1: Prestige system indexes
-CREATE INDEX IF NOT EXISTS idx_agents_discovery_prestige ON agents(discovery_prestige DESC);
-CREATE INDEX IF NOT EXISTS idx_agents_breeding_priority ON agents(breeding_priority DESC);
-CREATE INDEX IF NOT EXISTS idx_agents_survival_protection ON agents(survival_protection DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_discoveries_agent ON agent_discoveries(agent_id);
-CREATE INDEX IF NOT EXISTS idx_agent_discoveries_type ON agent_discoveries(discovery_type);
-CREATE INDEX IF NOT EXISTS idx_agent_discoveries_prestige ON agent_discoveries(prestige_contribution DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_discoveries_viral ON agent_discoveries(times_used_by_others DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_validation_perf_success ON agent_validation_performance(validation_success_rate DESC);
-
--- AGI diversity indexes
-CREATE INDEX IF NOT EXISTS idx_agent_game_diversity_agent ON agent_game_diversity(agent_id);
-CREATE INDEX IF NOT EXISTS idx_agent_game_diversity_novel ON agent_game_diversity(is_novel_game);
-CREATE INDEX IF NOT EXISTS idx_agent_agi_metrics_fitness ON agent_agi_metrics(agi_fitness_score DESC);
-CREATE INDEX IF NOT EXISTS idx_game_exposure_retired ON game_exposure_history(is_retired);
-
--- Meta-learning indexes
-CREATE INDEX IF NOT EXISTS idx_visual_primitives_agent ON visual_primitives(agent_id);
-CREATE INDEX IF NOT EXISTS idx_visual_primitives_type ON visual_primitives(primitive_type);
-CREATE INDEX IF NOT EXISTS idx_visual_primitives_success ON visual_primitives(success_rate DESC);
-
-CREATE INDEX IF NOT EXISTS idx_learned_rules_agent ON learned_rules(agent_id);
-CREATE INDEX IF NOT EXISTS idx_learned_rules_confidence ON learned_rules(confidence DESC);
-CREATE INDEX IF NOT EXISTS idx_learned_rules_transferred ON learned_rules(transferred_successfully);
-CREATE INDEX IF NOT EXISTS idx_learned_rules_generality ON learned_rules(generality_score DESC);
-
-CREATE INDEX IF NOT EXISTS idx_rule_transfers_rule ON rule_transfers(rule_id);
-CREATE INDEX IF NOT EXISTS idx_rule_transfers_successful ON rule_transfers(transfer_successful);
-CREATE INDEX IF NOT EXISTS idx_rule_transfers_timestamp ON rule_transfers(transfer_timestamp);
-
-CREATE INDEX IF NOT EXISTS idx_agent_meta_learning_fitness ON agent_meta_learning(meta_fitness_score DESC);
-CREATE INDEX IF NOT EXISTS idx_agent_meta_learning_transfer_rate ON agent_meta_learning(transfer_success_rate DESC);
-
-CREATE INDEX IF NOT EXISTS idx_curriculum_progress_agent ON curriculum_progress(agent_id);
-CREATE INDEX IF NOT EXISTS idx_curriculum_progress_stage ON curriculum_progress(stage_number);
-CREATE INDEX IF NOT EXISTS idx_curriculum_progress_completed ON curriculum_progress(stage_completed);
-
-CREATE INDEX IF NOT EXISTS idx_game_visual_analysis_agent ON game_visual_analysis(agent_id);
-CREATE INDEX IF NOT EXISTS idx_game_visual_analysis_game ON game_visual_analysis(game_id);
-
--- Ecosystem health indexes
-CREATE INDEX IF NOT EXISTS idx_ecosystem_health_generation ON ecosystem_health_snapshots(generation);
-CREATE INDEX IF NOT EXISTS idx_ecosystem_health_timestamp ON ecosystem_health_snapshots(snapshot_timestamp);
-CREATE INDEX IF NOT EXISTS idx_ecosystem_health_status ON ecosystem_health_snapshots(health_status);
-CREATE INDEX IF NOT EXISTS idx_ecosystem_health_score ON ecosystem_health_snapshots(health_score DESC);
-
-CREATE INDEX IF NOT EXISTS idx_knowledge_redundancy_criticality ON knowledge_redundancy(criticality_score DESC);
-CREATE INDEX IF NOT EXISTS idx_knowledge_redundancy_viral_core ON knowledge_redundancy(is_viral_core);
-CREATE INDEX IF NOT EXISTS idx_knowledge_redundancy_risk ON knowledge_redundancy(risk_of_loss DESC);
-
-CREATE INDEX IF NOT EXISTS idx_rule_redundancy_criticality ON rule_redundancy(criticality_score DESC);
-CREATE INDEX IF NOT EXISTS idx_rule_redundancy_viral_core ON rule_redundancy(is_viral_core);
-
-CREATE INDEX IF NOT EXISTS idx_knowledge_graph_source ON knowledge_graph_edges(source_knowledge_id);
-CREATE INDEX IF NOT EXISTS idx_knowledge_graph_target ON knowledge_graph_edges(target_knowledge_id);
-CREATE INDEX IF NOT EXISTS idx_knowledge_graph_type ON knowledge_graph_edges(edge_type);
-
--- ============================================================================
--- VIEWS FOR COMMON QUERIES
--- ============================================================================
-
--- Recent sessions view
-CREATE VIEW IF NOT EXISTS recent_sessions AS
-SELECT
-    session_id,
-    mode,
-    status,
-    total_actions,
-    total_wins,
-    total_games,
-    win_rate,
-    avg_score,
-    start_time,
-    end_time
-FROM training_sessions
-WHERE start_time >= datetime('now', '-7 days')
-ORDER BY start_time DESC;
-
--- Action effectiveness summary view
-CREATE VIEW IF NOT EXISTS action_effectiveness_summary AS
-SELECT
-    action_number,
-    COUNT(*) as game_count,
-    SUM(attempts) as total_attempts,
-    SUM(successes) as total_successes,
-    AVG(success_rate) as avg_success_rate,
-    AVG(avg_score_impact) as avg_score_impact
-FROM action_effectiveness
-GROUP BY action_number
-ORDER BY avg_success_rate DESC;
-
--- Current generation performance view
-CREATE VIEW IF NOT EXISTS current_generation_performance AS
-SELECT
-    a.agent_id,
-    a.agent_type,
-    a.generation,
-    a.total_games_played,
-    a.total_games_won,
-    CASE 
-        WHEN a.total_games_played > 0 THEN (a.total_games_won * 1.0 / a.total_games_played)
-        ELSE 0.0
-    END as win_rate,
-    a.avg_score_per_game,
-    a.score_efficiency,
-    a.is_active
-FROM agents a
-WHERE a.generation = (SELECT MAX(generation) FROM agents WHERE is_active = TRUE)
-ORDER BY win_rate DESC, a.score_efficiency DESC;
-
--- Evolution progress view
-CREATE VIEW IF NOT EXISTS evolution_progress AS
-SELECT
-    phm.generation,
-    phm.population_size,
-    phm.best_win_rate,
-    phm.average_win_rate,
-    phm.improvement_rate,
-    phm.genetic_diversity_score,
-    ced.strategy_focus,
-    ced.decision_timestamp
-FROM population_health_metrics phm
-LEFT JOIN claude_evolution_decisions ced ON phm.generation = ced.generation
-ORDER BY phm.generation DESC;
-
--- Top performing agents view
-CREATE VIEW IF NOT EXISTS top_performing_agents AS
-SELECT
-    a.agent_id,
-    a.agent_type,
-    a.generation,
-    a.total_games_played,
-    a.total_games_won,
-    CASE 
-        WHEN a.total_games_played > 0 THEN (a.total_games_won * 1.0 / a.total_games_played)
-        ELSE 0.0
-    END as win_rate,
-    a.avg_score_per_game,
-    a.score_efficiency,
-    a.created_at
-FROM agents a
-WHERE a.is_active = TRUE
-ORDER BY win_rate DESC, a.score_efficiency DESC
-LIMIT 10;
-
--- ============================================================================
--- PHASE 2: ECONOMIC SYSTEM (ECOSYSTEM METABOLISM)
--- Per-agent action budgets + network-level resource flow tracking
--- CRITICAL: Keep prestige (social capital) COMPLETELY SEPARATE from actions (economic capital)
--- ============================================================================
-
--- Phase 2: Per-Agent Action Economy (extends agents table)
--- Actions = Metabolic Currency (ATP of the network)
-ALTER TABLE agents ADD COLUMN action_allowance_per_level INTEGER DEFAULT 400;
-ALTER TABLE agents ADD COLUMN action_allowance_total INTEGER DEFAULT 7000;
-ALTER TABLE agents ADD COLUMN action_budget_multiplier REAL DEFAULT 1.0;
-ALTER TABLE agents ADD COLUMN last_salary_adjustment_gen INTEGER DEFAULT 0;
-
--- Phase 2: Agent Economic Performance (extends agent_arc_performance table)
--- Track actions earned, spent, and efficiency per game
-ALTER TABLE agent_arc_performance ADD COLUMN actions_earned INTEGER DEFAULT 0;
-ALTER TABLE agent_arc_performance ADD COLUMN actions_spent INTEGER DEFAULT 0;
-ALTER TABLE agent_arc_performance ADD COLUMN action_efficiency REAL DEFAULT 0.0;  -- Score per action
-ALTER TABLE agent_arc_performance ADD COLUMN budget_utilization REAL DEFAULT 0.0;  -- % of budget used
-
--- Phase 2: Ecosystem Metabolism Snapshots (network-level resource flow)
-CREATE TABLE IF NOT EXISTS ecosystem_metabolism_snapshots (
-    snapshot_id TEXT PRIMARY KEY,
-    generation INTEGER NOT NULL,
-    snapshot_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+-- knowledge_redundancy
+CREATE TABLE knowledge_redundancy (
+    sequence_id TEXT PRIMARY KEY,
+    discovery_timestamp TIMESTAMP,
+    discovery_generation INTEGER,
     
-    -- Total metabolic capacity (network ATP pool)
-    total_actions_available INTEGER NOT NULL,
-    total_actions_budgeted INTEGER NOT NULL,
-    total_actions_spent INTEGER NOT NULL,
-    total_actions_wasted INTEGER NOT NULL,  -- Budgeted but not used
+    -- Backup metrics (how many agents know this)
+    agents_who_know INTEGER DEFAULT 1,  -- How many agents have used this successfully
+    agent_carriers TEXT,  -- JSON: list of agent IDs who successfully used this
+    validation_attempts INTEGER DEFAULT 0,
+    successful_validations INTEGER DEFAULT 0,
     
-    -- Resource distribution metrics
-    gini_coefficient REAL DEFAULT 0.0,  -- Action inequality (0=equal, 1=one agent has all)
-    top_10_percent_share REAL DEFAULT 0.0,  -- % of actions held by top 10% agents
-    bottom_50_percent_share REAL DEFAULT 0.0,  -- % of actions held by bottom 50%
+    -- Criticality assessment
+    games_solved_by_this INTEGER DEFAULT 0,  -- How many unique games
+    alternative_solutions_exist INTEGER DEFAULT 0,  -- Redundancy at game level
+    criticality_score REAL DEFAULT 0.0,  -- How critical is this to network survival
+    is_viral_core BOOLEAN DEFAULT FALSE,  -- Essential knowledge that must not be lost
     
-    -- Metabolic rates (network dynamics)
-    action_creation_rate REAL DEFAULT 0.0,  -- Actions earned per generation
-    action_destruction_rate REAL DEFAULT 0.0,  -- Actions spent per generation
-    metabolic_efficiency REAL DEFAULT 0.0,  -- Score produced per action spent
+    -- Persistence tracking
+    generations_survived INTEGER DEFAULT 0,  -- How many generations has this knowledge persisted
+    last_used_generation INTEGER DEFAULT 0,
+    last_used_timestamp TIMESTAMP,
+    risk_of_loss REAL DEFAULT 1.0,  -- Probability of being forgotten (0=safe, 1=at risk)
     
-    -- Network health indicators
-    resource_scarcity_index REAL DEFAULT 0.0,  -- How constrained is the network?
-    budget_inflation_rate REAL DEFAULT 0.0,  -- Change in average budget
+    -- Network contribution
+    times_taught_to_others INTEGER DEFAULT 0,
+    network_enrichment_value REAL DEFAULT 0.0,
     
-    -- Population economics
-    active_agent_count INTEGER NOT NULL,
-    agents_above_baseline INTEGER DEFAULT 0,  -- Agents earning >1.0x multiplier
-    agents_below_baseline INTEGER DEFAULT 0   -- Agents earning <1.0x multiplier
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
 );
 
--- Index for fast ecosystem metabolism queries
-CREATE INDEX IF NOT EXISTS idx_ecosystem_metabolism_generation 
-ON ecosystem_metabolism_snapshots(generation);
-
-CREATE INDEX IF NOT EXISTS idx_agent_budget_multiplier 
-ON agents(action_budget_multiplier);
-
-CREATE INDEX IF NOT EXISTS idx_agent_arc_performance_actions 
-ON agent_arc_performance(actions_earned, actions_spent);
-
--- ============================================================================
--- PHASE 2.5: KNOWLEDGE RECOMBINATION (VIRAL EVOLUTION ACCELERATOR)
--- Horizontal gene transfer through sequence chaining and pattern synthesis
--- CRITICAL: This enables EXPONENTIAL knowledge growth, not just linear discovery
--- ============================================================================
-
--- Phase 2.5: Sequence Dependencies (tracking which sequences build on others)
--- This is the "horizontal gene transfer" mechanism from biome theory
-CREATE TABLE IF NOT EXISTS sequence_dependencies (
-    dependency_id TEXT PRIMARY KEY,
-    parent_sequence_id TEXT NOT NULL,
-    child_sequence_id TEXT NOT NULL,
-    dependency_type TEXT NOT NULL CHECK(dependency_type IN ('chain', 'variation', 'synthesis')),
+-- learned_rules
+CREATE TABLE learned_rules (
+    rule_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    source_game_id TEXT NOT NULL,          -- Game where rule was learned
+    rule_name TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    -- Recombination metrics
-    combined_efficiency REAL DEFAULT 0.0,  -- Efficiency of combined sequence
-    improvement_over_parent REAL DEFAULT 0.0,  -- How much better than parent alone
-    discovery_agent_id TEXT,  -- Who discovered this combination
-    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    discovery_generation INTEGER DEFAULT 0,
+    -- Rule definition
+    preconditions TEXT NOT NULL,           -- JSON: visual conditions that must be met
+    action_template TEXT NOT NULL,         -- JSON: sequence of actions to take
+    expected_outcome TEXT NOT NULL,        -- 'win', 'progress', 'score_increase'
     
-    -- Usage tracking (does this recombination spread?)
-    times_used INTEGER DEFAULT 0,
-    success_rate REAL DEFAULT 0.0,
-    viral_spread_count INTEGER DEFAULT 0,  -- How many OTHER agents use this
-    
-    -- Fitness evaluation
-    is_beneficial BOOLEAN DEFAULT NULL,  -- Does this improve on parent?
-    fitness_impact REAL DEFAULT 0.0,  -- Net benefit over individual sequences
-    
-    FOREIGN KEY (parent_sequence_id) REFERENCES winning_sequences(sequence_id),
-    FOREIGN KEY (child_sequence_id) REFERENCES winning_sequences(sequence_id),
-    FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
-);
-
--- Phase 2.5: Pattern Synthesis (combining abstract patterns into meta-patterns)
-CREATE TABLE IF NOT EXISTS pattern_synthesis (
-    synthesis_id TEXT PRIMARY KEY,
-    pattern_a_id TEXT NOT NULL,
-    pattern_b_id TEXT NOT NULL,
-    synthesized_pattern_id TEXT NOT NULL,
-    
-    -- Synthesis metrics
-    novelty_score REAL DEFAULT 0.0,  -- How novel is this combination
-    effectiveness_score REAL DEFAULT 0.0,  -- How effective is the synthesis
-    games_applied_to INTEGER DEFAULT 0,
+    -- Confidence and success tracking
+    confidence REAL DEFAULT 0.5,
     success_count INTEGER DEFAULT 0,
+    failure_count INTEGER DEFAULT 0,
+    success_rate REAL DEFAULT 0.0,         -- success / (success + failure)
     
-    -- Discovery tracking
-    discovery_agent_id TEXT,
-    discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    discovery_generation INTEGER DEFAULT 0,
+    -- Transfer learning
+    applicable_games TEXT,                 -- JSON: list of game_ids where rule works
+    transferred_successfully BOOLEAN DEFAULT 0,
+    transfer_attempts INTEGER DEFAULT 0,
+    successful_transfers INTEGER DEFAULT 0,
     
-    -- Evolution tracking
-    times_recombined INTEGER DEFAULT 0,  -- How many times this synthesis was further combined
-    descendant_count INTEGER DEFAULT 0,  -- How many patterns descended from this
+    -- Rule characteristics
+    visual_signature TEXT,                 -- Compact signature for quick matching
+    complexity_level TEXT,                 -- 'simple', 'moderate', 'complex'
+    generality_score REAL DEFAULT 0.0,     -- How many games rule works on
     
-    FOREIGN KEY (pattern_a_id) REFERENCES discovered_patterns(pattern_id),
-    FOREIGN KEY (pattern_b_id) REFERENCES discovered_patterns(pattern_id),
-    FOREIGN KEY (synthesized_pattern_id) REFERENCES discovered_patterns(pattern_id),
-    FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
+    last_updated TIMESTAMP,
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
--- Phase 2.5: Recombination Attempts Log (track all attempts, not just successes)
-CREATE TABLE IF NOT EXISTS recombination_attempts (
-    attempt_id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    game_id TEXT NOT NULL,
-    attempt_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    generation INTEGER NOT NULL,
-    
-    -- What was attempted
-    sequence_a_id TEXT NOT NULL,
-    sequence_b_id TEXT NOT NULL,
-    combination_type TEXT NOT NULL CHECK(combination_type IN ('chain', 'interleave', 'conditional')),
-    
-    -- Outcome
-    was_successful BOOLEAN NOT NULL,
-    resulting_sequence_id TEXT,  -- NULL if failed
-    resulting_score INTEGER DEFAULT 0,
-    actions_used INTEGER DEFAULT 0,
-    
-    -- Analysis
-    failure_reason TEXT,  -- If failed, why?
-    
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
-    FOREIGN KEY (game_id) REFERENCES game_results(game_id),
-    FOREIGN KEY (sequence_a_id) REFERENCES winning_sequences(sequence_id),
-    FOREIGN KEY (sequence_b_id) REFERENCES winning_sequences(sequence_id),
-    FOREIGN KEY (resulting_sequence_id) REFERENCES winning_sequences(sequence_id)
-);
+-- navigation_state_history
+CREATE TABLE navigation_state_history (
+        history_id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        game_id TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        
+        -- State tracking
+        navigation_state REAL NOT NULL, -- Internal emotional state
+        dominant_emotion TEXT, -- 'confident', 'frustrated', 'curious', 'cautious'
+        
+        -- Context when state was recorded
+        game_score INTEGER DEFAULT 0,
+        actions_taken INTEGER DEFAULT 0,
+        recent_success_rate REAL DEFAULT NULL,
+        
+        -- State change triggers
+        state_change_trigger TEXT, -- What caused this emotional state
+        previous_state REAL DEFAULT NULL,
+        state_change_magnitude REAL DEFAULT NULL,
+        
+        -- Timestamp
+        state_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        
+        FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+    );
 
--- Indexes for fast recombination queries
-CREATE INDEX IF NOT EXISTS idx_sequence_dependencies_parent 
-ON sequence_dependencies(parent_sequence_id);
+-- network_regulation_history
+CREATE TABLE network_regulation_history (
+        regulation_id TEXT PRIMARY KEY,
+        regulation_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        generation INTEGER NOT NULL,
+        parameter_name TEXT NOT NULL,
+        old_value REAL NOT NULL,
+        new_value REAL NOT NULL,
+        adjustment_magnitude REAL NOT NULL,
+        triggering_signal_id TEXT,
+        net_signal_strength REAL NOT NULL,
+        signal_consensus_level REAL DEFAULT 0.5,
+        predicted_improvement TEXT,
+        actual_improvement_measured REAL DEFAULT 0.0,
+        regulation_success BOOLEAN,
+        network_health_before REAL DEFAULT 0.5,
+        network_health_after REAL DEFAULT 0.5,
+        failing_metrics_addressed TEXT,
+        FOREIGN KEY (triggering_signal_id) REFERENCES network_regulatory_signals(signal_id)
+    );
 
-CREATE INDEX IF NOT EXISTS idx_sequence_dependencies_child 
-ON sequence_dependencies(child_sequence_id);
+-- network_regulatory_signals
+CREATE TABLE network_regulatory_signals (
+        signal_id TEXT PRIMARY KEY,
+        signal_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        generation INTEGER NOT NULL,
+        signal_type TEXT NOT NULL,
+        signal_source_agent TEXT,
+        initial_strength REAL NOT NULL DEFAULT 1.0,
+        current_strength REAL NOT NULL DEFAULT 1.0,
+        propagation_radius INTEGER DEFAULT 0,
+        target_parameter TEXT NOT NULL,
+        adjustment_direction TEXT NOT NULL,
+        adjustment_magnitude REAL DEFAULT 0.1,
+        decay_rate REAL DEFAULT 0.1,
+        expires_generation INTEGER,
+        is_active BOOLEAN DEFAULT TRUE,
+        agents_responding INTEGER DEFAULT 0,
+        net_amplification REAL DEFAULT 0.0,
+        effectiveness_score REAL DEFAULT 0.0,
+        FOREIGN KEY (signal_source_agent) REFERENCES agents(agent_id)
+    );
 
-CREATE INDEX IF NOT EXISTS idx_sequence_dependencies_agent 
-ON sequence_dependencies(discovery_agent_id, discovery_generation);
+-- object_sensation_mappings
+CREATE TABLE object_sensation_mappings (
+        mapping_id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        
+        -- Object identification
+        object_type TEXT NOT NULL,
+        object_characteristics TEXT, -- JSON: color, size, pattern, etc.
+        
+        -- Sensation data
+        sensation_score REAL NOT NULL, -- -1.0 to 1.0 (negative=avoid, positive=approach)
+        confidence_level REAL DEFAULT 0.5, -- How confident agent is in this sensation
+        
+        -- Learning context
+        learn_count INTEGER DEFAULT 1, -- How many times this sensation was reinforced
+        success_count INTEGER DEFAULT 0, -- How many successful outcomes with this sensation
+        failure_count INTEGER DEFAULT 0, -- How many failed outcomes with this sensation
+        
+        -- Timestamps
+        first_learned DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+        
+        FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+        UNIQUE(agent_id, object_type)
+    );
 
-CREATE INDEX IF NOT EXISTS idx_pattern_synthesis_patterns 
-ON pattern_synthesis(pattern_a_id, pattern_b_id);
-
-CREATE INDEX IF NOT EXISTS idx_recombination_attempts_agent 
-ON recombination_attempts(agent_id, generation);
-
-CREATE INDEX IF NOT EXISTS idx_recombination_attempts_game 
-ON recombination_attempts(game_id);
-
--- Phase 2.5: Extend agents table to track recombination success
-ALTER TABLE agents ADD COLUMN recombination_discoveries INTEGER DEFAULT 0;
-ALTER TABLE agents ADD COLUMN successful_recombinations INTEGER DEFAULT 0;
-ALTER TABLE agents ADD COLUMN recombination_success_rate REAL DEFAULT 0.0;
-
--- ============================================================================
--- PHASE 3: VIRAL PACKAGES & PARIAHS (BIDIRECTIONAL EVOLUTION)
--- Viral packages = positive selection (successful patterns that spread)
--- Pariahs = negative selection (failure patterns to avoid)
--- Together = accelerate evolution through bidirectional learning
--- ============================================================================
-
--- Viral information packages (successful patterns packaged as "viruses")
--- Think: Gene sequences that carry successful strategies
-CREATE TABLE IF NOT EXISTS viral_information_packages (
-    package_id TEXT PRIMARY KEY,
-    package_name TEXT NOT NULL,
-    package_type TEXT NOT NULL,  -- 'action_sequence', 'coordinate_pattern', 'meta_strategy'
-    
-    -- Package content (what does this virus carry?)
-    action_sequence TEXT,  -- JSON array of action IDs (e.g., [1,2,6,6,3])
-    coordinate_pattern TEXT,  -- JSON array of (x,y) coordinates
-    meta_strategy_description TEXT,  -- High-level strategy description
-    
-    -- Package characteristics
-    virulence REAL DEFAULT 0.5,  -- How strongly does this influence host behavior? (0-1)
-    transmission_rate REAL DEFAULT 0.3,  -- How easily does this spread? (0-1)
-    mutation_rate REAL DEFAULT 0.05,  -- How stable is this package? (0-1)
-    
-    -- Package fitness (network-level evaluation)
-    success_rate REAL DEFAULT 0.0,  -- % of hosts that succeed using this
-    avg_score_contribution REAL DEFAULT 0.0,  -- Average score boost from this package
-    total_infections INTEGER DEFAULT 0,  -- How many agents carry this?
-    active_infections INTEGER DEFAULT 0,  -- How many currently active carriers?
-    
-    -- Origins and evolution
-    discovery_generation INTEGER NOT NULL,
-    source_sequence_id TEXT,  -- Original winning_sequence this came from
-    parent_package_id TEXT,  -- If this is a mutated variant
-    generation_discovered INTEGER NOT NULL,
-    
-    -- Lifecycle
-    is_active BOOLEAN DEFAULT TRUE,
-    obsolescence_score REAL DEFAULT 0.0,  -- Is this package becoming irrelevant?
-    last_successful_use_generation INTEGER,
-    
-    FOREIGN KEY (source_sequence_id) REFERENCES winning_sequences(sequence_id),
-    FOREIGN KEY (parent_package_id) REFERENCES viral_information_packages(package_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_viral_packages_active ON viral_information_packages(is_active);
-CREATE INDEX IF NOT EXISTS idx_viral_packages_type ON viral_information_packages(package_type);
-CREATE INDEX IF NOT EXISTS idx_viral_packages_success ON viral_information_packages(success_rate DESC);
-
--- Agent viral infections (which agents carry which packages)
--- Think: Which hosts are infected with which viruses?
-CREATE TABLE IF NOT EXISTS agent_viral_infections (
-    agent_id TEXT NOT NULL,
+-- pariah_package_interactions
+CREATE TABLE pariah_package_interactions (
+    pariah_id TEXT NOT NULL,
     package_id TEXT NOT NULL,
     
-    -- Infection details
-    infection_generation INTEGER NOT NULL,
-    infection_source TEXT NOT NULL,  -- 'discovery', 'horizontal_transfer', 'inheritance', 'mutation'
-    infected_by_agent TEXT,  -- If horizontal transfer, who spread it?
-    
-    -- Infection strength (how much does host express this?)
-    infection_strength REAL DEFAULT 0.5,  -- 0-1, affects action selection weight
-    expression_level REAL DEFAULT 0.5,  -- 0-1, how actively is host using this?
-    
-    -- Host response to infection
-    success_count INTEGER DEFAULT 0,  -- Times this package helped host
-    failure_count INTEGER DEFAULT 0,  -- Times this package failed host
-    total_uses INTEGER DEFAULT 0,
-    avg_score_boost REAL DEFAULT 0.0,  -- Average score change when using
-    
-    -- Infection lifecycle
-    is_active BOOLEAN DEFAULT TRUE,
-    last_used_generation INTEGER,
-    immunity_developed BOOLEAN DEFAULT FALSE,  -- Host rejected this package?
-    
-    PRIMARY KEY (agent_id, package_id),
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
-    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id),
-    FOREIGN KEY (infected_by_agent) REFERENCES agents(agent_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_infections_agent ON agent_viral_infections(agent_id);
-CREATE INDEX IF NOT EXISTS idx_infections_package ON agent_viral_infections(package_id);
-CREATE INDEX IF NOT EXISTS idx_infections_active ON agent_viral_infections(is_active);
-
--- Viral package interactions (co-infection dynamics)
--- Think: Do these viruses help or interfere with each other?
-CREATE TABLE IF NOT EXISTS viral_package_interactions (
-    package_a_id TEXT NOT NULL,
-    package_b_id TEXT NOT NULL,
-    
-    interaction_type TEXT NOT NULL,  -- 'synergistic', 'antagonistic', 'neutral'
-    interaction_strength REAL DEFAULT 0.0,  -- -1.0 (interfere) to +1.0 (synergy)
+    interaction_type TEXT NOT NULL,  -- 'protective', 'causative', 'neutral'
+    interaction_strength REAL DEFAULT 0.0,  -- -1.0 (causes) to +1.0 (protects)
     
     -- Evidence
-    co_infection_count INTEGER DEFAULT 0,  -- Times both packages in same host
-    synergy_score_boost REAL DEFAULT 0.0,  -- Extra score when both present
+    co_occurrence_count INTEGER DEFAULT 0,  -- Times package + pariah in same context
+    protection_score REAL DEFAULT 0.0,  -- Does package prevent pariah?
+    causation_score REAL DEFAULT 0.0,  -- Does package trigger pariah?
     observations INTEGER DEFAULT 0,
     
-    PRIMARY KEY (package_a_id, package_b_id),
-    FOREIGN KEY (package_a_id) REFERENCES viral_information_packages(package_id),
-    FOREIGN KEY (package_b_id) REFERENCES viral_information_packages(package_id)
+    PRIMARY KEY (pariah_id, package_id),
+    FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
+    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id)
 );
 
--- ============================================================================
--- PARIAHS (Negative Patterns / Failure Antibodies)
--- ============================================================================
--- Pariahs are the "antibodies" of the network - patterns to AVOID
--- Just as immune systems recognize pathogens, the network recognizes failures
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS pariahs (
+-- pariahs
+CREATE TABLE pariahs (
     pariah_id TEXT PRIMARY KEY,
     pariah_name TEXT NOT NULL,
     pariah_type TEXT NOT NULL,  -- 'action_sequence', 'coordinate_trap', 'strategy_failure'
@@ -1408,86 +969,474 @@ CREATE TABLE IF NOT EXISTS pariahs (
     FOREIGN KEY (parent_pariah_id) REFERENCES pariahs(pariah_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_pariahs_active ON pariahs(is_active);
-CREATE INDEX IF NOT EXISTS idx_pariahs_type ON pariahs(pariah_type);
-CREATE INDEX IF NOT EXISTS idx_pariahs_toxicity ON pariahs(toxicity DESC);
-
--- Agent pariah awareness (network immunity)
--- Think: Which agents have developed "antibodies" to which failures?
-CREATE TABLE IF NOT EXISTS agent_pariah_awareness (
+-- pattern_applications
+CREATE TABLE pattern_applications (
+    application_id TEXT PRIMARY KEY,
+    pattern_id TEXT NOT NULL,
+    sequence_id TEXT,
+    game_id TEXT NOT NULL,
     agent_id TEXT NOT NULL,
-    pariah_id TEXT NOT NULL,
+    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    -- Awareness details
-    awareness_generation INTEGER NOT NULL,
-    awareness_source TEXT NOT NULL,  -- 'self_discovery', 'horizontal_transfer', 'inheritance'
-    learned_from_agent TEXT,  -- If learned from another agent
+    -- Results
+    success BOOLEAN NOT NULL,
+    score_achieved REAL NOT NULL,
+    actions_taken INTEGER NOT NULL,
     
-    -- Awareness strength
-    awareness_level REAL DEFAULT 0.5,  -- 0-1, how well does agent recognize this?
-    avoidance_priority REAL DEFAULT 0.5,  -- 0-1, how strongly to avoid?
-    
-    -- Agent response to pariah
-    avoidance_success_count INTEGER DEFAULT 0,  -- Times agent avoided this
-    trigger_count INTEGER DEFAULT 0,  -- Times agent fell into trap despite awareness
-    total_encounters INTEGER DEFAULT 0,
-    avg_score_saved REAL DEFAULT 0.0,  -- Score saved by avoiding
-    
-    -- Awareness lifecycle
-    is_active BOOLEAN DEFAULT TRUE,
-    last_encountered_generation INTEGER,
-    false_positive_count INTEGER DEFAULT 0,  -- Times avoided when shouldn't have
-    
-    PRIMARY KEY (agent_id, pariah_id),
-    FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
-    FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
-    FOREIGN KEY (learned_from_agent) REFERENCES agents(agent_id)
+    FOREIGN KEY (pattern_id) REFERENCES discovered_patterns(pattern_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_pariah_awareness_agent ON agent_pariah_awareness(agent_id);
-CREATE INDEX IF NOT EXISTS idx_pariah_awareness_pariah ON agent_pariah_awareness(pariah_id);
-CREATE INDEX IF NOT EXISTS idx_pariah_awareness_active ON agent_pariah_awareness(is_active);
+-- pattern_synthesis
+CREATE TABLE pattern_synthesis (
+            synthesis_id TEXT PRIMARY KEY,
+            pattern_a_id TEXT NOT NULL,
+            pattern_b_id TEXT NOT NULL,
+            synthesized_pattern_id TEXT NOT NULL,
+            
+            novelty_score REAL DEFAULT 0.0,
+            effectiveness_score REAL DEFAULT 0.0,
+            games_applied_to INTEGER DEFAULT 0,
+            success_count INTEGER DEFAULT 0,
+            
+            discovery_agent_id TEXT,
+            discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            discovery_generation INTEGER DEFAULT 0,
+            
+            times_recombined INTEGER DEFAULT 0,
+            descendant_count INTEGER DEFAULT 0,
+            
+            FOREIGN KEY (pattern_a_id) REFERENCES discovered_patterns(pattern_id),
+            FOREIGN KEY (pattern_b_id) REFERENCES discovered_patterns(pattern_id),
+            FOREIGN KEY (synthesized_pattern_id) REFERENCES discovered_patterns(pattern_id),
+            FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
+        );
 
--- Pariah-Package interactions (protective/causative relationships)
--- Think: Does this strategy protect against or cause this failure?
-CREATE TABLE IF NOT EXISTS pariah_package_interactions (
-    pariah_id TEXT NOT NULL,
-    package_id TEXT NOT NULL,
+-- recombination_attempts
+CREATE TABLE recombination_attempts (
+            attempt_id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            game_id TEXT NOT NULL,
+            attempt_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            generation INTEGER NOT NULL,
+            
+            sequence_a_id TEXT NOT NULL,
+            sequence_b_id TEXT NOT NULL,
+            combination_type TEXT NOT NULL CHECK(combination_type IN ('chain', 'interleave', 'conditional')),
+            
+            was_successful BOOLEAN NOT NULL,
+            resulting_sequence_id TEXT,
+            resulting_score INTEGER DEFAULT 0,
+            actions_used INTEGER DEFAULT 0,
+            
+            failure_reason TEXT,
+            
+            FOREIGN KEY (agent_id) REFERENCES agents(agent_id),
+            FOREIGN KEY (game_id) REFERENCES game_results(game_id),
+            FOREIGN KEY (sequence_a_id) REFERENCES winning_sequences(sequence_id),
+            FOREIGN KEY (sequence_b_id) REFERENCES winning_sequences(sequence_id),
+            FOREIGN KEY (resulting_sequence_id) REFERENCES winning_sequences(sequence_id)
+        );
+
+-- rule_redundancy
+CREATE TABLE rule_redundancy (
+    rule_id TEXT PRIMARY KEY,
+    discovery_timestamp TIMESTAMP,
+    discovery_generation INTEGER,
     
-    interaction_type TEXT NOT NULL,  -- 'protective', 'causative', 'neutral'
-    interaction_strength REAL DEFAULT 0.0,  -- -1.0 (causes) to +1.0 (protects)
+    -- Backup metrics
+    agents_who_discovered INTEGER DEFAULT 1,
+    agent_carriers TEXT,  -- JSON: list of agent IDs who independently discovered this
+    independent_discoveries INTEGER DEFAULT 1,
+    
+    -- Criticality for network
+    games_applicable_to INTEGER DEFAULT 0,
+    transfer_success_count INTEGER DEFAULT 0,
+    criticality_score REAL DEFAULT 0.0,
+    is_viral_core BOOLEAN DEFAULT FALSE,
+    
+    -- Persistence
+    generations_survived INTEGER DEFAULT 0,
+    last_used_generation INTEGER DEFAULT 0,
+    risk_of_loss REAL DEFAULT 1.0,
+    
+    FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id)
+);
+
+-- rule_transfers
+CREATE TABLE rule_transfers (
+    transfer_id TEXT PRIMARY KEY,
+    rule_id TEXT NOT NULL,
+    source_game_id TEXT NOT NULL,
+    target_game_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    transfer_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Transfer results
+    transfer_successful BOOLEAN NOT NULL,
+    confidence_before REAL NOT NULL,
+    confidence_after REAL,
+    score_achieved REAL,
+    actions_taken INTEGER,
+    
+    -- Analysis
+    match_confidence REAL,                 -- How well preconditions matched
+    execution_quality REAL,                -- How well actions were executed
+    actual_result TEXT,                    -- 'full_win', 'partial_success', 'no_progress', 'failure'
+    failure_reason TEXT,
+    
+    FOREIGN KEY (rule_id) REFERENCES learned_rules(rule_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- sensation_learning_events
+CREATE TABLE sensation_learning_events (
+        event_id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        game_id TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        
+        -- Sensation context
+        object_type TEXT NOT NULL,
+        pre_sensation_score REAL NOT NULL,
+        post_sensation_score REAL NOT NULL,
+        
+        -- Navigation context  
+        pre_navigation_state REAL NOT NULL,
+        post_navigation_state REAL NOT NULL,
+        action_taken INTEGER NOT NULL, -- 1-7 only
+        
+        -- Learning outcome
+        reward_received REAL NOT NULL,
+        sensation_adjustment REAL NOT NULL,
+        learning_success BOOLEAN DEFAULT FALSE,
+        
+        -- Timestamps
+        event_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        
+        FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+    );
+
+-- sequence_dependencies
+CREATE TABLE sequence_dependencies (
+            dependency_id TEXT PRIMARY KEY,
+            parent_sequence_id TEXT NOT NULL,
+            child_sequence_id TEXT NOT NULL,
+            dependency_type TEXT NOT NULL CHECK(dependency_type IN ('chain', 'variation', 'synthesis')),
+            
+            combined_efficiency REAL DEFAULT 0.0,
+            improvement_over_parent REAL DEFAULT 0.0,
+            discovery_agent_id TEXT,
+            discovery_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            discovery_generation INTEGER DEFAULT 0,
+            
+            times_used INTEGER DEFAULT 0,
+            success_rate REAL DEFAULT 0.0,
+            viral_spread_count INTEGER DEFAULT 0,
+            
+            is_beneficial BOOLEAN DEFAULT NULL,
+            fitness_impact REAL DEFAULT 0.0,
+            
+            FOREIGN KEY (parent_sequence_id) REFERENCES winning_sequences(sequence_id),
+            FOREIGN KEY (child_sequence_id) REFERENCES winning_sequences(sequence_id),
+            FOREIGN KEY (discovery_agent_id) REFERENCES agents(agent_id)
+        );
+
+-- sequence_reputation
+CREATE TABLE sequence_reputation (
+    sequence_id TEXT PRIMARY KEY,
+    
+    -- Validation statistics
+    total_validation_attempts INTEGER DEFAULT 0,
+    successful_validations INTEGER DEFAULT 0,
+    failed_validations INTEGER DEFAULT 0,
+    partial_validations INTEGER DEFAULT 0,
+    
+    -- Reputation metrics
+    success_rate REAL DEFAULT 0.0,              -- successful / total
+    reliability_score REAL DEFAULT 0.5,         -- Bayesian confidence-adjusted score
+    agent_diversity INTEGER DEFAULT 1,          -- How many different agents tried it
+    
+    -- Temporal tracking
+    recent_success_rate REAL DEFAULT 0.0,       -- Last 10 attempts only
+    trending TEXT DEFAULT 'stable',             -- 'improving', 'declining', 'stable'
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
+);
+
+-- sequence_validation_attempts
+CREATE TABLE sequence_validation_attempts (
+    validation_id TEXT PRIMARY KEY,
+    sequence_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Validation results
+    validation_success BOOLEAN NOT NULL,       -- Did sequence work for this agent?
+    partial_success BOOLEAN DEFAULT FALSE,     -- Got partway through sequence
+    actions_completed INTEGER DEFAULT 0,       -- How many actions from sequence worked
+    total_actions_in_sequence INTEGER NOT NULL,
+    
+    -- Performance
+    score_achieved REAL DEFAULT 0.0,
+    efficiency_vs_original REAL DEFAULT 1.0,   -- This agent's efficiency / original efficiency
+    
+    -- Context
+    agent_epigenetics TEXT,                    -- JSON: agent's epigenetic state during attempt
+    failure_reason TEXT,                       -- If failed, why? 'state_mismatch', 'invalid_action', etc.
+    
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- signal_propagation_events
+CREATE TABLE signal_propagation_events (
+        propagation_id TEXT PRIMARY KEY,
+        signal_id TEXT NOT NULL,
+        propagation_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        generation INTEGER NOT NULL,
+        source_agent_id TEXT,
+        target_agent_id TEXT NOT NULL,
+        propagation_distance INTEGER DEFAULT 1,
+        signal_strength_before REAL NOT NULL,
+        signal_strength_after REAL NOT NULL,
+        modification_type TEXT DEFAULT 'relay',
+        agent_relationship TEXT DEFAULT 'random',
+        transmission_probability REAL DEFAULT 1.0,
+        FOREIGN KEY (signal_id) REFERENCES network_regulatory_signals(signal_id),
+        FOREIGN KEY (source_agent_id) REFERENCES agents(agent_id),
+        FOREIGN KEY (target_agent_id) REFERENCES agents(agent_id)
+    );
+
+-- viral_information_packages
+CREATE TABLE viral_information_packages (
+    package_id TEXT PRIMARY KEY,
+    package_name TEXT NOT NULL,
+    package_type TEXT NOT NULL,  -- 'action_sequence', 'coordinate_pattern', 'meta_strategy'
+    
+    -- Package content (what does this virus carry?)
+    action_sequence TEXT,  -- JSON array of action IDs (e.g., [1,2,6,6,3])
+    coordinate_pattern TEXT,  -- JSON array of (x,y) coordinates
+    meta_strategy_description TEXT,  -- High-level strategy description
+    
+    -- Package characteristics
+    virulence REAL DEFAULT 0.5,  -- How strongly does this influence host behavior? (0-1)
+    transmission_rate REAL DEFAULT 0.3,  -- How easily does this spread? (0-1)
+    mutation_rate REAL DEFAULT 0.05,  -- How stable is this package? (0-1)
+    
+    -- Package fitness (network-level evaluation)
+    success_rate REAL DEFAULT 0.0,  -- % of hosts that succeed using this
+    avg_score_contribution REAL DEFAULT 0.0,  -- Average score boost from this package
+    total_infections INTEGER DEFAULT 0,  -- How many agents carry this?
+    active_infections INTEGER DEFAULT 0,  -- How many currently active carriers?
+    
+    -- Origins and evolution
+    discovery_generation INTEGER NOT NULL,
+    source_sequence_id TEXT,  -- Original winning_sequence this came from
+    parent_package_id TEXT,  -- If this is a mutated variant
+    generation_discovered INTEGER NOT NULL,
+    
+    -- Lifecycle
+    is_active BOOLEAN DEFAULT TRUE,
+    obsolescence_score REAL DEFAULT 0.0,  -- Is this package becoming irrelevant?
+    last_successful_use_generation INTEGER,
+    
+    FOREIGN KEY (source_sequence_id) REFERENCES winning_sequences(sequence_id),
+    FOREIGN KEY (parent_package_id) REFERENCES viral_information_packages(package_id)
+);
+
+-- viral_package_interactions
+CREATE TABLE viral_package_interactions (
+    package_a_id TEXT NOT NULL,
+    package_b_id TEXT NOT NULL,
+    
+    interaction_type TEXT NOT NULL,  -- 'synergistic', 'antagonistic', 'neutral'
+    interaction_strength REAL DEFAULT 0.0,  -- -1.0 (interfere) to +1.0 (synergy)
     
     -- Evidence
-    co_occurrence_count INTEGER DEFAULT 0,  -- Times package + pariah in same context
-    protection_score REAL DEFAULT 0.0,  -- Does package prevent pariah?
-    causation_score REAL DEFAULT 0.0,  -- Does package trigger pariah?
+    co_infection_count INTEGER DEFAULT 0,  -- Times both packages in same host
+    synergy_score_boost REAL DEFAULT 0.0,  -- Extra score when both present
     observations INTEGER DEFAULT 0,
     
-    PRIMARY KEY (pariah_id, package_id),
-    FOREIGN KEY (pariah_id) REFERENCES pariahs(pariah_id),
-    FOREIGN KEY (package_id) REFERENCES viral_information_packages(package_id)
+    PRIMARY KEY (package_a_id, package_b_id),
+    FOREIGN KEY (package_a_id) REFERENCES viral_information_packages(package_id),
+    FOREIGN KEY (package_b_id) REFERENCES viral_information_packages(package_id)
+);
+
+-- visual_primitives
+CREATE TABLE visual_primitives (
+    primitive_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    primitive_type TEXT NOT NULL,          -- 'symmetry_detector', 'pattern_finder', 'color_analyzer'
+    primitive_name TEXT NOT NULL,
+    learned_parameters TEXT NOT NULL,      -- JSON: parameters/weights for this primitive
+    success_rate REAL DEFAULT 0.0,
+    times_used INTEGER DEFAULT 0,
+    avg_confidence REAL DEFAULT 0.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used TIMESTAMP,
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+);
+
+-- winning_sequences
+CREATE TABLE winning_sequences (
+    sequence_id TEXT PRIMARY KEY,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    agent_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- The winning sequence
+    action_sequence TEXT NOT NULL,         -- JSON: ordered list of actions
+    coordinate_sequence TEXT,              -- JSON: coordinates for ACTION6
+    total_actions INTEGER NOT NULL,
+    total_score REAL NOT NULL,
+    efficiency_score REAL NOT NULL,        -- score / actions
+    
+    -- Game state context
+    initial_frame TEXT NOT NULL,           -- JSON: starting frame state
+    final_frame TEXT NOT NULL,             -- JSON: winning frame state
+    frame_transitions TEXT,                -- JSON: key frame changes
+    
+    -- Abstraction tags (for pattern matching)
+    pattern_tags TEXT,                     -- JSON: ['grid_clear', 'color_match', 'sequence_repeat']
+    difficulty_level TEXT,                 -- 'easy', 'medium', 'hard'
+    game_type TEXT,                        -- 'action6_only', 'mixed_actions', 'pattern_based'
+    
+    -- Reuse tracking
+    times_referenced INTEGER DEFAULT 0,
+    success_rate_when_reused REAL DEFAULT 0.0,
+    last_referenced TIMESTAMP, generation_discovered INTEGER DEFAULT 0, is_recombination BOOLEAN DEFAULT 0, scorecard_id TEXT, is_uber_sequence BOOLEAN DEFAULT FALSE,
+    
+    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
 );
 
 -- ============================================================================
--- PHASE 3 SUMMARY
+-- INDEXES FOR PERFORMANCE
 -- ============================================================================
--- Phase 3 implements bidirectional evolution:
--- 
--- VIRAL PACKAGES (Positive Selection):
--- - Extract successful patterns from winning_sequences
--- - Package as "information viruses" that spread horizontally
--- - Agents infected with packages prefer those actions
--- - Successful packages spread, failed packages die out
--- 
--- PARIAHS (Negative Selection):
--- - Extract failure patterns from lost games
--- - Mark as "toxic" patterns to avoid
--- - Agents aware of pariahs actively avoid those actions
--- - Network develops "herd immunity" to failures
--- 
--- TOGETHER:
--- - Packages say "DO this" (positive guidance)
--- - Pariahs say "DON'T do this" (negative guidance)
--- - Bidirectional selection = faster evolution
--- - Network learns both what works AND what fails
--- ============================================================================
+
+CREATE INDEX idx_action_bias_action ON action_bias_events(action_taken);
+CREATE INDEX idx_action_bias_agent ON action_bias_events(agent_id);
+CREATE INDEX idx_action_effectiveness_action_number ON action_effectiveness(action_number);
+CREATE INDEX idx_action_effectiveness_game_id ON action_effectiveness(game_id);
+CREATE INDEX idx_action_effectiveness_success_rate ON action_effectiveness(success_rate);
+CREATE INDEX idx_action_traces_game_id ON action_traces(game_id);
+CREATE INDEX idx_action_traces_session_id ON action_traces(session_id);
+CREATE INDEX idx_action_traces_timestamp ON action_traces(timestamp);
+CREATE INDEX idx_agent_agi_metrics_fitness ON agent_agi_metrics(agi_fitness_score DESC);
+CREATE INDEX idx_agent_arc_perf_agent_id ON agent_arc_performance(agent_id);
+CREATE INDEX idx_agent_arc_perf_timestamp ON agent_arc_performance(game_timestamp);
+CREATE INDEX idx_agent_arc_perf_total_reward ON agent_arc_performance(total_evolutionary_reward);
+CREATE INDEX idx_agent_arc_perf_win_achieved ON agent_arc_performance(win_achieved);
+CREATE INDEX idx_agent_arc_performance_actions ON agent_arc_performance(actions_earned, actions_spent);
+CREATE INDEX idx_agent_budget_multiplier ON agents(action_budget_multiplier);
+CREATE INDEX idx_agent_game_diversity_agent ON agent_game_diversity(agent_id);
+CREATE INDEX idx_agent_game_diversity_novel ON agent_game_diversity(is_novel_game);
+CREATE INDEX idx_agent_meta_learning_fitness ON agent_meta_learning(meta_fitness_score DESC);
+CREATE INDEX idx_agent_meta_learning_transfer_rate ON agent_meta_learning(transfer_success_rate DESC);
+CREATE INDEX idx_agents_agent_type ON agents(agent_type);
+CREATE INDEX idx_agents_generation ON agents(generation);
+CREATE INDEX idx_agents_is_active ON agents(is_active);
+CREATE INDEX idx_agents_score_efficiency ON agents(score_efficiency);
+CREATE INDEX idx_agents_total_games_won ON agents(total_games_won);
+CREATE INDEX idx_arc_action_accepted ON arc_action_tracking(action_accepted);
+CREATE INDEX idx_arc_action_agent_id ON arc_action_tracking(agent_id);
+CREATE INDEX idx_arc_action_coordinate_valid ON arc_action_tracking(coordinate_valid);
+CREATE INDEX idx_arc_action_timestamp ON arc_action_tracking(action_timestamp);
+CREATE INDEX idx_chains_generation ON knowledge_propagation_chains(chain_start_generation);
+CREATE INDEX idx_claude_decisions_generation ON claude_evolution_decisions(generation);
+CREATE INDEX idx_claude_decisions_strategy_focus ON claude_evolution_decisions(strategy_focus);
+CREATE INDEX idx_claude_decisions_timestamp ON claude_evolution_decisions(decision_timestamp);
+CREATE INDEX idx_claude_memory_created_at ON claude_memory(created_at);
+CREATE INDEX idx_claude_memory_relevance ON claude_memory(relevance_score);
+CREATE INDEX idx_claude_memory_type ON claude_memory(memory_type);
+CREATE INDEX idx_curriculum_progress_agent ON curriculum_progress(agent_id);
+CREATE INDEX idx_curriculum_progress_completed ON curriculum_progress(stage_completed);
+CREATE INDEX idx_curriculum_progress_stage ON curriculum_progress(stage_number);
+CREATE INDEX idx_discovered_patterns_success_rate ON discovered_patterns(success_rate);
+CREATE INDEX idx_ecosystem_health_generation ON ecosystem_health_snapshots(generation);
+CREATE INDEX idx_ecosystem_health_score ON ecosystem_health_snapshots(health_score DESC);
+CREATE INDEX idx_ecosystem_health_status ON ecosystem_health_snapshots(health_status);
+CREATE INDEX idx_ecosystem_health_timestamp ON ecosystem_health_snapshots(snapshot_timestamp);
+CREATE INDEX idx_ecosystem_metabolism_generation ON ecosystem_metabolism_snapshots(generation);
+CREATE INDEX idx_game_exposure_retired ON game_exposure_history(is_retired);
+CREATE INDEX idx_game_results_final_score ON game_results(final_score);
+CREATE INDEX idx_game_results_scorecard ON game_results(scorecard_id);
+CREATE INDEX idx_game_results_session_id ON game_results(session_id);
+CREATE INDEX idx_game_results_status ON game_results(status);
+CREATE INDEX idx_game_visual_analysis_agent ON game_visual_analysis(agent_id);
+CREATE INDEX idx_game_visual_analysis_game ON game_visual_analysis(game_id);
+CREATE INDEX idx_infections_active ON agent_viral_infections(is_active);
+CREATE INDEX idx_infections_agent ON agent_viral_infections(agent_id);
+CREATE INDEX idx_infections_package ON agent_viral_infections(package_id);
+CREATE INDEX idx_knowledge_graph_source ON knowledge_graph_edges(source_knowledge_id);
+CREATE INDEX idx_knowledge_graph_target ON knowledge_graph_edges(target_knowledge_id);
+CREATE INDEX idx_knowledge_graph_type ON knowledge_graph_edges(edge_type);
+CREATE INDEX idx_knowledge_redundancy_criticality ON knowledge_redundancy(criticality_score DESC);
+CREATE INDEX idx_knowledge_redundancy_risk ON knowledge_redundancy(risk_of_loss DESC);
+CREATE INDEX idx_knowledge_redundancy_viral_core ON knowledge_redundancy(is_viral_core);
+CREATE INDEX idx_learned_rules_agent ON learned_rules(agent_id);
+CREATE INDEX idx_learned_rules_confidence ON learned_rules(confidence DESC);
+CREATE INDEX idx_learned_rules_generality ON learned_rules(generality_score DESC);
+CREATE INDEX idx_learned_rules_transferred ON learned_rules(transferred_successfully);
+CREATE INDEX idx_navigation_history_agent ON navigation_state_history(agent_id);
+CREATE INDEX idx_object_mappings_agent ON object_sensation_mappings(agent_id);
+CREATE INDEX idx_pariah_awareness_active ON agent_pariah_awareness(is_active);
+CREATE INDEX idx_pariah_awareness_agent ON agent_pariah_awareness(agent_id);
+CREATE INDEX idx_pariah_awareness_pariah ON agent_pariah_awareness(pariah_id);
+CREATE INDEX idx_pariahs_active ON pariahs(is_active);
+CREATE INDEX idx_pariahs_toxicity ON pariahs(toxicity DESC);
+CREATE INDEX idx_pariahs_type ON pariahs(pariah_type);
+CREATE INDEX idx_pattern_applications_success ON pattern_applications(success);
+CREATE INDEX idx_pattern_synthesis_patterns ON pattern_synthesis(pattern_a_id, pattern_b_id);
+CREATE INDEX idx_pop_health_generation ON population_health_metrics(generation);
+CREATE INDEX idx_pop_health_improvement_rate ON population_health_metrics(improvement_rate);
+CREATE INDEX idx_pop_health_timestamp ON population_health_metrics(measurement_timestamp);
+CREATE INDEX idx_propagation_generation ON signal_propagation_events(generation);
+CREATE INDEX idx_recombination_attempts_agent ON recombination_attempts(agent_id, generation);
+CREATE INDEX idx_recombination_attempts_game ON recombination_attempts(game_id);
+CREATE INDEX idx_regulation_generation ON network_regulation_history(generation);
+CREATE INDEX idx_responses_agent ON agent_signal_responses(agent_id, generation);
+CREATE INDEX idx_responses_generation ON agent_signal_responses(generation);
+CREATE INDEX idx_rule_redundancy_criticality ON rule_redundancy(criticality_score DESC);
+CREATE INDEX idx_rule_redundancy_viral_core ON rule_redundancy(is_viral_core);
+CREATE INDEX idx_rule_transfers_rule ON rule_transfers(rule_id);
+CREATE INDEX idx_rule_transfers_successful ON rule_transfers(transfer_successful);
+CREATE INDEX idx_rule_transfers_timestamp ON rule_transfers(transfer_timestamp);
+CREATE INDEX idx_score_history_game_id ON score_history(game_id);
+CREATE INDEX idx_score_history_session_id ON score_history(session_id);
+CREATE INDEX idx_score_history_timestamp ON score_history(timestamp);
+CREATE INDEX idx_sensation_events_agent ON sensation_learning_events(agent_id);
+CREATE INDEX idx_sensation_events_generation ON sensation_learning_events(generation);
+CREATE INDEX idx_sequence_dependencies_agent ON sequence_dependencies(discovery_agent_id, discovery_generation);
+CREATE INDEX idx_sequence_dependencies_child ON sequence_dependencies(child_sequence_id);
+CREATE INDEX idx_sequence_dependencies_parent ON sequence_dependencies(parent_sequence_id);
+CREATE INDEX idx_sequence_reputation_success_rate ON sequence_reputation(success_rate DESC);
+CREATE INDEX idx_sequence_validation_attempts_agent ON sequence_validation_attempts(agent_id);
+CREATE INDEX idx_sequence_validation_attempts_sequence ON sequence_validation_attempts(sequence_id);
+CREATE INDEX idx_signals_active ON network_regulatory_signals(is_active, generation);
+CREATE INDEX idx_signals_generation ON network_regulatory_signals(generation);
+CREATE INDEX idx_system_logs_game_id ON system_logs(game_id);
+CREATE INDEX idx_system_logs_level ON system_logs(level);
+CREATE INDEX idx_system_logs_logger_name ON system_logs(logger_name);
+CREATE INDEX idx_system_logs_session_id ON system_logs(session_id);
+CREATE INDEX idx_system_logs_timestamp ON system_logs(timestamp);
+CREATE INDEX idx_training_sessions_mode ON training_sessions(mode);
+CREATE INDEX idx_training_sessions_start_time ON training_sessions(start_time);
+CREATE INDEX idx_training_sessions_status ON training_sessions(status);
+CREATE INDEX idx_transfers_donor ON horizontal_transfer_events(donor_agent_id);
+CREATE INDEX idx_transfers_generation ON horizontal_transfer_events(generation);
+CREATE INDEX idx_transfers_recipient ON horizontal_transfer_events(recipient_agent_id);
+CREATE INDEX idx_viral_packages_active ON viral_information_packages(is_active);
+CREATE INDEX idx_viral_packages_success ON viral_information_packages(success_rate DESC);
+CREATE INDEX idx_viral_packages_type ON viral_information_packages(package_type);
+CREATE INDEX idx_visual_primitives_agent ON visual_primitives(agent_id);
+CREATE INDEX idx_visual_primitives_success ON visual_primitives(success_rate DESC);
+CREATE INDEX idx_visual_primitives_type ON visual_primitives(primitive_type);
+CREATE INDEX idx_winning_sequences_efficiency ON winning_sequences(efficiency_score);
+CREATE INDEX idx_winning_sequences_game_id ON winning_sequences(game_id);
+CREATE INDEX idx_winning_sequences_scorecard ON winning_sequences(scorecard_id);

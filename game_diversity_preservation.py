@@ -49,7 +49,17 @@ class GameDiversityPreserver:
         
         game_counts = {}
         for agent in agents:
-            spec = json.loads(agent['specialization'])
+            # Handle empty/null specialization safely
+            specialization = agent['specialization']
+            if not specialization or specialization.strip() == '':
+                continue
+                
+            try:
+                spec = json.loads(specialization)
+            except (json.JSONDecodeError, TypeError):
+                # Skip agents with invalid specialization data
+                continue
+                
             assigned_games = spec.get('assigned_games', [])
             
             for game_id in assigned_games:
@@ -90,13 +100,22 @@ class GameDiversityPreserver:
             FROM agents
             WHERE is_active = TRUE
         """)
-        
+
+        # Helper to safely parse specialization JSON
+        def _parse_specialization(spec_value) -> dict:
+            if not spec_value:
+                return {}
+            try:
+                return json.loads(spec_value)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+
         # Map each game to list of specialists
         game_specialists = {}
         for agent in agents:
-            spec = json.loads(agent['specialization'])
+            spec = _parse_specialization(agent.get('specialization'))
             assigned_games = spec.get('assigned_games', [])
-            
+
             for game_id in assigned_games:
                 if game_id not in game_specialists:
                     game_specialists[game_id] = []
@@ -139,9 +158,13 @@ class GameDiversityPreserver:
         for agent in generalists:
             if assignments_made >= max_assignments:
                 break
-            
-            spec = json.loads(agent['specialization'])
-            
+
+            # Safely parse specialization
+            try:
+                spec = json.loads(agent.get('specialization') or '{}')
+            except (json.JSONDecodeError, TypeError):
+                spec = {}
+
             # Check if this is a specialist
             if spec.get('type') == 'specialist' and spec.get('assigned_games'):
                 # Already a specialist, skip

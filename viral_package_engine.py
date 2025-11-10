@@ -19,6 +19,13 @@ from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from database_interface import DatabaseInterface
 
+# Phase 4.5: Import sensation engine for emotional context in viral packages
+try:
+    from sensation_engine import SensationEngine
+    SENSATION_AVAILABLE = True
+except ImportError:
+    SENSATION_AVAILABLE = False
+
 class ViralPackageEngine:
     """
     Manages viral information packages and pariah patterns.
@@ -29,6 +36,12 @@ class ViralPackageEngine:
     
     def __init__(self, db: DatabaseInterface):
         self.db = db
+        
+        # Phase 4.5: Initialize sensation engine if available
+        if SENSATION_AVAILABLE:
+            self.sensation_engine = SensationEngine(db)
+        else:
+            self.sensation_engine = None
     
     # ========================================================================
     # VIRAL PACKAGE CREATION (Positive Selection)
@@ -90,6 +103,31 @@ class ViralPackageEngine:
                 True,  # is_active
                 generation
             ))
+            
+            # Phase 4.5: Capture emotional context during package creation
+            if self.sensation_engine and agent_id:
+                try:
+                    # Get agent's emotional state when package was created
+                    agent_result = self.db.execute_query(
+                        "SELECT navigation_state, sensation_profile FROM agents WHERE agent_id = ?",
+                        (agent_id,)
+                    )
+                    
+                    if agent_result:
+                        emotional_context = {
+                            'creation_navigation_state': agent_result[0]['navigation_state'],
+                            'creation_timestamp': datetime.now().isoformat(),
+                            'successful_emotional_range': [
+                                agent_result[0]['navigation_state'] - 0.3,  # Lower bound for compatibility
+                                agent_result[0]['navigation_state'] + 0.3   # Upper bound for compatibility
+                            ]
+                        }
+                        
+                        # Store emotional context with the package
+                        self.add_emotional_context_to_package(package_id, emotional_context)
+                
+                except Exception as e:
+                    print(f"[VIRAL] Warning: Could not capture emotional context: {e}")
             
             # Auto-infect the discoverer
             self._infect_agent(agent_id, package_id, generation, 'discovery', None)
@@ -480,6 +518,9 @@ class ViralPackageEngine:
         """
         Get action weights from viral packages this agent carries.
         
+        Phase 4.5 Enhancement: Includes emotional context compatibility.
+        Packages with emotional context matching agent's current state get boosted weights.
+        
         Returns:
             Dict mapping action_id -> weight (higher = prefer this action)
         """
@@ -499,6 +540,19 @@ class ViralPackageEngine:
         
         action_weights = {}
         
+        # Phase 4.5: Get agent's current emotional state for compatibility
+        agent_navigation_state = 0.0
+        if self.sensation_engine:
+            try:
+                agent_result = self.db.execute_query(
+                    "SELECT navigation_state FROM agents WHERE agent_id = ?",
+                    (agent_id,)
+                )
+                if agent_result:
+                    agent_navigation_state = agent_result[0]['navigation_state']
+            except Exception:
+                pass  # Continue without emotional enhancement if error
+
         for infection in infections:
             # Parse action sequence
             try:
@@ -508,10 +562,18 @@ class ViralPackageEngine:
                 # This allows new packages to be tried before they have usage data
                 success_rate = infection['success_rate'] if infection['total_uses'] > 0 else 0.5
                 
-                # Weight each action by infection strength, expression level, and success rate
-                weight = (infection['infection_strength'] * 
-                         infection['expression_level'] * 
-                         success_rate)
+                # Base weight calculation
+                base_weight = (infection['infection_strength'] * 
+                              infection['expression_level'] * 
+                              success_rate)
+                
+                # Phase 4.5: Apply emotional context multiplier
+                emotional_multiplier = self._calculate_emotional_compatibility(
+                    infection['package_id'], agent_navigation_state
+                ) if self.sensation_engine else 1.0
+                
+                # Final weight with emotional enhancement
+                weight = base_weight * emotional_multiplier
                 
                 for action in actions:
                     action_weights[action] = action_weights.get(action, 0.0) + weight
@@ -808,6 +870,95 @@ def display_viral_ecosystem_dashboard(db: DatabaseInterface, generation: int):
             print(f"     Packages guide toward success, Pariahs warn of failure")
     
     print("="*80)
+
+    # Phase 4.5: Emotional compatibility methods
+    
+    def _calculate_emotional_compatibility(self, package_id: str, agent_navigation_state: float) -> float:
+        """
+        Calculate how compatible a viral package is with agent's current emotional state.
+        
+        Returns multiplier: 1.0 = neutral, >1.0 = boost, <1.0 = reduce
+        """
+        if not self.sensation_engine:
+            return 1.0  # No emotional enhancement if sensation engine unavailable
+        
+        try:
+            # Check if this package has emotional context metadata
+            package_emotion = self._get_package_emotional_context(package_id)
+            
+            if package_emotion is None:
+                return 1.0  # No emotional context, no boost or penalty
+            
+            # Calculate compatibility based on emotional distance
+            emotional_distance = abs(agent_navigation_state - package_emotion)
+            
+            # Compatibility decreases with emotional distance
+            # Close emotions get boost (up to 1.5x), distant emotions get penalty (down to 0.5x)
+            if emotional_distance < 0.2:  # Very compatible
+                return 1.4
+            elif emotional_distance < 0.4:  # Somewhat compatible
+                return 1.2
+            elif emotional_distance < 0.6:  # Neutral
+                return 1.0
+            elif emotional_distance < 0.8:  # Somewhat incompatible
+                return 0.8
+            else:  # Very incompatible
+                return 0.6
+        
+        except Exception:
+            return 1.0  # Safe fallback
+    
+    def _get_package_emotional_context(self, package_id: str) -> Optional[float]:
+        """
+        Get the emotional context associated with a viral package.
+        
+        Returns the navigation state when this package was successful.
+        """
+        try:
+            # Get package metadata containing emotional context
+            result = self.db.execute_query(
+                "SELECT package_metadata FROM viral_information_packages WHERE package_id = ?",
+                (package_id,)
+            )
+            
+            if not result or not result[0]['package_metadata']:
+                return None
+            
+            # Parse emotional context
+            emotional_context = json.loads(result[0]['package_metadata'])
+            return emotional_context.get('creation_navigation_state')
+            
+        except (json.JSONDecodeError, TypeError, KeyError):
+            return None
+
+    def add_emotional_context_to_package(self, package_id: str, emotional_context: Dict[str, Any]) -> bool:
+        """
+        Add emotional context to an existing viral package.
+        
+        This allows packages to carry information about when/how they should be used
+        based on agent emotional state.
+        """
+        if not self.sensation_engine:
+            return False
+        
+        try:
+            # Store emotional context as JSON metadata
+            # This could include: navigation_state when successful, object sensations, etc.
+            emotional_json = json.dumps(emotional_context)
+            
+            # For now, we'll add this as a comment/metadata field
+            # In full Phase 5 implementation, this would be a proper schema extension
+            self.db.execute_query("""
+                UPDATE viral_information_packages 
+                SET package_metadata = ? 
+                WHERE package_id = ?
+            """, (emotional_json, package_id))
+            
+            return True
+            
+        except Exception as e:
+            print(f"[VIRAL] Error adding emotional context: {e}")
+            return False
 
 
 if __name__ == "__main__":

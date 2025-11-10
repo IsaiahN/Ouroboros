@@ -46,6 +46,7 @@ from adaptive_action_limits import AdaptiveActionLimits
 from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
 from prestige_engine import PrestigeEngine, display_prestige_leaderboard
 from viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
+from regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
 from game_diversity_preservation import GameDiversityPreserver  # Game diversity protection
 
 # Rule 2: Database-only logging
@@ -98,7 +99,12 @@ class AutonomousEvolutionRunner:
         self.network_intelligence = NetworkIntelligenceEngine(self.db)  # Network health tracking
         self.prestige_engine = PrestigeEngine(self.db)  # PHASE 1: Network contribution prestige
         self.viral_engine = ViralPackageEngine(self.db)  # PHASE 3: Viral packages & pariahs
+        self.regulatory_engine = RegulatorySignalEngine(self.db)  # PHASE 4: Distributed regulation
         self.diversity_preserver = GameDiversityPreserver(self.db, min_specialists_per_game=1)  # Game diversity protection
+        
+        # PHASE 5: Horizontal Gene Transfer with Emotional Intelligence
+        from horizontal_transfer_engine import HorizontalTransferEngine
+        self.transfer_engine = HorizontalTransferEngine(self.db)
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -438,10 +444,16 @@ class AutonomousEvolutionRunner:
                 # Get available games
                 try:
                     from arc_api_client import ARCAPIClient
+                    import asyncio
+                    
                     api_key = os.getenv('ARC_API_KEY')
                     if api_key:
-                        client = ARCAPIClient(api_key)
-                        available_games = client.get_available_games()
+                        async def get_games_async():
+                            async with ARCAPIClient(api_key) as client:
+                                return await client.get_available_games()
+                        
+                        # Run async call properly
+                        available_games = asyncio.run(get_games_async())
                         game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
                         
                         if game_ids:
@@ -650,7 +662,7 @@ class AutonomousEvolutionRunner:
                                 "SELECT generation FROM agents WHERE agent_id = ?", 
                                 (agent_id,)
                             )
-                            generation = current_gen[0]['generation'] if current_gen else self.generation
+                            generation = current_gen[0]['generation'] if current_gen else self.current_generation
                             
                             for infection in infections:
                                 viral_engine.record_package_usage(
@@ -894,6 +906,55 @@ class AutonomousEvolutionRunner:
                 import traceback
                 traceback.print_exc()
             
+            # PHASE 4: DISTRIBUTED REGULATION (Network Homeostasis)
+            print(f"\n[🏛️ REGULATION] Processing distributed network signals...")
+            try:
+                # Step 1: Agent signal emission (quorum sensing)
+                signals_emitted = self.regulatory_engine.emit_agent_signals(self.current_generation)
+                print(f"[OK] {len(signals_emitted)} regulatory signals emitted")
+                
+                # Step 2: Process signal responses and calculate net adjustments
+                net_adjustments = self.regulatory_engine.process_signal_responses(self.current_generation)
+                print(f"[OK] Processed signal responses, {len(net_adjustments)} parameter adjustments calculated")
+                
+                # Step 3: Apply network regulation (emergent homeostasis)
+                if net_adjustments:
+                    applied_changes = self.regulatory_engine.apply_network_regulation(self.current_generation, net_adjustments)
+                    
+                    if applied_changes:
+                        print(f"[HOMEOSTASIS] Applied {len(applied_changes)} parameter adjustments:")
+                        for param, (old_val, new_val) in applied_changes.items():
+                            direction = "↑" if new_val > old_val else "↓"
+                            change_pct = ((new_val - old_val) / old_val) * 100 if old_val != 0 else 0
+                            print(f"  {direction} {param}: {old_val:.4f} → {new_val:.4f} ({change_pct:+.1f}%)")
+                    else:
+                        print("[INFO] No significant parameter changes needed")
+                else:
+                    print("[INFO] No regulatory signals strong enough for parameter adjustments")
+                
+                # Step 4: Cleanup expired signals
+                self.regulatory_engine.cleanup_expired_signals(self.current_generation)
+                
+                # Step 5: Display regulation summary
+                regulation_summary = self.regulatory_engine.get_regulation_summary(self.current_generation)
+                active_signals = regulation_summary.get('active_signals', {})
+                recent_regulations = regulation_summary.get('recent_regulations', {})
+                
+                if active_signals:
+                    print(f"[SIGNALS] Active regulatory signals:")
+                    for signal_type, data in active_signals.items():
+                        print(f"  📡 {signal_type}: {data['count']} signals (avg strength: {data['strength']:.2f})")
+                
+                if recent_regulations:
+                    print(f"[HISTORY] Recent parameter adjustments:")
+                    for param, data in recent_regulations.items():
+                        print(f"  ⚙️  {param}: {data['changes']} changes (avg: {data['avg_change']:+.3f})")
+                
+            except Exception as e:
+                print(f"[WARN]️  Distributed regulation failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
             # Optionally prune worst performers (GAME-AWARE, LEVEL-PRESERVING)
             if population_size > self.initial_population_size * 2:
                 print(f"\n[🔪] Population too large ({population_size}), pruning with specialist protection...")
@@ -1088,6 +1149,19 @@ class AutonomousEvolutionRunner:
         
         if should_evolve:
             success = await self.analyze_and_evolve()
+            
+            # Phase 5: Horizontal Gene Transfer with Emotional Intelligence
+            try:
+                transfer_count = self.transfer_engine.execute_generation_transfers(
+                    self.current_generation, max_transfers_per_agent=2
+                )
+                if transfer_count > 0:
+                    print(f"[PHASE 5] 🧬 Horizontal transfers: {transfer_count} knowledge injections")
+                else:
+                    print(f"[PHASE 5] 🧬 No compatible transfers found this generation")
+            except Exception as e:
+                print(f"[PHASE 5] ❌ Horizontal transfer error: {e}")
+            
             if not success:
                 # Check if we hit targets (comprehensive success)
                 if eval_results['win_rate'] >= self.target_win_rate:

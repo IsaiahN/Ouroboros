@@ -9,9 +9,25 @@ import uuid
 import random
 import copy
 from datetime import datetime
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 from database_interface import DatabaseInterface
 from prestige_engine import PrestigeEngine
+
+# Phase 4.5: Import sensation engine for emotional intelligence inheritance
+try:
+    from sensation_engine import SensationEngine
+    SENSATION_AVAILABLE = True
+except ImportError:
+    SENSATION_AVAILABLE = False
+
+def safe_json_parse(json_str, default=None):
+    """Safely parse JSON string, returning default if invalid or empty."""
+    if not json_str or json_str.strip() == '':
+        return default or {}
+    try:
+        return json.loads(json_str)
+    except (json.JSONDecodeError, TypeError):
+        return default or {}
 
 
 class EvolutionaryEngine:
@@ -23,9 +39,15 @@ class EvolutionaryEngine:
     def __init__(self, database_interface: DatabaseInterface):
         self.db = database_interface
         self.prestige_engine = PrestigeEngine(database_interface)  # Phase 1: Prestige system
-        self.crossover_ops = CrossoverOperations()
-        self.mutation_strategies = MutationStrategies()
+        self.crossover_ops = CrossoverOperations(database_interface)  # Pass DB for sensation access
+        self.mutation_strategies = MutationStrategies(database_interface)  # Pass DB for sensation access
         self.engine_id = f"evol_{uuid.uuid4().hex[:8]}"
+        
+        # Phase 4.5: Initialize sensation engine if available
+        if SENSATION_AVAILABLE:
+            self.sensation_engine = SensationEngine(database_interface)
+        else:
+            self.sensation_engine = None
 
     def evolve_population(self, evolution_strategy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -1015,6 +1037,15 @@ class EvolutionaryEngine:
 
 class CrossoverOperations:
     """Handles genetic crossover operations for agent genomes"""
+    
+    def __init__(self, database_interface: DatabaseInterface):
+        self.db = database_interface
+        
+        # Phase 4.5: Initialize sensation engine if available
+        if SENSATION_AVAILABLE:
+            self.sensation_engine = SensationEngine(database_interface)
+        else:
+            self.sensation_engine = None
 
     def crossover_genomes(self, parent1: Dict[str, Any], parent2: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1066,6 +1097,9 @@ class CrossoverOperations:
                     p2_genome[param]
                 ])
 
+        # Phase 4.5: Perform sensation profile crossover (Layer 2 - Epigenetic inheritance)
+        offspring_sensation_data = self._crossover_sensation_profiles(parent1, parent2)
+
         # Create offspring agent
         offspring = {
             'agent_id': offspring_genome['agent_id'],
@@ -1075,6 +1109,10 @@ class CrossoverOperations:
             'specialization': self._determine_offspring_specialization(parent1, parent2),
             'crossover_count': 1
         }
+        
+        # Phase 4.5: Add sensation profile data to offspring
+        if offspring_sensation_data:
+            offspring.update(offspring_sensation_data)
 
         return offspring
 
@@ -1101,9 +1139,166 @@ class CrossoverOperations:
         ]
         return random.choice(specializations)
 
+    def _crossover_sensation_profiles(self, parent1: Dict[str, Any], parent2: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Crossover sensation profiles between parents (Layer 2 - Epigenetic inheritance).
+        
+        Phase 4.5: FITNESS-WEIGHTED inheritance with 0.95 decay per Ouroboros Three-Layer Architecture.
+        Inherits HOW to learn (learning capacity), not WHAT was learned (specific sensations).
+        """
+        if not self.sensation_engine:
+            return {}
+        
+        try:
+            # Get parent fitness scores for weighted inheritance
+            p1_fitness = parent1.get('fitness_score', 0.5)
+            p2_fitness = parent2.get('fitness_score', 0.5)
+            total_fitness = p1_fitness + p2_fitness
+            
+            if total_fitness == 0:
+                p1_weight = 0.5
+                p2_weight = 0.5
+            else:
+                p1_weight = p1_fitness / total_fitness
+                p2_weight = p2_fitness / total_fitness
+            
+            # Get parent sensation profiles from database
+            p1_profile = self._get_agent_sensation_profile(parent1['agent_id'])
+            p2_profile = self._get_agent_sensation_profile(parent2['agent_id'])
+            
+            if not p1_profile and not p2_profile:
+                # No sensation data from parents - initialize fresh
+                return self._initialize_offspring_sensation_profile(parent1, parent2)
+            
+            # Ensure we have valid profiles (use defaults if None)
+            p1_profile = p1_profile or {}
+            p2_profile = p2_profile or {}
+            
+            # Fitness-weighted crossover of epigenetic traits (learning capacity)
+            offspring_profile = {
+                'sensation_learning_rate': (
+                    p1_profile.get('sensation_learning_rate', 0.3) * p1_weight +
+                    p2_profile.get('sensation_learning_rate', 0.3) * p2_weight
+                ) * 0.95,  # Epigenetic decay
+                
+                'state_update_sensitivity': (
+                    p1_profile.get('state_update_sensitivity', 0.7) * p1_weight +
+                    p2_profile.get('state_update_sensitivity', 0.7) * p2_weight
+                ) * 0.95,  # Epigenetic decay
+                
+                'navigation_state': 0.0,  # Reset emotional state for offspring
+                'emotional_intelligence_score': 0.0,  # Will be learned, not inherited
+                
+                # Action biases - inherit learning patterns, not specific biases
+                'action_biases': json.dumps({}),  # Start fresh - Layer 3 (somatic) not inherited
+                
+                # Sensation profile - inherit learning capacity, not specific mappings
+                'sensation_profile': json.dumps(
+                    self._inherit_sensation_learning_capacity(p1_profile, p2_profile, p1_weight, p2_weight)
+                )
+            }
+            
+            return offspring_profile
+            
+        except Exception as e:
+            # Fallback to fresh initialization if crossover fails
+            return self._initialize_offspring_sensation_profile(parent1, parent2)
+
+    def _get_agent_sensation_profile(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """Get agent's sensation profile from database."""
+        try:
+            result = self.db.execute_query("""
+                SELECT sensation_profile, sensation_learning_rate, state_update_sensitivity,
+                       navigation_state, action_biases, emotional_intelligence_score
+                FROM agents WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if result:
+                profile = result[0]
+                # Parse JSON fields
+                if profile['sensation_profile']:
+                    profile['sensation_profile_data'] = safe_json_parse(profile['sensation_profile'])
+                if profile['action_biases']:
+                    profile['action_biases_data'] = safe_json_parse(profile['action_biases'])
+                
+                return profile
+            return None
+            
+        except Exception:
+            return None
+
+    def _inherit_sensation_learning_capacity(self, p1_profile: Dict[str, Any], p2_profile: Dict[str, Any],
+                                           p1_weight: float, p2_weight: float) -> Dict[str, Any]:
+        """
+        Inherit sensation learning capacity (Layer 2) without inheriting specific sensations (Layer 3).
+        
+        This creates agents that are 'prepared to learn' without giving them solutions.
+        """
+        # Get parent sensation profiles
+        p1_sensation_data = p1_profile.get('sensation_profile_data', {})
+        p2_sensation_data = p2_profile.get('sensation_profile_data', {})
+        
+        # Initialize offspring with capacity to learn, not learned sensations
+        offspring_sensation_profile = {
+            'object_sensations': {},  # Start fresh - specific sensations not inherited
+            'navigation_preferences': {},  # Start fresh - specific preferences not inherited
+            'learning_history': {
+                'total_sensation_events': 0,
+                'successful_learnings': 0,
+                'emotional_intelligence_score': 0.0
+            }
+        }
+        
+        # Inherit meta-learning patterns (HOW to learn, not WHAT was learned)
+        p1_learning = p1_sensation_data.get('learning_history', {})
+        p2_learning = p2_sensation_data.get('learning_history', {})
+        
+        # Inherit learning efficiency tendencies (fitness-weighted)
+        if p1_learning and p2_learning:
+            p1_ei = p1_learning.get('emotional_intelligence_score', 0.0)
+            p2_ei = p2_learning.get('emotional_intelligence_score', 0.0)
+            
+            # Inherit potential for emotional intelligence (capacity), not achievement
+            offspring_ei_potential = (p1_ei * p1_weight + p2_ei * p2_weight) * 0.95 * 0.3  # Decay + reduced to potential
+            
+            offspring_sensation_profile['learning_history']['ei_potential'] = offspring_ei_potential
+        
+        return offspring_sensation_profile
+
+    def _initialize_offspring_sensation_profile(self, parent1: Dict[str, Any], parent2: Dict[str, Any]) -> Dict[str, Any]:
+        """Initialize sensation profile for offspring when parents have no sensation data."""
+        
+        # Determine offspring agent type for type-specific initialization
+        offspring_type = self._determine_offspring_type(parent1, parent2)
+        
+        # Use sensation engine to initialize fresh profile
+        if self.sensation_engine:
+            temp_agent_id = f"temp_{uuid.uuid4().hex[:8]}"
+            sensation_profile = self.sensation_engine.initialize_agent_sensations(temp_agent_id, offspring_type)
+            
+            return {
+                'sensation_learning_rate': 0.3,
+                'state_update_sensitivity': 0.7,
+                'navigation_state': 0.0,
+                'emotional_intelligence_score': 0.0,
+                'action_biases': json.dumps({}),
+                'sensation_profile': json.dumps(sensation_profile)
+            }
+        
+        return {}
+
 
 class MutationStrategies:
     """Handles mutation operations for genome exploration"""
+    
+    def __init__(self, database_interface: DatabaseInterface):
+        self.db = database_interface
+        
+        # Phase 4.5: Initialize sensation engine if available
+        if SENSATION_AVAILABLE:
+            self.sensation_engine = SensationEngine(database_interface)
+        else:
+            self.sensation_engine = None
 
     def mutate_genome(self, agent: Dict[str, Any], strategy_focus: str) -> Dict[str, Any]:
         """
