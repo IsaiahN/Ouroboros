@@ -194,8 +194,8 @@ class CounterfactualAnalyzer:
         try:
             # Get actual action sequence from database
             actual_actions = self.db.execute_query("""
-                SELECT action_type, coordinates, score_before, score_after,
-                       frame_before, frame_after
+                SELECT action_type, coordinate_x, coordinate_y, 
+                       score_before_action, score_after_action
                 FROM arc_action_tracking
                 WHERE agent_id = ? AND game_id = ?
                 ORDER BY action_timestamp
@@ -249,8 +249,8 @@ class CounterfactualAnalyzer:
             importance_score = 0.0
             
             # Factor 1: Score change magnitude
-            score_before = action.get('score_before', 0.0)
-            score_after = action.get('score_after', 0.0)
+            score_before = action.get('score_before_action', 0.0)
+            score_after = action.get('score_after_action', 0.0)
             score_change = score_after - score_before
             
             if score_change != 0:
@@ -274,7 +274,7 @@ class CounterfactualAnalyzer:
             if i > 0:
                 plateau_length = 0
                 for j in range(i-1, max(0, i-6), -1):
-                    if actions[j].get('score_after', 0.0) == score_before:
+                    if actions[j].get('score_after_action', 0.0) == score_before:
                         plateau_length += 1
                     else:
                         break
@@ -397,7 +397,7 @@ class CounterfactualAnalyzer:
         # Simple heuristic-based prediction
         # In a real implementation, this could use learned models
         
-        actual_score = actual_actions[-1].get('score_after', 0.0) if actual_actions else 0.0
+        actual_score = actual_actions[-1].get('score_after_action', 0.0) if actual_actions else 0.0
         
         # Check if alternative action was ever successful in other contexts
         # This is a simplified heuristic
@@ -414,8 +414,8 @@ class CounterfactualAnalyzer:
         
         # If original action led to plateau, alternative likely to be better
         if divergence_index > 0 and divergence_index < len(actual_actions):
-            score_before_div = actual_actions[divergence_index].get('score_before', 0.0)
-            score_after_div = actual_actions[divergence_index].get('score_after', 0.0)
+            score_before_div = actual_actions[divergence_index].get('score_before_action', 0.0)
+            score_after_div = actual_actions[divergence_index].get('score_after_action', 0.0)
             
             if score_after_div == score_before_div:  # No progress with actual action
                 confidence = 0.6

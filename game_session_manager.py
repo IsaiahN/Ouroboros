@@ -96,7 +96,11 @@ class GameSessionManager:
             game_id=game_id
         )
 
-        # Initialize ARC client
+        # Initialize ARC client (properly cleanup old client if exists)
+        if self.client and self.client.session:
+            # Close existing session
+            await self.client.__aexit__(None, None, None)
+        
         self.client = ARCClient(api_key=self.api_key)
 
         self.is_running = True
@@ -117,7 +121,12 @@ class GameSessionManager:
         if not self.is_running:
             raise RuntimeError("No active session")
 
+        # Properly manage client lifecycle - close old session if exists
         if not self.client:
+            self.client = ARCClient(api_key=self.api_key)
+        elif self.client.session:
+            # Close existing session before recreating
+            await self.client.__aexit__(None, None, None)
             self.client = ARCClient(api_key=self.api_key)
 
         # Ensure client session is active
@@ -476,9 +485,13 @@ class GameSessionManager:
         Returns:
             List of available games
         """
+        # Properly manage client lifecycle
         if not self.client:
             self.client = ARCClient(api_key=self.api_key)
-
+        elif self.client.session:
+            # Reuse existing session if active
+            pass
+        
         if not self.client.session:
             await self.client.__aenter__()
 

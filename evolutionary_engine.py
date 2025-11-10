@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
 from database_interface import DatabaseInterface
 from prestige_engine import PrestigeEngine
+from agent_operating_mode_system import AgentOperatingModeSystem
 
 # Phase 4.5: Import sensation engine for emotional intelligence inheritance
 try:
@@ -48,6 +49,9 @@ class EvolutionaryEngine:
             self.sensation_engine = SensationEngine(database_interface)
         else:
             self.sensation_engine = None
+        
+        # Dynamic Role System: Initialize operating mode coordinator
+        self.operating_mode_system = AgentOperatingModeSystem(database_interface)
 
     def evolve_population(self, evolution_strategy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -166,8 +170,9 @@ class EvolutionaryEngine:
             agent_id = agent['agent_id']
 
             if specialist_mode:
-                # SPECIALIST FITNESS - 100% focus on assigned games
-                # No diversity penalties, deep mastery encouraged
+                # SPECIALIST MODE DISABLED - This branch never executes
+                # Specialist system replaced by prestige + operating modes
+                # Keeping code for reference but specialist_mode is always False
                 fitness_scores[agent_id] = self._calculate_specialist_fitness(agent_id, agent)
                 
             elif diversity_mode:
@@ -698,14 +703,38 @@ class EvolutionaryEngine:
                         evolution_strategy: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Apply mutations to offspring to explore strategy space
+        
+        DYNAMIC ROLE SYSTEM: Each agent has per-deployment operating mode
+        - Pioneers: 5x mutation rate
+        - Optimizers: 0.5x mutation rate
+        - Generalists: 1.0x mutation rate
         """
-        mutation_rate = evolution_strategy.get('mutation_rate', 0.2)
+        base_mutation_rate = evolution_strategy.get('mutation_rate', 0.2)
         strategy_focus = evolution_strategy.get('focus', 'balanced')
+        generation = evolution_strategy.get('generation', 0)
 
         mutated_offspring = []
 
         for agent in offspring:
-            if random.random() < mutation_rate:
+            agent_id = agent.get('agent_id')
+            
+            # Get agent's operating mode for this generation
+            if agent_id:
+                mode_params = self.operating_mode_system.get_mode_parameters(agent_id, generation)
+                operating_mode = mode_params.get('mode', 'generalist')
+                mode_multiplier = mode_params.get('mutation_multiplier', 1.0)
+            else:
+                # Fallback if agent_id missing
+                operating_mode = 'generalist'
+                mode_multiplier = 1.0
+            
+            # Apply mode-specific mutation rate
+            agent_mutation_rate = base_mutation_rate * mode_multiplier
+            
+            # Clamp to reasonable range (0.01 to 0.99)
+            agent_mutation_rate = max(0.01, min(0.99, agent_mutation_rate))
+            
+            if random.random() < agent_mutation_rate:
                 # Apply mutation based on strategy focus
                 mutated_agent = self.mutation_strategies.mutate_genome(
                     agent,
@@ -713,9 +742,13 @@ class EvolutionaryEngine:
                 )
                 mutated_agent['mutated'] = True
                 mutated_agent['mutation_count'] = mutated_agent.get('mutation_count', 0) + 1
+                mutated_agent['operating_mode'] = operating_mode  # Track mode used
+                mutated_agent['mode_multiplier'] = mode_multiplier
                 mutated_offspring.append(mutated_agent)
             else:
                 agent['mutated'] = False
+                agent['operating_mode'] = operating_mode
+                agent['mode_multiplier'] = mode_multiplier
                 mutated_offspring.append(agent)
 
         return mutated_offspring

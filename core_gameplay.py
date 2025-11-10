@@ -196,6 +196,11 @@ class GameplayEngine:
             level_completions = 0  # Track how many levels completed
             current_level = 1
             level_start_action = 0  # Track where each level starts
+            
+            # Anti-oscillation: Track no-progress actions
+            actions_since_score_increase = 0  # Count actions with no score improvement
+            last_score_increase = 0.0  # Track last successful score
+            NO_PROGRESS_RESET_THRESHOLD = 300  # Hard reset after 300 actions with no progress
 
             # Game loop
             while (game_state.state == "NOT_FINISHED" and
@@ -239,6 +244,32 @@ class GameplayEngine:
                     
                     # Check for significant score increase (level completion)
                     score_increase = game_state.score - previous_score
+                    
+                    # Anti-oscillation: Track no-progress actions
+                    if score_increase > 0:
+                        # Score improved! Reset counter
+                        actions_since_score_increase = 0
+                        last_score_increase = game_state.score
+                    else:
+                        # No progress
+                        actions_since_score_increase += 1
+                        
+                        # Hard reset after 300 actions with no progress
+                        if actions_since_score_increase >= NO_PROGRESS_RESET_THRESHOLD:
+                            logger.warning(f"🔄 HARD RESET: No score improvement for {actions_since_score_increase} actions! Entering desperate exploration mode")
+                            
+                            # Force visual analyzer to reset all heuristics
+                            if hasattr(self.action_handler, 'visual_analyzer'):
+                                self.action_handler.visual_analyzer.exploration_radius = self.action_handler.visual_analyzer.max_exploration_radius
+                                self.action_handler.visual_analyzer.clicked_coordinates.clear()
+                                self.action_handler.visual_analyzer.oscillation_detected = False
+                                self.action_handler.consecutive_similar_coordinate = 0
+                                logger.info(f"   → Visual analyzer reset: max exploration radius, cleared coordinate history")
+                            
+                            # Reset counter to give system 300 more actions
+                            actions_since_score_increase = 0
+                            logger.info(f"   → Desperate exploration: System reset, trying completely new approach")
+                    
                     if score_increase >= 0.5:  # Significant score increase (usually +1.0 per level)
                         level_completions += 1
                         logger.info(f"🎉 Level {current_level} completed! Score: {previous_score} → {game_state.score} (+{score_increase})")

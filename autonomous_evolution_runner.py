@@ -119,7 +119,7 @@ class AutonomousEvolutionRunner:
         self.collective_reasoner = CollectiveReasoningEngine(self.db)  # Multi-agent collaboration
         self.counterfactual_analyzer = CounterfactualAnalyzer(self.db)  # "What if?" analysis
         
-        print("[✓] Breakthrough systems initialized (Subgoal Planning, Frustration Detection, Near-Miss Analysis, Collective Reasoning, Counterfactual Analysis)")
+        print("[OK] Breakthrough systems initialized (Subgoal Planning, Frustration Detection, Near-Miss Analysis, Collective Reasoning, Counterfactual Analysis)")
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -136,14 +136,10 @@ class AutonomousEvolutionRunner:
             self.rule_engine = None
             self.visual_engine = None
         
-        # SPECIALIST COORDINATOR (SPECIALIST MODE)
-        if specialist_mode:
-            from specialist_coordinator import SpecialistCoordinator
-            
-            self.specialist_coordinator = SpecialistCoordinator(self.db)
-            print("[>] Specialist coordinator initialized")
-        else:
-            self.specialist_coordinator = None
+        # SPECIALIST COORDINATOR - DISABLED (replaced by prestige + operating modes)
+        # Specialist system removed - prestige provides survival protection (0-80%)
+        # Operating modes (pioneer/optimizer/generalist) handle mutation adaptation
+        self.specialist_coordinator = None
         
         self.initial_population_size = initial_population_size
         self.games_per_generation = games_per_generation
@@ -456,30 +452,9 @@ class AutonomousEvolutionRunner:
             # Initialize specialist assignments if in specialist mode
             if self.specialist_mode and self.specialist_coordinator:
                 print(f"\n[>] Initializing specialist game assignments...")
-                # Get available games
-                try:
-                    from arc_api_client import ARCAPIClient
-                    import asyncio
-                    
-                    api_key = os.getenv('ARC_API_KEY')
-                    if api_key:
-                        async def get_games_async():
-                            async with ARCAPIClient(api_key) as client:
-                                return await client.get_available_games()
-                        
-                        # Run async call properly
-                        available_games = asyncio.run(get_games_async())
-                        game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
-                        
-                        if game_ids:
-                            # Assign 2 games per specialist for focused training
-                            self.specialist_coordinator.initialize_specialist_assignments(
-                                [a.to_dict() for a in agents_created],
-                                game_ids,
-                                games_per_specialist=2
-                            )
-                except Exception as e:
-                    print(f"[WARN]️  Could not initialize specialist assignments: {e}")
+                # Specialist assignments disabled - prestige + modes handle selection
+                # Prestige system provides earned survival protection (0-80%)
+                # Operating modes (pioneer/optimizer/generalist) guide mutation rates
             
             return True
             
@@ -519,6 +494,15 @@ class AutonomousEvolutionRunner:
             if not agents:
                 print("[?] No active agents found")
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
+            
+            # DYNAMIC ROLE ASSIGNMENT: Assign operating modes for this generation
+            # 10% pioneers (5x mutation), 60% optimizers (0.5x mutation), 30% generalists (1x)
+            from agent_operating_mode_system import AgentOperatingModeSystem
+            mode_system = AgentOperatingModeSystem(self.db)
+            agent_ids = [a['agent_id'] for a in agents]
+            mode_assignments = mode_system.assign_population_modes(self.current_generation, agent_ids)
+            distribution = mode_system.get_population_mode_distribution(self.current_generation)
+            print(f"[MODE] Dynamic roles assigned: {distribution['pioneer']} pioneers, {distribution['optimizer']} optimizers, {distribution['generalist']} generalists")
             
             # CRITICAL FIX: Distribute games_per_generation ACROSS all agents, not per agent
             # Old logic: games_per_agent = num_games // len(agents) meant 419 agents × 1 game = 419 games (70+ hours!)
@@ -570,25 +554,8 @@ class AutonomousEvolutionRunner:
                 for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
                     agent_id = agent['agent_id']
                     
-                    # SPECIALIST MODE: Use specialist coordinator for game selection (NEW)
-                    if self.specialist_mode and self.specialist_coordinator:
-                        # FIX: Specialists must play ALL assigned games (not just games_per_agent)
-                        # This ensures game diversity - each specialist covers their full assignment
-                        assigned = self.specialist_coordinator.get_games_for_specialist(agent_id)
-                        if assigned:
-                            # Play each assigned game at least once
-                            agent_games = list(assigned) * games_per_agent  # Repeat if needed
-                            print(f"  [>] Agent {agent_id[:8]} - Specialist on {len(assigned)} games: {assigned} × {games_per_agent}")
-                        else:
-                            # No assignment - fallback to random
-                            agent_games = random.sample(
-                                [g.get('id', g.get('game_id')) for g in available_games],
-                                min(games_per_agent, len(available_games))
-                            )
-                            print(f"  [>] Agent {agent_id[:8]} - No assignment, playing {len(agent_games)} random games")
-                    
                     # META-LEARNING: Use curriculum for game selection
-                    elif self.curriculum:
+                    if self.curriculum:
                         # Initialize agent in curriculum if needed
                         if self.curriculum.get_agent_current_stage(agent_id) == 1 and \
                            not self.db.execute_query("SELECT 1 FROM curriculum_progress WHERE agent_id = ?", (agent_id,)):
@@ -612,6 +579,17 @@ class AutonomousEvolutionRunner:
                             print("[PAUSE]️  Shutdown requested, stopping evaluation")
                             break
                         
+                        # PERSISTENT MODE MEMORY: Assign mode for this specific game
+                        # Agent remembers which mode (pioneer/optimizer/generalist) works best per game
+                        agent_mode = mode_system.get_best_mode_for_game(agent_id, game_id)
+                        if not agent_mode:
+                            # No history - use population assignment
+                            agent_mode = mode_assignments.get(agent_id, 'generalist')
+                            mode_system._record_mode_assignment(
+                                agent_id, game_id, self.current_generation, 
+                                agent_mode, "First attempt - using population role"
+                            )
+                        
                         # === NEW: Collective reasoning for difficult games ===
                         # Trigger ensemble intelligence when game attempted 3+ times without win
                         if self.collective_reasoner:
@@ -620,7 +598,7 @@ class AutonomousEvolutionRunner:
                                 attempts = self.db.execute_query("""
                                     SELECT COUNT(*) as attempt_count
                                     FROM agent_arc_performance
-                                    WHERE game_id = ? AND win_detected = FALSE
+                                    WHERE game_id = ? AND win_achieved = FALSE
                                 """, (game_id,))
                                 
                                 if attempts and attempts[0]['attempt_count'] >= 3:
@@ -745,6 +723,15 @@ class AutonomousEvolutionRunner:
                                     print(f"  [?] Counterfactual: {len(learning_ids)} alternative strategies identified")
                             except Exception as e:
                                 print(f"  [WARN] Counterfactual analysis failed: {e}")
+                        
+                        # PERSISTENT MODE MEMORY: Record mode effectiveness for this game
+                        mode_system.update_mode_effectiveness(
+                            agent_id=agent_id,
+                            generation=self.current_generation,
+                            score=result.get('final_score', 0),
+                            win=result.get('win', False),
+                            actions=result.get('actions_taken', 0)
+                        )
                         
                         # PHASE 3: Track viral package usage and effectiveness
                         try:

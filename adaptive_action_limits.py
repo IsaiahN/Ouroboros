@@ -34,18 +34,18 @@ class AdaptiveActionLimits:
         
         # Hard constraints
         self.MIN_ACTIONS_PER_LEVEL = 200  # Hard floor (never go below)
-        self.MAX_ACTIONS_PER_LEVEL = 300  # Ceiling (REDUCED: 600 → 300 to force efficiency)
+        self.MAX_ACTIONS_PER_LEVEL = 1500  # Ceiling (INCREASED: 300 → 1500, level 3 requires 5000+ total)
         self.MIN_TOTAL_ACTIONS = 1000     # Minimum total
-        self.MAX_TOTAL_ACTIONS = 1500     # Maximum total (REDUCED: 4000 → 1500 for ~10min games)
+        self.MAX_TOTAL_ACTIONS = 8000     # Maximum total (INCREASED: 1500 → 8000, level 3 empirically needs 5000+)
         
-        # BIOME THEORY: Metabolic constraints force efficiency evolution
-        # Old: 4000-135k actions = thrashing without progress
-        # New: 1500 max = agents MUST learn efficient strategies or fail
-        # This creates evolutionary pressure toward levels/action optimization
+        # BREAKTHROUGH UNLOCKED: Level 3+ action requirements discovered
+        # Empirical data: L1=389 actions, L2=653 actions, L3=5017 actions (7.7x jump!)
+        # Old limit (1500) was blocking 99.5% of level 3 attempts
+        # New limit (8000) allows deep exploration while maintaining efficiency pressure
         
-        # Starting defaults (REDUCED for reasonable game times)
-        self.current_actions_per_level = 250  # REDUCED: 300 → 250
-        self.current_total_actions = 1250     # REDUCED: 3500 → 1250 (~8 min/game)
+        # Starting defaults (INCREASED to allow level 3 breakthrough attempts)
+        self.current_actions_per_level = 800   # INCREASED: 250 → 800 (allows L3 exploration)
+        self.current_total_actions = 5000      # INCREASED: 1250 → 5000 (matches L3 empirical requirement)
         
         # Adjustment parameters
         self.ADJUSTMENT_RATE = 0.15  # 15% adjustment per generation
