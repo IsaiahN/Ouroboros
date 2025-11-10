@@ -106,6 +106,21 @@ class AutonomousEvolutionRunner:
         from horizontal_transfer_engine import HorizontalTransferEngine
         self.transfer_engine = HorizontalTransferEngine(self.db)
         
+        # NEW BREAKTHROUGH SYSTEMS (Tier 1-3)
+        from subgoal_planner import SubgoalPlanner
+        from frustration_detector import FrustrationDetector
+        from near_miss_analyzer import NearMissAnalyzer
+        from collective_reasoning_engine import CollectiveReasoningEngine
+        from counterfactual_analyzer import CounterfactualAnalyzer
+        
+        self.subgoal_planner = SubgoalPlanner(self.db)  # Hierarchical planning
+        self.frustration_detector = FrustrationDetector(self.db)  # Frustration quorum sensing
+        self.near_miss_analyzer = NearMissAnalyzer(self.db)  # Learn from 15-18/20 scores
+        self.collective_reasoner = CollectiveReasoningEngine(self.db)  # Multi-agent collaboration
+        self.counterfactual_analyzer = CounterfactualAnalyzer(self.db)  # "What if?" analysis
+        
+        print("[✓] Breakthrough systems initialized (Subgoal Planning, Frustration Detection, Near-Miss Analysis, Collective Reasoning, Counterfactual Analysis)")
+        
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
             from meta_learning_curriculum import MetaLearningCurriculum
@@ -597,6 +612,29 @@ class AutonomousEvolutionRunner:
                             print("[PAUSE]️  Shutdown requested, stopping evaluation")
                             break
                         
+                        # === NEW: Collective reasoning for difficult games ===
+                        # Trigger ensemble intelligence when game attempted 3+ times without win
+                        if self.collective_reasoner:
+                            try:
+                                # Check game difficulty (attempts without win)
+                                attempts = self.db.execute_query("""
+                                    SELECT COUNT(*) as attempt_count
+                                    FROM agent_arc_performance
+                                    WHERE game_id = ? AND win_detected = FALSE
+                                """, (game_id,))
+                                
+                                if attempts and attempts[0]['attempt_count'] >= 3:
+                                    # Start collective session (auto-selects top agents)
+                                    session_id = self.collective_reasoner.start_collective_session(
+                                        game_id=game_id,
+                                        generation=self.current_generation,
+                                        reasoning_mode='consensus'  # Use consensus for difficult games
+                                    )
+                                    if session_id:
+                                        print(f"  [ENSEMBLE] Collective reasoning session started for difficult game")
+                            except Exception as e:
+                                print(f"  [WARN] Collective reasoning setup failed: {e}")
+                        
                         # Use adaptive action limits (adjusted per generation)
                         # Configure engine with current adaptive limits
                         engine.configure(
@@ -642,6 +680,71 @@ class AutonomousEvolutionRunner:
                         
                         # CRITICAL FIX: Store reward data so agents get credited for their games!
                         self.db.store_arc_reward_data(agent_id, reward_data)
+                        
+                        # === NEW BREAKTHROUGH SYSTEMS: Post-game analysis ===
+                        
+                        # 1. Update frustration state (detect stuck agents)
+                        if self.frustration_detector:
+                            try:
+                                # Get agent's previous best score on this game
+                                prev_best = self.db.execute_query("""
+                                    SELECT MAX(final_score) as best_score
+                                    FROM agent_arc_performance
+                                    WHERE agent_id = ? AND game_id = ?
+                                """, (agent_id, game_id))
+                                previous_best_score = prev_best[0]['best_score'] if prev_best and prev_best[0]['best_score'] else 0.0
+                                
+                                self.frustration_detector.update_agent_frustration(
+                                    agent_id=agent_id,
+                                    game_id=game_id,
+                                    score_achieved=result.get('final_score', 0),
+                                    previous_best_score=previous_best_score,
+                                    actions_taken=result.get('actions_taken', 0),
+                                    generation=self.current_generation
+                                )
+                                
+                                # Check if network-wide frustration threshold reached
+                                quorum_reached = self.frustration_detector.check_frustration_quorum(
+                                    generation=self.current_generation
+                                )
+                                if quorum_reached:
+                                    print(f"  [!] Frustration quorum reached - desperation signals emitted")
+                            except Exception as e:
+                                print(f"  [WARN] Frustration detection failed: {e}")
+                        
+                        # 2. Analyze near-misses (high score failures)
+                        final_score = result.get('final_score', 0)
+                        if self.near_miss_analyzer and final_score >= 15 and not result.get('win', False):
+                            try:
+                                session_id = engine.session_manager.current_session_id or "unknown"
+                                insights_id = self.near_miss_analyzer.analyze_near_miss(
+                                    agent_id=agent_id,
+                                    game_id=game_id,
+                                    session_id=session_id,
+                                    final_score=final_score,
+                                    total_actions=result.get('actions_taken', 0),
+                                    generation=self.current_generation
+                                )
+                                if insights_id:
+                                    print(f"  [>] Near-miss analysis recorded (ID: {insights_id[:8]})")
+                            except Exception as e:
+                                print(f"  [WARN] Near-miss analysis failed: {e}")
+                        
+                        # 3. Counterfactual analysis on failures (learn from mistakes)
+                        if self.counterfactual_analyzer and not result.get('win', False) and final_score < 15:
+                            try:
+                                session_id = engine.session_manager.current_session_id or "unknown"
+                                learning_ids = self.counterfactual_analyzer.analyze_failure(
+                                    agent_id=agent_id,
+                                    game_id=game_id,
+                                    session_id=session_id,
+                                    final_score=final_score,
+                                    generation=self.current_generation
+                                )
+                                if learning_ids:
+                                    print(f"  [?] Counterfactual: {len(learning_ids)} alternative strategies identified")
+                            except Exception as e:
+                                print(f"  [WARN] Counterfactual analysis failed: {e}")
                         
                         # PHASE 3: Track viral package usage and effectiveness
                         try:

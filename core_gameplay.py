@@ -45,6 +45,15 @@ class GameplayEngine:
         self.db = DatabaseInterface(db_path)  # Pattern learning database access
         self.prestige_engine = PrestigeEngine(self.db)  # Phase 1: Prestige tracking
         self.sensation_engine = SensationEngine(self.db)  # Phase 4.5: Emotional intelligence
+        
+        # NEW: Breakthrough systems initialization
+        try:
+            from subgoal_planner import SubgoalPlanner
+            self.subgoal_planner = SubgoalPlanner(self.db)  # Hierarchical planning
+        except ImportError:
+            self.subgoal_planner = None
+            logger.debug("Subgoal planner not available")
+        
         self.game_config = {
             'max_actions_per_level': 400,  # Max actions per level (increased for multi-level discovery)
             'max_total_actions': 7000,  # Max total actions across all levels (increased for multi-level runs)
@@ -507,11 +516,12 @@ class GameplayEngine:
         """Select the next action to take.
         
         Uses:
-        1. PHASE 4.5: Sensation-based navigation (emotional intelligence for actions 1-7)
-        2. PHASE 3: Viral package influence (prefer successful patterns)
-        3. PHASE 3: Pariah avoidance (avoid known failures)
-        4. Meta-learning pattern detection
-        5. Default strategy
+        1. NEW: Hierarchical subgoal planning (multi-step strategy)
+        2. PHASE 4.5: Sensation-based navigation (emotional intelligence for actions 1-7)
+        3. PHASE 3: Viral package influence (prefer successful patterns)
+        4. PHASE 3: Pariah avoidance (avoid known failures)
+        5. Meta-learning pattern detection
+        6. Default strategy
 
         Args:
             game_state: Current game state
@@ -520,6 +530,61 @@ class GameplayEngine:
             Action to take
         """
         agent_id = self.game_config.get('agent_id')
+        
+        # === NEW: Check for active subgoal plan ===
+        if agent_id and hasattr(self, 'subgoal_planner') and self.subgoal_planner:
+            try:
+                current_game_id = self.session_manager.current_game_id
+                session_id = self.session_manager.current_session_id
+                
+                if current_game_id and session_id:
+                    # Check if we have an active plan
+                    active_plan = self.db.execute_query("""
+                        SELECT plan_id, current_subgoal
+                        FROM subgoal_plans
+                        WHERE agent_id = ? AND game_id = ? AND session_id = ? 
+                          AND status = 'active'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """, (agent_id, current_game_id, session_id))
+                    
+                    if active_plan and active_plan[0]:
+                        # Get actions for current subgoal
+                        plan_id = active_plan[0]['plan_id']
+                        
+                        # Convert frame to list format
+                        frame_list = game_state.frame if isinstance(game_state.frame, list) else []
+                        available_actions = list(range(1, 8))  # ACTION1-ACTION7
+                        
+                        if frame_list:
+                            subgoal_action_ids = self.subgoal_planner.get_next_subgoal_actions(
+                                plan_id=plan_id,
+                                current_frame=frame_list,
+                                available_actions=available_actions
+                            )
+                            
+                            if subgoal_action_ids:
+                                action_id = subgoal_action_ids[0]
+                                logger.info(f"📋 Following subgoal plan: ACTION{action_id}")
+                                return f"ACTION{action_id}"
+                    
+                    # No active plan - create one if game is making progress
+                    elif game_state.score > 0 and game_state.score < 20:
+                        frame_list = game_state.frame if isinstance(game_state.frame, list) else []
+                        if frame_list:
+                            plan_id = self.subgoal_planner.create_plan(
+                                agent_id=agent_id,
+                                game_id=current_game_id,
+                                session_id=session_id,
+                                current_frame=frame_list,
+                                current_score=game_state.score,
+                                generation=self.game_config.get('generation', 0)
+                            )
+                            if plan_id:
+                                logger.info(f"📋 Created hierarchical plan for game {current_game_id[:8]}")
+                            
+            except Exception as e:
+                logger.debug(f"Subgoal planning error: {e}")
         
         # PHASE 4.5: Sensation-based analysis for navigation actions
         sensation_biases = {}
