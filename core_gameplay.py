@@ -281,17 +281,21 @@ class GameplayEngine:
                             
                             try:
                                 # Reset the current level via API (use scorecard from game creation)
+                                # IMPORTANT: This resets the SAME level, NOT progressing to next level
+                                # level_completions only increments when score actually increases (line 304)
                                 game_state = await self.session_manager.client.reset_game(
                                     game_id,
                                     game_data.get('scorecard_id')  # Scorecard stored during create_game
                                 )
                                 
                                 level_api_resets += 1
-                                level_action_count = 0  # Reset level counter
+                                # NOTE: Don't reset level_action_count - keep cumulative count across resets
+                                # This ensures we track total actions spent on this level attempt
                                 actions_since_score_increase = 0  # Reset no-progress counter
                                 
                                 logger.info(f"   ✓ Level reset successful! Fresh attempt #{level_api_resets + 1}")
                                 logger.info(f"   → {MAX_API_RESETS_PER_LEVEL - level_api_resets} API resets remaining for this level")
+                                logger.info(f"   → Total actions on this level so far: {level_action_count}")
                                 
                             except Exception as e:
                                 logger.error(f"   ✗ API reset failed: {e}")
@@ -1243,8 +1247,9 @@ class GameplayEngine:
             pattern_signature = self._detect_frame_pattern(initial_frame, final_frame)
             
             # Check if we already have a winning sequence for this game/level
+            # ANTI-GAMING: Check BEST sequence globally (not just by this agent)
             existing = self.db.execute_query("""
-                SELECT sequence_id, total_actions, efficiency_score 
+                SELECT sequence_id, total_actions, efficiency_score, agent_id
                 FROM winning_sequences
                 WHERE game_id = ? AND level_number = ?
                 ORDER BY efficiency_score DESC
@@ -1255,6 +1260,9 @@ class GameplayEngine:
             should_store = False
             sequence_id = None
             
+            # Get current agent_id from config
+            current_agent_id = self.game_config.get('agent_id', 'unknown')
+            
             if not existing:
                 # First win for this level - always store
                 should_store = True
@@ -1264,20 +1272,31 @@ class GameplayEngine:
                 existing_seq = existing[0]
                 existing_actions = existing_seq['total_actions']
                 existing_efficiency = existing_seq['efficiency_score']
+                existing_agent = existing_seq.get('agent_id', 'unknown')
+                
+                # ANTI-GAMING: Require SIGNIFICANT improvement to store another sequence
+                # - If same agent: Must improve by 10+ actions OR 15% efficiency
+                # - If different agent: Must improve by 5+ actions OR 10% efficiency
+                # This prevents agents from "discovering" the same solution 50 times via resets
+                
+                is_same_agent = (current_agent_id == existing_agent)
+                min_action_improvement = 10 if is_same_agent else 5
+                min_efficiency_multiplier = 1.15 if is_same_agent else 1.10
                 
                 # Store if we improved (fewer actions OR better efficiency)
-                if len(actions) < existing_actions:
+                if len(actions) <= existing_actions - min_action_improvement:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
                     logger.info(f"⚡ Optimized sequence: {existing_actions} → {len(actions)} actions "
                               f"(efficiency: {existing_efficiency:.4f} → {efficiency:.4f})")
-                elif efficiency > existing_efficiency * 1.1:  # 10% efficiency improvement
+                elif efficiency > existing_efficiency * min_efficiency_multiplier:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
                     logger.info(f"📈 Improved efficiency: {existing_efficiency:.4f} → {efficiency:.4f}")
                 else:
                     logger.info(f"Existing sequence is still optimal ({existing_actions} actions, "
-                              f"efficiency {existing_efficiency:.4f})")
+                              f"efficiency {existing_efficiency:.4f}) - "
+                              f"Need {min_action_improvement}+ action improvement or {min_efficiency_multiplier}x efficiency")
             
             # Store in database (Rule 2) only if improved or first win
             if should_store and sequence_id:
