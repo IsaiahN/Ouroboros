@@ -201,6 +201,11 @@ class GameplayEngine:
             actions_since_score_increase = 0  # Count actions with no score improvement
             last_score_increase = 0.0  # Track last successful score
             NO_PROGRESS_RESET_THRESHOLD = 300  # Hard reset after 300 actions with no progress
+            
+            # API RESET tracking (NEW - hybrid approach)
+            level_api_resets = 0  # Track resets used on current level
+            MAX_API_RESETS_PER_LEVEL = 2  # Max 2 API resets per level
+            API_RESET_THRESHOLD = 600  # API reset after 600 no-progress actions (after internal reset fails)
 
             # Game loop
             while (game_state.state == "NOT_FINISHED" and
@@ -254,9 +259,11 @@ class GameplayEngine:
                         # No progress
                         actions_since_score_increase += 1
                         
-                        # Hard reset after 300 actions with no progress
-                        if actions_since_score_increase >= NO_PROGRESS_RESET_THRESHOLD:
-                            logger.warning(f"🔄 HARD RESET: No score improvement for {actions_since_score_increase} actions! Entering desperate exploration mode")
+                        # HYBRID APPROACH: Internal reset at 300, API reset at 600
+                        
+                        # Phase 1: Internal hard reset after 300 actions with no progress
+                        if actions_since_score_increase == NO_PROGRESS_RESET_THRESHOLD:
+                            logger.warning(f"🔄 INTERNAL RESET: No score improvement for {actions_since_score_increase} actions! Clearing heuristics")
                             
                             # Force visual analyzer to reset all heuristics
                             if hasattr(self.action_handler, 'visual_analyzer'):
@@ -266,14 +273,38 @@ class GameplayEngine:
                                 self.action_handler.consecutive_similar_coordinate = 0
                                 logger.info(f"   → Visual analyzer reset: max exploration radius, cleared coordinate history")
                             
-                            # Reset counter to give system 300 more actions
-                            actions_since_score_increase = 0
-                            logger.info(f"   → Desperate exploration: System reset, trying completely new approach")
+                            logger.info(f"   → Trying completely new approach (300 more actions before API reset)")
+                        
+                        # Phase 2: API RESET after 600 actions if internal reset didn't help
+                        elif actions_since_score_increase >= API_RESET_THRESHOLD and level_api_resets < MAX_API_RESETS_PER_LEVEL:
+                            logger.warning(f"🔄 API RESET #{level_api_resets + 1}: Internal reset failed, resetting level via API")
+                            
+                            try:
+                                # Reset the current level via API (use scorecard from game creation)
+                                game_state = await self.session_manager.client.reset_game(
+                                    game_id,
+                                    game_data.get('scorecard_id')  # Scorecard stored during create_game
+                                )
+                                
+                                level_api_resets += 1
+                                level_action_count = 0  # Reset level counter
+                                actions_since_score_increase = 0  # Reset no-progress counter
+                                
+                                logger.info(f"   ✓ Level reset successful! Fresh attempt #{level_api_resets + 1}")
+                                logger.info(f"   → {MAX_API_RESETS_PER_LEVEL - level_api_resets} API resets remaining for this level")
+                                
+                            except Exception as e:
+                                logger.error(f"   ✗ API reset failed: {e}")
+                                # Continue with current state if reset fails
+                                actions_since_score_increase = 0  # Reset counter anyway to avoid spam
                     
                     if score_increase >= 0.5:  # Significant score increase (usually +1.0 per level)
                         level_completions += 1
                         logger.info(f"🎉 Level {current_level} completed! Score: {previous_score} → {game_state.score} (+{score_increase})")
-                        logger.info(f"📊 Level {current_level} stats: {level_action_count} actions")
+                        logger.info(f"📊 Level {current_level} stats: {level_action_count} actions, {level_api_resets} API resets used")
+                        
+                        # Reset level-specific counters for next level
+                        level_api_resets = 0  # Fresh reset budget for new level
                         
                         # Pattern Learning: ONLY capture if this is a VERIFIED level win
                         # (score increased AND game is still running, meaning level truly completed)

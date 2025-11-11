@@ -34,18 +34,19 @@ class AdaptiveActionLimits:
         
         # Hard constraints
         self.MIN_ACTIONS_PER_LEVEL = 200  # Hard floor (never go below)
-        self.MAX_ACTIONS_PER_LEVEL = 1500  # Ceiling (INCREASED: 300 → 1500, level 3 requires 5000+ total)
+        self.MAX_ACTIONS_PER_LEVEL = 3000  # Ceiling (INCREASED: 1500 → 3000, allow deep level exploration)
         self.MIN_TOTAL_ACTIONS = 1000     # Minimum total
-        self.MAX_TOTAL_ACTIONS = 8000     # Maximum total (INCREASED: 1500 → 8000, level 3 empirically needs 5000+)
+        self.MAX_TOTAL_ACTIONS = 10000    # Maximum total (INCREASED: 8000 → 10000, level 3 needs 5000+)
         
-        # BREAKTHROUGH UNLOCKED: Level 3+ action requirements discovered
-        # Empirical data: L1=389 actions, L2=653 actions, L3=5017 actions (7.7x jump!)
-        # Old limit (1500) was blocking 99.5% of level 3 attempts
-        # New limit (8000) allows deep exploration while maintaining efficiency pressure
+        # BREAKTHROUGH FIX: Per-level limit was ending games prematurely
+        # Issue: 800 actions/level was too low - agents hitting limit on L0/L1 and game ending
+        # Data: Avg 417 actions used = hitting per-level limit, never reaching higher levels
+        # Solution: Increase to 2000/level so agents can actually explore L2, L3, L4+
+        # Total budget (6000) still enforces efficiency, but per-level allows exploration
         
-        # Starting defaults (INCREASED to allow level 3 breakthrough attempts)
-        self.current_actions_per_level = 800   # INCREASED: 250 → 800 (allows L3 exploration)
-        self.current_total_actions = 5000      # INCREASED: 1250 → 5000 (matches L3 empirical requirement)
+        # Starting defaults (INCREASED to prevent premature game termination)
+        self.current_actions_per_level = 2000  # INCREASED: 800 → 2000 (prevent early termination)
+        self.current_total_actions = 6000      # INCREASED: 5000 → 6000 (allow multi-level attempts)
         
         # Adjustment parameters
         self.ADJUSTMENT_RATE = 0.15  # 15% adjustment per generation
