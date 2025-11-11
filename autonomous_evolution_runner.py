@@ -464,6 +464,222 @@ class AutonomousEvolutionRunner:
             traceback.print_exc()
             return False
     
+    def _assign_agent_to_optimal_task(
+        self,
+        agent_id: str,
+        agent_mode: str,
+        available_games: list,
+        games_per_agent: int
+    ) -> list:
+        """
+        Smart agent-to-task assignment based on operating mode and WIN state.
+        
+        This addresses user concerns #1 and #2:
+        - Knowledge distribution: Agents use community sequences automatically
+        - Continuous optimization: Optimizers focus on reducing action counts
+        
+        Strategy (Win-state driven, not hardcoded thresholds):
+        - Pioneer agents (10%): Games WITHOUT win state (frontier discovery)
+          * Use best sequences until hitting unbeaten level, then explore
+          * Prioritize games with partial progress (70%) over completely new (30%)
+          
+        - Optimizer agents (60%): ALL games, prioritize games with beaten levels
+          * Focus on reducing action counts for ALREADY-BEATEN levels
+          * Prioritize: max_level (more beaten levels) × avg_actions (more improvement room)
+          * Will also work on unbeaten games, optimizing whatever levels exist
+          
+        - Generalist agents (30%): Balanced 50/50 split
+          * 50% unbeaten games (frontier)
+          * 50% beaten games (optimization)
+        
+        Once assigned, core_gameplay.py handles sequence selection automatically:
+        - Queries best sequences by reliability → efficiency → actions
+        - Uses community validation and Bayesian reputation
+        - Pattern learning and sequence replay unchanged
+        
+        Args:
+            agent_id: Agent identifier
+            agent_mode: Operating mode ('pioneer', 'optimizer', 'generalist')
+            available_games: List of available game objects
+            games_per_agent: Number of games this agent should play
+        
+        Returns:
+            List of game IDs assigned to this agent
+        """
+        import random
+        
+        # Get all game IDs
+        all_game_ids = [g.get('id', g.get('game_id')) for g in available_games]
+        
+        if not all_game_ids:
+            return []
+        
+        # Query community knowledge about each game
+        game_stats = {}
+        for game_id in all_game_ids:
+            stats = self.db.execute_query("""
+                SELECT 
+                    MAX(level_progressions) as max_level,
+                    COUNT(*) as attempts,
+                    AVG(total_actions) as avg_actions,
+                    MAX(CASE WHEN win_achieved = 1 THEN 1 ELSE 0 END) as has_win
+                FROM agent_arc_performance
+                WHERE game_id = ?
+            """, (game_id,))
+            
+            if stats and stats[0]:
+                game_stats[game_id] = {
+                    'max_level': stats[0]['max_level'] or 0,
+                    'attempts': stats[0]['attempts'] or 0,
+                    'avg_actions': stats[0]['avg_actions'] or 0,
+                    'has_win': bool(stats[0]['has_win'])  # True if community has won this game
+                }
+            else:
+                game_stats[game_id] = {
+                    'max_level': 0,
+                    'attempts': 0,
+                    'avg_actions': 0,
+                    'has_win': False
+                }
+        
+        # Also check winning_sequences table for known sequences
+        sequences_by_game = {}
+        for game_id in all_game_ids:
+            sequences = self.db.execute_query("""
+                SELECT 
+                    COUNT(*) as sequence_count,
+                    AVG(total_actions) as avg_sequence_actions
+                FROM winning_sequences
+                WHERE game_id = ?
+            """, (game_id,))
+            
+            if sequences and sequences[0] and sequences[0]['sequence_count']:
+                sequences_by_game[game_id] = {
+                    'count': sequences[0]['sequence_count'],
+                    'avg_actions': sequences[0]['avg_sequence_actions']
+                }
+        
+        # PIONEER MODE: Focus on games WITHOUT WIN state (frontier discovery)
+        if agent_mode == 'pioneer':
+            # Find games where community hasn't won yet
+            unbeaten_games = [
+                game_id for game_id, stats in game_stats.items()
+                if not stats['has_win']
+            ]
+            
+            if unbeaten_games:
+                # Prioritize games with some progress over completely untried games
+                # This helps pioneers build on partial knowledge
+                tried_unbeaten = [g for g in unbeaten_games if game_stats[g]['attempts'] > 0]
+                untried_unbeaten = [g for g in unbeaten_games if game_stats[g]['attempts'] == 0]
+                
+                # 70% tried (with partial knowledge), 30% completely new
+                num_tried = int(games_per_agent * 0.7)
+                num_untried = games_per_agent - num_tried
+                
+                selected = []
+                if tried_unbeaten:
+                    selected.extend(random.sample(tried_unbeaten, min(num_tried, len(tried_unbeaten))))
+                if untried_unbeaten and len(selected) < games_per_agent:
+                    selected.extend(random.sample(untried_unbeaten, min(num_untried, len(untried_unbeaten))))
+                
+                # Fill remaining with any unbeaten games
+                while len(selected) < games_per_agent and unbeaten_games:
+                    game = random.choice(unbeaten_games)
+                    if game not in selected:
+                        selected.append(game)
+                
+                if len(selected) >= games_per_agent:
+                    return selected[:games_per_agent]
+            
+            # Fallback: if all games are beaten, work on optimization
+            # (pioneers become temporary optimizers when frontier is exhausted)
+            games_with_wins = [g for g, s in game_stats.items() if s['has_win']]
+            if games_with_wins:
+                return random.sample(games_with_wins, min(games_per_agent, len(games_with_wins)))
+            
+            # Ultimate fallback: random games
+            return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
+        
+        # OPTIMIZER MODE: Focus on games with beaten levels (optimize those sequences)
+        elif agent_mode == 'optimizer':
+            # Optimizers work on ALL games, but prioritize games with:
+            # 1. Most beaten levels (more levels to optimize)
+            # 2. Highest action counts per level (most room for improvement)
+            
+            # Build optimization priority list for all games
+            optimization_priority = []
+            
+            for game_id in all_game_ids:
+                stats = game_stats[game_id]
+                max_level = stats['max_level']
+                
+                # Skip games with no progress (nothing to optimize)
+                if max_level == 0:
+                    continue
+                
+                # Calculate optimization potential
+                # Games with more beaten levels = more optimization work available
+                # Games with higher action counts = more room for improvement
+                avg_actions = stats['avg_actions'] if stats['avg_actions'] > 0 else 1000
+                
+                optimization_priority.append({
+                    'game_id': game_id,
+                    'max_level': max_level,  # Number of beaten levels
+                    'avg_actions': avg_actions,  # Actions per level
+                    'has_win': stats['has_win'],
+                    # Priority score: more levels + higher actions = better optimization target
+                    'priority': max_level * avg_actions
+                })
+            
+            if optimization_priority:
+                # Sort by priority (most levels * highest actions = best targets)
+                optimization_priority.sort(
+                    key=lambda x: x['priority'],
+                    reverse=True
+                )
+                
+                # Select top optimization targets
+                selected = [g['game_id'] for g in optimization_priority[:games_per_agent]]
+                
+                # Fill remaining if needed
+                while len(selected) < games_per_agent and all_game_ids:
+                    game = random.choice(all_game_ids)
+                    if game not in selected:
+                        selected.append(game)
+                
+                return selected[:games_per_agent]
+            
+            # Fallback: random games if no optimization targets found
+            return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
+        
+        # GENERALIST MODE: Balanced mix of unbeaten and optimization targets
+        else:
+            # 50% unbeaten games (frontier), 50% beaten games (optimization)
+            unbeaten_games = [g for g, s in game_stats.items() if not s['has_win']]
+            beaten_games = [g for g, s in game_stats.items() if s['has_win']]
+            
+            num_frontier = int(games_per_agent * 0.5)
+            num_optimize = games_per_agent - num_frontier
+            
+            selected = []
+            
+            # Add frontier games (unbeaten)
+            if unbeaten_games:
+                selected.extend(random.sample(unbeaten_games, min(num_frontier, len(unbeaten_games))))
+            
+            # Add optimization targets (beaten games)
+            if beaten_games:
+                selected.extend(random.sample(beaten_games, min(num_optimize, len(beaten_games))))
+            
+            # Fill remaining with random games if we don't have enough
+            while len(selected) < games_per_agent:
+                game = random.choice(all_game_ids)
+                if game not in selected:
+                    selected.append(game)
+            
+            return selected[:games_per_agent]
+    
     async def run_evaluation_games(self, num_games: int) -> Dict[str, Any]:
         """
         Run evaluation games with current population.
@@ -554,6 +770,9 @@ class AutonomousEvolutionRunner:
                 for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
                     agent_id = agent['agent_id']
                     
+                    # Get agent's operating mode (pioneer/optimizer/generalist)
+                    agent_mode = mode_assignments.get(agent_id, 'generalist')
+                    
                     # META-LEARNING: Use curriculum for game selection
                     if self.curriculum:
                         # Initialize agent in curriculum if needed
@@ -569,9 +788,23 @@ class AutonomousEvolutionRunner:
                         )
                         print(f"  [?] Agent {agent_id[:8]} - Stage {self.curriculum.get_agent_current_stage(agent_id)}: {len(agent_games)} games")
                     else:
-                        # Standard game selection
-                        agent_games = [available_games[i % len(available_games)].get('id', available_games[i % len(available_games)].get('game_id')) 
-                                      for i in range(games_per_agent)]
+                        # SMART AGENT-TO-TASK ASSIGNMENT: Match agents to optimal tasks
+                        agent_games = self._assign_agent_to_optimal_task(
+                            agent_id=agent_id,
+                            agent_mode=agent_mode,
+                            available_games=available_games,
+                            games_per_agent=games_per_agent
+                        )
+                        
+                        # Log assignment for first few agents to show smart routing
+                        if agent_idx < 3:
+                            if agent_mode == 'pioneer':
+                                task_type = "unbeaten games (frontier discovery)"
+                            elif agent_mode == 'optimizer':
+                                task_type = "games with beaten levels (optimize sequences)"
+                            else:
+                                task_type = "50/50 unbeaten/beaten (balanced)"
+                            print(f"  [SMART] {agent_mode.upper()} {agent_id[:8]} → {task_type} ({len(agent_games)} games)")
                     
                     # Run games for this agent
                     for game_idx, game_id in enumerate(agent_games):
