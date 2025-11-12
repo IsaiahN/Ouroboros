@@ -316,68 +316,75 @@ class ActionHandler:
 
         return changes > 0, changes
 
-    async def send_action_1(self, reasoning: str = "Action 1") -> GameState:
+    async def send_action_1(self, reasoning: str = "Action 1", level_number: int = 1) -> GameState:
         """Send ACTION1 to the game.
 
         Args:
             reasoning: Optional reasoning for the action
+            level_number: Current level number for trace logging
 
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION1", reasoning=reasoning)
+        return await self._send_action_with_context("ACTION1", reasoning=reasoning, level_number=level_number)
 
-    async def send_action_2(self, reasoning: str = "Action 2") -> GameState:
+    async def send_action_2(self, reasoning: str = "Action 2", level_number: int = 1) -> GameState:
         """Send ACTION2 to the game.
 
         Args:
             reasoning: Optional reasoning for the action
+            level_number: Current level number for trace logging
 
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION2", reasoning=reasoning)
+        return await self._send_action_with_context("ACTION2", reasoning=reasoning, level_number=level_number)
 
-    async def send_action_3(self, reasoning: str = "Action 3") -> GameState:
+    async def send_action_3(self, reasoning: str = "Action 3", level_number: int = 1) -> GameState:
         """Send ACTION3 to the game.
 
         Args:
             reasoning: Optional reasoning for the action
+            level_number: Current level number for trace logging
 
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION3", reasoning=reasoning)
+        return await self._send_action_with_context("ACTION3", reasoning=reasoning, level_number=level_number)
 
-    async def send_action_4(self, reasoning: str = "Action 4") -> GameState:
+    async def send_action_4(self, reasoning: str = "Action 4", level_number: int = 1) -> GameState:
         """Send ACTION4 to the game.
 
         Args:
             reasoning: Optional reasoning for the action
+            level_number: Current level number for trace logging
 
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION4", reasoning=reasoning)
+        return await self._send_action_with_context("ACTION4", reasoning=reasoning, level_number=level_number)
 
-    async def send_action_5(self, reasoning: str = "Action 5") -> GameState:
+    async def send_action_5(self, reasoning: str = "Action 5", level_number: int = 1) -> GameState:
         """Send ACTION5 to the game.
 
         Args:
             reasoning: Optional reasoning for the action
+            level_number: Current level number for trace logging
 
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION5", reasoning=reasoning)
+        return await self._send_action_with_context("ACTION5", reasoning=reasoning, level_number=level_number)
 
-    async def send_action_6(self, x: int, y: int, frame: Optional[List[List[int]]] = None) -> GameState:
+    async def send_action_6(self, x: int, y: int, frame: Optional[List[List[int]]] = None, reasoning: Optional[str] = None, level_number: int = 1) -> GameState:
         """Send ACTION6 (coordinate-based action) to the game.
 
         Args:
             x: X coordinate
             y: Y coordinate
             frame: Current frame for validation (optional)
+            reasoning: Optional reasoning for the action
+            level_number: Current level number for trace logging
 
         Returns:
             New game state
@@ -391,18 +398,23 @@ class ActionHandler:
             logger.warning(f"Invalid coordinates ({x}, {y}) for frame size {len(frame)}x{len(frame[0]) if frame else 0}")
             raise ValueError(f"Coordinates ({x}, {y}) are outside frame bounds")
 
-        return await self._send_action_with_context("ACTION6", x=x, y=y, coordinates=[x, y])
+        # Include reasoning and level_number if provided
+        kwargs = {'x': x, 'y': y, 'coordinates': [x, y], 'level_number': level_number}
+        if reasoning:
+            kwargs['reasoning'] = reasoning
+        return await self._send_action_with_context("ACTION6", **kwargs)
 
-    async def send_action_7(self, reasoning: str = "Action 7") -> GameState:
+    async def send_action_7(self, reasoning: str = "Action 7", level_number: int = 1) -> GameState:
         """Send ACTION7 to the game.
 
         Args:
             reasoning: Optional reasoning for the action
+            level_number: Current level number for trace logging
 
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION7", reasoning=reasoning)
+        return await self._send_action_with_context("ACTION7", reasoning=reasoning, level_number=level_number)
 
     async def _send_action_with_context(self, action: str, **kwargs) -> GameState:
         """Send action with context tracking.

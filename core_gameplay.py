@@ -120,15 +120,21 @@ class GameplayEngine:
             session_mode = f"agent_{agent_id}_gameplay" if agent_id else "gameplay"
             await self.session_manager.start_session(mode=session_mode, game_id=game_id)
         
-        # Create game
-        game_data = await self.session_manager.create_game(game_id)
+        # Get agent mode BEFORE creating game (needed for tags)
+        agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
+        
+        # Create game with agent info in tags
+        game_data = await self.session_manager.create_game(
+            game_id, 
+            agent_id=agent_id,
+            agent_mode=agent_mode
+        )
         game_state = GameState.from_dict(game_data)
         
         # Pattern Learning: Check for known winning sequence (Rule 10: integrated)
         # Check AFTER game creation so we have the initial frame
         # MODE-AWARE: Behavior depends on agent operating mode
         known_sequence = None
-        agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
         
         if self.game_config.get('enable_pattern_learning', True):
             learning_mode = self.game_config.get('learning_mode', 'smart_exploration')
@@ -261,8 +267,8 @@ class GameplayEngine:
                             raise ValueError(f"Invalid action callback result: {action_result}")
                     else:
                         # Use default action selection
-                        action = await self._select_action(game_state)
-                        game_state = await self._execute_action(action, game_state)
+                        action, reasoning = await self._select_action(game_state)
+                        game_state = await self._execute_action(action, game_state, reasoning, current_level)
 
                     action_count += 1
                     level_action_count += 1
@@ -307,6 +313,9 @@ class GameplayEngine:
                                 # Reset the current level via API (use scorecard from game creation)
                                 # IMPORTANT: This resets the SAME level, NOT progressing to next level
                                 # level_completions only increments when score actually increases (line 304)
+                                if not self.session_manager.client:
+                                    raise ValueError("Session manager client not initialized")
+                                
                                 game_state = await self.session_manager.client.reset_game(
                                     game_id,
                                     game_data.get('scorecard_id')  # Scorecard stored during create_game
@@ -638,8 +647,8 @@ class GameplayEngine:
                 pass
             raise
 
-    async def _select_action(self, game_state: GameState) -> str:
-        """Select the next action to take.
+    async def _select_action(self, game_state: GameState) -> tuple[str, str]:
+        """Select the next action to take with reasoning.
         
         Uses:
         1. NEW: Hierarchical subgoal planning (multi-step strategy)
@@ -653,7 +662,7 @@ class GameplayEngine:
             game_state: Current game state
 
         Returns:
-            Action to take
+            Tuple of (action, reasoning) where reasoning explains why this action was chosen
         """
         agent_id = self.game_config.get('agent_id')
         
@@ -691,8 +700,9 @@ class GameplayEngine:
                             
                             if subgoal_action_ids:
                                 action_id = subgoal_action_ids[0]
-                                logger.info(f"📋 Following subgoal plan: ACTION{action_id}")
-                                return f"ACTION{action_id}"
+                                reasoning = f"Following hierarchical subgoal plan (plan_id: {plan_id[:8]})"
+                                logger.info(f"📋 {reasoning}: ACTION{action_id}")
+                                return f"ACTION{action_id}", reasoning
                     
                     # No active plan - create one if game is making progress
                     elif game_state.score > 0 and game_state.score < 20:
@@ -810,7 +820,8 @@ class GameplayEngine:
                                 self._pattern_action_queue = []
                             self._pattern_action_queue = actions[1:]  # Queue remaining actions
                             
-                            return "ACTION6"  # Will be executed with stored coordinates
+                            reasoning = f"Meta-learned {pattern_result['pattern_type']} pattern (confidence: {pattern_result['confidence']:.2f})"
+                            return "ACTION6", reasoning  # Will be executed with stored coordinates
                             
             except Exception as e:
                 logger.debug(f"Meta-learning error (falling back to default): {e}")
@@ -819,8 +830,9 @@ class GameplayEngine:
         if hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
             next_action = self._pattern_action_queue.pop(0)
             if next_action['type'] == 'ACTION6':
-                logger.info(f"🎯 Continuing pattern execution: ACTION6 at {next_action['coordinate']}")
-                return "ACTION6"
+                reasoning = f"Continuing meta-learned pattern: {next_action['reason']}"
+                logger.info(f"🎯 {reasoning}: ACTION6 at {next_action['coordinate']}")
+                return "ACTION6", reasoning
         
         # Fall back to default action selection WITH viral/pariah influence
         strategy = self.game_config.get('strategy', 'balanced')
@@ -857,11 +869,21 @@ class GameplayEngine:
                         best_alt, best_bias = max(alternatives, key=lambda x: x[1])
                         logger.info(f"🧠 Switching to ACTION{best_alt} (positive sensation bias: {best_bias:.2f})")
                         base_action = f"ACTION{best_alt}"
+                        sensation_reasoning = f"{emotion.capitalize()} state (nav: {navigation_state:.2f}) - switched from negative bias to positive alternative (bias: {best_bias:.2f})"
+                    else:
+                        sensation_reasoning = f"{emotion.capitalize()} state (nav: {navigation_state:.2f}) - avoiding negative bias (bias: {current_bias:.2f})"
                 
                 # If current action has positive bias, reinforce it
                 elif current_bias > 0.2:
                     emotion = self._get_emotion_label(navigation_state)
                     logger.info(f"🧠 {emotion.capitalize()} agent reinforcing {base_action} (positive sensation: {current_bias:.2f})")
+                    sensation_reasoning = f"{emotion.capitalize()} state (nav: {navigation_state:.2f}) - positive sensation bias (bias: {current_bias:.2f})"
+                else:
+                    sensation_reasoning = None
+            else:
+                sensation_reasoning = None
+        else:
+            sensation_reasoning = None
         
         # PHASE 3: Apply viral package / pariah influence to action selection
         if action_weights or action_penalties:
@@ -889,20 +911,47 @@ class GameplayEngine:
                 
                 if alternatives and alternatives[0][1] > net_influence:
                     best_alt = alternatives[0][0]
+                    alt_influence = alternatives[0][1]
+                    reasoning = f"Viral package suggested ACTION{best_alt} (net influence: {alt_influence:.2f}) - avoiding pariah penalty on {base_action} (penalty: {penalty:.2f})"
                     logger.info(f"🦠 Switching to ACTION{best_alt} (viral package suggestion)")
-                    return f"ACTION{best_alt}"
+                    
+                    # Include sensation reasoning if available
+                    if sensation_reasoning:
+                        reasoning = f"{reasoning} | {sensation_reasoning}"
+                    
+                    return f"ACTION{best_alt}", reasoning
             
             elif net_influence > 0.3:
                 logger.info(f"🦠 Reinforcing {base_action} (viral package boost: {weight:.2f})")
+                viral_reasoning = f"Viral package reinforcement (weight: {weight:.2f})"
+            else:
+                viral_reasoning = None
+        else:
+            viral_reasoning = None
         
-        return base_action
+        # Build final reasoning from all sources
+        reasoning_parts = []
+        if is_unbeaten_game:
+            reasoning_parts.append("Unbeaten game - full exploration")
+        if sensation_reasoning:
+            reasoning_parts.append(sensation_reasoning)
+        if viral_reasoning:
+            reasoning_parts.append(viral_reasoning)
+        if not reasoning_parts:
+            reasoning_parts.append(f"Standard {strategy} strategy")
+        
+        final_reasoning = " | ".join(reasoning_parts)
+        
+        return base_action, final_reasoning
 
-    async def _execute_action(self, action: str, game_state: GameState) -> GameState:
-        """Execute an action.
+    async def _execute_action(self, action: str, game_state: GameState, reasoning: str = "", current_level: int = 1) -> GameState:
+        """Execute an action with reasoning sent to ARC API.
 
         Args:
             action: Action to execute (string like "ACTION1" or int like 1)
             game_state: Current game state
+            reasoning: Human-readable explanation of why this action was chosen
+            current_level: Current level number (for trace logging)
 
         Returns:
             New game state
@@ -910,6 +959,18 @@ class GameplayEngine:
         # Normalize action to string format if it's an integer
         if isinstance(action, int):
             action = f"ACTION{action}"
+        
+        # Generate default reasoning if not provided
+        if not reasoning:
+            agent_mode = self._get_agent_operating_mode(self.game_config.get('agent_id'))
+            score = game_state.score
+            
+            # Build context-aware reasoning
+            reasoning_parts = []
+            if agent_mode:
+                reasoning_parts.append(f"{agent_mode.upper()} mode")
+            reasoning_parts.append(f"Score: {score}")
+            reasoning = " | ".join(reasoning_parts) if reasoning_parts else f"Exploring with {action}"
         
         if action == "ACTION6":
             # Check if we have meta-learned coordinates to use
@@ -919,23 +980,27 @@ class GameplayEngine:
                 if next_action['type'] == 'ACTION6':
                     x, y = next_action['coordinate']
                     reason = next_action['reason']
-                    logger.info(f"ACTION6 at ({x}, {y}): {reason}")
+                    full_reasoning = f"{reasoning} | Meta-pattern: {reason}"
+                    logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
                 else:
                     # Fall back to smart coordinates
                     x, y, reason = self.action_handler.get_smart_coordinates(
                         game_state.frame,
                         strategy="visual"
                     )
-                    logger.info(f"ACTION6 at ({x}, {y}): {reason}")
+                    full_reasoning = f"{reasoning} | Visual: {reason}"
+                    logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
             else:
                 # Use smart coordinate selection
                 x, y, reason = self.action_handler.get_smart_coordinates(
                     game_state.frame,
                     strategy="visual"
                 )
-                logger.info(f"ACTION6 at ({x}, {y}): {reason}")
+                full_reasoning = f"{reasoning} | Visual: {reason}"
+                logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
             
-            new_state = await self.action_handler.send_action_6(x, y, game_state.frame)
+            # Send ACTION6 with reasoning - coordinate reasoning already built in
+            new_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=full_reasoning, level_number=current_level)
             
             # Track frame changes to detect productive actions
             if new_state and new_state.frame:
@@ -956,7 +1021,8 @@ class GameplayEngine:
             method_name = f"send_action_{action_num}"
             if hasattr(self.action_handler, method_name):
                 method = getattr(self.action_handler, method_name)
-                return await method()
+                # Pass reasoning and level_number to action handler
+                return await method(reasoning=reasoning, level_number=current_level)
             else:
                 raise ValueError(f"Unknown action: {action}")
 
@@ -1022,7 +1088,7 @@ class GameplayEngine:
                        for i, game in enumerate(available_games)]
 
             # Apply diversity-focused game selection if enabled
-            if self.game_config.get('diversity_mode') and self.game_config.get('enforce_game_diversity'):
+            if self.game_config.get('diversity_mode') and self.game_config.get('enforce_game_diversity') and max_games:
                 game_ids = self._select_diverse_games(game_ids, max_games)
             elif max_games:
                 # Standard mode: just limit count
@@ -1307,13 +1373,14 @@ class GameplayEngine:
             if not session_id:
                 return None
             
-            # Get action traces from database
+            # Get action traces from database FOR THIS SPECIFIC LEVEL ONLY
+            # This ensures sequences only include actions taken to complete that level
             action_traces = self.db.execute_query("""
                 SELECT action_number, coordinates, frame_before, frame_after
                 FROM action_traces
-                WHERE game_id = ? AND session_id = ?
+                WHERE game_id = ? AND session_id = ? AND level_number = ?
                 ORDER BY timestamp ASC
-            """, (game_id, session_id))
+            """, (game_id, session_id, level_number))
             
             if not action_traces or len(action_traces) == 0:
                 return None

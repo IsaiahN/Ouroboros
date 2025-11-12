@@ -108,12 +108,15 @@ class GameSessionManager:
 
         return self.current_session_id
 
-    async def create_game(self, game_id: str, tags: Optional[list] = None) -> Dict[str, Any]:
+    async def create_game(self, game_id: str, tags: Optional[list] = None, 
+                         agent_id: Optional[str] = None, agent_mode: Optional[str] = None) -> Dict[str, Any]:
         """Create and initialize a new game.
 
         Args:
             game_id: Game ID to create
             tags: Optional tags for the scorecard
+            agent_id: Optional agent ID for tagging
+            agent_mode: Optional agent mode ('pioneer', 'optimizer', 'generalist')
 
         Returns:
             Game initialization data
@@ -137,7 +140,9 @@ class GameSessionManager:
         if not tags:
             tags = self.client.generate_tags(
                 game_id=game_id,
-                session_id=self.current_session_id
+                session_id=self.current_session_id,
+                agent_id=agent_id,
+                agent_mode=agent_mode
             )
 
         # Create game via API

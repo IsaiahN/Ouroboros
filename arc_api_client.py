@@ -297,8 +297,16 @@ class ARCClient:
             return [response]
         return response
 
-    def generate_tags(self, game_id: Optional[str] = None, session_id: Optional[str] = None) -> List[str]:
-        """Generate tags for scorecard identification."""
+    def generate_tags(self, game_id: Optional[str] = None, session_id: Optional[str] = None, 
+                     agent_id: Optional[str] = None, agent_mode: Optional[str] = None) -> List[str]:
+        """Generate tags for scorecard identification.
+        
+        Args:
+            game_id: Game identifier
+            session_id: Session identifier
+            agent_id: Agent identifier (optional)
+            agent_mode: Agent operating mode - 'pioneer', 'optimizer', 'generalist' (optional)
+        """
         import threading
         import platform
         import subprocess
@@ -356,6 +364,16 @@ class ARCClient:
 
         # Add system identifier
         tags.append(f"sys_{platform.system().lower()}")
+        
+        # Add agent information
+        if agent_id:
+            tags.append("agent")  # General tag indicating this is an agent run
+            # Short agent ID for identification
+            tags.append(f"agent_{agent_id[:8]}")
+        
+        # Add agent mode (CRITICAL: shows if optimizer/pioneer/generalist)
+        if agent_mode:
+            tags.append(f"mode_{agent_mode}")
 
         return tags
 
