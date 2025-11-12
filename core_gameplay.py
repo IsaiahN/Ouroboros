@@ -126,11 +126,17 @@ class GameplayEngine:
         
         # Pattern Learning: Check for known winning sequence (Rule 10: integrated)
         # Check AFTER game creation so we have the initial frame
+        # MODE-AWARE: Behavior depends on agent operating mode
         known_sequence = None
+        agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
+        
         if self.game_config.get('enable_pattern_learning', True):
             learning_mode = self.game_config.get('learning_mode', 'smart_exploration')
             
-            if learning_mode in ['exploit', 'smart_exploration']:
+            # OPTIMIZER: Always gets sequence (to try improving it)
+            # GENERALIST: Gets sequence (follows it exactly)
+            # PIONEER: Gets sequence (uses until frontier, then explores)
+            if learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist']:
                 try:
                     known_sequence = self._get_best_sequence_for_game(
                         game_id, 
@@ -139,12 +145,30 @@ class GameplayEngine:
                     )
                     
                     if known_sequence:
-                        logger.info(f"🎯 Found known winning sequence for {game_id} level 1, will attempt inline replay")
+                        if agent_mode == 'optimizer':
+                            logger.info(f"🔧 OPTIMIZER mode: Found {known_sequence['total_actions']}-action sequence for {game_id} level 1, will try to improve it")
+                        elif agent_mode == 'pioneer':
+                            logger.info(f"🎯 PIONEER mode: Will use sequences until frontier, then explore")
+                        else:
+                            logger.info(f"🎯 Found known winning sequence for {game_id} level 1, will attempt inline replay")
                 except Exception as e:
                     logger.debug(f"Pattern learning lookup error: {e}")
         
         try:
-            # If we have a known sequence, try to replay it INLINE (no separate game)
+            # MODE-SPECIFIC SEQUENCE HANDLING
+            # OPTIMIZER: Do NOT replay sequence, just store it as target to beat
+            # GENERALIST/PIONEER: Replay sequence normally
+            if known_sequence and agent_mode == 'optimizer':
+                # OPTIMIZER: Store target but don't replay - will try to beat it
+                target_actions = known_sequence['total_actions']
+                logger.info(f"🔧 OPTIMIZER: Target to beat = {target_actions} actions, exploring alternative paths")
+                # Set the sequence as a target in game config
+                self.game_config['optimization_target'] = target_actions
+                self.game_config['optimization_sequence_id'] = known_sequence['sequence_id']
+                # Don't replay - let optimizer explore
+                known_sequence = None  # Clear so normal exploration happens
+            
+            # If we have a known sequence (GENERALIST/PIONEER), try to replay it INLINE
             if known_sequence:
                 replay_result = await self._replay_sequence_inline(
                     game_state, 
@@ -358,12 +382,48 @@ class GameplayEngine:
                                         break  # Exit main loop, game is won
                             else:
                                 # No partial match, check for complete sequence for new level
+                                # MODE-AWARE: Behavior depends on agent mode
                                 next_level_sequence = self._get_best_sequence_for_game(game_id, current_level)
+                                
+                                # Check if Pioneer has reached frontier (highest known level for this game)
+                                at_frontier = False
+                                if agent_mode == 'pioneer' and next_level_sequence is None:
+                                    at_frontier = True
+                                    logger.info(f"🚀 PIONEER: Reached frontier (Level {current_level}), no known sequences - EXPLORING NEW TERRITORY!")
+                                
                                 if next_level_sequence:
-                                    logger.info(f"🎯 Found winning sequence for level {current_level}, attempting replay...")
-                                    # Try to replay just this level's sequence
-                                    # Note: This would need frame state management for mid-game replay
-                                    # For now, log that we have it available for next full game
+                                    # OPTIMIZER: Don't replay, just note target
+                                    if agent_mode == 'optimizer':
+                                        target_actions = next_level_sequence['total_actions']
+                                        logger.info(f"🔧 OPTIMIZER: Level {current_level} target = {target_actions} actions, trying to beat it")
+                                        # Store target but continue exploring to beat it
+                                        self.game_config[f'level_{current_level}_target'] = target_actions
+                                    else:
+                                        # GENERALIST/PIONEER: Replay sequence
+                                        logger.info(f"🎯 Found winning sequence for level {current_level}, attempting replay...")
+                                        
+                                        # FIX: Actually replay the sequence instead of just logging it!
+                                        # This enables knowledge sharing for Level 2+
+                                        replay_result = await self._replay_sequence_inline(
+                                            game_state,
+                                            next_level_sequence,
+                                            start_index=0
+                                        )
+                                        
+                                        if replay_result and replay_result['success']:
+                                            game_state = replay_result['game_state']
+                                            logger.info(f"✅ Level {current_level} sequence replay successful! State: {game_state.state}, Score: {game_state.score}")
+                                            
+                                            # If we won, exit main loop
+                                            if game_state.state == "WIN":
+                                                logger.info(f"🏆 WON via level {current_level} sequence replay!")
+                                                break
+                                        else:
+                                            logger.info(f"⚠️ Level {current_level} sequence replay failed, continuing with exploration")
+                                elif agent_mode == 'pioneer':
+                                    # Pioneer at frontier - log that they're exploring
+                                    logger.info(f"🚀 PIONEER: Exploring uncharted Level {current_level}")
+
                     
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
@@ -1187,6 +1247,40 @@ class GameplayEngine:
             logger.error(f"Error tracking game diversity: {e}")
 
     # ========================================================================
+    # AGENT OPERATING MODE HELPERS
+    # ========================================================================
+    
+    def _get_agent_operating_mode(self, agent_id: Optional[str]) -> Optional[str]:
+        """
+        Get the current operating mode for an agent.
+        
+        Args:
+            agent_id: Agent ID to check
+            
+        Returns:
+            'pioneer', 'optimizer', 'generalist', or None if not set
+        """
+        if not agent_id:
+            return None
+            
+        try:
+            # Query most recent mode assignment for this agent
+            mode_data = self.db.execute_query("""
+                SELECT operating_mode
+                FROM agent_operating_modes
+                WHERE agent_id = ?
+                ORDER BY assigned_timestamp DESC
+                LIMIT 1
+            """, (agent_id,))
+            
+            if mode_data:
+                return mode_data[0]['operating_mode']
+        except Exception as e:
+            logger.debug(f"Error getting agent operating mode: {e}")
+        
+        return None
+
+    # ========================================================================
     # PATTERN LEARNING METHODS (Rule 10: Integrated into existing file)
     # ========================================================================
 
@@ -1588,7 +1682,8 @@ class GameplayEngine:
             # Query sequences with reputation scores (community memory)
             # FIXED: Match by game TYPE prefix, not exact session ID
             # This allows sequences from previous sessions to be reused
-            # Prioritize: reliability_score, then efficiency, then fewest actions
+            # CRITICAL: Only sequences that actually completed the level (total_score >= level_number)
+            # Prioritize: reliability_score, then efficiency, then FEWEST actions (optimization!)
             sequences = self.db.execute_query("""
                 SELECT ws.*, 
                        COALESCE(sr.reliability_score, 0.5) as reliability,
@@ -1597,10 +1692,12 @@ class GameplayEngine:
                        COALESCE(sr.trending, 'stable') as trend
                 FROM winning_sequences ws
                 LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
-                WHERE ws.game_id LIKE ? AND ws.level_number = ?
+                WHERE ws.game_id LIKE ? 
+                  AND ws.level_number = ?
+                  AND ws.total_score >= ?
                 ORDER BY reliability DESC, ws.efficiency_score DESC, ws.total_actions ASC
                 LIMIT 5
-            """, (f"{game_type}-%", level_number))
+            """, (f"{game_type}-%", level_number, level_number))
             
             if sequences:
                 # Filter out sequences with very low reliability (< 0.3)
