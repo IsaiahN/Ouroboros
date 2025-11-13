@@ -30,9 +30,16 @@ TEMP_PATTERNS = [
     "detailed_*.py",
     "verify_*.py",
     "find_*.py",
-    "*_summary.*",  # Cleanup summary files (all extensions, case-insensitive)
-    "*_SUMMARY.*",  # Explicit uppercase variant
-    "BugFix_*.*"    # BugFix files with any extension
+    "debug_*.py",        # Debug scripts
+    "quick_*.py",        # Quick check scripts
+    "fix_*.py",          # One-time fix scripts
+    "temp_*.py",         # Temp files
+    "*_summary.*",       # Cleanup summary files (all extensions, case-insensitive)
+    "*_SUMMARY.*",       # Explicit uppercase variant
+    "*_analysis.py",     # Analysis scripts
+    "*_report.py",       # Report scripts
+    "*_check.py",        # Check scripts
+    "BugFix_*.*"         # BugFix files with any extension
 ]
 
 # Files to KEEP (whitelist - never delete these)
@@ -42,12 +49,17 @@ KEEP_FILES = {
     "test_path_efficiency.py",  # Core feature test
     "test_adaptive_limits.py",  # Core feature test
     
-    # Important analysis tools
-    "analyze_action_limits.py",
-    "analyze_real_progress.py",
+    # Useful utilities (keep)
+    "cleanup_temp_files.py",  # This file
+    "evolution_status_report.py",  # Useful status tool
+    "readiness_check.py",  # Pre-run check
+    "real_progress_check.py",  # Progress monitoring
+    "system_status_report.py",  # System status
     
-    # Documentation
+    # Documentation (keep)
     "README.md",
+    "COMPLETE_ADAPTIVE_SCALING.py",  # Reference documentation
+    "HARDCODED_LIMITS_AUDIT.py",  # Reference documentation
     
     # Any files in DOCS/ or configs
 }
