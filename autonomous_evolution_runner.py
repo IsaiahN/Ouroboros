@@ -20,6 +20,7 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import sys
 import asyncio
+from historical_data_cleanup import HistoricalDataCleaner
 import time
 import argparse
 import signal
@@ -1394,6 +1395,32 @@ class AutonomousEvolutionRunner:
                     print(f"  [OK] Pruned {pruned_count} agents (target: {target_pruned})")
                     print(f"       Protected by prestige: {protected_by_prestige} agents")
                     print(f"       New population size: {population_size - pruned_count}")
+            
+            # CLEANUP: Historical data garbage collection (prevent database bloat)
+            print(f"\n[🗑️ CLEANUP] Running historical data garbage collection...")
+            try:
+                cleaner = HistoricalDataCleaner(self.db)
+                cleanup_results = cleaner.cleanup_all(dry_run=False)
+                
+                # Report sensation events cleanup
+                sensation = cleanup_results.get('sensation_events', {})
+                if sensation['action'] == 'cleaned':
+                    print(f"  [OK] Deleted {sensation['deleted']:,} old sensation events (kept last {cleaner.sensation_retention_generations} generations)")
+                elif sensation['action'] == 'skipped':
+                    print(f"  [SKIP] Sensation events: {sensation.get('reason', 'Not enough to clean')}")
+                
+                # Report score history cleanup
+                scores = cleanup_results.get('score_history', {})
+                if scores['action'] == 'cleaned':
+                    print(f"  [OK] Deleted {scores['deleted']:,} old score history records (kept last {cleaner.score_history_retention_days} days)")
+                elif scores['action'] == 'skipped':
+                    print(f"  [SKIP] Score history: {scores.get('reason', 'Not enough to clean')}")
+                
+                if cleanup_results.get('vacuumed'):
+                    print(f"  [OK] Database vacuumed and optimized")
+                
+            except Exception as e:
+                print(f"  [WARN] Cleanup failed: {e}")
             
             return True
             

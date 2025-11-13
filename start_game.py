@@ -71,32 +71,40 @@ async def start_single_game():
         print("=" * 50)
 
         # Create session manager and start session
-        session_manager = game_session_manager.GameSessionManager(client)
+        api_key = os.getenv('ARC_API_KEY')
+        session_manager = game_session_manager.GameSessionManager(api_key=api_key)
         session_id = await session_manager.start_session()
         print(f"Started session: {session_id}")
 
         # Create game
         game_data = await session_manager.create_game(first_game_id)
-        print(f"Created game with scorecard: {game_data.scorecard.guid}")
+        scorecard_id = game_data.get('scorecard_id', 'N/A')
+        print(f"Created game with scorecard: {scorecard_id}")
 
         # Create action handler
         action_handler_instance = action_handler.ActionHandler(session_manager)
 
         # Play some actions
         print("\nPlaying game...")
-        game_state = game_data.game_state
+        game_state_dict = game_data.get('game_state', {})
+        current_state = game_state_dict.get('state', 'NOT_FINISHED')
+        current_score = game_state_dict.get('score', 0.0)
         actions_taken = 0
         max_actions = 10
 
-        while game_state.state == "NOT_FINISHED" and actions_taken < max_actions:
-            print(f"Action {actions_taken + 1}: Score = {game_state.score}")
+        while current_state == "NOT_FINISHED" and actions_taken < max_actions:
+            print(f"Action {actions_taken + 1}: Score = {current_score}")
 
             # Try ACTION1 first
             try:
                 game_state = await action_handler_instance.send_action_1()
                 actions_taken += 1
+                
+                # Update state from GameState object
+                current_state = game_state.state
+                current_score = game_state.score
 
-                if game_state.state != "NOT_FINISHED":
+                if current_state != "NOT_FINISHED":
                     break
 
             except Exception as e:
