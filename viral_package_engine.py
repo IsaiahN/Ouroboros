@@ -803,6 +803,99 @@ class ViralPackageEngine:
             ORDER BY toxicity DESC, trigger_count DESC
             LIMIT ?
         """, (limit,))
+    
+    # Phase 4.5: Emotional compatibility methods
+    
+    def _calculate_emotional_compatibility(self, package_id: str, agent_navigation_state: float) -> float:
+        """
+        Calculate how compatible a viral package is with agent's current emotional state.
+        
+        Returns multiplier: 1.0 = neutral, >1.0 = boost, <1.0 = reduce
+        """
+        if not self.sensation_engine:
+            return 1.0  # No emotional enhancement if sensation engine unavailable
+        
+        try:
+            # Check if this package has emotional context metadata
+            package_emotion = self._get_package_emotional_context(package_id)
+            
+            if package_emotion is None:
+                return 1.0  # No emotional context, no boost or penalty
+            
+            # Calculate compatibility based on emotional distance
+            emotional_distance = abs(agent_navigation_state - package_emotion)
+            
+            # Compatibility decreases with emotional distance
+            # Close emotions get boost (up to 1.5x), distant emotions get penalty (down to 0.5x)
+            if emotional_distance < 0.2:  # Very compatible
+                return 1.4
+            elif emotional_distance < 0.4:  # Somewhat compatible
+                return 1.2
+            elif emotional_distance < 0.6:  # Neutral
+                return 1.0
+            elif emotional_distance < 0.8:  # Somewhat incompatible
+                return 0.8
+            else:  # Very incompatible
+                return 0.6
+        
+        except Exception:
+            return 1.0  # Safe fallback
+    
+    def _get_package_emotional_context(self, package_id: str) -> Optional[float]:
+        """
+        Get the emotional context associated with a viral package.
+        
+        Returns the navigation state when this package was successful.
+        """
+        try:
+            # Get package metadata containing emotional context
+            result = self.db.execute_query(
+                "SELECT package_metadata FROM viral_information_packages WHERE package_id = ?",
+                (package_id,)
+            )
+            
+            if not result or not result[0]['package_metadata']:
+                return None
+            
+            # Parse emotional context
+            emotional_context = json.loads(result[0]['package_metadata'])
+            return emotional_context.get('creation_navigation_state')
+            
+        except Exception:
+            return None
+    
+    def add_emotional_context_to_package(self, package_id: str, emotional_context: Dict[str, Any]) -> bool:
+        """
+        Add emotional context to a viral package.
+        
+        Args:
+            package_id: Package to add context to
+            emotional_context: Dict with emotional state information
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.sensation_engine:
+            return False
+        
+        try:
+            # Store emotional context as JSON metadata
+            # This could include: navigation_state when successful, object sensations, etc.
+            emotional_json = json.dumps(emotional_context)
+            
+            # For now, we'll add this as a comment/metadata field
+            # In full Phase 5 implementation, this would be a proper schema extension
+            self.db.execute_query("""
+                UPDATE viral_information_packages 
+                SET package_metadata = ? 
+                WHERE package_id = ?
+            """, (emotional_json, package_id))
+            
+            return True
+            
+        except Exception as e:
+            print(f"[VIRAL] Error adding emotional context: {e}")
+            return False
 
 
 def display_viral_ecosystem_dashboard(db: DatabaseInterface, generation: int):
@@ -870,95 +963,6 @@ def display_viral_ecosystem_dashboard(db: DatabaseInterface, generation: int):
             print(f"     Packages guide toward success, Pariahs warn of failure")
     
     print("="*80)
-
-    # Phase 4.5: Emotional compatibility methods
-    
-    def _calculate_emotional_compatibility(self, package_id: str, agent_navigation_state: float) -> float:
-        """
-        Calculate how compatible a viral package is with agent's current emotional state.
-        
-        Returns multiplier: 1.0 = neutral, >1.0 = boost, <1.0 = reduce
-        """
-        if not self.sensation_engine:
-            return 1.0  # No emotional enhancement if sensation engine unavailable
-        
-        try:
-            # Check if this package has emotional context metadata
-            package_emotion = self._get_package_emotional_context(package_id)
-            
-            if package_emotion is None:
-                return 1.0  # No emotional context, no boost or penalty
-            
-            # Calculate compatibility based on emotional distance
-            emotional_distance = abs(agent_navigation_state - package_emotion)
-            
-            # Compatibility decreases with emotional distance
-            # Close emotions get boost (up to 1.5x), distant emotions get penalty (down to 0.5x)
-            if emotional_distance < 0.2:  # Very compatible
-                return 1.4
-            elif emotional_distance < 0.4:  # Somewhat compatible
-                return 1.2
-            elif emotional_distance < 0.6:  # Neutral
-                return 1.0
-            elif emotional_distance < 0.8:  # Somewhat incompatible
-                return 0.8
-            else:  # Very incompatible
-                return 0.6
-        
-        except Exception:
-            return 1.0  # Safe fallback
-    
-    def _get_package_emotional_context(self, package_id: str) -> Optional[float]:
-        """
-        Get the emotional context associated with a viral package.
-        
-        Returns the navigation state when this package was successful.
-        """
-        try:
-            # Get package metadata containing emotional context
-            result = self.db.execute_query(
-                "SELECT package_metadata FROM viral_information_packages WHERE package_id = ?",
-                (package_id,)
-            )
-            
-            if not result or not result[0]['package_metadata']:
-                return None
-            
-            # Parse emotional context
-            emotional_context = json.loads(result[0]['package_metadata'])
-            return emotional_context.get('creation_navigation_state')
-            
-        except (json.JSONDecodeError, TypeError, KeyError):
-            return None
-
-    def add_emotional_context_to_package(self, package_id: str, emotional_context: Dict[str, Any]) -> bool:
-        """
-        Add emotional context to an existing viral package.
-        
-        This allows packages to carry information about when/how they should be used
-        based on agent emotional state.
-        """
-        if not self.sensation_engine:
-            return False
-        
-        try:
-            # Store emotional context as JSON metadata
-            # This could include: navigation_state when successful, object sensations, etc.
-            emotional_json = json.dumps(emotional_context)
-            
-            # For now, we'll add this as a comment/metadata field
-            # In full Phase 5 implementation, this would be a proper schema extension
-            self.db.execute_query("""
-                UPDATE viral_information_packages 
-                SET package_metadata = ? 
-                WHERE package_id = ?
-            """, (emotional_json, package_id))
-            
-            return True
-            
-        except Exception as e:
-            print(f"[VIRAL] Error adding emotional context: {e}")
-            return False
 
 
 if __name__ == "__main__":

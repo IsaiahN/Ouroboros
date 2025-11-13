@@ -11,8 +11,10 @@ A comprehensive ARC-AGI-3 game runner that:
 This serves as a foundation for more sophisticated gameplay logic.
 """
 
-import asyncio
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+import asyncio
 import subprocess
 import platform
 import random

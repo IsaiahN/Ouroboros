@@ -5,6 +5,9 @@ Entry point for running ARC games using the core game mechanics.
 Provides command-line interface for playing games.
 """
 
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 import asyncio
 import argparse
 import logging

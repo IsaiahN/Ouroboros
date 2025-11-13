@@ -5,8 +5,10 @@ Quick Game Starter Script for BitterTruth-AI
 Standalone script to start a game without module import issues.
 """
 
-import asyncio
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+import asyncio
 import sys
 import logging
 

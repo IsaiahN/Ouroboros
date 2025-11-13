@@ -6,6 +6,8 @@ Follows all rules - Rule 6 & 7: Real ARC games only
 """
 
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 import sys
 import asyncio
 import random

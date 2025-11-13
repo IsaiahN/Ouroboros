@@ -450,7 +450,7 @@ class CounterfactualAnalyzer:
             scenarios = self.db.execute_query("""
                 SELECT * FROM counterfactual_scenarios
                 WHERE scenario_id IN ({})
-            """.format(','.join(['?'] * len(scenario_ids))), scenario_ids)
+            """.format(','.join(['?'] * len(scenario_ids))), tuple(scenario_ids))
             
             if not scenarios:
                 return
@@ -547,7 +547,7 @@ class CounterfactualAnalyzer:
                     SUM(CASE WHEN predicted_outcome LIKE '%improve%' OR predicted_outcome LIKE '%win%' THEN 1 ELSE 0 END) as predicted_improvements
                 FROM counterfactual_scenarios
                 {where_sql}
-            """, params)
+            """, tuple(params))
             
             # Learnings
             learnings = self.db.execute_query(f"""
@@ -558,7 +558,7 @@ class CounterfactualAnalyzer:
                     SUM(success_when_applied) as total_successes
                 FROM counterfactual_learnings
                 {where_sql}
-            """, params)
+            """, tuple(params))
             
             # Top learnings
             top_learnings = self.db.execute_query(f"""
@@ -568,7 +568,7 @@ class CounterfactualAnalyzer:
                 {where_sql}
                 ORDER BY confidence_score DESC, success_when_applied DESC
                 LIMIT 10
-            """, params)
+            """, tuple(params))
             
             return {
                 'scenarios': scenarios[0] if scenarios else {},

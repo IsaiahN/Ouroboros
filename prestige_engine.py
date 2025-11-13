@@ -23,6 +23,9 @@ This separation ensures:
 4. Diversity maintained by separating performance from contribution
 """
 
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 import json
 import logging
 from typing import Dict, List, Tuple, Optional

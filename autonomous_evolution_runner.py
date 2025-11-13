@@ -16,6 +16,8 @@ Following Rules 5-7: Real games, real actions only
 """
 
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 import sys
 import asyncio
 import time
