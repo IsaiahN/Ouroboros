@@ -754,6 +754,24 @@ class AutonomousEvolutionRunner:
                     print("[?] No games available from API")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
                 
+                # ADAPTIVE SCALING: Extract unique game types from available games
+                # Dynamically determine game types instead of hardcoding
+                game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
+                game_type_prefixes = set()
+                for game_id in game_ids:
+                    if game_id and len(game_id) >= 4:
+                        game_type_prefixes.add(game_id[:4])
+                
+                game_types = sorted(list(game_type_prefixes))  # Sort for consistency
+                
+                # ADAPTIVE TARGET POPULATION: Scale with available game count
+                # Formula: unique_games * 10 (e.g., 6 games = 60 agents, 100 games = 1000 agents)
+                ADAPTIVE_TARGET_POPULATION = len(game_types) * 10
+                print(f"  [ADAPTIVE] {len(game_types)} game types detected → Target population: {ADAPTIVE_TARGET_POPULATION} agents")
+                
+                # Store for pruning logic later
+                self._current_target_population = ADAPTIVE_TARGET_POPULATION
+                
                 # SPECIALIST MODE: Auto-assign games if not already assigned (for resumed checkpoints)
                 if self.specialist_mode and self.specialist_coordinator:
                     # Check if assignments exist
@@ -762,7 +780,6 @@ class AutonomousEvolutionRunner:
                         assignments = self.specialist_coordinator.get_games_for_specialist(first_agent['agent_id'])
                         if not assignments:
                             print(f"\n[>] Auto-assigning specialists (resuming from checkpoint)...")
-                            game_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
                             self.specialist_coordinator.initialize_specialist_assignments(
                                 selected_agents,  # FIXED: Use selected_agents
                                 game_ids,
@@ -775,8 +792,27 @@ class AutonomousEvolutionRunner:
                 total_score = 0
                 rules_learned = 0  # NEW: Track rule learning
                 
+                # ISSUE 2 FIX: Round-robin game type distribution for diversity
+                # Use dynamically detected game types
+                start_offset = self.current_generation % len(game_types)
+                rotated_game_types = game_types[start_offset:] + game_types[:start_offset]
+                
                 for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
                     agent_id = agent['agent_id']
+                    
+                    # ISSUE 2 FIX: Assign game type using round-robin
+                    assigned_game_type = rotated_game_types[agent_idx % len(rotated_game_types)]
+                    
+                    # Filter available games to match assigned type
+                    type_filtered_games = [
+                        g for g in available_games 
+                        if g.get('id', g.get('game_id', '')).startswith(assigned_game_type)
+                    ]
+                    
+                    if not type_filtered_games:
+                        # Fallback: if no games of this type, use all games
+                        type_filtered_games = available_games
+                        print(f"  [WARN] No {assigned_game_type} games available, using all games for agent {agent_id[:8]}")
                     
                     # Get agent's operating mode (pioneer/optimizer/generalist)
                     agent_mode = mode_assignments.get(agent_id, 'generalist')
@@ -788,19 +824,21 @@ class AutonomousEvolutionRunner:
                            not self.db.execute_query("SELECT 1 FROM curriculum_progress WHERE agent_id = ?", (agent_id,)):
                             self.curriculum.initialize_agent_curriculum(agent_id, self.current_generation)
                         
+                        # ISSUE 2: Use type-filtered games for curriculum
                         # Select games based on curriculum stage
                         agent_games = self.curriculum.select_games_for_agent(
                             agent_id, 
-                            [g.get('id', g.get('game_id')) for g in available_games],
+                            [g.get('id', g.get('game_id')) for g in type_filtered_games],
                             games_per_agent
                         )
-                        print(f"  [?] Agent {agent_id[:8]} - Stage {self.curriculum.get_agent_current_stage(agent_id)}: {len(agent_games)} games")
+                        print(f"  [?] Agent {agent_id[:8]} ({assigned_game_type}) - Stage {self.curriculum.get_agent_current_stage(agent_id)}: {len(agent_games)} games")
                     else:
                         # SMART AGENT-TO-TASK ASSIGNMENT: Match agents to optimal tasks
+                        # ISSUE 2: Use type-filtered games
                         agent_games = self._assign_agent_to_optimal_task(
                             agent_id=agent_id,
                             agent_mode=agent_mode,
-                            available_games=available_games,
+                            available_games=type_filtered_games,  # CHANGED: was available_games
                             games_per_agent=games_per_agent
                         )
                         
@@ -812,7 +850,7 @@ class AutonomousEvolutionRunner:
                                 task_type = "games with beaten levels (optimize sequences)"
                             else:
                                 task_type = "50/50 unbeaten/beaten (balanced)"
-                            print(f"  [SMART] {agent_mode.upper()} {agent_id[:8]} → {task_type} ({len(agent_games)} games)")
+                            print(f"  [SMART] {agent_mode.upper()} {agent_id[:8]} → {assigned_game_type} {task_type} ({len(agent_games)} games)")
                     
                     # Run games for this agent
                     for game_idx, game_id in enumerate(agent_games):
@@ -1154,6 +1192,13 @@ class AutonomousEvolutionRunner:
             
             print(f"  Strategy: {strategy_focus} (based on {avg_success_rate:.1%} success rate)")
             
+            # ADAPTIVE OFFSPRING: Scale with target population
+            # Create enough offspring to maintain target population
+            TARGET_POPULATION = getattr(self, '_current_target_population', 50)
+            adaptive_offspring_size = max(5, TARGET_POPULATION // 10)  # At least 5, scales with target
+            
+            print(f"  Adaptive offspring: {adaptive_offspring_size} (based on target population {TARGET_POPULATION})")
+            
             # Create evolution strategy dict with diversity mode flag
             evolution_strategy = {
                 'focus': strategy_focus,
@@ -1164,7 +1209,7 @@ class AutonomousEvolutionRunner:
                 'crossover_rate': 0.7,
                 'selection_pressure': 0.5,
                 'elite_size': 2,
-                'offspring_size': 5
+                'offspring_size': adaptive_offspring_size  # ADAPTIVE: was hardcoded to 5
             }
             
             # Use EvolutionaryEngine's evolve_population for proper fitness calculation
@@ -1286,12 +1331,12 @@ class AutonomousEvolutionRunner:
                 import traceback
                 traceback.print_exc()
             
-            # Optionally prune worst performers (GAME-AWARE, LEVEL-PRESERVING)
-            # Allow population to grow to 400 agents (40x initial size of 10) before pruning
-            POPULATION_MULTIPLIER = 40  # Allow 400 agents before pruning (increased from 2)
-            if population_size > self.initial_population_size * POPULATION_MULTIPLIER:
-                print(f"\n[🔪] Population too large ({population_size}), pruning aggressively...")
-                print(f"    Target size: {self.initial_population_size * POPULATION_MULTIPLIER} agents")
+            # ISSUE 3 FIX: Aggressive pruning to maintain target population
+            # ADAPTIVE: Scale target with available game count (game_types * 10)
+            TARGET_POPULATION = getattr(self, '_current_target_population', 50)  # Use adaptive target, fallback to 50
+            if population_size > TARGET_POPULATION:
+                print(f"\n[🔪] Population too large ({population_size}), pruning to {TARGET_POPULATION}...")
+                print(f"      (Adaptive target based on {TARGET_POPULATION // 10} available game types)")
                 
                 # STEP 1: PRESTIGE-BASED PROTECTION ONLY (specialist system disabled)
                 # Get survival_protection for all agents (0-80% protection based on prestige)
@@ -1309,11 +1354,12 @@ class AutonomousEvolutionRunner:
                 
                 print(f"  [🛡️] Using prestige-based protection (0-80% survival chance)")
                 
-                # STEP 2: Prune worst performers with prestige consideration
-                worst_performers = analysis.get('top_performers', [])[-200:]  # Check worst 200 (increased from 100)
+                # ISSUE 3 FIX: Check ALL worst performers (not just worst 200)
+                # Sort all agents by performance, worst first
+                worst_performers = analysis.get('top_performers', [])[::-1]  # Reverse to get worst first
                 pruned_count = 0
                 protected_by_prestige = 0
-                target_pruned = min(100, population_size - self.initial_population_size * POPULATION_MULTIPLIER)  # Prune up to 100 (increased from 50)
+                target_pruned = population_size - TARGET_POPULATION  # Prune down to target
                 
                 print(f"  [TARGET] Attempting to prune {target_pruned} worst performers...")
                 
@@ -1423,7 +1469,10 @@ class AutonomousEvolutionRunner:
                     return False
         
         # Run evaluation games
-        eval_results = await self.run_evaluation_games(self.games_per_generation)
+        # ADAPTIVE: Use target population if available, otherwise use configured value
+        adaptive_games = getattr(self, '_current_target_population', self.games_per_generation)
+        print(f"  [ADAPTIVE] Running {adaptive_games} games (target population: {getattr(self, '_current_target_population', 'not set')})")
+        eval_results = await self.run_evaluation_games(adaptive_games)
         
         # CRITICAL: Force WAL checkpoint after every generation to prevent data loss
         try:

@@ -150,6 +150,9 @@ class GameplayEngine:
             # PIONEER: Gets sequence (uses ALL sequences until frontier, then explores)
             if learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist', 'pioneer']:
                 try:
+                    # Start from level 1 (first challenge to complete)
+                    # Level 1 = score 1.0 (first challenge completed)
+                    # Level 2 = score 2.0 (second challenge completed)
                     known_sequence = self._get_best_sequence_for_game(
                         game_id, 
                         level_number=1, 
@@ -233,7 +236,7 @@ class GameplayEngine:
             start_time = datetime.now()
             previous_score = 0.0  # Track score for level completion detection
             level_completions = 0  # Track how many levels completed
-            current_level = 1
+            current_level = 1  # Start at level 1 (first challenge to complete)
             level_start_action = 0  # Track where each level starts
             
             # Anti-oscillation: Track no-progress actions
@@ -453,14 +456,20 @@ class GameplayEngine:
                         if (self.game_config.get('enable_pattern_learning', True) and 
                             game_state.state == "NOT_FINISHED"):  # Full level completion already verified above
                             
+                            # SIMPLE MAPPING: level_number = score
+                            # Score 1.0 = level 1 (first challenge completed)
+                            # Score 2.0 = level 2 (second challenge completed)
+                            # Score N.0 = level N (Nth challenge completed)
+                            level_for_storage = int(game_state.score)
+                            
                             sequence_id = self._capture_winning_sequence(
                                 game_id, 
                                 game_state.score, 
-                                level_number=current_level,
-                                reason=f"level_{current_level}_win"
+                                level_number=level_for_storage,
+                                reason=f"level_{level_for_storage}_win"
                             )
                             if sequence_id:
-                                logger.info(f"✅ Captured level {current_level} winning sequence: {sequence_id}")
+                                logger.info(f"✅ Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
                         
                         # Move to next level
                         current_level += 1
@@ -1575,17 +1584,32 @@ class GameplayEngine:
                 existing_efficiency = existing_seq['efficiency_score']
                 existing_agent = existing_seq.get('agent_id', 'unknown')
                 
-                # ANTI-GAMING: Require SIGNIFICANT improvement to store another sequence
-                # - If same agent: Must improve by 10+ actions OR 15% efficiency
-                # - If different agent: Must improve by 5+ actions OR 10% efficiency
-                # This prevents agents from "discovering" the same solution 50 times via resets
+                # ANTI-GAMING: Require improvement to store another sequence
+                # Lowered thresholds to encourage incremental progress
+                # - If same agent: Must improve by 5+ actions OR 10% efficiency
+                # - If different agent: Must improve by 3+ actions OR 5% efficiency
+                # - DIVERSITY BONUS: If < 3 sequences for this game-level, always store
+                # This prevents spam while allowing meaningful improvements
+                
+                # Check sequence count for this game-level
+                seq_count = self.db.execute_query("""
+                    SELECT COUNT(*) as cnt FROM winning_sequences
+                    WHERE game_id = ? AND level_number = ? AND is_active = 1
+                """, (game_id, level_number))[0]['cnt']
                 
                 is_same_agent = (current_agent_id == existing_agent)
-                min_action_improvement = 10 if is_same_agent else 5
-                min_efficiency_multiplier = 1.15 if is_same_agent else 1.10
+                min_action_improvement = 5 if is_same_agent else 3
+                min_efficiency_multiplier = 1.10 if is_same_agent else 1.05
                 
-                # Store if we improved (fewer actions OR better efficiency)
-                if len(actions) <= existing_actions - min_action_improvement:
+                # DIVERSITY BONUS: Always store if < 3 sequences exist
+                diversity_bonus = (seq_count < 3)
+                
+                # Store if we improved (fewer actions OR better efficiency) OR diversity bonus
+                if diversity_bonus:
+                    should_store = True
+                    sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
+                    logger.info(f"🌟 DIVERSITY BONUS: Storing sequence for under-represented game-level (only {seq_count} exist)")
+                elif len(actions) <= existing_actions - min_action_improvement:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
                     logger.info(f"⚡ Optimized sequence: {existing_actions} → {len(actions)} actions "
@@ -1671,6 +1695,25 @@ class GameplayEngine:
                 logger.info(f"✅ Captured winning sequence {sequence_id}: "
                            f"{len(actions)} actions, efficiency {efficiency:.4f}, "
                            f"tags: {pattern_tags}, pattern: {pattern_signature.get('transformation_type', 'unknown')}")
+                
+                # AUTO-CLEANUP: If we now have 4+ sequences for this game-level, deactivate worst one
+                current_sequences = self.db.execute_query("""
+                    SELECT sequence_id, total_actions, total_score, efficiency_score
+                    FROM winning_sequences
+                    WHERE game_id = ? AND level_number = ? AND is_active = 1
+                    ORDER BY total_score DESC, total_actions ASC
+                """, (game_id, level_number))
+                
+                if len(current_sequences) > 3:
+                    # Deactivate the worst sequence (last in sorted list)
+                    worst_seq = current_sequences[-1]
+                    self.db.execute_query("""
+                        UPDATE winning_sequences
+                        SET is_active = 0
+                        WHERE sequence_id = ?
+                    """, (worst_seq['sequence_id'],))
+                    logger.info(f"🗑️ Auto-deactivated redundant sequence {worst_seq['sequence_id'][:8]} "
+                              f"({worst_seq['total_actions']} actions, keeping top 3)")
             
             return sequence_id
             
@@ -1889,10 +1932,16 @@ class GameplayEngine:
             # Query sequences with reputation scores (community memory)
             # FIXED: Match by game TYPE prefix, not exact session ID
             # This allows sequences from previous sessions to be reused
-            # CRITICAL: Only sequences that actually completed the level (total_score > level_number)
-            # BUG FIX: Changed >= to > because total_score must EXCEED level to complete it
-            # (e.g., level 1 needs total_score > 1, meaning at least 2 points scored)
-            # Prioritize: EFFICIENCY first (fewest actions), then reliability
+            # 
+            # LEVEL MAPPING (SIMPLE):
+            # level_number = score (when sequence was captured)
+            # Level 1 = score 1.0 (first challenge completed)
+            # Level 2 = score 2.0 (second challenge completed)
+            # Level N = score N.0 (Nth challenge completed)
+            # 
+            # WHERE clause: total_score >= level_number means sequence achieved at least that level
+            # ORDER BY: Highest score first (completes most levels), then fewest actions (most efficient)
+            # ACTIVE ONLY: Only query active sequences (top 3 per game-level)
             sequences = self.db.execute_query("""
                 SELECT ws.*, 
                        COALESCE(sr.reliability_score, 0.5) as reliability,
@@ -1903,8 +1952,9 @@ class GameplayEngine:
                 LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
                 WHERE ws.game_id LIKE ? 
                   AND ws.level_number = ?
-                  AND ws.total_score > ?
-                ORDER BY ws.total_actions ASC, ws.efficiency_score DESC, reliability DESC
+                  AND ws.total_score >= ?
+                  AND ws.is_active = 1
+                ORDER BY ws.total_score DESC, ws.total_actions ASC, reliability DESC
                 LIMIT 5
             """, (f"{game_type}-%", level_number, level_number))
             
@@ -2400,7 +2450,7 @@ class GameplayEngine:
                 return False
             
             match_ratio = matching_cells / total_cells
-            return match_ratio >= 0.95
+            return match_ratio >= 0.90  # Lowered from 0.95 to allow more "slip into sequence" opportunities
             
         except Exception as e:
             logger.debug(f"Frame comparison error: {e}")
