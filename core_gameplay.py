@@ -258,8 +258,8 @@ class GameplayEngine:
                    action_count < self.game_config['max_total_actions']):
 
                 # Check if session is still active (graceful shutdown detection)
-                if not self.session_manager.is_running:
-                    logger.info(f"⚠️ Session no longer running, ending game gracefully")
+                if not self.session_manager.is_running or self.session_manager.is_shutting_down:
+                    logger.info(f"⚠️ Session shutdown detected, ending game gracefully")
                     break
 
                 try:
@@ -1121,6 +1121,14 @@ class GameplayEngine:
             reasoning_parts.append(f"Score: {score}")
             reasoning = " | ".join(reasoning_parts) if reasoning_parts else f"Exploring with {action}"
         
+        # Format reasoning as JSON object (≤16 KB) for ARC API
+        reasoning_json = self._format_reasoning_for_api(
+            action=action,
+            reasoning_text=reasoning,
+            game_state=game_state,
+            current_level=current_level
+        )
+        
         if action == "ACTION6":
             # Check if we have meta-learned coordinates to use
             if hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
@@ -1148,8 +1156,13 @@ class GameplayEngine:
                 full_reasoning = f"{reasoning} | Visual: {reason}"
                 logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
             
-            # Send ACTION6 with reasoning - coordinate reasoning already built in
-            new_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=full_reasoning, level_number=current_level)
+            # Update reasoning JSON with coordinate info
+            if reasoning_json:
+                reasoning_json['coordinate'] = {'x': x, 'y': y}
+                reasoning_json['visual_reason'] = reason
+            
+            # Send ACTION6 with reasoning JSON
+            new_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=reasoning_json, level_number=current_level)
             
             # Track frame changes to detect productive actions
             if new_state and new_state.frame:
@@ -1170,8 +1183,8 @@ class GameplayEngine:
             method_name = f"send_action_{action_num}"
             if hasattr(self.action_handler, method_name):
                 method = getattr(self.action_handler, method_name)
-                # Pass reasoning and level_number to action handler
-                return await method(reasoning=reasoning, level_number=current_level)
+                # Pass reasoning JSON and level_number to action handler
+                return await method(reasoning=reasoning_json, level_number=current_level)
             else:
                 raise ValueError(f"Unknown action: {action}")
 
@@ -1465,6 +1478,65 @@ class GameplayEngine:
     # AGENT OPERATING MODE HELPERS
     # ========================================================================
     
+    def _format_reasoning_for_api(self, action: str, reasoning_text: str, 
+                                  game_state: GameState, current_level: int) -> Dict[str, Any]:
+        """
+        Format reasoning as JSON object for ARC API (≤16 KB).
+        
+        Converts human-readable reasoning text into structured JSON metadata
+        for transmission to ARC API. Includes agent context, game state,
+        and decision factors.
+        
+        Args:
+            action: Action being taken (e.g., "ACTION6")
+            reasoning_text: Human-readable reasoning string
+            game_state: Current game state
+            current_level: Current level number
+            
+        Returns:
+            Dictionary with reasoning metadata (JSON-serializable, ≤16 KB)
+        """
+        agent_id = self.game_config.get('agent_id')
+        agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
+        
+        reasoning_obj = {
+            'action': action,
+            'reasoning': reasoning_text,
+            'level': current_level,
+            'score': game_state.score,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Add agent context if available
+        if agent_id:
+            reasoning_obj['agent_id'] = agent_id
+        if agent_mode:
+            reasoning_obj['agent_mode'] = agent_mode
+        
+        # Add genome config if available
+        genome = self.game_config.get('genome')
+        if genome:
+            # Include key genome parameters (not full genome to stay under 16 KB)
+            reasoning_obj['genome'] = {
+                'agent_type': genome.get('agent_type'),
+                'exploration_rate': genome.get('exploration_rate'),
+                'learning_rate': genome.get('learning_rate')
+            }
+        
+        # Add strategy context
+        reasoning_obj['strategy'] = self.game_config.get('strategy', 'balanced')
+        reasoning_obj['learning_mode'] = self.game_config.get('learning_mode', 'smart_exploration')
+        
+        # Ensure JSON is ≤16 KB
+        reasoning_json = json.dumps(reasoning_obj)
+        if len(reasoning_json) > 16384:  # 16 KB limit
+            # Truncate reasoning text if too large
+            max_reasoning_len = len(reasoning_text) - (len(reasoning_json) - 16384) - 100
+            reasoning_obj['reasoning'] = reasoning_text[:max_reasoning_len] + '...[truncated]'
+            reasoning_json = json.dumps(reasoning_obj)
+        
+        return reasoning_obj
+
     def _get_agent_operating_mode(self, agent_id: Optional[str]) -> Optional[str]:
         """
         Get the current operating mode for an agent.
@@ -1546,6 +1618,13 @@ class GameplayEngine:
                         pass
             
             efficiency = final_score / len(actions) if len(actions) > 0 else 0.0
+            
+            # QUALITY FILTER: Reject extremely inefficient sequences
+            # Max 5000 actions per level - sequences above this are not useful for learning
+            MAX_ACTIONS_PER_LEVEL_SEQUENCE = 5000
+            if len(actions) > MAX_ACTIONS_PER_LEVEL_SEQUENCE:
+                logger.warning(f"⚠️ Sequence too inefficient ({len(actions)} actions > {MAX_ACTIONS_PER_LEVEL_SEQUENCE} threshold) - not storing")
+                return None
             
             # Get frames
             initial_frame = json.loads(action_traces[0]['frame_before']) if action_traces[0].get('frame_before') else []
@@ -1959,8 +2038,12 @@ class GameplayEngine:
             """, (f"{game_type}-%", level_number, level_number))
             
             if sequences:
-                # Filter out sequences with very low reliability (< 0.3)
-                reliable_sequences = [s for s in sequences if s['reliability'] >= 0.3]
+                # Filter out sequences with very low reliability (< 0.3) or extremely high action counts (> 5000)
+                MAX_ACTIONS_THRESHOLD = 5000  # Don't use sequences with more than 5000 actions
+                reliable_sequences = [
+                    s for s in sequences 
+                    if s['reliability'] >= 0.3 and s['total_actions'] <= MAX_ACTIONS_THRESHOLD
+                ]
                 
                 if reliable_sequences:
                     seq = reliable_sequences[0]
@@ -2072,7 +2155,17 @@ class GameplayEngine:
                         coord_index += 1
                         continue
                     
-                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame)
+                    # Add reasoning for sequence replay (pariah validation)
+                    replay_reasoning = {
+                        'action': 'ACTION6',
+                        'reasoning': f'Validating pariah sequence {sequence_id[:8]} from checkpoint',
+                        'sequence_id': sequence_id,
+                        'replay_step': action_count + 1,
+                        'total_steps': len(actions),
+                        'coordinate': {'x': x, 'y': y},
+                        'checkpoint_validation': True
+                    }
+                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning)
                     coord_index += 1
                 else:
                     action = f"ACTION{action_num}"
@@ -2195,7 +2288,16 @@ class GameplayEngine:
                         coord_index += 1
                         continue
                     
-                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame)
+                    # Add reasoning for sequence replay
+                    replay_reasoning = {
+                        'action': 'ACTION6',
+                        'reasoning': f'Replaying known winning sequence {sequence_id[:8]}',
+                        'sequence_id': sequence_id,
+                        'replay_step': action_count + 1,
+                        'total_steps': len(actions),
+                        'coordinate': {'x': x, 'y': y}
+                    }
+                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning)
                     coord_index += 1
                 else:
                     action = f"ACTION{action_num}"
@@ -3519,9 +3621,20 @@ async def exploration_strategy(game_state: GameState, action_handler: ActionHand
     # Prefer ACTION6 for exploration
     if "ACTION6" in (game_state.available_actions or []):
         x, y = action_handler.get_random_coordinates(game_state.frame)
-        return await action_handler.send_action_6(x, y, game_state.frame)
+        exploration_reasoning = {
+            'action': 'ACTION6',
+            'reasoning': 'Random exploration strategy',
+            'coordinate': {'x': x, 'y': y},
+            'strategy': 'exploration'
+        }
+        return await action_handler.send_action_6(x, y, game_state.frame, reasoning=exploration_reasoning)
     else:
         action = action_handler.get_random_action(game_state.available_actions)
         method_name = f"send_{action.lower()}"
         method = getattr(action_handler, method_name)
-        return await method()
+        exploration_reasoning = {
+            'action': action,
+            'reasoning': 'Random exploration strategy (non-ACTION6)',
+            'strategy': 'exploration'
+        }
+        return await method(reasoning=exploration_reasoning)

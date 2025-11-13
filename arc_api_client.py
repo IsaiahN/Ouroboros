@@ -511,10 +511,11 @@ class ARCClient:
             payload["y"] = y
             logger.info(f"Sending {action} to API with coordinates ({x}, {y})")
         else:
-            # Add reasoning for other actions
-            if "reasoning" in kwargs:
-                payload["reasoning"] = kwargs["reasoning"]
             logger.info(f"Sending {action} to API")
+        
+        # Add reasoning for ALL actions (optional JSON blob ≤16 KB)
+        if "reasoning" in kwargs and kwargs["reasoning"]:
+            payload["reasoning"] = kwargs["reasoning"]
 
         # Make the request
         response = await self._make_request("POST", action_endpoints[action], json=payload)

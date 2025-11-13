@@ -97,7 +97,12 @@ async def start_single_game():
 
             # Try ACTION1 first
             try:
-                game_state = await action_handler_instance.send_action_1()
+                test_reasoning = {
+                    'action': 'ACTION1',
+                    'reasoning': 'Test game action',
+                    'test_mode': True
+                }
+                game_state = await action_handler_instance.send_action_1(reasoning=test_reasoning)
                 actions_taken += 1
                 
                 # Update state from GameState object

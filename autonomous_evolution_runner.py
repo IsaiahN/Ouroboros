@@ -166,6 +166,37 @@ class AutonomousEvolutionRunner:
         # Setup signal handlers for graceful shutdown
         self._setup_signal_handlers()
     
+    def _calculate_target_population_from_db(self):
+        """
+        Calculate target population from database game diversity.
+        Used as fallback when _current_target_population is not set.
+        
+        Returns:
+            int: Target population (game_types * 10)
+        """
+        try:
+            # Get distinct game types from performance data
+            game_types_result = self.db.execute_query("""
+                SELECT DISTINCT SUBSTR(game_id, 1, 4) as game_type
+                FROM agent_arc_performance
+                WHERE game_id IS NOT NULL
+                LIMIT 100
+            """)
+            
+            game_types = [row['game_type'] for row in game_types_result if row.get('game_type')]
+            
+            if game_types:
+                target = len(set(game_types)) * 10
+                print(f"  [CALC] Calculated target from DB: {len(set(game_types))} game types → {target} agents")
+                return target
+            else:
+                # Ultimate fallback: assume 6 common game types
+                print(f"  [WARN] No game data in DB, using default 6 game types → 60 agents")
+                return 60
+        except Exception as e:
+            print(f"  [ERROR] Failed to calculate target from DB: {e}, using 60 as fallback")
+            return 60
+    
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
         # Handle Ctrl+C (SIGINT) and termination (SIGTERM)
@@ -198,7 +229,10 @@ class AutonomousEvolutionRunner:
         
         if not self.shutdown_requested:
             print(f"\n\n[WARN]️  Received {signal_name}")
-            print("[?] Initiating graceful shutdown...")
+            print("[?] Initiating graceful shutdown cascade...")
+            print("   - Current game will finish gracefully")
+            print("   - No new games will start")
+            print("   - Generation will complete early")
             print("   (Press Ctrl+C again to force quit)\n")
             self.shutdown_requested = True
             self.running = False
@@ -750,6 +784,12 @@ class AutonomousEvolutionRunner:
             
             async with GameplayEngine(api_key, db_path=self.db.db_path) as engine:
                 
+                # If shutdown was requested before entering this context, set flag immediately
+                if self.shutdown_requested:
+                    engine.session_manager.is_shutting_down = True
+                    print("[PAUSE]️  Shutdown requested before generation started, exiting")
+                    return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
+                
                 # Get available games
                 available_games = await engine.session_manager.get_available_games()
                 
@@ -774,6 +814,7 @@ class AutonomousEvolutionRunner:
                 
                 # Store for pruning logic later
                 self._current_target_population = ADAPTIVE_TARGET_POPULATION
+                self._current_game_types = game_types  # Store game types for specialist protection
                 
                 # SPECIALIST MODE: Auto-assign games if not already assigned (for resumed checkpoints)
                 if self.specialist_mode and self.specialist_coordinator:
@@ -855,10 +896,15 @@ class AutonomousEvolutionRunner:
                                 task_type = "50/50 unbeaten/beaten (balanced)"
                             print(f"  [SMART] {agent_mode.upper()} {agent_id[:8]} → {assigned_game_type} {task_type} ({len(agent_games)} games)")
                     
+                    # Check for shutdown before starting this agent's games
+                    if self.shutdown_requested:
+                        print(f"[PAUSE]️  Shutdown requested, skipping agent {agent_id[:8]} and remaining agents")
+                        break
+                    
                     # Run games for this agent
                     for game_idx, game_id in enumerate(agent_games):
                         if self.shutdown_requested:
-                            print("[PAUSE]️  Shutdown requested, stopping evaluation")
+                            print("[PAUSE]️  Shutdown requested during game, stopping evaluation")
                             break
                         
                         # PERSISTENT MODE MEMORY: Assign mode for this specific game
@@ -920,8 +966,17 @@ class AutonomousEvolutionRunner:
                             # Game was cancelled during shutdown
                             print(f"[PAUSE]️  Game {game_id[:8]} cancelled")
                             if self.shutdown_requested:
+                                # Propagate shutdown to session manager to prevent new actions
+                                engine.session_manager.is_shutting_down = True
                                 break
                             raise
+                        
+                        # Check for shutdown after game completes
+                        if self.shutdown_requested:
+                            # Propagate shutdown signal to prevent any new games
+                            engine.session_manager.is_shutting_down = True
+                            print(f"[PAUSE]️  Shutdown detected after game {game_id[:8]}, ending generation early")
+                            break
                         
                         # Process ARC rewards
                         rlvr = ARCRLVRFramework(self.db)
@@ -1197,7 +1252,9 @@ class AutonomousEvolutionRunner:
             
             # ADAPTIVE OFFSPRING: Scale with target population
             # Create enough offspring to maintain target population
-            TARGET_POPULATION = getattr(self, '_current_target_population', 50)
+            TARGET_POPULATION = getattr(self, '_current_target_population', None)
+            if TARGET_POPULATION is None:
+                TARGET_POPULATION = self._calculate_target_population_from_db()
             adaptive_offspring_size = max(5, TARGET_POPULATION // 10)  # At least 5, scales with target
             
             print(f"  Adaptive offspring: {adaptive_offspring_size} (based on target population {TARGET_POPULATION})")
@@ -1336,7 +1393,10 @@ class AutonomousEvolutionRunner:
             
             # ISSUE 3 FIX: Aggressive pruning to maintain target population
             # ADAPTIVE: Scale target with available game count (game_types * 10)
-            TARGET_POPULATION = getattr(self, '_current_target_population', 50)  # Use adaptive target, fallback to 50
+            TARGET_POPULATION = getattr(self, '_current_target_population', None)
+            if TARGET_POPULATION is None:
+                TARGET_POPULATION = self._calculate_target_population_from_db()
+            
             if population_size > TARGET_POPULATION:
                 print(f"\n[🔪] Population too large ({population_size}), pruning to {TARGET_POPULATION}...")
                 print(f"      (Adaptive target based on {TARGET_POPULATION // 10} available game types)")
@@ -1357,20 +1417,77 @@ class AutonomousEvolutionRunner:
                 
                 print(f"  [🛡️] Using prestige-based protection (0-80% survival chance)")
                 
-                # ISSUE 3 FIX: Check ALL worst performers (not just worst 200)
-                # Sort all agents by performance, worst first
-                worst_performers = analysis.get('top_performers', [])[::-1]  # Reverse to get worst first
+                # STEP 2: Identify top 10 performers for each game type (ABSOLUTE PROTECTION)
+                # Get available game types from earlier in generation
+                game_types = getattr(self, '_current_game_types', ['sp80', 'ls20', 'lp85', 'ft09', 'as66', 'vc33'])
+                
+                top_performers_by_game = set()
+                for game_type in game_types:
+                    # Get top 10 agents for this game type based on their performance
+                    top_agents = self.db.execute_query("""
+                        SELECT DISTINCT aap.agent_id, 
+                               AVG(aap.final_score) as avg_score,
+                               COUNT(*) as games_played
+                        FROM agent_arc_performance aap
+                        WHERE aap.game_id LIKE ?
+                          AND aap.agent_id IN (SELECT agent_id FROM agents WHERE is_active = TRUE)
+                        GROUP BY aap.agent_id
+                        HAVING games_played >= 1
+                        ORDER BY avg_score DESC, games_played DESC
+                        LIMIT 10
+                    """, (f"{game_type}-%",))
+                    
+                    for agent in top_agents:
+                        top_performers_by_game.add(agent['agent_id'])
+                
+                print(f"  [🏆] Protected top 10 performers per game type: {len(top_performers_by_game)} specialists")
+                
+                # CRITICAL FIX: Get ALL agents sorted by performance (worst first)
+                # Don't use top_performers list which is limited to top 5!
+                all_agents_sorted = self.db.execute_query("""
+                    SELECT agent_id, avg_score_per_game, total_games_won, score_efficiency
+                    FROM agents
+                    WHERE is_active = TRUE
+                    ORDER BY avg_score_per_game ASC, total_games_won ASC, score_efficiency ASC
+                """)
+                
                 pruned_count = 0
                 protected_by_prestige = 0
+                protected_by_specialist = 0
                 target_pruned = population_size - TARGET_POPULATION  # Prune down to target
                 
-                print(f"  [TARGET] Attempting to prune {target_pruned} worst performers...")
+                # ADAPTIVE PRESTIGE DAMPENING
+                # Scale down prestige protection when population is way over target
+                overpopulation_ratio = population_size / TARGET_POPULATION
+                if overpopulation_ratio > 10:
+                    # Severe overpopulation: reduce prestige to 10% effectiveness
+                    prestige_dampening = 0.1
+                elif overpopulation_ratio > 5:
+                    # Heavy overpopulation: reduce prestige to 30% effectiveness
+                    prestige_dampening = 0.3
+                elif overpopulation_ratio > 2:
+                    # Moderate overpopulation: reduce prestige to 60% effectiveness
+                    prestige_dampening = 0.6
+                else:
+                    # Normal or slight overpopulation: full prestige effectiveness
+                    prestige_dampening = 1.0
+                
+                print(f"  [TARGET] Attempting to prune {target_pruned} worst performers from {len(all_agents_sorted)} active agents...")
+                print(f"  [DAMPEN] Population ratio: {overpopulation_ratio:.1f}x target, prestige dampening: {prestige_dampening:.0%}")
                 
                 import random
-                for agent in worst_performers:
-                    # Check prestige protection (probabilistic)
-                    protection_chance = protection_map.get(agent['agent_id'], 0.0)
-                    if random.random() < protection_chance:
+                for agent in all_agents_sorted:
+                    agent_id = agent['agent_id']
+                    
+                    # ABSOLUTE PROTECTION: Top 10 performers per game type
+                    if agent_id in top_performers_by_game:
+                        protected_by_specialist += 1
+                        continue
+                    
+                    # Check prestige protection (probabilistic with adaptive dampening)
+                    base_protection = protection_map.get(agent_id, 0.0)
+                    effective_protection = base_protection * prestige_dampening
+                    if random.random() < effective_protection:
                         # Agent protected by prestige - skip pruning
                         protected_by_prestige += 1
                         continue
@@ -1379,7 +1496,7 @@ class AutonomousEvolutionRunner:
                     # Agent data preserved in database for analysis
                     self.db.execute_query(
                         "UPDATE agents SET is_active = 0 WHERE agent_id = ?",
-                        (agent['agent_id'],)
+                        (agent_id,)
                     )
                     pruned_count += 1
                     
@@ -1388,11 +1505,13 @@ class AutonomousEvolutionRunner:
                         break
                 
                 if pruned_count == 0:
-                    print(f"  [WARN] No agents pruned - all protected by prestige!")
-                    print(f"        Protected: {protected_by_prestige} agents saved by prestige")
-                    print(f"        Consider adjusting prestige levels or increasing pruning target")
+                    print(f"  [WARN] No agents pruned - all protected!")
+                    print(f"        Protected by specialist status: {protected_by_specialist} agents")
+                    print(f"        Protected by prestige: {protected_by_prestige} agents")
+                    print(f"        Consider adjusting protection thresholds")
                 else:
                     print(f"  [OK] Pruned {pruned_count} agents (target: {target_pruned})")
+                    print(f"       Protected specialists (top 10/game): {protected_by_specialist} agents")
                     print(f"       Protected by prestige: {protected_by_prestige} agents")
                     print(f"       New population size: {population_size - pruned_count}")
             
