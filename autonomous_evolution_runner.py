@@ -47,7 +47,7 @@ from network_intelligence_engine import NetworkIntelligenceEngine, display_netwo
 from prestige_engine import PrestigeEngine, display_prestige_leaderboard
 from viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
 from regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
-from game_diversity_preservation import GameDiversityPreserver  # Game diversity protection
+# GameDiversityPreserver import removed - prestige-only protection now
 
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
@@ -100,7 +100,7 @@ class AutonomousEvolutionRunner:
         self.prestige_engine = PrestigeEngine(self.db)  # PHASE 1: Network contribution prestige
         self.viral_engine = ViralPackageEngine(self.db)  # PHASE 3: Viral packages & pariahs
         self.regulatory_engine = RegulatorySignalEngine(self.db)  # PHASE 4: Distributed regulation
-        self.diversity_preserver = GameDiversityPreserver(self.db, min_specialists_per_game=1)  # Game diversity protection
+        # DIVERSITY PRESERVER DISABLED - prestige-only protection now
         
         # PHASE 5: Horizontal Gene Transfer with Emotional Intelligence
         from horizontal_transfer_engine import HorizontalTransferEngine
@@ -712,13 +712,21 @@ class AutonomousEvolutionRunner:
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
             
             # DYNAMIC ROLE ASSIGNMENT: Assign operating modes for this generation
-            # 10% pioneers (5x mutation), 60% optimizers (0.5x mutation), 30% generalists (1x)
+            # ADAPTIVE POPULATION: Distribution changes based on whether games have been beaten
+            # EXPLORATION: 40% PIONEER, 40% OPTIMIZER, 20% GENERALIST (no full wins yet)
+            # OPTIMIZATION: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST (at least one full win)
             from agent_operating_mode_system import AgentOperatingModeSystem
             mode_system = AgentOperatingModeSystem(self.db)
+            
+            # Check if we should transition phases (exploration → optimization)
+            phase_changed = mode_system.check_and_update_phase()
+            if phase_changed:
+                print(f"[PHASE] Transitioned to {mode_system.phase} phase!")
+            
             agent_ids = [a['agent_id'] for a in agents]
             mode_assignments = mode_system.assign_population_modes(self.current_generation, agent_ids)
             distribution = mode_system.get_population_mode_distribution(self.current_generation)
-            print(f"[MODE] Dynamic roles assigned: {distribution['pioneer']} pioneers, {distribution['optimizer']} optimizers, {distribution['generalist']} generalists")
+            print(f"[MODE] {mode_system.phase} phase - Dynamic roles: {distribution['pioneer']} pioneers, {distribution['optimizer']} optimizers, {distribution['generalist']} generalists")
             
             # CRITICAL FIX: Distribute games_per_generation ACROSS all agents, not per agent
             # Old logic: games_per_agent = num_games // len(agents) meant 419 agents × 1 game = 419 games (70+ hours!)
@@ -1279,94 +1287,65 @@ class AutonomousEvolutionRunner:
                 traceback.print_exc()
             
             # Optionally prune worst performers (GAME-AWARE, LEVEL-PRESERVING)
-            if population_size > self.initial_population_size * 2:
-                print(f"\n[🔪] Population too large ({population_size}), pruning with specialist protection...")
+            # Allow population to grow to 400 agents (40x initial size of 10) before pruning
+            POPULATION_MULTIPLIER = 40  # Allow 400 agents before pruning (increased from 2)
+            if population_size > self.initial_population_size * POPULATION_MULTIPLIER:
+                print(f"\n[🔪] Population too large ({population_size}), pruning aggressively...")
+                print(f"    Target size: {self.initial_population_size * POPULATION_MULTIPLIER} agents")
                 
-                # STEP 1: Identify game specialists (top level achievers per game)
-                game_specialists = {}
-                all_agents = analysis.get('top_performers', [])
-                
-                for agent in all_agents:
-                    # Query agent's best level achievement per game
-                    best_levels = self.db.execute_query('''
-                        SELECT game_id, MAX(level_progressions) as max_level, 
-                               MAX(final_score) as best_score
-                        FROM agent_arc_performance
-                        WHERE agent_id = ?
-                        GROUP BY game_id
-                    ''', (agent['agent_id'],))
-                    
-                    for level_data in best_levels:
-                        game_id = level_data['game_id']
-                        max_level = level_data['max_level']
-                        best_score = level_data['best_score']
-                        
-                        if game_id not in game_specialists:
-                            game_specialists[game_id] = []
-                        game_specialists[game_id].append({
-                            'agent': agent,
-                            'max_level': max_level,
-                            'best_score': best_score
-                        })
-                
-                # STEP 2: Preserve top 3 level achievers per game
-                protected_agents = set()
-                print(f"  [🛡️] Protecting specialists across {len(game_specialists)} games:")
-                
-                for game_id, specialists in game_specialists.items():
-                    # Sort by max level (desc), then by best score (desc)
-                    specialists.sort(
-                        key=lambda x: (x['max_level'], x['best_score']), 
-                        reverse=True
-                    )
-                    
-                    # Protect top 3 per game
-                    top_specialists = specialists[:3]
-                    for spec in top_specialists:
-                        protected_agents.add(spec['agent']['agent_id'])
-                    
-                    if top_specialists:
-                        print(f"    {game_id[:12]}...: Level {top_specialists[0]['max_level']} specialists protected")
-                
-                print(f"  [OK] {len(protected_agents)} specialist agents protected from pruning")
-                
-                # STEP 3: GAME DIVERSITY PROTECTION
-                # Get all known games
-                all_games = self.db.execute_query("""
-                    SELECT DISTINCT game_id FROM agent_arc_performance
+                # STEP 1: PRESTIGE-BASED PROTECTION ONLY (specialist system disabled)
+                # Get survival_protection for all agents (0-80% protection based on prestige)
+                agents_with_prestige = self.db.execute_query("""
+                    SELECT agent_id, survival_protection
+                    FROM agents
+                    WHERE is_active = TRUE
                 """)
-                all_game_ids = [g['game_id'] for g in all_games]
                 
-                # Run diversity check and get protected agents
-                diversity_result = self.diversity_preserver.ensure_game_diversity(all_game_ids)
-                diversity_protected = set(diversity_result['protected_agents'])
+                # Build protection map: agent_id -> survival_protection (0.0 to 0.8)
+                protection_map = {
+                    agent['agent_id']: agent.get('survival_protection', 0.0) or 0.0
+                    for agent in agents_with_prestige
+                }
                 
-                # Merge with specialist protection
-                protected_agents.update(diversity_protected)
-                print(f"  [DIVERSITY] {len(diversity_protected)} additional agents protected (last specialists per game)")
+                print(f"  [🛡️] Using prestige-based protection (0-80% survival chance)")
                 
-                # STEP 4: Prune only non-protected agents from worst performers
-                worst_performers = analysis.get('top_performers', [])[-10:]  # Check worst 10
+                # STEP 2: Prune worst performers with prestige consideration
+                worst_performers = analysis.get('top_performers', [])[-200:]  # Check worst 200 (increased from 100)
                 pruned_count = 0
+                protected_by_prestige = 0
+                target_pruned = min(100, population_size - self.initial_population_size * POPULATION_MULTIPLIER)  # Prune up to 100 (increased from 50)
                 
+                print(f"  [TARGET] Attempting to prune {target_pruned} worst performers...")
+                
+                import random
                 for agent in worst_performers:
-                    if agent['agent_id'] not in protected_agents:
-                        # Safe to prune - not protected
-                        self.db.execute_query(
-                            "UPDATE agents SET is_active = 0 WHERE agent_id = ?",
-                            (agent['agent_id'],)
-                        )
-                        print(f"    Deactivated: {agent['agent_id'][:12]}... (non-protected)")
-                        pruned_count += 1
-                        
-                        # Stop after pruning 3 agents
-                        if pruned_count >= 3:
-                            break
+                    # Check prestige protection (probabilistic)
+                    protection_chance = protection_map.get(agent['agent_id'], 0.0)
+                    if random.random() < protection_chance:
+                        # Agent protected by prestige - skip pruning
+                        protected_by_prestige += 1
+                        continue
+                    
+                    # Deactivate agent (not deleted - just marked inactive)
+                    # Agent data preserved in database for analysis
+                    self.db.execute_query(
+                        "UPDATE agents SET is_active = 0 WHERE agent_id = ?",
+                        (agent['agent_id'],)
+                    )
+                    pruned_count += 1
+                    
+                    # Stop after reaching target
+                    if pruned_count >= target_pruned:
+                        break
                 
                 if pruned_count == 0:
-                    print(f"  [OK] No non-protected agents found to prune - all worst performers are protected!")
+                    print(f"  [WARN] No agents pruned - all protected by prestige!")
+                    print(f"        Protected: {protected_by_prestige} agents saved by prestige")
+                    print(f"        Consider adjusting prestige levels or increasing pruning target")
                 else:
-                    print(f"  [OK] Pruned {pruned_count} non-protected agents")
+                    print(f"  [OK] Pruned {pruned_count} agents (target: {target_pruned})")
+                    print(f"       Protected by prestige: {protected_by_prestige} agents")
+                    print(f"       New population size: {population_size - pruned_count}")
             
             return True
             

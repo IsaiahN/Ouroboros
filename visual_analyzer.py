@@ -27,6 +27,9 @@ class VisualAnalyzer:
         self.last_action_changed_frame = False  # Did last action change the frame?
         self.consecutive_no_change_count = 0  # How many actions with no frame change?
         
+        # Agent mode tracking (for mode-specific behavior)
+        self.current_agent_mode = None  # 'pioneer', 'optimizer', 'generalist', or None
+        
         # Adaptive exploration parameters
         self.exploration_radius = 5  # Start with focused exploration
         self.min_exploration_radius = 3
@@ -158,12 +161,28 @@ class VisualAnalyzer:
         
         logger.debug(f"Marked ({x}, {y}) as clicked. Total clicked: {len(self.clicked_coordinates)}")
     
+    def set_agent_mode(self, mode: Optional[str]):
+        """Set the current agent operating mode for mode-specific behavior.
+        
+        Args:
+            mode: Agent operating mode ('pioneer', 'optimizer', 'generalist', or None)
+        """
+        self.current_agent_mode = mode
+        logger.debug(f"VisualAnalyzer agent mode set to: {mode}")
+    
     def _detect_oscillation(self):
         """Detect if we're oscillating between the same targets.
         
         If we're repeatedly clicking the same small set of coordinates,
         expand exploration to break the pattern.
+        
+        **PIONEER MODE EXEMPTION**: PIONEER agents are exempt from oscillation
+        detection - they need maximum freedom to explore and discover.
         """
+        # PIONEER EXEMPTION: No oscillation detection for pioneers
+        if self.current_agent_mode == 'pioneer':
+            return
+        
         if len(self.recent_targets) < self.max_target_history:
             return
         

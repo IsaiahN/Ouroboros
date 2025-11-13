@@ -167,12 +167,51 @@ class PrestigeEngine:
                                (teaching_events * 0.3)
             
             # Calculate total prestige with weighted components
-            total_prestige = (
+            raw_prestige = (
                 (network_enrichment * 0.35) +
                 (viral_spread * 0.25) +
                 (persistence * 0.25) +
                 (validation_quality * 0.15)
             )
+            
+            # PRESTIGE DECAY: Apply generational decay to prevent coasting
+            # Get agent's previous prestige and last update generation
+            agent_data = self.db.execute_query("""
+                SELECT discovery_prestige, last_prestige_update_gen
+                FROM agents
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if agent_data and len(agent_data) > 0:
+                previous_prestige = agent_data[0]['discovery_prestige'] or 0.0
+                last_update_gen = agent_data[0]['last_prestige_update_gen'] or 0
+                generations_since_update = current_generation - last_update_gen
+                
+                # Apply 3% decay per generation to previous prestige
+                # This prevents agents from coasting on past achievements
+                DECAY_RATE = 0.03  # 3% per generation
+                decay_factor = (1.0 - DECAY_RATE) ** generations_since_update
+                decayed_previous_prestige = previous_prestige * decay_factor
+                
+                # New prestige is the MAX of current contributions OR decayed previous prestige
+                # This ensures you keep prestige if still contributing, but it decays if you stop
+                total_prestige = max(raw_prestige, decayed_previous_prestige)
+                
+                if decayed_previous_prestige > raw_prestige:
+                    self.logger.info(
+                        f"Agent {agent_id}: Using decayed prestige {total_prestige:.3f} "
+                        f"(prev={previous_prestige:.3f}, decay={decay_factor:.3f}, raw={raw_prestige:.3f})"
+                    )
+            else:
+                # New agent, no decay
+                total_prestige = raw_prestige
+            
+            # Update last prestige update generation
+            self.db.execute_query("""
+                UPDATE agents
+                SET last_prestige_update_gen = ?
+                WHERE agent_id = ?
+            """, (current_generation, agent_id))
             
             self.logger.info(
                 f"Prestige calculated for agent {agent_id}: {total_prestige:.3f} "
@@ -226,9 +265,9 @@ class PrestigeEngine:
             # High prestige agents get strong protection from culling
             survival_protection = min(0.8, percentile * 0.8)
             
-            # Bonus game slots: +0 (low prestige) to +10 (high prestige)
-            # High prestige agents get more chances to demonstrate teaching
-            bonus_game_slots = int(percentile * 10)
+            # Bonus game slots: +0 (low prestige) to +3 (high prestige)
+            # High prestige agents get more chances to demonstrate teaching (2-4x advantage, not 10x)
+            bonus_game_slots = int(percentile * 3)
             
             # Update database
             update_query = """

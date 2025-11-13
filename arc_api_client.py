@@ -407,6 +407,11 @@ class ARCClient:
         Returns:
             Scorecard results
         """
+        # Check if session is still active before attempting to close
+        if not self.session:
+            logger.warning(f"Session already closed, cannot close scorecard {card_id}")
+            return {"status": "session_closed", "card_id": card_id}
+        
         if not card_id:
             if not self.current_scorecard_id:
                 raise ValueError("No scorecard ID provided and no current scorecard")
@@ -428,6 +433,10 @@ class ARCClient:
         Returns:
             GameState: The initial game state after reset.
         """
+        # Check if session is still active
+        if not self.session:
+            raise ARCError("Session already closed, cannot reset game")
+        
         if not card_id:
             if not self.current_scorecard_id:
                 raise ValueError("No scorecard ID provided and no current scorecard")

@@ -123,6 +123,12 @@ class GameplayEngine:
         # Get agent mode BEFORE creating game (needed for tags)
         agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
         
+        # Set agent mode in action handler and visual analyzer for mode-specific behavior
+        self.action_handler.set_agent_mode(agent_mode)
+        self.action_handler.visual_analyzer.set_agent_mode(agent_mode)
+        if agent_mode:
+            logger.info(f"🎯 Agent mode set to: {agent_mode.upper()}")
+        
         # Create game with agent info in tags
         game_data = await self.session_manager.create_game(
             game_id, 
@@ -141,8 +147,8 @@ class GameplayEngine:
             
             # OPTIMIZER: Always gets sequence (to try improving it)
             # GENERALIST: Gets sequence (follows it exactly)
-            # PIONEER: Gets sequence (uses until frontier, then explores)
-            if learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist']:
+            # PIONEER: Gets sequence (uses ALL sequences until frontier, then explores)
+            if learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist', 'pioneer']:
                 try:
                     known_sequence = self._get_best_sequence_for_game(
                         game_id, 
@@ -154,7 +160,7 @@ class GameplayEngine:
                         if agent_mode == 'optimizer':
                             logger.info(f"🔧 OPTIMIZER mode: Found {known_sequence['total_actions']}-action sequence for {game_id} level 1, will try to improve it")
                         elif agent_mode == 'pioneer':
-                            logger.info(f"🎯 PIONEER mode: Will use sequences until frontier, then explore")
+                            logger.info(f"🚀 PIONEER mode: Found {known_sequence['total_actions']}-action sequence, will chain through all known levels to frontier")
                         else:
                             logger.info(f"🎯 Found known winning sequence for {game_id} level 1, will attempt inline replay")
                 except Exception as e:
@@ -163,18 +169,21 @@ class GameplayEngine:
         try:
             # MODE-SPECIFIC SEQUENCE HANDLING
             # OPTIMIZER: Do NOT replay sequence, just store it as target to beat
-            # GENERALIST/PIONEER: Replay sequence normally
+            # GENERALIST/PIONEER: Replay sequence to reach frontier quickly
             if known_sequence and agent_mode == 'optimizer':
                 # OPTIMIZER: Store target but don't replay - will try to beat it
                 target_actions = known_sequence['total_actions']
-                logger.info(f"🔧 OPTIMIZER: Target to beat = {target_actions} actions, exploring alternative paths")
-                # Set the sequence as a target in game config
-                self.game_config['optimization_target'] = target_actions
+                level_for_target = known_sequence.get('level_number', 1)
+                logger.info(f"🔧 OPTIMIZER: Target to beat = {target_actions} actions for level {level_for_target}, exploring alternative paths")
+                # Store per-level targets (not single target)
+                if 'optimization_targets' not in self.game_config:
+                    self.game_config['optimization_targets'] = {}
+                self.game_config['optimization_targets'][level_for_target] = target_actions
                 self.game_config['optimization_sequence_id'] = known_sequence['sequence_id']
                 # Don't replay - let optimizer explore
                 known_sequence = None  # Clear so normal exploration happens
             
-            # If we have a known sequence (GENERALIST/PIONEER), try to replay it INLINE
+            # If we have a known sequence (GENERALIST/PIONEER), replay it to skip known levels
             if known_sequence:
                 replay_result = await self._replay_sequence_inline(
                     game_state, 
@@ -230,12 +239,16 @@ class GameplayEngine:
             # Anti-oscillation: Track no-progress actions
             actions_since_score_increase = 0  # Count actions with no score improvement
             last_score_increase = 0.0  # Track last successful score
-            NO_PROGRESS_RESET_THRESHOLD = 300  # Hard reset after 300 actions with no progress
+            NO_PROGRESS_RESET_THRESHOLD = 1000  # Hard reset after 1000 actions with no progress (increased for more exploration)
             
             # API RESET tracking (NEW - hybrid approach)
             level_api_resets = 0  # Track resets used on current level
             MAX_API_RESETS_PER_LEVEL = 2  # Max 2 API resets per level
-            API_RESET_THRESHOLD = 600  # API reset after 600 no-progress actions (after internal reset fails)
+            API_RESET_THRESHOLD = 1000  # API reset after 1000 no-progress actions (OPTIMIZER only, increased for more exploration)
+            
+            # STUCK STATE DETECTION (for games like ls20 that finish but don't report it)
+            consecutive_no_frame_change = 0  # Track actions with no frame change
+            STUCK_STATE_THRESHOLD = 100  # If 100 consecutive actions have no frame change and no score increase, game is likely stuck/finished (only applies to pioneers at frontier)
 
             # Game loop
             while (game_state.state == "NOT_FINISHED" and
@@ -280,6 +293,86 @@ class GameplayEngine:
                     # Check for significant score increase (level completion)
                     score_increase = game_state.score - previous_score
                     
+                    # STUCK STATE DETECTION: Only for FRONTIER exploration (pioneers on highest known level)
+                    # Not needed for known levels - those should use sequences or optimizer strategies
+                    # This prevents false positives during sequence replay while helping pioneers detect truly stuck games
+                    frame_changed = False
+                    
+                    # Check if this level is at the frontier (no known sequences)
+                    is_frontier_level = False
+                    if agent_mode == 'pioneer' and self.game_config.get('enable_pattern_learning', True):
+                        # Quick check if any sequences exist for this level
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                        frontier_check = self.db.execute_query("""
+                            SELECT COUNT(*) as seq_count
+                            FROM winning_sequences
+                            WHERE game_id LIKE ? AND level_number = ?
+                        """, (f"{game_type}-%", current_level))
+                        is_frontier_level = (not frontier_check or frontier_check[0]['seq_count'] == 0)
+                    
+                    # Only apply stuck state detection at the frontier
+                    if is_frontier_level and hasattr(self.action_handler, 'visual_analyzer') and game_state.frame:
+                        frame_changed = self.action_handler.visual_analyzer.update_frame_change_tracking(
+                            game_state.frame,
+                            game_state.score
+                        )
+                        
+                        if not frame_changed and score_increase == 0:
+                            consecutive_no_frame_change += 1
+                            
+                            if consecutive_no_frame_change >= STUCK_STATE_THRESHOLD:
+                                logger.warning(
+                                    f"🛑 FRONTIER STUCK STATE: {consecutive_no_frame_change} consecutive actions with "
+                                    f"no frame change and no score increase on FRONTIER level {current_level}."
+                                )
+                                logger.info(
+                                    f"   Current score: {game_state.score:.1f}, Actions taken: {action_count}, "
+                                    f"Level {current_level} actions: {level_action_count}"
+                                )
+                                logger.info(f"   Terminating pioneer exploration to avoid wasting actions")
+                                break  # Exit game loop
+                        else:
+                            # Reset counter if we had a frame change or score increase
+                            consecutive_no_frame_change = 0
+                    elif not is_frontier_level:
+                        # Not at frontier, don't track stuck state (sequences should handle this)
+                        consecutive_no_frame_change = 0
+                    
+                    # OPTIMIZER EARLY ABANDONMENT: Check if exceeded target for this level
+                    if agent_mode == 'optimizer':
+                        target_actions = self.game_config.get('optimization_targets', {}).get(current_level)
+                        if target_actions and level_action_count > target_actions:
+                            logger.warning(
+                                f"🔧 OPTIMIZER: Exceeded target ({level_action_count} > {target_actions} actions), "
+                                f"abandoning level {current_level} attempt for better efficiency"
+                            )
+                            # Use API reset to try completely different approach
+                            if level_api_resets < MAX_API_RESETS_PER_LEVEL:
+                                logger.info(f"🔄 OPTIMIZER: Using API reset for fresh attempt (reset #{level_api_resets + 1})")
+                                try:
+                                    if not self.session_manager.client:
+                                        raise ValueError("Session manager client not initialized")
+                                    
+                                    game_state = await self.session_manager.client.reset_game(
+                                        game_id,
+                                        game_data.get('scorecard_id')
+                                    )
+                                    
+                                    level_api_resets += 1
+                                    level_action_count = 0  # Reset level counter for fresh attempt
+                                    action_count = max(0, action_count - level_action_count)  # Adjust total
+                                    actions_since_score_increase = 0
+                                    
+                                    logger.info(f"   ✓ OPTIMIZER reset successful! Fresh attempt with new strategy")
+                                    logger.info(f"   → {MAX_API_RESETS_PER_LEVEL - level_api_resets} resets remaining")
+                                    continue  # Skip to next iteration
+                                    
+                                except Exception as e:
+                                    logger.error(f"   ✗ OPTIMIZER reset failed: {e}")
+                                    # If reset fails, give up on this level and move to exploration
+                            else:
+                                logger.warning(f"⚠️ OPTIMIZER: No resets remaining, accepting sub-optimal sequence")
+                    
                     # Anti-oscillation: Track no-progress actions
                     if score_increase > 0:
                         # Score improved! Reset counter
@@ -306,8 +399,11 @@ class GameplayEngine:
                             logger.info(f"   → Trying completely new approach (300 more actions before API reset)")
                         
                         # Phase 2: API RESET after 600 actions if internal reset didn't help
-                        elif actions_since_score_increase >= API_RESET_THRESHOLD and level_api_resets < MAX_API_RESETS_PER_LEVEL:
-                            logger.warning(f"🔄 API RESET #{level_api_resets + 1}: Internal reset failed, resetting level via API")
+                        # ONLY FOR OPTIMIZER MODE - PIONEER/GENERALIST need full exploration budget
+                        elif (actions_since_score_increase >= API_RESET_THRESHOLD and 
+                              level_api_resets < MAX_API_RESETS_PER_LEVEL and
+                              agent_mode == 'optimizer'):
+                            logger.warning(f"🔄 API RESET #{level_api_resets + 1}: OPTIMIZER internal reset failed, resetting level via API")
                             
                             try:
                                 # Reset the current level via API (use scorecard from game creation)
@@ -326,16 +422,25 @@ class GameplayEngine:
                                 # This ensures we track total actions spent on this level attempt
                                 actions_since_score_increase = 0  # Reset no-progress counter
                                 
-                                logger.info(f"   ✓ Level reset successful! Fresh attempt #{level_api_resets + 1}")
+                                logger.info(f"   ✓ OPTIMIZER reset successful! Fresh attempt #{level_api_resets + 1}")
                                 logger.info(f"   → {MAX_API_RESETS_PER_LEVEL - level_api_resets} API resets remaining for this level")
                                 logger.info(f"   → Total actions on this level so far: {level_action_count}")
                                 
                             except Exception as e:
-                                logger.error(f"   ✗ API reset failed: {e}")
+                                logger.error(f"   ✗ OPTIMIZER reset failed: {e}")
                                 # Continue with current state if reset fails
                                 actions_since_score_increase = 0  # Reset counter anyway to avoid spam
+                        
+                        # PIONEER/GENERALIST: Log no-progress but don't reset - they need full budget
+                        elif actions_since_score_increase >= API_RESET_THRESHOLD:
+                            mode_str = agent_mode.upper() if agent_mode else "UNKNOWN"
+                            logger.info(f"ℹ️ {mode_str}: {actions_since_score_increase} actions without progress, but continuing exploration (no reset)")
+                            # Reset counter to avoid log spam, but keep exploring
+                            actions_since_score_increase = 0
                     
-                    if score_increase >= 0.5:  # Significant score increase (usually +1.0 per level)
+                    # BUGFIX: Only increment level_completions on full level completion (score increase >= 1.0)
+                    # Previously incremented on >= 0.5 which caused overcounting with partial progress
+                    if score_increase >= 1.0:  # Full level completion (ARC levels give 1.0 point each)
                         level_completions += 1
                         logger.info(f"🎉 Level {current_level} completed! Score: {previous_score} → {game_state.score} (+{score_increase})")
                         logger.info(f"📊 Level {current_level} stats: {level_action_count} actions, {level_api_resets} API resets used")
@@ -346,8 +451,7 @@ class GameplayEngine:
                         # Pattern Learning: ONLY capture if this is a VERIFIED level win
                         # (score increased AND game is still running, meaning level truly completed)
                         if (self.game_config.get('enable_pattern_learning', True) and 
-                            game_state.state == "NOT_FINISHED" and 
-                            score_increase >= 1.0):  # Full level completion
+                            game_state.state == "NOT_FINISHED"):  # Full level completion already verified above
                             
                             sequence_id = self._capture_winning_sequence(
                                 game_id, 
@@ -362,10 +466,12 @@ class GameplayEngine:
                         current_level += 1
                         level_action_count = 0  # Reset level action counter
                         level_start_action = action_count  # Mark where this level starts
+                        consecutive_no_frame_change = 0  # CRITICAL FIX: Reset stuck state counter on level completion
                         
-                        # NEW: Try partial sequence matching for current state
-                        # This allows "jumping in" to known sequences mid-game
-                        if self.game_config.get('enable_pattern_learning', True):
+                        # PIONEER/GENERALIST: Chain through multiple known sequences
+                        # Keep replaying sequences until we hit the frontier or fail
+                        while self.game_config.get('enable_pattern_learning', True) and game_state.state == "NOT_FINISHED":
+                            # Try partial sequence matching first
                             partial_match = self._find_partial_sequence_match(
                                 game_id, game_state.frame, current_level
                             )
@@ -384,29 +490,35 @@ class GameplayEngine:
                                 if replay_result and replay_result['success']:
                                     game_state = replay_result['game_state']
                                     logger.info(f"✨ Checkpoint replay successful! State: {game_state.state}, Score: {game_state.score}")
+                                    consecutive_no_frame_change = 0  # Reset stuck state counter after successful replay
                                     
-                                    # If we won or progressed significantly, update stats
+                                    # If we won, break out of sequence chain loop
                                     if game_state.state == "WIN":
                                         logger.info(f"🏆 WON via checkpoint replay!")
-                                        break  # Exit main loop, game is won
+                                        break
+                                    # Otherwise update tracking and continue to check for next level
+                                    previous_score = game_state.score
+                                else:
+                                    # Partial match replay failed, try complete sequence
+                                    break
                             else:
                                 # No partial match, check for complete sequence for new level
                                 # MODE-AWARE: Behavior depends on agent mode
                                 next_level_sequence = self._get_best_sequence_for_game(game_id, current_level)
                                 
                                 # Check if Pioneer has reached frontier (highest known level for this game)
-                                at_frontier = False
                                 if agent_mode == 'pioneer' and next_level_sequence is None:
-                                    at_frontier = True
                                     logger.info(f"🚀 PIONEER: Reached frontier (Level {current_level}), no known sequences - EXPLORING NEW TERRITORY!")
+                                    break  # Exit sequence chain loop, continue with exploration
                                 
                                 if next_level_sequence:
-                                    # OPTIMIZER: Don't replay, just note target
+                                    # OPTIMIZER: Don't replay, just note target and break
                                     if agent_mode == 'optimizer':
                                         target_actions = next_level_sequence['total_actions']
                                         logger.info(f"🔧 OPTIMIZER: Level {current_level} target = {target_actions} actions, trying to beat it")
-                                        # Store target but continue exploring to beat it
+                                        # Store target but don't replay - optimizer explores
                                         self.game_config[f'level_{current_level}_target'] = target_actions
+                                        break  # Exit sequence chain, optimizer explores
                                     else:
                                         # GENERALIST/PIONEER: Replay sequence
                                         logger.info(f"🎯 Found winning sequence for level {current_level}, attempting replay...")
@@ -420,18 +532,46 @@ class GameplayEngine:
                                         )
                                         
                                         if replay_result and replay_result['success']:
+                                            replay_initial_score = previous_score
                                             game_state = replay_result['game_state']
-                                            logger.info(f"✅ Level {current_level} sequence replay successful! State: {game_state.state}, Score: {game_state.score}")
+                                            replay_final_score = game_state.score
+                                            logger.info(f"✅ Level {current_level} sequence replay successful! Score: {replay_initial_score} → {replay_final_score}, State: {game_state.state}")
+                                            consecutive_no_frame_change = 0  # Reset stuck state counter after successful replay
                                             
-                                            # If we won, exit main loop
+                                            # Update tracking with replay results
+                                            previous_score = replay_final_score
+                                            
+                                            # If we won completely, exit main loop
                                             if game_state.state == "WIN":
-                                                logger.info(f"🏆 WON via level {current_level} sequence replay!")
+                                                logger.info(f"� WON via level {current_level} sequence replay!")
+                                                break
+                                            
+                                            # Check if replay completed one or more levels
+                                            levels_completed = int(replay_final_score - replay_initial_score)
+                                            if levels_completed > 0:
+                                                level_completions += levels_completed
+                                                current_level += levels_completed
+                                                level_action_count = 0
+                                                level_start_action = action_count
+                                                level_api_resets = 0
+                                                logger.info(f"🚀 PIONEER/GENERALIST: Replay completed {levels_completed} level(s), now at level {current_level}")
+                                                # Loop continues to check for next level sequence
+                                            else:
+                                                # Replay didn't complete a level, break out
+                                                logger.warning(f"⚠️ Level {current_level} sequence replay didn't complete level, continuing with exploration")
                                                 break
                                         else:
                                             logger.info(f"⚠️ Level {current_level} sequence replay failed, continuing with exploration")
-                                elif agent_mode == 'pioneer':
-                                    # Pioneer at frontier - log that they're exploring
-                                    logger.info(f"🚀 PIONEER: Exploring uncharted Level {current_level}")
+                                            break  # Exit sequence chain, continue with exploration
+                                else:
+                                    # No sequence found for this level
+                                    if agent_mode == 'generalist':
+                                        logger.info(f"🌐 GENERALIST: No sequence for level {current_level}, exploring")
+                                    break  # Exit sequence chain
+                        
+                        # If we broke out of sequence chain due to WIN, exit main game loop
+                        if game_state.state == "WIN":
+                            break
 
                     
                     # Check if exceeded max actions for this level
@@ -1749,8 +1889,10 @@ class GameplayEngine:
             # Query sequences with reputation scores (community memory)
             # FIXED: Match by game TYPE prefix, not exact session ID
             # This allows sequences from previous sessions to be reused
-            # CRITICAL: Only sequences that actually completed the level (total_score >= level_number)
-            # Prioritize: reliability_score, then efficiency, then FEWEST actions (optimization!)
+            # CRITICAL: Only sequences that actually completed the level (total_score > level_number)
+            # BUG FIX: Changed >= to > because total_score must EXCEED level to complete it
+            # (e.g., level 1 needs total_score > 1, meaning at least 2 points scored)
+            # Prioritize: EFFICIENCY first (fewest actions), then reliability
             sequences = self.db.execute_query("""
                 SELECT ws.*, 
                        COALESCE(sr.reliability_score, 0.5) as reliability,
@@ -1761,8 +1903,8 @@ class GameplayEngine:
                 LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
                 WHERE ws.game_id LIKE ? 
                   AND ws.level_number = ?
-                  AND ws.total_score >= ?
-                ORDER BY reliability DESC, ws.efficiency_score DESC, ws.total_actions ASC
+                  AND ws.total_score > ?
+                ORDER BY ws.total_actions ASC, ws.efficiency_score DESC, reliability DESC
                 LIMIT 5
             """, (f"{game_type}-%", level_number, level_number))
             

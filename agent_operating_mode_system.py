@@ -31,10 +31,13 @@ class AgentOperatingModeSystem:
     def __init__(self, db: DatabaseInterface):
         self.db = db
         
-        # Target population distribution
-        self.TARGET_PIONEER_PCT = 0.10   # 10% pioneers
-        self.TARGET_OPTIMIZER_PCT = 0.60  # 60% optimizers
-        self.TARGET_GENERALIST_PCT = 0.30 # 30% generalists
+        # ADAPTIVE population distribution based on whether any games fully beaten
+        # Check if any games have been completely won
+        self._update_population_distribution()
+        
+        # Distribution will be set by _update_population_distribution():
+        # EXPLORATION PHASE (no full wins): 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST
+        # OPTIMIZATION PHASE (has full wins): 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST
         
         # Mode mutation multipliers
         self.PIONEER_MUTATION_MULTIPLIER = 5.0     # 5x exploration
@@ -68,12 +71,61 @@ class AgentOperatingModeSystem:
                 'description': 'Balanced agent - maintain baseline capability'
             }
         }
+    
+    def _update_population_distribution(self):
+        """
+        Adaptive population distribution based on game completion status.
+        
+        EXPLORATION PHASE (no games fully beaten):
+            70% PIONEER - MAXIMUM exploration focus to find first solutions
+            10% OPTIMIZER - Minimal refinement of partial solutions
+            20% GENERALIST - Baseline validation
+        
+        OPTIMIZATION PHASE (at least one game fully beaten):
+            10% PIONEER - Maintain some frontier exploration
+            60% OPTIMIZER - Focus on efficiency refinement
+            30% GENERALIST - Strong baseline for comparison
+        """
+        try:
+            # Check if ANY games have been completely won (win_detected = TRUE)
+            full_wins = self.db.execute_query("""
+                SELECT COUNT(*) as win_count
+                FROM game_results
+                WHERE win_detected = TRUE
+            """)
+            
+            has_full_wins = full_wins and full_wins[0]['win_count'] > 0
+            
+            if has_full_wins:
+                # OPTIMIZATION PHASE: At least one game fully beaten
+                self.TARGET_PIONEER_PCT = 0.10
+                self.TARGET_OPTIMIZER_PCT = 0.60
+                self.TARGET_GENERALIST_PCT = 0.30
+                self.phase = "OPTIMIZATION"
+                logger.info(f"🎯 OPTIMIZATION PHASE: {full_wins[0]['win_count']} games fully beaten")
+                logger.info(f"   Distribution: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST")
+            else:
+                # EXPLORATION PHASE: No games fully beaten yet - HEAVY PIONEER FOCUS
+                self.TARGET_PIONEER_PCT = 0.70
+                self.TARGET_OPTIMIZER_PCT = 0.10
+                self.TARGET_GENERALIST_PCT = 0.20
+                self.phase = "EXPLORATION"
+                logger.info(f"🔍 EXPLORATION PHASE: No games fully beaten yet")
+                logger.info(f"   Distribution: 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST")
+                
+        except Exception as e:
+            # Fallback to exploration phase if query fails
+            logger.warning(f"Failed to check game completion status: {e}")
+            self.TARGET_PIONEER_PCT = 0.70
+            self.TARGET_OPTIMIZER_PCT = 0.10
+            self.TARGET_GENERALIST_PCT = 0.20
+            self.phase = "EXPLORATION"
         
         # Create database table if not exists
         self._initialize_database()
         
         logger.info("[✓] Agent Operating Mode System initialized")
-        logger.info(f"   Target distribution: 10% pioneers, 60% optimizers, 30% generalists")
+        logger.info(f"   Target distribution: {self.TARGET_PIONEER_PCT*100:.0f}% pioneers, {self.TARGET_OPTIMIZER_PCT*100:.0f}% optimizers, {self.TARGET_GENERALIST_PCT*100:.0f}% generalists")
     
     def _initialize_database(self):
         """Create agent_operating_modes table"""
@@ -111,6 +163,57 @@ class AgentOperatingModeSystem:
         """)
         
         logger.info("[✓] agent_operating_modes table initialized")
+    
+    def check_and_update_phase(self) -> bool:
+        """
+        Check if we should transition from EXPLORATION to OPTIMIZATION phase.
+        Called at the start of each generation to adaptively adjust population mix.
+        
+        Returns:
+            True if phase changed, False if stayed the same
+        """
+        old_phase = getattr(self, 'phase', 'EXPLORATION')
+        
+        # Re-check game completion status
+        try:
+            full_wins = self.db.execute_query("""
+                SELECT COUNT(*) as win_count
+                FROM game_results
+                WHERE win_detected = TRUE
+            """)
+            
+            has_full_wins = full_wins and full_wins[0]['win_count'] > 0
+            
+            if has_full_wins and old_phase == 'EXPLORATION':
+                # TRANSITION: First game beaten! Switch to optimization phase
+                self.TARGET_PIONEER_PCT = 0.10
+                self.TARGET_OPTIMIZER_PCT = 0.60
+                self.TARGET_GENERALIST_PCT = 0.30
+                self.phase = "OPTIMIZATION"
+                
+                logger.info(f"\n{'='*80}")
+                logger.info(f"🎯 PHASE TRANSITION: EXPLORATION → OPTIMIZATION")
+                logger.info(f"{'='*80}")
+                logger.info(f"✅ {full_wins[0]['win_count']} games fully beaten!")
+                logger.info(f"📊 Old distribution: 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST")
+                logger.info(f"📊 New distribution: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST")
+                logger.info(f"   Focus shifting from exploration to efficiency refinement")
+                logger.info(f"{'='*80}\n")
+                return True
+            
+            elif not has_full_wins and old_phase == 'OPTIMIZATION':
+                # Edge case: Somehow lost all wins? Return to exploration
+                self.TARGET_PIONEER_PCT = 0.70
+                self.TARGET_OPTIMIZER_PCT = 0.10
+                self.TARGET_GENERALIST_PCT = 0.20
+                self.phase = "EXPLORATION"
+                logger.warning(f"⚠️ PHASE REVERT: OPTIMIZATION → EXPLORATION (no wins found)")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"Failed to check phase transition: {e}")
+        
+        return False
     
     def get_best_mode_for_game(self, agent_id: str, game_id: str) -> Optional[str]:
         """
