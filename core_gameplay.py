@@ -272,6 +272,17 @@ class GameplayEngine:
                     # Store previous score before action
                     previous_score = game_state.score
                     
+                    # CRITICAL FIX: Synchronize current_level with actual score
+                    # After level completion, score = 1, 2, 3, etc.
+                    # But current_level might still be at old value if we're past the score-increase detection
+                    actual_level_from_score = int(game_state.score) + 1  # Score 1 = completed level 1, now on level 2
+                    if actual_level_from_score > current_level:
+                        logger.info(f"🔄 Level sync: current_level was {current_level}, updating to {actual_level_from_score} (score={game_state.score})")
+                        current_level = actual_level_from_score
+                        level_action_count = 0  # Reset level counter
+                        level_start_action = action_count
+                        consecutive_no_frame_change = 0
+                    
                     # Select action
                     if action_callback:
                         action_result = await action_callback(game_state, self.action_handler)
@@ -667,10 +678,13 @@ class GameplayEngine:
             if agent_id:
                 self.session_manager.deduct_actions_used(agent_id, game_id)
 
-            # Pattern Learning: Capture final WIN sequence (Rule 2: Database-only)
-            if results['win'] and self.game_config.get('enable_pattern_learning', True):
-                # ONLY capture on actual WIN state
+            # Pattern Learning: Capture final sequence (Rule 2: Database-only)
+            if self.game_config.get('enable_pattern_learning', True):
+                # CRITICAL: Capture ANY progress made (not just WINs)
+                # This ensures we save sequences for score 3.0 even if agent fails level 4
+                # Future agents can replay this to guarantee the same minimum score
                 if game_state.state == "WIN":
+                    # Full game win - capture complete sequence
                     sequence_id = self._capture_winning_sequence(
                         game_id, 
                         game_state.score,
@@ -680,6 +694,21 @@ class GameplayEngine:
                     if sequence_id:
                         results['learned_sequence_id'] = sequence_id
                         logger.info(f"✅ Captured full game winning sequence: {sequence_id}")
+                
+                elif game_state.score > 0:
+                    # Partial progress - capture what we achieved
+                    # Score 3.0 = completed 3 levels, future agents should replay this
+                    levels_completed = int(game_state.score)
+                    sequence_id = self._capture_winning_sequence(
+                        game_id,
+                        game_state.score,
+                        level_number=levels_completed,
+                        reason=f"partial_progress_{levels_completed}_levels"
+                    )
+                    if sequence_id:
+                        results['learned_sequence_id'] = sequence_id
+                        logger.info(f"✅ Captured partial progress sequence (score {game_state.score}): {sequence_id}")
+                        logger.info(f"   → Future agents can replay this to guarantee {levels_completed} level(s) minimum")
             
             # PHASE 2.5: Knowledge Recombination (AUTOMATIC - runs after EVERY game)
             # This is the viral evolution accelerator - opportunistic recombination
@@ -875,43 +904,55 @@ class GameplayEngine:
         sensation_biases = {}
         navigation_state = 0.0
         
+        # Get agent mode to determine if sensation is allowed
+        agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
+        
+        # STRATEGIC RESTRICTION: Generalists do NOT get sensation access
+        # They must rely purely on pattern recognition and learned sequences
+        # This forces them to be true "jack of all trades" without emotional shortcuts
+        sensation_allowed = (agent_mode != 'generalist')
+        
         if agent_id and self.game_config.get('enable_sensation_navigation', True):
-            try:
-                # Analyze frame for emotional context
-                frame_data = self._convert_game_state_for_sensation_analysis(game_state)
-                
-                # Update agent's navigation state based on perceptions
-                sensation_context = self._analyze_sensation_context(frame_data, agent_id)
-                navigation_state = self.sensation_engine.update_navigation_state(
-                    agent_id, 
-                    sensation_context.get('dominant_sensation', 0.0),
-                    {
-                        'game_id': self.session_manager.current_game_id,
-                        'generation': self.game_config.get('generation', 0),
-                        'game_score': game_state.score,
-                        'recent_success_rate': self._calculate_recent_success_rate_from_game_state(game_state)
-                    }
-                )
-                
-                # Get sensation-based action biases for navigation actions (1-7)
-                available_navigation_actions = [1, 2, 3, 4, 5, 6, 7]  # All navigation actions
-                biased_actions = self.sensation_engine.bias_action_selection(
-                    agent_id, available_navigation_actions, navigation_state
-                )
-                
-                sensation_biases = {action: bias for action, bias in biased_actions}
-                
-                # Store perceived objects for learning
-                self._last_perceived_objects = sensation_context.get('perceived_objects', [])
-                
-                if sensation_biases:
-                    emotion = self._get_emotion_label(navigation_state)
-                    logger.debug(f"🧠 Agent feeling {emotion} (state: {navigation_state:.2f})")
-                    logger.debug(f"   Action biases: {sensation_biases}")
-                    logger.debug(f"   Perceived objects: {self._last_perceived_objects}")
-                
-            except Exception as e:
-                logger.debug(f"Phase 4.5 sensation error: {e}")
+            if not sensation_allowed:
+                # Generalists restricted from sensation - must use pure pattern learning
+                logger.debug(f"🚫 Generalist mode: Sensation navigation disabled (pattern-only)")
+            else:
+                try:
+                    # Analyze frame for emotional context
+                    frame_data = self._convert_game_state_for_sensation_analysis(game_state)
+                    
+                    # Update agent's navigation state based on perceptions
+                    sensation_context = self._analyze_sensation_context(frame_data, agent_id)
+                    navigation_state = self.sensation_engine.update_navigation_state(
+                        agent_id, 
+                        sensation_context.get('dominant_sensation', 0.0),
+                        {
+                            'game_id': self.session_manager.current_game_id,
+                            'generation': self.game_config.get('generation', 0),
+                            'game_score': game_state.score,
+                            'recent_success_rate': self._calculate_recent_success_rate_from_game_state(game_state)
+                        }
+                    )
+                    
+                    # Get sensation-based action biases for navigation actions (1-7)
+                    available_navigation_actions = [1, 2, 3, 4, 5, 6, 7]  # All navigation actions
+                    biased_actions = self.sensation_engine.bias_action_selection(
+                        agent_id, available_navigation_actions, navigation_state
+                    )
+                    
+                    sensation_biases = {action: bias for action, bias in biased_actions}
+                    
+                    # Store perceived objects for learning
+                    self._last_perceived_objects = sensation_context.get('perceived_objects', [])
+                    
+                    if sensation_biases:
+                        emotion = self._get_emotion_label(navigation_state)
+                        logger.debug(f"🧠 Agent feeling {emotion} (state: {navigation_state:.2f})")
+                        logger.debug(f"   Action biases: {sensation_biases}")
+                        logger.debug(f"   Perceived objects: {self._last_perceived_objects}")
+                    
+                except Exception as e:
+                    logger.debug(f"Phase 4.5 sensation error: {e}")
         
         # PHASE 3: Get viral package and pariah influence
         action_weights = {}
