@@ -49,6 +49,7 @@ from adaptive_action_limits import AdaptiveActionLimits
 from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
 from prestige_engine import PrestigeEngine, display_prestige_leaderboard
 from viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
+from evolution_game_scheduler import EvolutionGameScheduler  # NEW: Prevent duplicate game plays
 from regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
 # GameDiversityPreserver import removed - prestige-only protection now
 
@@ -103,6 +104,7 @@ class AutonomousEvolutionRunner:
         self.prestige_engine = PrestigeEngine(self.db)  # PHASE 1: Network contribution prestige
         self.viral_engine = ViralPackageEngine(self.db)  # PHASE 3: Viral packages & pariahs
         self.regulatory_engine = RegulatorySignalEngine(self.db)  # PHASE 4: Distributed regulation
+        self.game_scheduler = EvolutionGameScheduler(self.db)  # NEW: Prevent duplicate game plays
         # DIVERSITY PRESERVER DISABLED - prestige-only protection now
         
         # PHASE 5: Horizontal Gene Transfer with Emotional Intelligence
@@ -836,65 +838,50 @@ class AutonomousEvolutionRunner:
                 total_score = 0
                 rules_learned = 0  # NEW: Track rule learning
                 
-                # ISSUE 2 FIX: Round-robin game type distribution for diversity
-                # Use dynamically detected game types
-                start_offset = self.current_generation % len(game_types)
-                rotated_game_types = game_types[start_offset:] + game_types[:start_offset]
+                # NEW: Use GameScheduler to prevent duplicate game plays
+                # This prevents the inefficiency where multiple agents play same game type sequentially
+                print("\n🎮 GAME SCHEDULER: Assigning games to prevent duplicate plays...")
+                
+                # Prepare agents for scheduler (need mode from mode_assignments)
+                agents_with_modes = []
+                for agent in selected_agents:
+                    agent_id = agent['agent_id']
+                    agent_mode = mode_assignments.get(agent_id, 'generalist')
+                    agents_with_modes.append({
+                        'agent_id': agent_id,
+                        'mode': agent_mode,
+                        'generation': self.current_generation
+                    })
+                
+                # Assign games using scheduler (prevents duplicate game types)
+                game_assignments = self.game_scheduler.assign_games_to_agents(
+                    agents=agents_with_modes,
+                    total_games_to_play=num_games,
+                    available_game_ids=game_ids
+                )
+                
+                if not game_assignments:
+                    print("[?] No games could be assigned (all games may be in use)")
+                    return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
+                
+                print(f"✓ Assigned {sum(len(g) for g in game_assignments.values())} games to {len(game_assignments)} agents\n")
                 
                 for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
                     agent_id = agent['agent_id']
                     
-                    # ISSUE 2 FIX: Assign game type using round-robin
-                    assigned_game_type = rotated_game_types[agent_idx % len(rotated_game_types)]
+                    # Get games assigned by scheduler
+                    agent_games = game_assignments.get(agent_id, [])
                     
-                    # Filter available games to match assigned type
-                    type_filtered_games = [
-                        g for g in available_games 
-                        if g.get('id', g.get('game_id', '')).startswith(assigned_game_type)
-                    ]
-                    
-                    if not type_filtered_games:
-                        # Fallback: if no games of this type, use all games
-                        type_filtered_games = available_games
-                        print(f"  [WARN] No {assigned_game_type} games available, using all games for agent {agent_id[:8]}")
+                    if not agent_games:
+                        # Agent didn't get any games (all games in use or not selected)
+                        continue
                     
                     # Get agent's operating mode (pioneer/optimizer/generalist)
                     agent_mode = mode_assignments.get(agent_id, 'generalist')
                     
-                    # META-LEARNING: Use curriculum for game selection
-                    if self.curriculum:
-                        # Initialize agent in curriculum if needed
-                        if self.curriculum.get_agent_current_stage(agent_id) == 1 and \
-                           not self.db.execute_query("SELECT 1 FROM curriculum_progress WHERE agent_id = ?", (agent_id,)):
-                            self.curriculum.initialize_agent_curriculum(agent_id, self.current_generation)
-                        
-                        # ISSUE 2: Use type-filtered games for curriculum
-                        # Select games based on curriculum stage
-                        agent_games = self.curriculum.select_games_for_agent(
-                            agent_id, 
-                            [g.get('id', g.get('game_id')) for g in type_filtered_games],
-                            games_per_agent
-                        )
-                        print(f"  [?] Agent {agent_id[:8]} ({assigned_game_type}) - Stage {self.curriculum.get_agent_current_stage(agent_id)}: {len(agent_games)} games")
-                    else:
-                        # SMART AGENT-TO-TASK ASSIGNMENT: Match agents to optimal tasks
-                        # ISSUE 2: Use type-filtered games
-                        agent_games = self._assign_agent_to_optimal_task(
-                            agent_id=agent_id,
-                            agent_mode=agent_mode,
-                            available_games=type_filtered_games,  # CHANGED: was available_games
-                            games_per_agent=games_per_agent
-                        )
-                        
-                        # Log assignment for first few agents to show smart routing
-                        if agent_idx < 3:
-                            if agent_mode == 'pioneer':
-                                task_type = "unbeaten games (frontier discovery)"
-                            elif agent_mode == 'optimizer':
-                                task_type = "games with beaten levels (optimize sequences)"
-                            else:
-                                task_type = "50/50 unbeaten/beaten (balanced)"
-                            print(f"  [SMART] {agent_mode.upper()} {agent_id[:8]} → {assigned_game_type} {task_type} ({len(agent_games)} games)")
+                    # Log assignment
+                    game_types_assigned = list(set(g[:4] for g in agent_games))
+                    print(f"  [SCHEDULED] {agent_mode.upper()} {agent_id[:8]} → {', '.join(game_types_assigned)} ({len(agent_games)} games)")
                     
                     # Check for shutdown before starting this agent's games
                     if self.shutdown_requested:
@@ -1133,6 +1120,9 @@ class AutonomousEvolutionRunner:
                             'result': result,
                             'reward': reward_data
                         })
+                        
+                        # NEW: Release game so another agent can use it
+                        self.game_scheduler.release_game(game_id)
                         
                         # Brief pause between games
                         await asyncio.sleep(0.5)
