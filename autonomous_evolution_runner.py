@@ -51,6 +51,7 @@ from prestige_engine import PrestigeEngine, display_prestige_leaderboard
 from viral_package_engine import ViralPackageEngine, display_viral_ecosystem_dashboard  # Phase 3
 from evolution_game_scheduler import EvolutionGameScheduler  # NEW: Prevent duplicate game plays
 from regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
+from sequence_pruning_system import SequencePruningSystem  # NEW: Automatic bad sequence removal
 # GameDiversityPreserver import removed - prestige-only protection now
 
 # Rule 2: Database-only logging
@@ -105,6 +106,7 @@ class AutonomousEvolutionRunner:
         self.viral_engine = ViralPackageEngine(self.db)  # PHASE 3: Viral packages & pariahs
         self.regulatory_engine = RegulatorySignalEngine(self.db)  # PHASE 4: Distributed regulation
         self.game_scheduler = EvolutionGameScheduler(self.db)  # NEW: Prevent duplicate game plays
+        self.sequence_pruner = SequencePruningSystem(self.db)  # NEW: Automatic bad sequence removal
         # DIVERSITY PRESERVER DISABLED - prestige-only protection now
         
         # PHASE 5: Horizontal Gene Transfer with Emotional Intelligence
@@ -238,6 +240,9 @@ class AutonomousEvolutionRunner:
             print("   (Press Ctrl+C again to force quit)\n")
             self.shutdown_requested = True
             self.running = False
+            
+            # Notify game scheduler to stop assigning games
+            self.game_scheduler.shutdown()
         else:
             print(f"\n\n[X] Forced shutdown requested")
             print("   Terminating immediately (data may be incomplete)\n")
@@ -1122,7 +1127,7 @@ class AutonomousEvolutionRunner:
                         })
                         
                         # NEW: Release game so another agent can use it
-                        self.game_scheduler.release_game(game_id)
+                        self.game_scheduler.release_game(game_id, agent_id=agent_id)
                         
                         # Brief pause between games
                         await asyncio.sleep(0.5)
@@ -1285,6 +1290,28 @@ class AutonomousEvolutionRunner:
             self.last_evolution_time = datetime.now()
             
             print(f"[OK] Evolution complete - Created {new_agents_created} new agents")
+            
+            # SEQUENCE PRUNING: Remove bad sequences after each generation
+            print(f"\n[SEQUENCE PRUNING] Cleaning up failed sequences for generation {self.current_generation}...")
+            try:
+                pruning_results = self.sequence_pruner.prune_bad_sequences(
+                    self.current_generation,
+                    dry_run=False
+                )
+                
+                if pruning_results['total_pruned'] > 0:
+                    print(f"[OK] Pruned {pruning_results['total_pruned']} bad sequences:")
+                    print(f"  - Excessive actions (>10K): {pruning_results['excessive_actions']}")
+                    print(f"  - Low success rate (<10%): {pruning_results['low_success_rate']}")
+                    print(f"  - Low score (<2 pts): {pruning_results['low_score']}")
+                    print(f"  - Kept: {pruning_results['total_kept']} good sequences")
+                else:
+                    print(f"[OK] No sequences needed pruning - {pruning_results['total_kept']} sequences active")
+                    
+            except Exception as e:
+                print(f"[WARN] Sequence pruning failed: {e}")
+                import traceback
+                traceback.print_exc()
             
             # PHASE 0: CAPTURE NETWORK INTELLIGENCE SNAPSHOT
             print(f"\n[NETWORK] Capturing ecosystem snapshot for generation {self.current_generation}...")

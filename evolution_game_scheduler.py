@@ -27,6 +27,10 @@ class EvolutionGameScheduler:
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self.scheduler = GameScheduler(db)
+    
+    def shutdown(self):
+        """Initiate graceful shutdown."""
+        self.scheduler.shutdown()
         
     def assign_games_to_agents(
         self,
@@ -92,8 +96,25 @@ class EvolutionGameScheduler:
                 if game_id:
                     agent_games.append(game_id)
                 else:
-                    print(f"   ⚠️  No more games available for {agent_id}")
-                    break
+                    # If no games available and agent is not already optimizer, make them one
+                    if agent_mode != 'optimizer' and not self.scheduler.is_shutting_down:
+                        print(f"   🔄 Converting {agent_id} to optimizer mode (all games occupied)")
+                        game_id = self.scheduler.get_next_game_for_agent(
+                            agent_id=agent_id,
+                            agent_mode='optimizer',  # Try as optimizer (can share games)
+                            session_id=f"gen_{agent_generation}",
+                            available_games=available_game_ids,
+                            generation=agent_generation
+                        )
+                        if game_id:
+                            agent_games.append(game_id)
+                        elif not self.scheduler.is_shutting_down:
+                            print(f"   ⚠️  No games available even as optimizer for {agent_id}")
+                            break
+                    else:
+                        if not self.scheduler.is_shutting_down:
+                            print(f"   ⚠️  No more games available for {agent_id}")
+                        break
             
             if agent_games:
                 assignments[agent_id] = agent_games
@@ -105,9 +126,9 @@ class EvolutionGameScheduler:
         
         return assignments
     
-    def release_game(self, game_id: str):
+    def release_game(self, game_id: str, agent_id: Optional[str] = None):
         """Mark a game as completed (agent finished playing)."""
-        self.scheduler.release_game(game_id)
+        self.scheduler.release_game(game_id, agent_id=agent_id)
     
     def release_all_agent_games(self, agent_id: str):
         """Release all games assigned to an agent."""

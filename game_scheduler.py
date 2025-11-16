@@ -57,11 +57,12 @@ class GameScheduler:
     
     def __init__(self, db: DatabaseInterface):
         self.db = db
-        self.active_games: Dict[str, ActiveGame] = {}
+        self.active_games: Dict[str, List[ActiveGame]] = {}  # game_id -> list of agents playing it
         self.game_type_mode_counts: Dict[str, Dict[str, int]] = {}
         self.last_assigned_game_type: Optional[str] = None
         self.current_generation: Optional[int] = None
         self.generation_game_type_assignments: Dict[str, str] = {}  # game_type -> last_mode_assigned
+        self.is_shutting_down: bool = False  # Graceful shutdown flag
         
     def get_next_game_for_agent(
         self,
@@ -84,6 +85,10 @@ class GameScheduler:
         Returns:
             game_id to play, or None if no games available
         """
+        # Check for shutdown - don't assign new games during shutdown
+        if self.is_shutting_down:
+            return None
+        
         # Reset counters when generation changes (enables mode rotation)
         if generation is not None and generation != self.current_generation:
             self.current_generation = generation
@@ -97,13 +102,30 @@ class GameScheduler:
         game_infos = self._get_game_type_info(available_games)
         
         # Filter out games currently being played
-        available_infos = [
-            info for info in game_infos 
-            if info.game_id not in self.active_games
-        ]
+        # EXCEPTION: Optimizers can share games (they work on different levels in parallel)
+        if agent_mode == 'optimizer':
+            # Optimizers can work on any game, even if occupied
+            available_infos = game_infos
+        else:
+            # Pioneers/generalists need exclusive access (avoid conflicting exploration)
+            # Block if game has any non-optimizer agent (pioneer/generalist)
+            available_infos = []
+            for info in game_infos:
+                if info.game_id not in self.active_games:
+                    # Game not occupied at all
+                    available_infos.append(info)
+                else:
+                    # Check if game only has optimizers (then pioneer/generalist can't join)
+                    agents_on_game = self.active_games[info.game_id]
+                    has_non_optimizer = any(a.agent_mode != 'optimizer' for a in agents_on_game)
+                    if not has_non_optimizer:
+                        # Only optimizers present, this pioneer/generalist can't join
+                        pass
+                    # Game has pioneer/generalist, can't assign to another pioneer/generalist
         
         if not available_infos:
-            print(f"⚠️  No games available - all {len(available_games)} games are in use")
+            if not self.is_shutting_down:
+                print(f"⚠️  No games available - all {len(available_games)} games are in use")
             return None
         
         # Apply scheduling rules
@@ -113,14 +135,17 @@ class GameScheduler:
         )
         
         if selected_game:
-            # Mark game as active
-            self.active_games[selected_game.game_id] = ActiveGame(
+            # Mark game as active (add to list of agents playing this game)
+            if selected_game.game_id not in self.active_games:
+                self.active_games[selected_game.game_id] = []
+            
+            self.active_games[selected_game.game_id].append(ActiveGame(
                 game_id=selected_game.game_id,
                 agent_id=agent_id,
                 agent_mode=agent_mode,
                 started_at=datetime.now(),
                 session_id=session_id
-            )
+            ))
             
             # Track mode distribution
             game_type = selected_game.game_type
@@ -140,28 +165,69 @@ class GameScheduler:
         
         return None
     
-    def release_game(self, game_id: str):
-        """Mark a game as no longer being played."""
+    def release_game(self, game_id: str, agent_id: Optional[str] = None):
+        """
+        Mark a game as no longer being played by an agent.
+        
+        Args:
+            game_id: Game to release
+            agent_id: Specific agent releasing the game (if None, removes all agents)
+        """
         if game_id in self.active_games:
-            active = self.active_games[game_id]
-            duration = (datetime.now() - active.started_at).total_seconds()
-            print(f"✓ Released {game_id} (played for {duration:.1f}s by {active.agent_id})")
-            del self.active_games[game_id]
+            if agent_id:
+                # Remove specific agent from this game
+                agents = self.active_games[game_id]
+                for i, active in enumerate(agents):
+                    if active.agent_id == agent_id:
+                        duration = (datetime.now() - active.started_at).total_seconds()
+                        print(f"✓ Released {game_id} (played for {duration:.1f}s by {agent_id})")
+                        agents.pop(i)
+                        break
+                
+                # If no more agents on this game, remove it entirely
+                if not agents:
+                    del self.active_games[game_id]
+            else:
+                # Release all agents from this game
+                agents = self.active_games[game_id]
+                for active in agents:
+                    duration = (datetime.now() - active.started_at).total_seconds()
+                    print(f"✓ Released {game_id} (played for {duration:.1f}s by {active.agent_id})")
+                del self.active_games[game_id]
     
     def get_active_games(self) -> List[ActiveGame]:
-        """Get list of currently active games."""
-        return list(self.active_games.values())
+        """Get list of currently active games (flattened from all games)."""
+        return [active for agents in self.active_games.values() for active in agents]
+    
+    def shutdown(self):
+        """Initiate graceful shutdown - stop assigning new games."""
+        self.is_shutting_down = True
+        active_count = len(self.get_active_games())
+        if active_count > 0:
+            print(f"  [SCHEDULER] Shutdown initiated - {active_count} games still active, no new assignments")
     
     def _cleanup_stale_games(self):
         """Remove games that have been active too long (likely crashed/stuck)."""
         stale_threshold = datetime.now() - timedelta(minutes=30)
-        stale_games = [
-            game_id for game_id, active in self.active_games.items()
-            if active.started_at < stale_threshold
-        ]
+        stale_games = []
         
+        for game_id, agents in self.active_games.items():
+            # Remove stale agents from this game
+            agents_to_remove = [
+                active for active in agents 
+                if active.started_at < stale_threshold
+            ]
+            
+            for active in agents_to_remove:
+                print(f"⚠️  Removing stale agent {active.agent_id} from game: {game_id}")
+                agents.remove(active)
+            
+            # If no agents left on this game, mark for removal
+            if not agents:
+                stale_games.append(game_id)
+        
+        # Remove games with no active agents
         for game_id in stale_games:
-            print(f"⚠️  Removing stale game: {game_id}")
             del self.active_games[game_id]
     
     def _get_game_type_info(self, game_ids: List[str]) -> List[GameTypeInfo]:
@@ -400,9 +466,11 @@ class GameScheduler:
     
     def get_stats(self) -> Dict:
         """Get scheduler statistics."""
+        all_active = self.get_active_games()
         return {
-            'active_games': len(self.active_games),
-            'game_types_active': len(set(a.agent_mode for a in self.active_games.values())),
+            'active_games': len(self.active_games),  # Number of unique games being played
+            'total_agents_playing': len(all_active),  # Total agents across all games
+            'game_types_active': len(set(a.agent_mode for a in all_active)),
             'mode_distribution': self.game_type_mode_counts,
             'active_game_list': [
                 {
@@ -411,7 +479,7 @@ class GameScheduler:
                     'mode': a.agent_mode,
                     'duration_seconds': (datetime.now() - a.started_at).total_seconds()
                 }
-                for a in self.active_games.values()
+                for a in all_active
             ]
         }
 
