@@ -2610,6 +2610,8 @@ class GameplayEngine:
                     frames_match = self._compare_frames(expected_initial_frame, current_frame)
                     if not frames_match:
                         logger.warning(f"⚠️ Initial frame mismatch - aborting replay for {sequence_id}")
+                        logger.debug(f"   Expected frame type: {type(expected_initial_frame)}, length: {len(expected_initial_frame)}")
+                        logger.debug(f"   Current frame type: {type(current_frame)}, length: {len(current_frame) if isinstance(current_frame, list) else 'N/A'}")
                         return {'game_state': game_state, 'success': False}
                 else:
                     logger.debug(f"🔄 No frame data available, allowing replay based on game type match")
@@ -3009,24 +3011,44 @@ class GameplayEngine:
         """
         Compare two frames for similarity.
         Returns True if frames match closely enough for replay.
+        
+        Handles various frame formats from ARC API:
+        - Single grid: [[row1], [row2], ...]
+        - Multiple grids (moving elements): [[[grid1]], [[grid2]], ...]
+        - Unwrapped format from GameState: [[row1], [row2], ...]
         """
         try:
-            # Handle nested lists from ARC API
-            if isinstance(frame1, list) and len(frame1) > 0:
-                if isinstance(frame1[0], list) and len(frame1[0]) > 0:
-                    if isinstance(frame1[0][0], list):
-                        frame1 = frame1[0][0]  # Unwrap [[[data]]]
+            # Normalize both frames to unwrapped grid format
+            def unwrap_frame(frame):
+                """Recursively unwrap frame to get the actual grid data."""
+                if not isinstance(frame, list) or len(frame) == 0:
+                    return frame
+                
+                # If this is a list of multiple grids (moving elements), take the first one
+                # Structure: [[[grid1]], [[grid2]], ...] -> [[grid1]] -> [grid1]
+                if isinstance(frame[0], list) and len(frame[0]) > 0:
+                    if isinstance(frame[0][0], list):
+                        # Check if this is multiple grids or nested single grid
+                        if len(frame) > 1 and isinstance(frame[1], list) and isinstance(frame[1][0], list):
+                            # Multiple grids: [[[grid1]], [[grid2]], ...] - take first
+                            return unwrap_frame(frame[0])
+                        else:
+                            # Single nested grid: [[[data]]] - unwrap
+                            return unwrap_frame(frame[0])
+                
+                # This is already a grid: [[row1], [row2], ...]
+                return frame
             
-            if isinstance(frame2, list) and len(frame2) > 0:
-                if isinstance(frame2[0], list) and len(frame2[0]) > 0:
-                    if isinstance(frame2[0][0], list):
-                        frame2 = frame2[0][0]  # Unwrap [[[data]]]
+            frame1 = unwrap_frame(frame1)
+            frame2 = unwrap_frame(frame2)
             
             # Simple equality check
             if frame1 == frame2:
                 return True
             
             # If frames are different lengths, definitely don't match
+            if not isinstance(frame1, list) or not isinstance(frame2, list):
+                return False
             if len(frame1) != len(frame2):
                 return False
             
