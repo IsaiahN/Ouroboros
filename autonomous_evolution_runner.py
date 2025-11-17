@@ -52,6 +52,7 @@ from viral_package_engine import ViralPackageEngine, display_viral_ecosystem_das
 from evolution_game_scheduler import EvolutionGameScheduler  # NEW: Prevent duplicate game plays
 from regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
 from sequence_pruning_system import SequencePruningSystem  # NEW: Automatic bad sequence removal
+from optimization_threshold_system import OptimizationThresholdSystem  # NEW: Track optimized levels
 # GameDiversityPreserver import removed - prestige-only protection now
 
 # Rule 2: Database-only logging
@@ -107,6 +108,7 @@ class AutonomousEvolutionRunner:
         self.regulatory_engine = RegulatorySignalEngine(self.db)  # PHASE 4: Distributed regulation
         self.game_scheduler = EvolutionGameScheduler(self.db)  # NEW: Prevent duplicate game plays
         self.sequence_pruner = SequencePruningSystem(self.db)  # NEW: Automatic bad sequence removal
+        self.optimization_tracker = OptimizationThresholdSystem(self.db)  # NEW: Track optimized levels
         # DIVERSITY PRESERVER DISABLED - prestige-only protection now
         
         # PHASE 5: Horizontal Gene Transfer with Emotional Intelligence
@@ -645,13 +647,45 @@ class AutonomousEvolutionRunner:
             # Ultimate fallback: random games
             return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
         
-        # OPTIMIZER MODE: Focus on games with beaten levels (optimize those sequences)
+        # OPTIMIZER MODE: Focus on UNOPTIMIZED levels (skip optimized ones)
         elif agent_mode == 'optimizer':
-            # Optimizers work on ALL games, but prioritize games with:
-            # 1. Most beaten levels (more levels to optimize)
-            # 2. Highest action counts per level (most room for improvement)
+            # NEW STRATEGY: Use optimization threshold system
+            # 1. Get unoptimized levels (high value targets)
+            # 2. Skip optimized levels (use best sequence, don't waste time)
+            # 3. Focus effort where it matters
             
-            # Build optimization priority list for all games
+            optimization_targets = self.optimization_tracker.get_optimization_targets(
+                agent_mode='optimizer',
+                limit=games_per_agent * 2  # Get extra targets for filtering
+            )
+            
+            # Extract game IDs from targets (removing level-specific info for now)
+            target_games = list(set(t['game_id'] for t in optimization_targets))
+            
+            # Prioritize unbeaten > unoptimized
+            unbeaten_targets = [t['game_id'] for t in optimization_targets if t['priority_class'] == 'unbeaten']
+            unoptimized_targets = [t['game_id'] for t in optimization_targets if t['priority_class'] == 'unoptimized']
+            
+            selected = []
+            
+            # First priority: Unbeaten games (no sequences yet - highest value)
+            if unbeaten_targets:
+                num_unbeaten = min(games_per_agent // 2, len(unbeaten_targets))
+                selected.extend(random.sample(unbeaten_targets, num_unbeaten))
+            
+            # Second priority: Unoptimized games (can still improve)
+            if unoptimized_targets and len(selected) < games_per_agent:
+                remaining = games_per_agent - len(selected)
+                selected.extend(random.sample(unoptimized_targets, min(remaining, len(unoptimized_targets))))
+            
+            # If we have enough targets, return them
+            if len(selected) >= games_per_agent:
+                return selected[:games_per_agent]
+            
+            # Fallback: If optimization tracker has no targets, use old logic
+            # (this happens on first generation before tracking is populated)
+            print(f"  [OPTIMIZER] Using fallback assignment (optimization tracker has {len(optimization_targets)} targets)")
+            
             optimization_priority = []
             
             for game_id in all_game_ids:
@@ -663,27 +697,17 @@ class AutonomousEvolutionRunner:
                     continue
                 
                 # Calculate optimization potential
-                # Games with more beaten levels = more optimization work available
-                # Games with higher action counts = more room for improvement
                 avg_actions = stats['avg_actions'] if stats['avg_actions'] > 0 else 1000
                 
                 optimization_priority.append({
                     'game_id': game_id,
-                    'max_level': max_level,  # Number of beaten levels
-                    'avg_actions': avg_actions,  # Actions per level
-                    'has_win': stats['has_win'],
-                    # Priority score: more levels + higher actions = better optimization target
+                    'max_level': max_level,
+                    'avg_actions': avg_actions,
                     'priority': max_level * avg_actions
                 })
             
             if optimization_priority:
-                # Sort by priority (most levels * highest actions = best targets)
-                optimization_priority.sort(
-                    key=lambda x: x['priority'],
-                    reverse=True
-                )
-                
-                # Select top optimization targets
+                optimization_priority.sort(key=lambda x: x['priority'], reverse=True)
                 selected = [g['game_id'] for g in optimization_priority[:games_per_agent]]
                 
                 # Fill remaining if needed
@@ -694,7 +718,7 @@ class AutonomousEvolutionRunner:
                 
                 return selected[:games_per_agent]
             
-            # Fallback: random games if no optimization targets found
+            # Ultimate fallback
             return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
         
         # GENERALIST MODE: Balanced mix of unbeaten and optimization targets
@@ -770,7 +794,7 @@ class AutonomousEvolutionRunner:
             agent_ids = [a['agent_id'] for a in agents]
             mode_assignments = mode_system.assign_population_modes(self.current_generation, agent_ids)
             distribution = mode_system.get_population_mode_distribution(self.current_generation)
-            print(f"[MODE] {mode_system.phase} phase - Dynamic roles: {distribution['pioneer']} pioneers, {distribution['optimizer']} optimizers, {distribution['generalist']} generalists")
+            print(f"[MODE] {mode_system.phase} phase - Dynamic roles: {distribution['pioneer']} pioneers, {distribution['optimizer']} optimizers, {distribution['generalist']} generalists, {distribution['exploiter']} exploiters")
             
             # CRITICAL FIX: Distribute games_per_generation ACROSS all agents, not per agent
             # Old logic: games_per_agent = num_games // len(agents) meant 419 agents × 1 game = 419 games (70+ hours!)
@@ -1310,6 +1334,24 @@ class AutonomousEvolutionRunner:
                     
             except Exception as e:
                 print(f"[WARN] Sequence pruning failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # OPTIMIZATION TRACKING: Update which levels are optimized vs need work
+            print(f"\n[OPTIMIZATION] Updating level optimization status for generation {self.current_generation}...")
+            try:
+                opt_summary = self.optimization_tracker.update_optimization_status(self.current_generation)
+                
+                if opt_summary['newly_optimized'] > 0:
+                    print(f"[OK] {opt_summary['newly_optimized']} levels newly optimized!")
+                
+                print(f"[OK] Optimization status: {opt_summary['optimized']} optimized, "
+                      f"{opt_summary['still_optimizing']} still need work")
+                print(f"     → Optimizers will use best sequences for optimized levels")
+                print(f"     → Optimizers will focus on unoptimized/unbeaten levels")
+                
+            except Exception as e:
+                print(f"[WARN] Optimization tracking failed: {e}")
                 import traceback
                 traceback.print_exc()
             

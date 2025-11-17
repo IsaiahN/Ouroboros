@@ -2,9 +2,17 @@
 Agent Operating Mode System
 
 Implements dynamic role assignment for agents:
-- 10% PIONEERS: 5x mutation rate, maximum exploration (breakthrough seekers)
-- 60% OPTIMIZERS: 0.5x mutation rate, refine known sequences (efficiency experts)
-- 30% GENERALISTS: 1.0x mutation rate, maintain baseline capability
+EXPLORATION Phase (no full wins yet):
+- 60% PIONEERS: 5x mutation rate, maximum exploration (breakthrough seekers)
+- 10% OPTIMIZERS: 0.5x mutation rate, refine partial wins
+- 20% GENERALISTS: 1.0x mutation rate, maintain baseline capability
+- 10% EXPLOITERS: 0.1x mutation, only replay proven sequences (harvest)
+
+OPTIMIZATION Phase (at least one full win):
+- 10% PIONEERS: Continue exploring new strategies
+- 50% OPTIMIZERS: 0.5x mutation rate, refine known sequences (efficiency experts)
+- 25% GENERALISTS: 1.0x mutation rate, maintain diversity
+- 15% EXPLOITERS: Pure exploitation of proven sequences
 
 Modes are per-deployment (agent can switch roles between games based on performance).
 Network-wide coordination ensures population maintains optimal distribution.
@@ -26,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentOperatingModeSystem:
-    """Manages dynamic role assignment for agents (Pioneer/Optimizer/Generalist)"""
+    """Manages dynamic role assignment for agents (Pioneer/Optimizer/Generalist/Exploiter)"""
     
     def __init__(self, db: DatabaseInterface):
         self.db = db
@@ -36,8 +44,8 @@ class AgentOperatingModeSystem:
         self._update_population_distribution()
         
         # Distribution will be set by _update_population_distribution():
-        # EXPLORATION PHASE (no full wins): 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST
-        # OPTIMIZATION PHASE (has full wins): 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST
+        # EXPLORATION PHASE (no full wins): 60% PIONEER, 10% OPTIMIZER, 20% GENERALIST, 10% EXPLOITER
+        # OPTIMIZATION PHASE (has full wins): 10% PIONEER, 50% OPTIMIZER, 25% GENERALIST, 15% EXPLOITER
         
         # Mode mutation multipliers
         self.PIONEER_MUTATION_MULTIPLIER = 5.0     # 5x exploration
@@ -69,6 +77,16 @@ class AgentOperatingModeSystem:
                 'risk_tolerance': 0.5,
                 'exploit_sequences': False,
                 'description': 'Balanced agent - maintain baseline capability'
+            },
+            'exploiter': {
+                'mutation_multiplier': 0.1,
+                'action_diversity': 0.0,
+                'novelty_seeking': 0.0,
+                'risk_tolerance': 0.0,
+                'exploit_sequences': True,
+                'only_use_sequences': True,
+                'prefer_uber_sequences': True,
+                'description': 'Pure exploiter - only replays proven sequences and uber-sequences'
             }
         }
     
@@ -77,8 +95,9 @@ class AgentOperatingModeSystem:
         Adaptive population distribution based on game completion status.
         
         EXPLORATION PHASE (no games fully beaten):
-            70% PIONEER - MAXIMUM exploration focus to find first solutions
+            60% PIONEER - MAXIMUM exploration focus to find first solutions
             10% OPTIMIZER - Minimal refinement of partial solutions
+            10% EXPLOITER - Test existing sequences for reliability
             20% GENERALIST - Baseline validation
         
         OPTIMIZATION PHASE (at least one game fully beaten):
@@ -99,33 +118,36 @@ class AgentOperatingModeSystem:
             if has_full_wins:
                 # OPTIMIZATION PHASE: At least one game fully beaten
                 self.TARGET_PIONEER_PCT = 0.10
-                self.TARGET_OPTIMIZER_PCT = 0.60
-                self.TARGET_GENERALIST_PCT = 0.30
+                self.TARGET_OPTIMIZER_PCT = 0.50
+                self.TARGET_GENERALIST_PCT = 0.25
+                self.TARGET_EXPLOITER_PCT = 0.15
                 self.phase = "OPTIMIZATION"
                 logger.info(f"🎯 OPTIMIZATION PHASE: {full_wins[0]['win_count']} games fully beaten")
-                logger.info(f"   Distribution: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST")
+                logger.info(f"   Distribution: 10% PIONEER, 50% OPTIMIZER, 25% GENERALIST, 15% EXPLOITER")
             else:
                 # EXPLORATION PHASE: No games fully beaten yet - HEAVY PIONEER FOCUS
-                self.TARGET_PIONEER_PCT = 0.70
+                self.TARGET_PIONEER_PCT = 0.60
                 self.TARGET_OPTIMIZER_PCT = 0.10
                 self.TARGET_GENERALIST_PCT = 0.20
+                self.TARGET_EXPLOITER_PCT = 0.10
                 self.phase = "EXPLORATION"
                 logger.info(f"🔍 EXPLORATION PHASE: No games fully beaten yet")
-                logger.info(f"   Distribution: 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST")
+                logger.info(f"   Distribution: 60% PIONEER, 10% OPTIMIZER, 20% GENERALIST, 10% EXPLOITER")
                 
         except Exception as e:
             # Fallback to exploration phase if query fails
             logger.warning(f"Failed to check game completion status: {e}")
-            self.TARGET_PIONEER_PCT = 0.70
+            self.TARGET_PIONEER_PCT = 0.60
             self.TARGET_OPTIMIZER_PCT = 0.10
             self.TARGET_GENERALIST_PCT = 0.20
+            self.TARGET_EXPLOITER_PCT = 0.10
             self.phase = "EXPLORATION"
         
         # Create database table if not exists
         self._initialize_database()
         
         logger.info("[✓] Agent Operating Mode System initialized")
-        logger.info(f"   Target distribution: {self.TARGET_PIONEER_PCT*100:.0f}% pioneers, {self.TARGET_OPTIMIZER_PCT*100:.0f}% optimizers, {self.TARGET_GENERALIST_PCT*100:.0f}% generalists")
+        logger.info(f"   Target distribution: {self.TARGET_PIONEER_PCT*100:.0f}% pioneers, {self.TARGET_OPTIMIZER_PCT*100:.0f}% optimizers, {self.TARGET_GENERALIST_PCT*100:.0f}% generalists, {self.TARGET_EXPLOITER_PCT*100:.0f}% exploiters")
     
     def _initialize_database(self):
         """Create agent_operating_modes table"""
@@ -264,12 +286,13 @@ class AgentOperatingModeSystem:
         total_agents = len(active_agents)
         target_pioneers = max(1, int(total_agents * self.TARGET_PIONEER_PCT))
         target_optimizers = int(total_agents * self.TARGET_OPTIMIZER_PCT)
-        target_generalists = total_agents - target_pioneers - target_optimizers
+        target_exploiters = int(total_agents * self.TARGET_EXPLOITER_PCT)
+        target_generalists = total_agents - target_pioneers - target_optimizers - target_exploiters
         
         logger.info(f"\n[MODE ASSIGNMENT] Generation {generation}: {total_agents} agents")
         if game_id:
             logger.info(f"   Game: {game_id} (using persistent mode memory)")
-        logger.info(f"   Target: {target_pioneers} pioneers, {target_optimizers} optimizers, {target_generalists} generalists")
+        logger.info(f"   Target: {target_pioneers} pioneers, {target_optimizers} optimizers, {target_generalists} generalists, {target_exploiters} exploiters")
         
         # PERSISTENT MODE MEMORY: Check if agents have proven effective modes for this game
         agents_with_memory = {}
@@ -307,7 +330,8 @@ class AgentOperatingModeSystem:
         assigned_modes = {
             'pioneer': sum(1 for m in agents_with_memory.values() if m == 'pioneer'),
             'optimizer': sum(1 for m in agents_with_memory.values() if m == 'optimizer'),
-            'generalist': sum(1 for m in agents_with_memory.values() if m == 'generalist')
+            'generalist': sum(1 for m in agents_with_memory.values() if m == 'generalist'),
+            'exploiter': sum(1 for m in agents_with_memory.values() if m == 'exploiter')
         }
         
         for agent_id in agents_by_performance:
@@ -315,8 +339,15 @@ class AgentOperatingModeSystem:
             
             # Decision logic: What mode is best for this agent right now?
             
-            # HIGH PERFORMERS → Optimizers (exploit success)
-            if (assigned_modes['optimizer'] < target_optimizers and
+            # TOP PERFORMERS WITH WINNING SEQUENCES → Exploiters (pure exploitation)
+            if (assigned_modes['exploiter'] < target_exploiters and
+                stats.get('avg_score', 0) > 0.7 and
+                stats.get('total_wins', 0) > 0):
+                mode = 'exploiter'
+                reason = f"Top performer (avg_score={stats.get('avg_score', 0):.2f}, wins={stats.get('total_wins', 0)}) - exploit proven sequences"
+            
+            # HIGH PERFORMERS → Optimizers (refine success)
+            elif (assigned_modes['optimizer'] < target_optimizers and
                 stats.get('avg_score', 0) > 0.5):
                 mode = 'optimizer'
                 reason = f"High performer (avg_score={stats.get('avg_score', 0):.2f}) - refine winning strategies"
@@ -334,8 +365,11 @@ class AgentOperatingModeSystem:
             
             # Fill remaining slots (if targets weren't met)
             else:
-                # Prioritize: optimizer > generalist > pioneer
-                if assigned_modes['optimizer'] < target_optimizers:
+                # Prioritize: exploiter > optimizer > generalist > pioneer
+                if assigned_modes['exploiter'] < target_exploiters:
+                    mode = 'exploiter'
+                    reason = "Filling exploiter quota"
+                elif assigned_modes['optimizer'] < target_optimizers:
                     mode = 'optimizer'
                     reason = "Filling optimizer quota"
                 elif assigned_modes['generalist'] < target_generalists:
@@ -354,7 +388,8 @@ class AgentOperatingModeSystem:
         # Report final distribution
         logger.info(f"   Assigned: {assigned_modes['pioneer']} pioneers, "
                    f"{assigned_modes['optimizer']} optimizers, "
-                   f"{assigned_modes['generalist']} generalists")
+                   f"{assigned_modes['generalist']} generalists, "
+                   f"{assigned_modes['exploiter']} exploiters")
         
         return mode_assignments
     
@@ -467,7 +502,7 @@ class AgentOperatingModeSystem:
             GROUP BY operating_mode
         """, (generation,))
         
-        distribution = {'pioneer': 0, 'optimizer': 0, 'generalist': 0}
+        distribution = {'pioneer': 0, 'optimizer': 0, 'generalist': 0, 'exploiter': 0}
         for row in results:
             distribution[row['operating_mode']] = row['count']
         

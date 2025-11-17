@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Core Gameplay Logic
 
@@ -55,8 +58,8 @@ class GameplayEngine:
             logger.debug("Subgoal planner not available")
         
         self.game_config = {
-            'max_actions_per_level': 400,  # Max actions per level (increased for multi-level discovery)
-            'max_total_actions': 7000,  # Max total actions across all levels (increased for multi-level runs)
+            'max_actions_per_level': 250,  # Max actions per level (REDUCED: force efficiency, prevent wandering)
+            'max_total_actions': 2000,  # Max total actions across all levels (REDUCED: 7000→2000, fail fast not stuck loops)
             'action_timeout': 30.0,
             'strategy': 'balanced',
             'enable_random_exploration': True,
@@ -148,8 +151,11 @@ class GameplayEngine:
             # OPTIMIZER: Always gets sequence (to try improving it)
             # GENERALIST: Gets sequence (follows it exactly)
             # PIONEER: Gets sequence (uses it to reach frontier, then explores)
-            if learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist', 'pioneer']:
+            # EXPLOITER: REQUIRES sequence (fails if no sequence found)
+            if learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist', 'pioneer', 'exploiter']:
                 try:
+                    logger.info(f"[SEQUENCE REPLAY DEBUG] Checking for sequences for game {game_id}, agent_mode={agent_mode}")
+                    
                     # NEW: Use cumulative sequence approach (user's insight)
                     # Get the SINGLE BEST sequence that completes the most levels
                     # This is more efficient than level-by-level lookup
@@ -157,16 +163,40 @@ class GameplayEngine:
                     known_sequence = self._get_best_cumulative_sequence(game_id)
                     
                     if known_sequence:
+                        logger.info(f"[SEQUENCE REPLAY DEBUG] Found sequence {known_sequence.get('sequence_id', 'UNKNOWN')}: "
+                                  f"{known_sequence['total_actions']} actions, completes {int(known_sequence['total_score'])} levels")
+                    else:
+                        logger.warning(f"[SEQUENCE REPLAY DEBUG] No sequences found for game {game_id}")
+                        if agent_mode == 'exploiter':
+                            logger.error(f"[EXPLOITER FAILURE] Agent in exploiter mode but no sequences available for {game_id} - cannot proceed")
+                    
+                    if known_sequence:
                         levels_completed_by_seq = int(known_sequence['total_score'])
-                        if agent_mode == 'optimizer':
+                        if agent_mode == 'exploiter':
+                            logger.info(f"💎 EXPLOITER mode: Found {known_sequence['total_actions']}-action sequence "
+                                      f"(completes {levels_completed_by_seq} levels), will replay to harvest proven results")
+                        elif agent_mode == 'optimizer':
                             logger.info(f"🔧 OPTIMIZER mode: Found {known_sequence['total_actions']}-action sequence "
                                       f"(completes {levels_completed_by_seq} levels), will try to beat it")
                         elif agent_mode == 'pioneer':
                             logger.info(f"🚀 PIONEER mode: Found {known_sequence['total_actions']}-action sequence "
                                       f"(completes {levels_completed_by_seq} levels), will replay to frontier then explore")
                         else:
-                            logger.info(f"� GENERALIST mode: Found {known_sequence['total_actions']}-action sequence "
+                            logger.info(f"🌐 GENERALIST mode: Found {known_sequence['total_actions']}-action sequence "
                                       f"(completes {levels_completed_by_seq} levels), will replay exactly")
+                    else:
+                        # No sequence available - exploiter mode cannot proceed
+                        if agent_mode == 'exploiter':
+                            logger.error(f"💎 EXPLOITER ABORT: No sequences available for {game_id} - exploiters only use proven sequences")
+                            return {
+                                'game_id': game_id,
+                                'final_state': 'NO_SEQUENCE_AVAILABLE',
+                                'final_score': 0.0,
+                                'actions_taken': 0,
+                                'win': False,
+                                'method': 'exploiter_abort_no_sequence',
+                                'error': 'Exploiter mode requires proven sequences but none available'
+                            }
                 except Exception as e:
                     logger.debug(f"Pattern learning lookup error: {e}")
         
@@ -219,14 +249,16 @@ class GameplayEngine:
                 # Don't replay - let optimizer explore with checkpoint guidance
                 known_sequence = None  # Clear so normal exploration happens
             
-            # If we have a known sequence (GENERALIST/PIONEER), replay it ONCE to reach frontier
+            # If we have a known sequence (GENERALIST/PIONEER/EXPLOITER), replay it ONCE to reach frontier
             # This is the NEW cumulative approach - replay best sequence once, not level-by-level
             if known_sequence:
                 logger.info(f"🔄 Replaying BEST cumulative sequence (score {known_sequence['total_score']}, {known_sequence['total_actions']} actions)")
+                logger.info(f"[SEQUENCE REPLAY DEBUG] About to call _replay_sequence_inline for sequence {known_sequence.get('sequence_id', 'UNKNOWN')}")
                 replay_result = await self._replay_sequence_inline(
                     game_state, 
                     known_sequence
                 )
+                logger.info(f"[SEQUENCE REPLAY DEBUG] Replay completed, result={replay_result is not None}, success={replay_result.get('success', False) if replay_result else 'N/A'}")
                 
                 # Update game_state from replay result
                 if replay_result:
@@ -268,10 +300,11 @@ class GameplayEngine:
                         logger.info(f"✅ Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
                         
                         # MODE-SPECIFIC BEHAVIOR AT FRONTIER:
-                        if agent_mode == 'generalist':
-                            # GENERALIST: Stop here, only replay known sequences
+                        if agent_mode == 'generalist' or agent_mode == 'exploiter':
+                            # GENERALIST/EXPLOITER: Stop here, only replay known sequences
                             # Should NOT explore beyond frontier
-                            logger.info(f"🌐 GENERALIST: At frontier, no more sequences available - stopping")
+                            stop_reason = "GENERALIST" if agent_mode == 'generalist' else "EXPLOITER"
+                            logger.info(f"🌐 {stop_reason}: At frontier, no more sequences available - stopping")
                             level_completions = int(game_state.score)
                             actions_taken = len(json.loads(known_sequence['action_sequence']))
                             await self.session_manager.finish_game("FRONTIER_REACHED", game_state.score, level_completions, actions_taken)
@@ -282,7 +315,7 @@ class GameplayEngine:
                                 'final_score': game_state.score,
                                 'actions_taken': actions_taken,
                                 'win': False,
-                                'method': 'generalist_frontier_stop',
+                                'method': f'{agent_mode}_frontier_stop',
                                 'sequence_id': known_sequence['sequence_id'],
                                 'frontier_level': frontier_level
                             }
@@ -301,11 +334,6 @@ class GameplayEngine:
             level_completions = 0  # Track how many levels completed
             current_level = 1  # Start at level 1 (first challenge to complete)
             level_start_action = 0  # Track where each level starts
-            
-            # Anti-oscillation: Track no-progress actions
-            actions_since_score_increase = 0  # Count actions with no score improvement
-            last_score_increase = 0.0  # Track last successful score
-            NO_PROGRESS_RESET_THRESHOLD = 1000  # Hard reset after 1000 actions with no progress (increased for more exploration)
             
             # API RESET tracking (NEW - hybrid approach)
             level_api_resets = 0  # Track resets used on current level
@@ -609,70 +637,7 @@ class GameplayEngine:
                                     except Exception as e:
                                         logger.error(f"   ✗ OPTIMIZER reset failed: {e}")
                     
-                    # Anti-oscillation: Track no-progress actions
-                    if score_increase > 0:
-                        # Score improved! Reset counter
-                        actions_since_score_increase = 0
-                        last_score_increase = game_state.score
-                    else:
-                        # No progress
-                        actions_since_score_increase += 1
-                        
-                        # HYBRID APPROACH: Internal reset at 300, API reset at 600
-                        
-                        # Phase 1: Internal hard reset after 300 actions with no progress
-                        if actions_since_score_increase == NO_PROGRESS_RESET_THRESHOLD:
-                            logger.warning(f"🔄 INTERNAL RESET: No score improvement for {actions_since_score_increase} actions! Clearing heuristics")
-                            
-                            # Force visual analyzer to reset all heuristics
-                            if hasattr(self.action_handler, 'visual_analyzer'):
-                                self.action_handler.visual_analyzer.exploration_radius = self.action_handler.visual_analyzer.max_exploration_radius
-                                self.action_handler.visual_analyzer.clicked_coordinates.clear()
-                                self.action_handler.visual_analyzer.oscillation_detected = False
-                                self.action_handler.consecutive_similar_coordinate = 0
-                                logger.info(f"   → Visual analyzer reset: max exploration radius, cleared coordinate history")
-                            
-                            logger.info(f"   → Trying completely new approach (300 more actions before API reset)")
-                        
-                        # Phase 2: API RESET after 600 actions if internal reset didn't help
-                        # ONLY FOR OPTIMIZER MODE - PIONEER/GENERALIST need full exploration budget
-                        elif (actions_since_score_increase >= API_RESET_THRESHOLD and 
-                              level_api_resets < MAX_API_RESETS_PER_LEVEL and
-                              agent_mode == 'optimizer'):
-                            logger.warning(f"🔄 API RESET #{level_api_resets + 1}: OPTIMIZER internal reset failed, resetting level via API")
-                            
-                            try:
-                                # Reset the current level via API (use scorecard from game creation)
-                                # IMPORTANT: This resets the SAME level, NOT progressing to next level
-                                # level_completions only increments when score actually increases (line 304)
-                                if not self.session_manager.client:
-                                    raise ValueError("Session manager client not initialized")
-                                
-                                game_state = await self.session_manager.client.reset_game(
-                                    game_id,
-                                    game_data.get('scorecard_id')  # Scorecard stored during create_game
-                                )
-                                
-                                level_api_resets += 1
-                                # NOTE: Don't reset level_action_count - keep cumulative count across resets
-                                # This ensures we track total actions spent on this level attempt
-                                actions_since_score_increase = 0  # Reset no-progress counter
-                                
-                                logger.info(f"   ✓ OPTIMIZER reset successful! Fresh attempt #{level_api_resets + 1}")
-                                logger.info(f"   → {MAX_API_RESETS_PER_LEVEL - level_api_resets} API resets remaining for this level")
-                                logger.info(f"   → Total actions on this level so far: {level_action_count}")
-                                
-                            except Exception as e:
-                                logger.error(f"   ✗ OPTIMIZER reset failed: {e}")
-                                # Continue with current state if reset fails
-                                actions_since_score_increase = 0  # Reset counter anyway to avoid spam
-                        
-                        # PIONEER/GENERALIST: Log no-progress but don't reset - they need full budget
-                        elif actions_since_score_increase >= API_RESET_THRESHOLD:
-                            mode_str = agent_mode.upper() if agent_mode else "UNKNOWN"
-                            logger.info(f"ℹ️ {mode_str}: {actions_since_score_increase} actions without progress, but continuing exploration (no reset)")
-                            # Reset counter to avoid log spam, but keep exploring
-                            actions_since_score_increase = 0
+                    # Track score improvements (no destructive resets - removed to preserve pattern learning)
                     
                     # BUGFIX: Only increment level_completions on full level completion (score increase >= 1.0)
                     # Previously incremented on >= 0.5 which caused overcounting with partial progress
@@ -2017,6 +1982,10 @@ class GameplayEngine:
                     generation
                 ))
                 
+                # CRITICAL: Force immediate commit to ensure sequence is saved
+                self.db.checkpoint_wal()
+                logger.info(f"💾 Sequence {sequence_id} committed to database immediately")
+                
                 # Try to detect and store abstract pattern (only if we have valid sequence_id)
                 self._detect_and_store_abstract_pattern(
                     sequence_id, game_id, level_number, pattern_signature, 
@@ -2455,6 +2424,7 @@ class GameplayEngine:
         try:
             # Extract game type prefix
             game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            logger.info(f"[SEQUENCE REPLAY DEBUG] _get_best_cumulative_sequence: game_id={game_id}, game_type={game_type}")
             
             # Get sequence with HIGHEST score (completes most levels)
             # Priority:
@@ -2484,15 +2454,18 @@ class GameplayEngine:
                 LIMIT 1
             """, (f"{game_type}-%",))
             
+            logger.info(f"[SEQUENCE REPLAY DEBUG] Query returned {len(sequences) if sequences else 0} sequences")
+            
             if sequences:
                 seq = sequences[0]
                 reliability_indicator = "✓" if seq['reliability'] >= 0.5 else "?"
                 logger.info(f"📖 {reliability_indicator} Best cumulative sequence for {game_type}: "
                            f"Score {seq['total_score']:.1f} (Level {int(seq['total_score'])}), "
                            f"{seq['total_actions']} actions, reliability {seq['reliability']:.2f}")
+                logger.info(f"[SEQUENCE REPLAY DEBUG] Returning sequence {seq.get('sequence_id', 'UNKNOWN')}")
                 return seq
             
-            logger.debug(f"No cumulative sequence found for game type {game_type}")
+            logger.warning(f"[SEQUENCE REPLAY DEBUG] No cumulative sequence found for game type {game_type}")
                 
         except Exception as e:
             logger.debug(f"Error retrieving cumulative sequence for {game_type}: {e}")
@@ -2642,12 +2615,14 @@ class GameplayEngine:
                     logger.debug(f"🔄 No frame data available, allowing replay based on game type match")
             
             # Track that we're referencing this sequence
+            logger.info(f"[SEQUENCE REPLAY DEBUG] Incrementing times_referenced for sequence {sequence_id}")
             self.db.execute_query("""
                 UPDATE winning_sequences 
                 SET times_referenced = times_referenced + 1,
                     last_referenced = ?
                 WHERE sequence_id = ?
             """, (datetime.now().isoformat(), sequence_id))
+            logger.info(f"[SEQUENCE REPLAY DEBUG] Successfully incremented times_referenced for sequence {sequence_id}")
             
             # Parse sequence
             actions = json.loads(sequence['action_sequence'])

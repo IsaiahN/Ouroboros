@@ -64,16 +64,16 @@ KEEP_FILES = {
     # Any files in DOCS/ or configs
 }
 
-# Directories to skip
+# Directories to skip (but we'll delete __pycache__ folders entirely)
 SKIP_DIRS = {
     ".git",
-    "__pycache__",
     ".vscode",
     "venv",
     "env"
 }
 
 # Note: DOCS is NOT in SKIP_DIRS because we want to clean *_Summary.* files from there
+# Note: __pycache__ is NOT in SKIP_DIRS because we want to DELETE those folders entirely
 
 def should_delete(filepath: Path) -> bool:
     """
@@ -144,7 +144,7 @@ def should_delete(filepath: Path) -> bool:
 
 def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
     """
-    Clean up temporary files from workspace.
+    Clean up temporary files and __pycache__ folders from workspace.
     
     Returns:
         (files_deleted, bytes_freed)
@@ -152,16 +152,41 @@ def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
     workspace_path = Path(workspace_root)
     files_deleted = 0
     bytes_freed = 0
+    pycache_folders_deleted = 0
     
-    print("\n[CLEANUP] Removing temporary files...")
+    print("\n[CLEANUP] Removing temporary files and __pycache__ folders...")
     print("=" * 80)
     
     # Walk workspace
     for root, dirs, files in os.walk(workspace_path):
+        root_path = Path(root)
+        
+        # Delete __pycache__ folders entirely
+        if '__pycache__' in dirs:
+            pycache_path = root_path / '__pycache__'
+            try:
+                # Count files in __pycache__ before deleting
+                pycache_size = sum(f.stat().st_size for f in pycache_path.rglob('*') if f.is_file())
+                pycache_file_count = sum(1 for f in pycache_path.rglob('*') if f.is_file())
+                
+                # Delete the entire folder
+                import shutil
+                shutil.rmtree(pycache_path)
+                
+                files_deleted += pycache_file_count
+                bytes_freed += pycache_size
+                pycache_folders_deleted += 1
+                print(f"  [DEL] {pycache_path.relative_to(workspace_path)}/ ({pycache_file_count} files)")
+            except Exception as e:
+                logger.warning(f"Failed to delete {pycache_path}: {e}")
+            
+            # Remove from dirs so we don't walk into it
+            dirs.remove('__pycache__')
+        
         # Skip certain directories (but we'll check individual files)
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         
-        root_path = Path(root)
+
         
         for filename in files:
             filepath = root_path / filename
@@ -186,7 +211,10 @@ def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
                     logger.warning(f"Failed to delete {filepath}: {e}")
     
     print("=" * 80)
-    print(f"[OK] Deleted {files_deleted} files ({bytes_freed / 1024:.1f} KB freed)\n")
+    if pycache_folders_deleted > 0:
+        print(f"[OK] Deleted {files_deleted} files + {pycache_folders_deleted} __pycache__ folders ({bytes_freed / 1024:.1f} KB freed)\n")
+    else:
+        print(f"[OK] Deleted {files_deleted} files ({bytes_freed / 1024:.1f} KB freed)\n")
     
     return files_deleted, bytes_freed
 
