@@ -51,7 +51,9 @@ class ActionHandler:
         self.visual_analyzer = VisualAnalyzer()  # Add visual analyzer
         
         # Agent operating mode tracking (for mode-specific behavior)
-        self.current_agent_mode = None  # 'pioneer', 'optimizer', 'generalist', or None
+        self.current_agent_mode = None  # 'pioneer', 'optimizer', 'generalist', 'exploiter', or None
+        self.current_level = 1  # Current level being played (for pioneer oscillation checks)
+        self.network_max_level = 0  # Network's max level for this game type (for pioneer checks)
         
         # Frame dimension tracking (expected 64x64 for ARC-AGI)
         self.expected_frame_size = (64, 64)  # (height, width)
@@ -78,14 +80,18 @@ class ActionHandler:
         self.spam_allowed_early = 10  # Allow up to 10 similar clicks early in level
         self.spam_allowed_late = 3   # Reduce to 3 similar clicks late in level
 
-    def set_agent_mode(self, mode: Optional[str]):
+    def set_agent_mode(self, mode: Optional[str], current_level: int = 1, network_max_level: int = 0):
         """Set the current agent operating mode for mode-specific behavior.
         
         Args:
-            mode: Agent operating mode ('pioneer', 'optimizer', 'generalist', or None)
+            mode: Agent operating mode ('pioneer', 'optimizer', 'generalist', 'exploiter', or None)
+            current_level: Current level being played (for pioneer oscillation checks)
+            network_max_level: Network's max level for this game type (for pioneer checks)
         """
         self.current_agent_mode = mode
-        logger.debug(f"ActionHandler agent mode set to: {mode}")
+        self.current_level = current_level
+        self.network_max_level = network_max_level
+        logger.debug(f"ActionHandler agent mode set to: {mode} (Level {current_level}, Network max: {network_max_level})")
 
     def _validate_frame_dimensions(self, frame: List[List[int]], context: str = "") -> bool:
         """
@@ -199,15 +205,23 @@ class ActionHandler:
         """
         coord = (x, y)
         
-        # PIONEER EXEMPTION: No oscillation checks for pioneers
+        # PIONEER EXEMPTION: Level-aware oscillation checks
+        # Lenient on frontier (unbeaten levels), strict on known levels
         if self.current_agent_mode == 'pioneer':
-            return {
-                'is_diverse': True,
-                'spam_detected': False,
-                'oscillation_detected': False,
-                'reason': 'PIONEER mode - no oscillation checks',
-                'threshold_used': 999
-            }
+            current_level = getattr(self, 'current_level', 1)
+            network_max_level = getattr(self, 'network_max_level', 0)
+            
+            # LENIENT on frontier (new territory) - pioneers need freedom to explore
+            if current_level >= network_max_level:
+                return {
+                    'is_diverse': True,
+                    'spam_detected': False,
+                    'oscillation_detected': False,
+                    'reason': f'PIONEER frontier (L{current_level} >= L{network_max_level}) - lenient',
+                    'threshold_used': 999
+                }
+            # STRICT on known levels - pioneers should use sequences there
+            # Fall through to normal oscillation checks below
         
         # Get dynamic threshold based on level progress
         dynamic_threshold = self._get_dynamic_spam_threshold()

@@ -647,48 +647,62 @@ class AutonomousEvolutionRunner:
             # Ultimate fallback: random games
             return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
         
-        # OPTIMIZER MODE: Focus on UNOPTIMIZED levels (skip optimized ones)
+        # OPTIMIZER MODE: Focus on BEATEN games/levels ONLY - reduce action counts
         elif agent_mode == 'optimizer':
-            # NEW STRATEGY: Use optimization threshold system
-            # 1. Get unoptimized levels (high value targets)
-            # 2. Skip optimized levels (use best sequence, don't waste time)
-            # 3. Focus effort where it matters
+            # CRITICAL FIX: Optimizers should NEVER work on unbeaten games
+            # That's pioneer territory. Optimizers refine what already works.
             
+            # Get games where community has at least one win or proven sequence
+            beaten_games = []
+            for game_id in all_game_ids:
+                stats = game_stats[game_id]
+                # Check if game has wins OR proven sequences
+                has_progress = stats['has_win'] or game_id in sequences_by_game
+                
+                if has_progress:
+                    beaten_games.append(game_id)
+            
+            if not beaten_games:
+                # Fallback: If no beaten games, optimizers become temporary pioneers
+                print(f"  [OPTIMIZER] No beaten games found, defaulting to pioneer behavior")
+                unbeaten_games = [g for g, s in game_stats.items() if not s['has_win']]
+                if unbeaten_games:
+                    return random.sample(unbeaten_games, min(games_per_agent, len(unbeaten_games)))
+                return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
+            
+            # Use optimization threshold system for beaten games ONLY
             optimization_targets = self.optimization_tracker.get_optimization_targets(
                 agent_mode='optimizer',
                 limit=games_per_agent * 2  # Get extra targets for filtering
             )
             
-            # Extract game IDs from targets (removing level-specific info for now)
-            target_games = list(set(t['game_id'] for t in optimization_targets))
+            # Filter targets to ONLY beaten games (exclude unbeaten)
+            beaten_targets = [t for t in optimization_targets 
+                            if t['game_id'] in beaten_games and t['priority_class'] != 'unbeaten']
             
-            # Prioritize unbeaten > unoptimized
-            unbeaten_targets = [t['game_id'] for t in optimization_targets if t['priority_class'] == 'unbeaten']
-            unoptimized_targets = [t['game_id'] for t in optimization_targets if t['priority_class'] == 'unoptimized']
+            # Extract game IDs from beaten targets
+            target_games = list(set(t['game_id'] for t in beaten_targets))
+            
+            # Prioritize unoptimized beaten games
+            unoptimized_targets = [t['game_id'] for t in beaten_targets if t['priority_class'] == 'unoptimized']
             
             selected = []
             
-            # First priority: Unbeaten games (no sequences yet - highest value)
-            if unbeaten_targets:
-                num_unbeaten = min(games_per_agent // 2, len(unbeaten_targets))
-                selected.extend(random.sample(unbeaten_targets, num_unbeaten))
-            
-            # Second priority: Unoptimized games (can still improve)
-            if unoptimized_targets and len(selected) < games_per_agent:
-                remaining = games_per_agent - len(selected)
-                selected.extend(random.sample(unoptimized_targets, min(remaining, len(unoptimized_targets))))
+            # Only priority: Unoptimized BEATEN games (can still improve)
+            if unoptimized_targets:
+                selected.extend(random.sample(unoptimized_targets, min(games_per_agent, len(unoptimized_targets))))
             
             # If we have enough targets, return them
             if len(selected) >= games_per_agent:
                 return selected[:games_per_agent]
             
-            # Fallback: If optimization tracker has no targets, use old logic
+            # Fallback: If optimization tracker has no targets, use beaten games only
             # (this happens on first generation before tracking is populated)
-            print(f"  [OPTIMIZER] Using fallback assignment (optimization tracker has {len(optimization_targets)} targets)")
+            print(f"  [OPTIMIZER] Using fallback assignment - beaten games only (optimization tracker has {len(optimization_targets)} targets)")
             
             optimization_priority = []
             
-            for game_id in all_game_ids:
+            for game_id in beaten_games:  # CRITICAL: Only iterate beaten games
                 stats = game_stats[game_id]
                 max_level = stats['max_level']
                 
@@ -957,6 +971,19 @@ class AutonomousEvolutionRunner:
                             except Exception as e:
                                 print(f"  [WARN] Collective reasoning setup failed: {e}")
                         
+                        # Determine target level for optimizers
+                        optimizer_target_level = None
+                        if agent_mode == 'optimizer':
+                            # Get optimization targets for this game
+                            all_targets = self.optimization_tracker.get_optimization_targets(
+                                agent_mode='optimizer',
+                                limit=100
+                            )
+                            # Filter to this game
+                            game_targets = [t for t in all_targets if t['game_id'] == game_id]
+                            if game_targets:
+                                optimizer_target_level = game_targets[0]['level_number']
+                        
                         # Use adaptive action limits (adjusted per generation)
                         # Configure engine with current adaptive limits
                         engine.configure(
@@ -970,7 +997,10 @@ class AutonomousEvolutionRunner:
                             enforce_game_diversity=self.agi_mode,
                             max_repeats_per_game=5 if self.agi_mode else 999,
                             # Specialist Mode settings (NEW)
-                            specialist_mode=self.specialist_mode
+                            specialist_mode=self.specialist_mode,
+                            # Agent role settings (NEW)
+                            agent_operating_mode=agent_mode,
+                            optimizer_target_level=optimizer_target_level
                         )
                         
                         # Play game - REAL ARC API CALL

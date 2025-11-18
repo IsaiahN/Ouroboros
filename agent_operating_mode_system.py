@@ -120,27 +120,27 @@ class AgentOperatingModeSystem:
                 self.TARGET_PIONEER_PCT = 0.10
                 self.TARGET_OPTIMIZER_PCT = 0.50
                 self.TARGET_GENERALIST_PCT = 0.25
-                self.TARGET_EXPLOITER_PCT = 0.15
+                self.TARGET_EXPLOITER_PCT = 0.15  # Higher in optimization phase
                 self.phase = "OPTIMIZATION"
                 logger.info(f"🎯 OPTIMIZATION PHASE: {full_wins[0]['win_count']} games fully beaten")
                 logger.info(f"   Distribution: 10% PIONEER, 50% OPTIMIZER, 25% GENERALIST, 15% EXPLOITER")
             else:
                 # EXPLORATION PHASE: No games fully beaten yet - HEAVY PIONEER FOCUS
                 self.TARGET_PIONEER_PCT = 0.60
-                self.TARGET_OPTIMIZER_PCT = 0.10
+                self.TARGET_OPTIMIZER_PCT = 0.15  # Slightly higher to refine partials
                 self.TARGET_GENERALIST_PCT = 0.20
-                self.TARGET_EXPLOITER_PCT = 0.10
+                self.TARGET_EXPLOITER_PCT = 0.05  # CRITICAL FIX: Lower in exploration (fewer sequences to exploit)
                 self.phase = "EXPLORATION"
                 logger.info(f"🔍 EXPLORATION PHASE: No games fully beaten yet")
-                logger.info(f"   Distribution: 60% PIONEER, 10% OPTIMIZER, 20% GENERALIST, 10% EXPLOITER")
+                logger.info(f"   Distribution: 60% PIONEER, 15% OPTIMIZER, 20% GENERALIST, 5% EXPLOITER")
                 
         except Exception as e:
             # Fallback to exploration phase if query fails
             logger.warning(f"Failed to check game completion status: {e}")
             self.TARGET_PIONEER_PCT = 0.60
-            self.TARGET_OPTIMIZER_PCT = 0.10
+            self.TARGET_OPTIMIZER_PCT = 0.15
             self.TARGET_GENERALIST_PCT = 0.20
-            self.TARGET_EXPLOITER_PCT = 0.10
+            self.TARGET_EXPLOITER_PCT = 0.05  # CRITICAL FIX: Lower for exploration fallback
             self.phase = "EXPLORATION"
         
         # Create database table if not exists
@@ -340,9 +340,11 @@ class AgentOperatingModeSystem:
             # Decision logic: What mode is best for this agent right now?
             
             # TOP PERFORMERS WITH WINNING SEQUENCES → Exploiters (pure exploitation)
+            # But only if we're in optimization phase (has_full_wins) or have local wins
             if (assigned_modes['exploiter'] < target_exploiters and
                 stats.get('avg_score', 0) > 0.7 and
-                stats.get('total_wins', 0) > 0):
+                stats.get('total_wins', 0) > 0 and
+                (self.phase == 'OPTIMIZATION' or stats.get('total_wins', 0) >= 2)):
                 mode = 'exploiter'
                 reason = f"Top performer (avg_score={stats.get('avg_score', 0):.2f}, wins={stats.get('total_wins', 0)}) - exploit proven sequences"
             

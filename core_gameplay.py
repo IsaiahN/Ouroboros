@@ -126,8 +126,12 @@ class GameplayEngine:
         # Get agent mode BEFORE creating game (needed for tags)
         agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
         
+        # Get network max level for pioneer oscillation checks
+        network_max_level = self._get_network_max_level(game_id) if game_id else 0
+        
         # Set agent mode in action handler and visual analyzer for mode-specific behavior
-        self.action_handler.set_agent_mode(agent_mode)
+        # Pass current_level=1 (starting level) and network_max_level for pioneer checks
+        self.action_handler.set_agent_mode(agent_mode, current_level=1, network_max_level=network_max_level)
         self.action_handler.visual_analyzer.set_agent_mode(agent_mode)
         if agent_mode:
             logger.info(f"🎯 Agent mode set to: {agent_mode.upper()}")
@@ -252,12 +256,47 @@ class GameplayEngine:
             # If we have a known sequence (GENERALIST/PIONEER/EXPLOITER), replay it ONCE to reach frontier
             # This is the NEW cumulative approach - replay best sequence once, not level-by-level
             if known_sequence:
-                logger.info(f"🔄 Replaying BEST cumulative sequence (score {known_sequence['total_score']}, {known_sequence['total_actions']} actions)")
-                logger.info(f"[SEQUENCE REPLAY DEBUG] About to call _replay_sequence_inline for sequence {known_sequence.get('sequence_id', 'UNKNOWN')}")
-                replay_result = await self._replay_sequence_inline(
-                    game_state, 
-                    known_sequence
-                )
+                # Check if this is a PROVEN sequence (>50% validation success)
+                sequence_id = known_sequence['sequence_id']
+                validation_check = self.db.execute_query("""
+                    SELECT successful_validations, total_validation_attempts,
+                           CAST(successful_validations AS FLOAT) / NULLIF(total_validation_attempts, 0) as success_rate
+                    FROM sequence_reputation
+                    WHERE sequence_id = ?
+                """, (sequence_id,))
+                
+                is_proven = False
+                if validation_check and validation_check[0]['total_validation_attempts'] >= 3:
+                    success_rate = validation_check[0]['success_rate'] or 0.0
+                    is_proven = success_rate > 0.5
+                    if is_proven:
+                        logger.info(f"✅ PROVEN sequence detected: {success_rate:.1%} success rate ({validation_check[0]['successful_validations']}/{validation_check[0]['total_validation_attempts']})")
+                
+                # OPTIMIZER/EXPLOITER PARIAH ANALYSIS: Check if worth challenging on unbeaten level
+                agent_mode = self.game_config.get('agent_operating_mode', 'generalist')
+                current_network_level = self._get_network_max_level(game_id)
+                sequence_level = int(known_sequence.get('total_score', 0))  # Score = level reached
+                
+                should_challenge_pariah = True  # Default: use the sequence
+                
+                if agent_mode in ['optimizer', 'exploiter'] and sequence_level >= current_network_level:
+                    # Optimizer/Exploiter on frontier - check if pariah is worth challenging
+                    pariah_worth = self._analyze_pariah_worthiness(known_sequence, game_id)
+                    if not pariah_worth['worth_challenging']:
+                        logger.info(f"⏭️  {agent_mode.upper()} skipping pariah: {pariah_worth['reason']}")
+                        should_challenge_pariah = False
+                        known_sequence = None  # Skip sequence, fall back to exploration
+                    else:
+                        logger.info(f"⚔️  {agent_mode.upper()} challenging pariah: {pariah_worth['reason']}")
+                
+                if should_challenge_pariah and known_sequence:
+                    logger.info(f"🔄 Replaying BEST cumulative sequence (score {known_sequence['total_score']}, {known_sequence['total_actions']} actions)")
+                    logger.info(f"[SEQUENCE REPLAY DEBUG] About to call _replay_sequence_inline for sequence {known_sequence.get('sequence_id', 'UNKNOWN')})")
+                    replay_result = await self._replay_sequence_inline(
+                        game_state, 
+                        known_sequence,
+                        strict_replay=is_proven  # Use strict mode for proven sequences
+                    )
                 logger.info(f"[SEQUENCE REPLAY DEBUG] Replay completed, result={replay_result is not None}, success={replay_result.get('success', False) if replay_result else 'N/A'}")
                 
                 # Update game_state from replay result
@@ -2599,22 +2638,63 @@ class GameplayEngine:
                 logger.info(f"⚡ CHECKPOINT REPLAY: Starting from action {start_index} "
                           f"(skipping {start_index} actions)")
             else:
-                # Verify initial frame matches (if frame data available and starting from beginning)
-                # NOTE: Frame matching skipped if initial_frame is empty (frame data not captured)
-                # For same-session resets, frames should match. For cross-session, game type matching is sufficient.
+                # Multi-stage frame matching for games with moving elements
+                # Stage 1: Try direct comparison
+                # Stage 2: Try all frames (for multi-frame sequences)
+                # Stage 3: Try subsequence matching (partial match)
+                # Stage 4: Proceed anyway (validation will catch failures)
                 expected_initial_frame = json.loads(sequence['initial_frame'])
                 current_frame = game_state.frame
                 
+                frames_match = False
+                match_method = None
+                
                 # Skip frame comparison if no frame data was captured
-                if expected_initial_frame and len(expected_initial_frame) > 0:
-                    frames_match = self._compare_frames(expected_initial_frame, current_frame)
-                    if not frames_match:
-                        logger.warning(f"⚠️ Initial frame mismatch - aborting replay for {sequence_id}")
-                        logger.debug(f"   Expected frame type: {type(expected_initial_frame)}, length: {len(expected_initial_frame)}")
-                        logger.debug(f"   Current frame type: {type(current_frame)}, length: {len(current_frame) if isinstance(current_frame, list) else 'N/A'}")
-                        return {'game_state': game_state, 'success': False}
-                else:
+                if not expected_initial_frame or len(expected_initial_frame) == 0:
                     logger.debug(f"🔄 No frame data available, allowing replay based on game type match")
+                    frames_match = True
+                    match_method = "no_frame_data"
+                else:
+                    # Stage 1: Direct comparison (handles both single and multi-grid formats)
+                    frames_match = self._compare_frames(expected_initial_frame, current_frame)
+                    if frames_match:
+                        match_method = "direct_match"
+                        logger.debug(f"✓ Frame matched via direct comparison")
+                    
+                    # STRICT REPLAY MODE: For proven sequences, fail hard if frames don't match
+                    elif strict_replay:
+                        logger.error(f"❌ STRICT REPLAY FAILED: Frame mismatch for proven sequence {sequence_id}")
+                        logger.error(f"   This sequence has >50% validation success rate but frames don't match")
+                        logger.error(f"   Game state may have changed or sequence is corrupted")
+                        return {'game_state': game_state, 'success': False}
+                    else:
+                        # Stage 2: For multi-frame sequences, try comparing against ALL frames
+                        # Structure: [[[grid1]], [[grid2]], ...] for moving elements
+                        if isinstance(expected_initial_frame, list) and len(expected_initial_frame) > 1:
+                            if isinstance(expected_initial_frame[0], list) and isinstance(expected_initial_frame[0][0], list):
+                                # This is a multi-frame sequence, try each frame
+                                for frame_idx, stored_frame in enumerate(expected_initial_frame):
+                                    if self._compare_frames(stored_frame, current_frame):
+                                        frames_match = True
+                                        match_method = f"multi_frame_match_{frame_idx}"
+                                        logger.info(f"✓ Frame matched via multi-frame comparison (frame {frame_idx}/{len(expected_initial_frame)})")
+                                        break
+                        
+                        # Stage 3: Try subsequence/partial matching (90% similarity)
+                        if not frames_match:
+                            similarity = self._calculate_frame_similarity(expected_initial_frame, current_frame)
+                            if similarity >= 0.90:
+                                frames_match = True
+                                match_method = f"partial_match_{similarity:.2f}"
+                                logger.info(f"✓ Frame matched via partial similarity ({similarity:.1%})")
+                        
+                        # Stage 4: Proceed anyway - let validation track success/failure
+                        if not frames_match:
+                            frames_match = True  # Allow replay to proceed
+                            match_method = "validation_fallback"
+                            logger.warning(f"⚠️ Frame mismatch for {sequence_id}, proceeding with replay (validation will track)")
+                            logger.debug(f"   Expected: type={type(expected_initial_frame)}, len={len(expected_initial_frame)}")
+                            logger.debug(f"   Current: type={type(current_frame)}, len={len(current_frame) if isinstance(current_frame, list) else 'N/A'}")
             
             # Track that we're referencing this sequence
             logger.info(f"[SEQUENCE REPLAY DEBUG] Incrementing times_referenced for sequence {sequence_id}")
@@ -2651,15 +2731,21 @@ class GameplayEngine:
                         coord_index += 1
                         continue
                     
-                    # Add reasoning for sequence replay (pariah validation)
+                    # Add reasoning for sequence replay with role-based context
+                    agent_mode = self.game_config.get('agent_operating_mode', 'unknown')
+                    target_level = self.game_config.get('optimizer_target_level', 'N/A')
+                    
                     replay_reasoning = {
                         'action': 'ACTION6',
-                        'reasoning': f'Validating pariah sequence {sequence_id[:8]} from checkpoint',
+                        'reasoning': f'{agent_mode.upper()} replaying proven sequence {sequence_id[:8]} (target: L{target_level})',
+                        'agent_role': agent_mode,
+                        'optimizer_target_level': target_level if agent_mode == 'optimizer' else None,
                         'sequence_id': sequence_id,
                         'replay_step': action_count + 1,
                         'total_steps': len(actions),
                         'coordinate': {'x': x, 'y': y},
-                        'checkpoint_validation': True
+                        'checkpoint_validation': True,
+                        'role_compliance': f'{agent_mode} following sequence script'
                     }
                     game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning)
                     coord_index += 1
@@ -2679,8 +2765,10 @@ class GameplayEngine:
             # Record validation attempt for community memory (Task 4)
             failure_reason = None
             if not replay_success:
-                if not frames_match:
-                    failure_reason = 'initial_frame_mismatch'
+                # Note: frames_match is always True now (we proceed regardless)
+                # Use match_method to determine if frame matching was questionable
+                if match_method == "validation_fallback":
+                    failure_reason = 'frame_mismatch_proceeded'
                 elif action_count < len(actions):
                     failure_reason = 'incomplete_sequence'
                 else:
@@ -3007,6 +3095,53 @@ class GameplayEngine:
         except Exception as e:
             logger.error(f"Error updating sequence reputation: {e}")
     
+    def _calculate_frame_similarity(self, frame1, frame2) -> float:
+        """
+        Calculate similarity ratio between two frames (0.0 to 1.0).
+        Used for fuzzy matching when exact frame match fails.
+        """
+        try:
+            # Use same unwrapping logic as _compare_frames
+            def unwrap_frame(frame):
+                if not isinstance(frame, list) or len(frame) == 0:
+                    return frame
+                if isinstance(frame[0], list) and len(frame[0]) > 0:
+                    if isinstance(frame[0][0], list):
+                        if len(frame) > 1 and isinstance(frame[1], list) and isinstance(frame[1][0], list):
+                            return unwrap_frame(frame[0])
+                        else:
+                            return unwrap_frame(frame[0])
+                return frame
+            
+            frame1 = unwrap_frame(frame1)
+            frame2 = unwrap_frame(frame2)
+            
+            if not isinstance(frame1, list) or not isinstance(frame2, list):
+                return 0.0
+            if len(frame1) != len(frame2):
+                return 0.0
+            
+            # Calculate cell-by-cell similarity
+            total_cells = 0
+            matching_cells = 0
+            
+            for row1, row2 in zip(frame1, frame2):
+                if not isinstance(row1, list) or not isinstance(row2, list):
+                    continue
+                for cell1, cell2 in zip(row1, row2):
+                    total_cells += 1
+                    if cell1 == cell2:
+                        matching_cells += 1
+            
+            if total_cells == 0:
+                return 0.0
+            
+            return matching_cells / total_cells
+            
+        except Exception as e:
+            logger.debug(f"Frame similarity calculation error: {e}")
+            return 0.0
+    
     def _compare_frames(self, frame1, frame2) -> bool:
         """
         Compare two frames for similarity.
@@ -3039,8 +3174,17 @@ class GameplayEngine:
                 # This is already a grid: [[row1], [row2], ...]
                 return frame
             
+            frame1_orig_len = len(frame1) if isinstance(frame1, list) else 0
+            frame2_orig_len = len(frame2) if isinstance(frame2, list) else 0
+            
             frame1 = unwrap_frame(frame1)
             frame2 = unwrap_frame(frame2)
+            
+            # Log unwrapping results for debugging
+            frame1_unwrapped_len = len(frame1) if isinstance(frame1, list) else 0
+            frame2_unwrapped_len = len(frame2) if isinstance(frame2, list) else 0
+            if frame1_orig_len != frame1_unwrapped_len or frame2_orig_len != frame2_unwrapped_len:
+                logger.debug(f"   Frame unwrapping: {frame1_orig_len}->{frame1_unwrapped_len}, {frame2_orig_len}->{frame2_unwrapped_len}")
             
             # Simple equality check
             if frame1 == frame2:
@@ -3048,8 +3192,10 @@ class GameplayEngine:
             
             # If frames are different lengths, definitely don't match
             if not isinstance(frame1, list) or not isinstance(frame2, list):
+                logger.debug(f"   Frame comparison failed: not both lists (f1={type(frame1)}, f2={type(frame2)})")
                 return False
             if len(frame1) != len(frame2):
+                logger.debug(f"   Frame comparison failed: length mismatch ({len(frame1)} vs {len(frame2)})")
                 return False
             
             # Check if at least 95% of cells match
@@ -4117,6 +4263,123 @@ class GameplayEngine:
         
         except Exception as e:
             logger.debug(f"Error in sensation learning: {e}")
+    
+    def _get_network_max_level(self, game_id: str) -> int:
+        """
+        Get the maximum level the NETWORK has reached for this game type.
+        Used to determine if a pariah is on an unbeaten level.
+        
+        Returns:
+            Maximum level reached by any agent, or 0 if none
+        """
+        try:
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            result = self.db.execute_query("""
+                SELECT MAX(level_progressions) as max_level
+                FROM agent_arc_performance
+                WHERE game_id LIKE ?
+            """, (f"{game_type}-%",))
+            
+            if result and result[0]['max_level']:
+                return int(result[0]['max_level'])
+                
+        except Exception as e:
+            logger.debug(f"Error getting network max level: {e}")
+        
+        return 0
+    
+    def _analyze_pariah_worthiness(self, sequence: Dict[str, Any], game_id: str) -> Dict[str, Any]:
+        """
+        Analyze if a pariah sequence is worth challenging for optimizers/exploiters.
+        
+        Optimizers/Exploiters should:
+        - SKIP pariahs with <30% validation success (unreliable)
+        - SKIP pariahs from OLD levels (network has moved past)
+        - CHALLENGE pariahs from CURRENT frontier level (worth testing)
+        - CHALLENGE pariahs with >70% validation but unoptimized actions
+        
+        Args:
+            sequence: The sequence to analyze
+            game_id: Current game ID
+            
+        Returns:
+            Dict with 'worth_challenging' (bool) and 'reason' (str)
+        """
+        try:
+            sequence_id = sequence['sequence_id']
+            sequence_level = int(sequence.get('total_score', 0))
+            sequence_actions = sequence.get('total_actions', 0)
+            
+            # Get validation stats
+            validation = self.db.execute_query("""
+                SELECT successful_validations, total_validation_attempts,
+                       CAST(successful_validations AS FLOAT) / NULLIF(total_validation_attempts, 0) as success_rate,
+                       reliability_score
+                FROM sequence_reputation
+                WHERE sequence_id = ?
+            """, (sequence_id,))
+            
+            if not validation or validation[0]['total_validation_attempts'] == 0:
+                # Untested pariah - worth one try for exploiters
+                return {
+                    'worth_challenging': True,
+                    'reason': 'Untested pariah - validating reliability'
+                }
+            
+            val = validation[0]
+            success_rate = val['success_rate'] or 0.0
+            reliability = val['reliability_score'] or 0.0
+            
+            # Rule 1: Skip if reliability is terrible (<30%)
+            if success_rate < 0.3:
+                return {
+                    'worth_challenging': False,
+                    'reason': f'Low reliability ({success_rate:.1%}) - likely broken'
+                }
+            
+            # Rule 2: Check if this is from an OLD level
+            network_max = self._get_network_max_level(game_id)
+            if sequence_level < network_max - 1:
+                return {
+                    'worth_challenging': False,
+                    'reason': f'Old level (L{sequence_level} vs network L{network_max}) - network moved past'
+                }
+            
+            # Rule 3: Check if sequence is from CURRENT frontier
+            if sequence_level >= network_max - 1:
+                return {
+                    'worth_challenging': True,
+                    'reason': f'Frontier level (L{sequence_level}, network L{network_max}) - worth testing'
+                }
+            
+            # Rule 4: High reliability (>70%) but many actions - worth optimizing
+            if success_rate > 0.7 and sequence_actions > 50:
+                return {
+                    'worth_challenging': True,
+                    'reason': f'Reliable ({success_rate:.1%}) but unoptimized ({sequence_actions} actions) - can improve'
+                }
+            
+            # Rule 5: Medium reliability (30-70%) - worth testing
+            if 0.3 <= success_rate <= 0.7:
+                return {
+                    'worth_challenging': True,
+                    'reason': f'Moderate reliability ({success_rate:.1%}) - needs more validation'
+                }
+            
+            # Default: challenge it
+            return {
+                'worth_challenging': True,
+                'reason': f'Standard pariah (L{sequence_level}, {success_rate:.1%} success) - testing'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing pariah worthiness: {e}")
+            # Default to challenging on error
+            return {
+                'worth_challenging': True,
+                'reason': 'Analysis error - defaulting to challenge'
+            }
 
 
 # Simple gameplay strategies that can be used as action callbacks
