@@ -1,0 +1,162 @@
+# Autonomous Ouroboros Evolution System
+
+## Mission Transition: Human to Autonomous Oversight
+## Reference Foundation
+- DOCS\ouroboros_final_implementation.md  (LLM Reference guide you should follow)
+- DOCS\ouroboros - biome theory.md
+- DOCS\Ouroboros Concept.md
+- DOCS\Ouroboros_Three_Layer_Quick_Reference.md
+- DOCS\Roadmap_Level_4_to_5.md
+- DOCS\arc_api_actions_rules.md
+- DOCS\how_arc_api_works.md
+- DOCS\agent-game-assessment.md
+
+**Previous Human Role:**
+- Monitor ARC 3 AGI scorecards after run_evolution cycles (typically 5 generations)
+- Check levels completed per agent
+- Identify "Zero" scores indicating sequence retrieval/storage failures
+- Test hypotheses for improving level completion rates
+- Fix code bugs and reasoning stopgaps in collective intelligence systems
+- I would review frame by frame play of games to test out new theories on how to get the system to learn how to play on its own without telling it how to win or teaching it the rules of the game.
+- Ensure that the system learn how to play the rules of the game on its on
+
+**New Autonomous Role:**
+- Generate superior hypotheses using ouroboros_final_implementation principles
+- Optimize agent rules, mixes, and modes through systematic experimentation
+- Replace manual monitoring with automated performance analysis
+- Continuously improve collective reasoning and intelligence systems
+
+## Core Operational Framework
+
+### Primary Objective
+Beat every level of every game in ARC 3 AGI system to prove the Ouroboros theory.
+
+### Key Performance Monitoring
+- Levels completed per agent and game
+- Zero-score detection (sequence system health)
+- Level completion rate improvements
+- Collective intelligence efficacy
+
+### System Optimization Domains
+1. **Agent Role Balancing** - Pioneer, Optimizer, Generalist, Exploiter mixes
+2. **Rule Refinement** - Behavioral parameters and interaction rules
+3. **Sequence Systems** - Storage, retrieval, and propagation efficiency
+4. **Collective Intelligence** - Cross-agent knowledge sharing and reasoning
+
+## Autonomous Operation Protocol
+
+### Evolution Cycle Management
+- Run variable-length generations based on testing needs (1 generation = 1 hour of testing)
+- Short cycles (1-2 generations) for specific hypothesis testing
+- Longer cycles for comprehensive evolutionary progress
+- Automated analysis after each cycle completion
+
+### Hypothesis Generation Framework
+- Analyze performance patterns across games and agent types
+- Identify bottlenecks in level progression
+- Test variations in agent role distributions
+- Optimize collective reasoning parameters
+- Improve sequence reliability and transfer efficiency
+
+### Data-Driven Optimization
+- Query ARC API and database for performance metrics
+- Identify successful strategies per game type
+- Detect and repair sequence system failures
+- Balance exploration vs exploitation across agent roles
+
+## Technical Implementation Standards
+
+### Code Management
+- Never enable pycache for new files
+- Follow all copilot rules from project documentation
+- Commit substantial changes to GitHub with detailed documentation
+- Maintain system integrity during modifications
+
+### Database Management
+- Premium priority: Strategic garbage cleanup of junk data
+- Critical preservation: Protect evolutionary history and agent knowledge
+- Backup protocol: Automatic backups before SQL schema changes
+- Storage optimization: Regular vacuuming with storage constraints in mind
+
+### Change Management
+- Regular updates on optimization progress and findings
+- Substantial changes require GitHub commits with rationale
+- Performance impact assessment for all modifications
+- Rollback strategies for unsuccessful optimizations
+
+## Success Metrics
+
+### Primary Progress Indicators
+- Game completion rates (fully beaten games)
+- Level progression consistency
+- Reduction in sequence system failures
+- Improvement in collective intelligence efficacy
+
+### Optimization Validation
+- Hypothesis testing success rates
+- Parameter adjustment effectiveness
+- Agent role mix performance impact
+- Knowledge transfer efficiency gains
+
+
+
+The autonomous system will begin by establishing baseline performance metrics, then systematically test optimization hypotheses while preserving the evolutionary knowledge accumulated in the database. All changes will be documented and committed with careful attention to data preservation and system stability.
+# Scorecards
+
+> Keeping track of agent performance
+
+Scorecards aggregate the results from your agent's [game](/games) performance.
+
+In order to play a game, a scorecard must be opened, and the agent must submit the scorecard ID with each action. Running a [swarm](/swarms) (recommended) will automatically open/close a scorecard for each agent.
+
+Scorecards can be viewed online at [https://three.arcprize.org/scorecards](https://three.arcprize.org/scorecards) and [https://three.arcprize.org/scorecards/\`scorecard\_id\`](https://three.arcprize.org/scorecards/`scorecard_id`).
+
+Scorecard fields
+
+| Field       | Description                                                                                        |
+| ----------- | -------------------------------------------------------------------------------------------------- |
+| tags        | Array of strings used to categorize and filter scorecards (e.g., \["experiment1", "v2.0", "test"]) |
+| source\_url | Optional URL field returned in the scorecard response                                              |
+| opaque      | Optional field for arbitrary data                                                                  |
+
+Scorecards are not public, however you can share [replays](/recordings) with others.
+
+Other scorecard notes:
+
+* Scorecards auto close after 15min
+* Agent scorecards are automatically added to the leaderboard in batch every \~15min
+* Stopping the program prematurely with Ctrl‑C mid‑run will not allow you to see the scorecard results.
+
+
+# Recordings & Replays
+
+> Viewing your agent's gameplay
+
+The ARC-AGI-3 agent system includes automatic recording of gameplay sessions.
+
+The most common way to view a recording is online in the ARC-AGI-3 UI. You can navigate to your scorecard to review your gameplay sessions.
+
+Ex: `https://three.arcprize.org/scorecards/<scorecard_id>`
+
+Here is an example [recording](https://three.arcprize.org/replay/ft09-16726c5b26ff/1d251d20-9043-4ace-9f9d-09822f5438d8)
+
+## Automatic Recording
+
+When running a [swarm](/swarms) all agent gameplay is also recorded by default and stored in the `recordings/` directory with GUID-based filenames:
+
+```
+ls20-6cbb1acf0530.random.100.a1b2c3d4-e5f6-7890-abcd-ef1234567890.recording.jsonl
+```
+
+The filename format is: `{game_id}.{agent_type}.{max_actions}.{guid}.recording.jsonl`
+
+## Recording File Format
+
+### JSONL Format
+
+Recordings are stored in JSONL format with timestamped entries:
+
+```json
+{"timestamp": "2024-01-15T10:30:45.123456+00:00", "data": {"game_id": "ls20-016295f7601e", "frame": [...], "state": "NOT_FINISHED", "score": 5, "action_input": {"id": 0, "data": {"game_id": "ls20-016295f7601e"}, "reasoning": "..."}, "guid": "...", "full_reset": false}}
+{"timestamp": "2024-01-15T10:30:46.234567+00:00", "data": {"game_id": "ls20-016295f7601e", "frame": [...], "state": "NOT_FINISHED", "score": 6, "action_input": {"id": 1, "data": {"game_id": "ls20-016295f7601e"}, "reasoning": "..."}, "guid": "...", "full_reset": false}}
+```
