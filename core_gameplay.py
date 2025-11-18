@@ -1142,10 +1142,10 @@ class GameplayEngine:
         # Get agent mode to determine if sensation is allowed
         agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
         
-        # STRATEGIC RESTRICTION: Generalists do NOT get sensation access
-        # They must rely purely on pattern recognition and learned sequences
-        # This forces them to be true "jack of all trades" without emotional shortcuts
-        sensation_allowed = (agent_mode != 'generalist')
+        # SENSATION ACCESS BY ROLE (Phase 4.5):
+        # - Pioneers: NO (pure exploration, no emotional biases)
+        # - Generalists: YES (feelings restored - need emotional intelligence)
+        sensation_allowed = (agent_mode != 'pioneer')
         
         if agent_id and self.game_config.get('enable_sensation_navigation', True):
             if not sensation_allowed:
@@ -1991,6 +1991,48 @@ class GameplayEngine:
                     )
                     if agent_data:
                         generation = agent_data[0]['generation']
+                
+                # ================================================================
+                # CRITICAL FIX #1: Optimizer Penultimate Checkpoint Bug
+                # ================================================================
+                # PROBLEM: Optimizers save partial sequences without final actions
+                # that guarantee level completion. This causes agents to get stuck.
+                #
+                # SOLUTION: If current agent is an Optimizer and we have checkpoint 
+                # data for this level, automatically append the final_actions before
+                # saving. This ensures all optimizer sequences are complete.
+                # ================================================================
+               
+                # Check if current agent is operating in Optimizer mode
+                agent_mode = self._get_agent_operating_mode(agent_id)
+                is_optimizer = (agent_mode == 'optimizer')
+                
+                if is_optimizer:
+                    # Try to get optimizer checkpoint data for this level
+                    checkpoint_data = self._analyze_optimizer_checkpoint(game_id, level_number)
+                    
+                    if checkpoint_data and checkpoint_data.get('final_actions'):
+                        final_actions = checkpoint_data['final_actions']
+                        current_action_count = len(actions)
+                        target_actions = checkpoint_data.get('target_actions', len(actions))
+                        
+                        # Check if current sequence is shorter than optimal (partial)
+                        if current_action_count < target_actions:
+                            # Append the guaranteed win ending
+                            logger.info(f"🔧 OPTIMIZER FIX: Partial sequence detected ({current_action_count} actions, target: {target_actions})")
+                            logger.info(f"   Appending {len(final_actions)} final actions to guarantee completion")
+                            
+                            original_length = len(actions)
+                            actions.extend(final_actions)
+                            
+                            # Update efficiency with new action count
+                            efficiency = final_score / len(actions) if len(actions) > 0 else 0.0
+                            
+                            logger.info(f"✅ Sequence completed: {original_length} → {len(actions)} actions (efficiency: {efficiency:.4f})")
+                        else:
+                            logger.debug(f"Optimizer sequence already complete ({current_action_count} actions)")
+                    else:
+                        logger.debug(f"No checkpoint data for {game_id} level {level_number} - saving as-is")
                 
                 # Get scorecard_id from game_results for tracking
                 scorecard_id = None
