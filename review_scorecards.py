@@ -75,6 +75,15 @@ class ScorecardReviewer:
         """
         Review a specific scorecard's gameplay playback.
         
+        Workflow:
+        1. Navigate to https://three.arcprize.org/scorecards/{scorecard_id}
+        2. Click "Play button/Watching Replay" under Recording section
+        3. This navigates to https://three.arcprize.org/replay/{game_id}/{session_id}
+        4. The replay page contains:
+           - Reasoning log (agent's decision-making)
+           - Frame-by-frame breakdown
+           - Should match database sequences/session info perfectly
+        
         Args:
             scorecard_id: The scorecard ID to review
             speed_multiplier: Playback speed (1-5x, use 5 for fastest)
@@ -86,13 +95,21 @@ class ScorecardReviewer:
         print(f"⏩ Playback speed: {speed_multiplier}x")
         
         # This would use browser_subagent to:
-        # 1. Click on the scorecard ID link
-        # 2. Click "Playback"
-        # 3. Click speed button multiple times to reach desired speed
-        # 4. Watch frame-by-frame to identify:
-        #    - Where sequences are matching/not matching
-        #    - Where agents are making mistakes
-        #    - Patterns in failure modes
+        # 1. Navigate to https://three.arcprize.org/scorecards/{scorecard_id}
+        # 2. Click "Play button/Watching Replay" button under Recording section
+        # 3. Wait for replay page to load: https://three.arcprize.org/replay/{game_id}/{session_id}
+        # 4. Extract:
+        #    - Reasoning log entries (agent's decision process)
+        #    - Frame-by-frame action sequence
+        #    - Game ID and session ID from URL
+        # 5. Query database for matching session data:
+        #    - action_traces table (action_number, coordinates, timestamp)
+        #    - game_results table (final score, total_actions, level_completions)
+        #    - winning_sequences table (if any sequences were used)
+        # 6. Compare:
+        #    - Replay actions vs database action_traces
+        #    - Reasoning log vs database metadata
+        #    - Identify discrepancies or failure points
         
         # Placeholder return
         return {
@@ -100,7 +117,9 @@ class ScorecardReviewer:
             'playback_speed': speed_multiplier,
             'analysis': 'pending_implementation',
             'failure_points': [],
-            'sequence_match_status': 'unknown'
+            'sequence_match_status': 'unknown',
+            'reasoning_log': [],
+            'frame_breakdown': []
         }
     
     async def generate_review_report(self, scorecards_data: List[Dict]) -> str:
