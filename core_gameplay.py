@@ -294,8 +294,7 @@ class GameplayEngine:
                     logger.info(f"[SEQUENCE REPLAY DEBUG] About to call _replay_sequence_inline for sequence {known_sequence.get('sequence_id', 'UNKNOWN')})")
                     replay_result = await self._replay_sequence_inline(
                         game_state, 
-                        known_sequence,
-                        strict_replay=is_proven  # Use strict mode for proven sequences
+                        known_sequence
                     )
                 logger.info(f"[SEQUENCE REPLAY DEBUG] Replay completed, result={replay_result is not None}, success={replay_result.get('success', False) if replay_result else 'N/A'}")
                 
