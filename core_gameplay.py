@@ -678,6 +678,9 @@ class GameplayEngine:
                     
                     # Track score improvements (no destructive resets - removed to preserve pattern learning)
                     
+                    # Calculate score increase to detect level completion
+                    score_increase = game_state.score - previous_score
+                    
                     # BUGFIX: Only increment level_completions on full level completion (score increase >= 1.0)
                     # Previously incremented on >= 0.5 which caused overcounting with partial progress
                     if score_increase >= 1.0:  # Full level completion (ARC levels give 1.0 point each)
@@ -709,6 +712,7 @@ class GameplayEngine:
                                 logger.info(f"✅ Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
                         
                         # Move to next level
+                        previous_score = game_state.score  # Update for next level detection
                         current_level += 1
                         level_action_count = 0  # Reset level action counter
                         level_start_action = action_count  # Mark where this level starts
