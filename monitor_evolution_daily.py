@@ -25,6 +25,13 @@ import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Get GitHub passkey from environment (never hardcoded)
+GITHUB_PASSKEY_PIN = os.getenv('GITHUB_PASSKEY_PIN', '')
 
 # GitHub MCP will be imported when needed
 # from github_mcp import create_issue, add_comment
