@@ -98,18 +98,27 @@ class ScorecardReviewer:
         # 1. Navigate to https://three.arcprize.org/scorecards/{scorecard_id}
         # 2. Click "Play button/Watching Replay" button under Recording section
         # 3. Wait for replay page to load: https://three.arcprize.org/replay/{game_id}/{session_id}
-        # 4. Extract:
+        # 4. Click the PLAY button on the replay page to watch frames execute
+        #    - This shows the visual progression of the game
+        #    - Frame counter updates in real-time (e.g., 15 → 130 in ~5 seconds)
+        #    - Reasoning log scrolls to show current frame's decision-making
+        #    - CRITICAL: This visual playback helps identify:
+        #      * When sequences break (frame doesn't match expected result)
+        #      * Why agents get stuck (repeated actions with no progress)
+        #      * Visual anomalies (wrong colors, coordinates, patterns)
+        # 5. Extract:
         #    - Reasoning log entries (agent's decision process)
         #    - Frame-by-frame action sequence
         #    - Game ID and session ID from URL
-        # 5. Query database for matching session data:
+        # 6. Query database for matching session data:
         #    - action_traces table (action_number, coordinates, timestamp)
         #    - game_results table (final score, total_actions, level_completions)
         #    - winning_sequences table (if any sequences were used)
-        # 6. Compare:
+        # 7. Compare:
         #    - Replay actions vs database action_traces
         #    - Reasoning log vs database metadata
         #    - Identify discrepancies or failure points
+        #    - Watch playback to see WHERE sequences diverge visually
         
         # Placeholder return
         return {
