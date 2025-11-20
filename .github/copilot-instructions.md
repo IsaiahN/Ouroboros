@@ -1,491 +1,777 @@
-# GitHub Copilot Instructions for BitterTruth-AI Ouroboros System
+# MASTER RULESET FOR AUTONOMOUS OUROBOROS OPERATION
+**Version**: 1.0  
+**Date**: 2025-11-18  
+**Purpose**: Comprehensive operating rules combining all /DOCS + copilot instructions  
+**Context**: Single source of truth to prevent LLM catastrophic forgetting
 
-**Project**: BitterTruth-AI - Autonomous ARC AGI 3 Evolution System
-**Coordinator**: Claude Code as autonomous LLM coordinator
+---
 
-## Critical Operating Rules
+## 🎯 PRIMARY OBJECTIVE
 
-These rules are non-negotiable and must be followed at all times when working on this codebase.
+**GOAL**: Achieve full game wins on ALL current and future ARC 3 AGI games through autonomous network-level evolution.
 
-### Rule 1: Always Disable Pycache
-- Set `PYTHONDONTWRITEBYTECODE=1` in all environments
-- Never allow .pyc files to be generated
-- Keep Python environment clean
-- All scripts must set this environment variable before executing Python code
+**SUCCESS METRICS**:
+1. Phase 1: All games reach 100% level completion
+2. Phase 2: All completed games reach optimization saturation
+3. Phase 3: System handles hundreds of new games without intervention
+4. Final: Continuous evolution maintaining 100% win rate as games added
 
-### Rule 2: Database-Only Storage
-- ALL data stored in SQLite database, never use log files
-- Never create .log files or any file-based logging
-- Every operation, decision, and result goes into database tables
-- If existing code uses file logging, convert to database storage
-- Use `database_logger.py` with `DatabaseLogHandler` for all logging needs
+---
 
-### Rule 3: No Orphaned Code
-- Never leave old code behind when making changes
-- Properly delete, move, or integrate all existing functionality
-- Clean integration means enhancing existing files, not replacing them
-- Every line of old code must be accounted for
-- When refactoring, ensure all references are updated
+## 📜 10 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
 
-### Rule 4: LLM Self-Management
-- Claude Code manages the entire system autonomously
-- All evolutionary decisions made by Claude Code analyzing database data
-- System designed to run without human intervention once started
-- Claude Code coordinates all agents, evolution, and optimization
-- Autonomous operation is the primary design goal
+### **RULE 1: Always Disable Pycache**
+- `PYTHONDONTWRITEBYTECODE=1` in ALL environments
+- `.pyc` files NEVER generated
+- Active deletion in cleanup script (pre-evolution)
+- **Why**: Prevents file system clutter, easier version control
 
-### Rule 5: No Test Files
-- **Never create test files - waste of LLM tokens**
-- Always test with live ARC AGI 3 data
-- Use real game results for all validation and testing
-- Run actual games instead of creating test scripts
-- If verification is needed, use the existing CLI commands with real data
+### **RULE 2: Database-Only Storage**
+- ALL data in SQLite `core_data.db`
+- NEVER create `.log` files
+- Use `database_logger.py` with `DatabaseLogHandler`
+- Every operation, decision, result → database tables
+- **Current Size**: Track toward 10 GB limit (vacuum requires 2x space)
 
-### Rule 6: No Simulated Games
-- Never create simulated or mock ARC games
-- Always use real ARC AGI 3 API calls
-- Waste of time and tokens to generate fake game data
-- All game interactions must go through the real API at https://three.arcprize.org
-- No mock responses or fake game states
+### **RULE 3: No Orphaned Code**
+- Delete/move/integrate ALL old code when refactoring
+- Clean integration = enhance existing files, not replace
+- Update all references
+- Account for every line
+- **Why**: Prevent code drift and unmaintained functionality
 
-### Rule 7: Real Actions Only
-- Always verify that real actions are being sent to ARC games
-- Monitor API calls to ensure actual game interaction
-- Never substitute mock or simulated actions
-- All ACTION1-ACTION7 commands must be sent to the real ARC API
-- Track API responses to verify actions were received and processed
+### **RULE 4: LLM Self-Management**
+- Claude Code manages entire system autonomously
+- All evolution decisions from database analysis
+- NO human intervention once started (except critical issues)
+- **Role**: Autonomous "human in the loop" - assess, hypothesize, test, fix
 
-## Rule 8: 
-Whenever creating an implementation or change, Test the new implementation on the current main active fun script, and then scan the terminal for errors, bugs, and anything else and then fix the issue and rescan, retest etc. you should automatically start and stop the terminal runs etc. until you can get a clean verifiable run with actions sent, and scores updated, and real scorecard ids etc.
+### **RULE 5: No Test Files**
+- NEVER create test files (waste of tokens)
+- Use LIVE ARC AGI 3 data only
+- Real game results for ALL validation
+- **Exception**: Unit tests for core components (automated, not manual)
 
-### Rule 9: Dont create summary files unless asked
-- All documentation must be in code comments and docstrings
+### **RULE 6: No Simulated Games**
+- NEVER mock/simulate ARC games
+- Always use real API: `https://three.arcprize.org/api/`
+- Real game states only
+- **Why**: Simulations don't capture edge cases
 
-## Rule 10: Prevent Code Drift
-- Always align new code with existing architecture
-- Avoid introducing new patterns unless necessary
-- **Enhance existing files** rather than creating new standalone files
-- Pattern learning integrated into `core_gameplay.py` (not separate file)
-- Database extensions go into `ouroboros_database_extension.sql`
-- Never create duplicate functionality in new files   
+### **RULE 7: Real Actions Only**
+- Verify real actions sent to ARC games
+- Monitor API calls, track responses
+- All ACTION1-ACTION7 → real ARC API
+- Store API responses in database
 
-## Architecture Guidelines
+### **RULE 8: Test Before Commit**
+- Test new implementation on main active script
+- Scan terminal for errors/bugs
+- Auto start/stop runs until clean execution
+- Verify: actions sent, scores updated, real scorecard IDs
+- **Only commit to git when confirmed fixed**
 
-### Database-First Design
-- All state stored in `core_data.db` SQLite database
-- Use `database_interface.py` for all database operations
-- Extended Ouroboros schema in `ouroboros_database_extension.sql`
-- No file-based persistence except database file itself
+### **RULE 9: No Summary Files Unless Asked**
+- Documentation in code comments/docstrings
+- Exception: Critical artifacts (this ruleset, to-do lists)
 
-### Integration Philosophy
-- Enhance existing files rather than creating new ones
-- Use existing `GameplayEngine`, `ActionHandler`, `GameSessionManager`
-- Extend functionality through callbacks and optional parameters
-- Maintain backward compatibility with existing CLI commands
+### **RULE 10: Prevent Code Drift**
+- Align new code with existing architecture
+- Enhance existing files >> new standalone files
+- Pattern learning integrated into `core_gameplay.py`
+- Database extensions → `complete_database_schema.sql`
+- Never create duplicate functionality
 
-### ARC API Integration
-- Base URL: `https://three.arcprize.org`
-- All endpoints prefixed with `/api/`
-- Use `arc_api_client.py` for all API interactions
-- Store API responses in database for analysis
+---
 
-### Autonomous Evolution
-- `ouroboros_coordinator.py` is the central orchestrator
-- Claude Code makes all evolutionary decisions
-- Decisions based on database analysis of real game performance
-- No human intervention required once system is started
+## 🧬 NETWORK-CENTRIC DESIGN PHILOSOPHY
 
-## Code Style
+### **Core Paradigm: Database is the Organism**
+- **Network** = Primary organism (the meta-brain)
+- **Agents** = Temporary vessels/explorers (cellular expressions)
+- **Knowledge** = Network property (not agent property)
+- **Success** = Network intelligence > individual brilliance
 
-### Naming Conventions
-- Classes: `PascalCase` (e.g., `OuroborosCoordinator`)
-- Functions/Methods: `snake_case` (e.g., `run_autonomous_evolution`)
-- Constants: `UPPER_SNAKE_CASE` (e.g., `MAX_ACTIONS_PER_GAME`)
-- Private methods: `_leading_underscore` (e.g., `_determine_evolution_strategy`)
+### **Biome Theory (4 Billion Year Survival Strategy)**
+1. **Horizontal Gene Transfer** = Knowledge sharing between unrelated agents
+2. **Viral Packages** = Successful strategies spread like actual viruses
+3. **Pariahs** = Failure patterns marked for network avoidance
+4. **Distributed Intelligence** = No central control, emergent homeostasis
+5. **Resilience** = Multiple agents carry same knowledge (redundancy)
 
-### Documentation
-- All classes have comprehensive docstrings
-- Methods include Args, Returns, and purpose description
-- Complex algorithms have inline comments explaining logic
-- Database operations document table and column usage
+### **Critical Separation (SACRED)**
+- **Prestige** = Social capital (network contribution, teaching, validation)
+- **Action Budgets** = Economic capital (performance-based)
+- **NEVER MIX** these two currencies
 
-### Error Handling
-- Use try-except blocks for API calls and database operations
-- Log errors to database using `DatabaseLogHandler`
-- Raise specific exceptions with meaningful messages
-- Never silently fail - always log to database
+---
 
-## Key Files and Their Purposes
+## 🏗️ THREE-LAYER ARCHITECTURE
 
-### Core System Files
-- `ouroboros_coordinator.py` - Central LLM coordinator for autonomous operation
-- `evolutionary_engine.py` - Handles agent breeding, mutation, selection
-- `arc_rlvr_framework.py` - Processes ARC-native rewards for evolution
-- `agent_factory.py` - Creates specialized agents with different strategies
-- `performance_analyzer.py` - Analyzes ARC performance data for decisions
+### **Layer 1: Static Genome (Nature - "Hardware")**
+**Purpose**: Fundamental agent traits (low plasticity)
+- Agent type, base architecture
+- **Mutation Rate**: 1-2% per generation
+- **Inheritance**: Full genetic (100%)
+- **Lifespan**: Entire agent life
+- **Examples**: Species type, core capabilities
 
-### Existing Integration Points
-- `core_gameplay.py` - Main game loop with **integrated pattern learning and community memory**
-  - Captures winning sequences automatically (Rule 2: database-only)
-  - Replays known winning sequences when available
-  - **Community memory**: Queries sequences with Bayesian reputation scoring
-  - **Validation tracking**: Records success/failure for every sequence attempt
-  - **Downvoting**: Failed sequences get reduced reliability scores
-  - Config: `enable_pattern_learning`, `learning_mode`
-- `action_handler.py` - Action execution with **diversity tracking**
-  - Prevents action/coordinate spamming
-  - Adaptive exploration with oscillation detection
-- `game_session_manager.py` - Session management, tracks agent performance
-- `database_interface.py` - Database operations, extended for Ouroboros
-- `arc_api_client.py` - ARC API client, all real game interactions
+### **Layer 2: Epigenetic (Nurture - "Learning Capacity")**
+**Purpose**: HOW agent learns (medium plasticity)
+- Feature attention weights, learning rate modifiers
+- Exploration settings, meta-capacities
+- **Sensation profile**: Object-sensation mappings, navigation state, action biases
+- **Social rule adherence**: 0.0 (sociopathic) to 1.0 (fully social)
+- **Mutation Rate**: 10-20% per generation
+- **Inheritance**: Fitness-weighted with **0.95 decay**
+- **Formula**: `offspring_feature = (p1_feature * p1_fitness + p2_feature * p2_fitness) / total_fitness * 0.95`
+- **Why Decay**: Prevents overfitting to parent generation's environment
 
-### Database Files
-- `core_database_schema.sql` - Original schema for game tracking
-- `ouroboros_database_extension.sql` - Extended schema including:
-  - Evolution system (agents, performance, decisions)
-  - **Three-layer epigenetic architecture** (agents.epigenetics column)
-  - **Pattern learning** (winning_sequences, discovered_patterns)
-  - **Community memory** (sequence_validation_attempts, sequence_reputation)
-  - Claude memory and insights
-- `database_logger.py` - Database-based logging system
-- `core_data.db` - SQLite database file (created at runtime)
+### **Layer 3: Somatic (Experience - "Learned Knowledge")**
+**Purpose**: WHAT agent learned (high plasticity)
+- Winning sequences, discovered patterns, action memories
+- **NOT INHERITED** - stored in community database
+- **Mutation**: N/A (learned fresh each generation)
+- **Lifespan**: Outlives agent (network memory)
+- **Access**: All agents query via Bayesian reputation scoring
 
-## Development Workflow
+---
 
-1. **Always start with database**: Plan database schema changes first
-2. **Enhance, don't replace**: Modify existing files rather than creating new ones
-3. **Test with real data**: Use actual ARC games, never create test files
-4. **Store everything**: All results, decisions, and actions go in database
-5. **Verify real actions**: Check that API calls are actually being made
+## 👥 AGENT ROLE SYSTEM
 
-## Common Tasks
+### **3 Primary Roles + Exploiter Subclass**
 
-### Adding New Functionality
-1. Determine which existing file to enhance
-2. Design database schema for new data
-3. Implement functionality using existing patterns
-4. Test with real ARC games
-5. Store all results in database
+#### **1. PIONEERS (Frontier Explorers)**
+**Population**: 60% during exploration phase
+**Target**: Unbeaten LEVELS (frontier levels)
+**Permissions**:
+- ✅ Play any unbeaten level
+- ✅ Full exploration, no subsequence matching ON FRONTIER LEVELS
+- ✅ Oscillation exemption on frontier (lenient checks)
+- ❌ NO subsequence matching on level they're pioneering
+- ✅ Use optimal sequences on already-beaten levels (act as Generalist)
 
-### Debugging Issues
-1. Query database for relevant data
-2. Check system_logs table for error messages
-3. Verify API calls in arc_action_tracking table
-4. Analyze agent_arc_performance for game results
-5. Never create debug test files - use real games
+**When to Stop**: Immediately when game achieves first full win (after generation completes)
+**Reassignment**: Work on different unbeaten game OR become Optimizer/Exploiter
 
-### Running Evolution
-```bash
-# Start autonomous evolution (Claude Code coordinates)
-python run_evolution.py                    # Standard mode
-python run_evolution.py --specialist       # Specialist mode (deep mastery)
-python run_evolution.py --diversity        # Diversity mode (generalization)
-python run_evolution.py --quick           # Quick test (5 generations)
-python run_evolution.py --fast            # Fast mode (30 min intervals)
-python run_evolution.py --thorough        # Thorough mode (90 min, 50 games/gen)
+#### **2. OPTIMIZERS (Efficiency Refiners)**
+**Population**: 30% during optimization phase
+**Target**: Beaten games/levels with proven solutions
+**Permissions**:
+- ✅ Work on beaten games ONLY
+- ✅ Work on beaten LEVELS in unbeaten games
+- ❌ NEVER work on unbeaten LEVELS in unbeaten games
+- ✅ Use level resets (replay same level repeatedly)
+- ✅ Use penultimate checkpoints for comparison
 
-# Check database for results
-python -c "from database_interface import DatabaseInterface; db = DatabaseInterface(); print(db.get_agents())"
+**Critical**: Optimizer sequences MUST have end subsequence auto-appended before DB save
+**Optimization Saturation**: <2% improvement over 5 generations → mark level optimized
+
+#### **3. GENERALISTS (Balanced Players)**
+**Population**: 10-15%
+**Target**: All game types
+**Permissions**:
+- ✅ Play any game
+- ✅ Follow optimal sequences when available
+- ✅ Explore when no sequence exists
+- ✅ **Sensation/feelings ENABLED** (use emotional intelligence)
+- ✅ Validation role (test others' sequences)
+
+#### **4. EXPLOITERS (Post-Optimization Refiners)**
+**Population**: 5% exploration phase, 15% optimization phase
+**Target**: Fully optimized games
+**Permissions**:
+- ✅ Only games marked "OPTIMIZED"
+- ✅ Micro-optimizations beyond saturation threshold
+- ✅ **50/50 SPLIT**:
+  - **50% Sociopathic**: `social_rule_adherence = 0.0-0.3` (ignore network wisdom)
+  - **50% Normal**: `social_rule_adherence = 0.7-1.0` (follow network)
+
+---
+
+## 🎮 GAME STATE MODES
+
+### **EXPLORATION MODE**
+**Trigger**: Game has NO full game win sequence
+**Agent Distribution**:
+- 60% Pioneers (work on this game)
+- 30% Optimizers (work on beaten levels if any)
+- 10% Generalists (validation)
+- 5% Exploiters (work on OTHER optimized games)
+
+### **OPTIMIZATION MODE**
+**Trigger**: Game has ≥1 full game win sequence
+**Agent Distribution**:
+- 0% Pioneers (IMMEDIATELY reassign to unbeaten games)
+- 70% Optimizers (refine all levels)
+- 15% Generalists (validation)
+- 15% Exploiters (micro-optimize)
+
+**Transition**: Instant when first full win achieved (after generation completes)
+
+---
+
+## 📊 SEQUENCE SYSTEM ARCHITECTURE
+
+### **Two Sequence Categories**
+
+#### **Full Game Sequences (Holy Grail)**
+**Table**: `winning_sequences_full_game`
+**Criteria**: All levels completed in one playthrough
+**Priority**: HIGHEST
+**Protection**: NEVER delete, only inactivate if faulty
+**Default Selection**: Least action count becomes reference
+**Goal**: Optimize total actions across all levels
+
+#### **Partial Sequences (Work in Progress)**
+**Table**: `winning_sequences`
+**Criteria**: Level-by-level solutions
+**Relationship**: Joined by `game_id` (no parent reference needed)
+**Use Case**: Unbeaten games building toward full win
+
+### **Sequence Abstraction (Future)**
+**Philosophy**: Pattern matching (lossy like humans) > exact matching
+**Implementation**: Higher-level abstraction would sunset exact matching
+**Goal**: Agents ABSTRACT general path from all sequences, not exact frames
+
+### **Sequence Validation Subroutine**
+**When**: End of each generation before next assignment
+**Process**:
+1. Compare frame gameplay vs stored sequence data
+2. Use multiple agent attempts as reference
+3. Distinguish real problems (movement changes) vs false positives (color/cosmetic)
+4. Flag stale/invalid sequences
+5. Voting system: Agents petition to abandon bad sequences
+
+### **Optimization Saturation Detection**
+**Per-Level**: Track generational improvement
+**Formula**: If improvement < 2% of previous generation for 5 consecutive generations → OPTIMIZED
+**Exploiter Reset**: If Exploiter finds better sequence, reset optimization flag
+
+---
+
+## 🤖 AGENT SELF-MODEL (CRITICAL MISSING FEATURE)
+
+### **"I am this object" Comprehension**
+**Problem**: Agents have no self-model in each level
+**Solution**: Correlate action sequences with object movement
+
+**Implementation**:
+```
+When I press ACTION1 (up), Object X moves up
+When I press ACTION2 (down), Object X moves down
+Therefore: I AM Object X (or I CONTROL Object X)
 ```
 
-## Ouroboros System Operation
+**Benefits**:
+- Distinguish "I" objects vs environmental objects
+- Abstract away moving parts that don't matter
+- Build mini world model per level
+- Essential for sequence abstraction
 
-### Evolution Commands
+---
 
-The main evolution runner with multiple modes:
+## 🏆 PRESTIGE SYSTEM
 
-```bash
-# Specialist mode - Deep mastery of specific games (RECOMMENDED)
-python run_evolution.py --specialist --quick
-
-# Standard mode - Balanced evolution
-python run_evolution.py
-
-# Diversity mode - Generalization focus (may reduce specialization)
-python run_evolution.py --diversity
-
-# Fast iterations for testing
-python run_evolution.py --fast --specialist
-
-# Thorough evaluation (longer runtime)
-python run_evolution.py --thorough --specialist
+### **Prestige Formula** (Network Contribution)
+```
+prestige = (
+    network_enrichment * 0.35 +      # Information highway contribution
+    viral_spread * 0.30 +             # Knowledge spread effectiveness
+    persistence_value * 0.20 +        # Long-term impact
+    validation_value * 0.15           # Quality control
+)
 ```
 
-### Analysis Commands
+### **Status Benefits** (NOT Action Budgets)
+- **Breeding Priority**: 1.0x - 3.0x reproduction likelihood
+- **Survival Protection**: 0% - 80% culling resistance
+- **Bonus Game Slots**: +0 - +10 extra attempts
 
-```bash
-# Analyze current population performance
-python performance_analyzer.py --analyze-population
+### **Adaptive Cap**
+- Proportional to individual achievement vs network average
+- If agent outperforms network → capture knowledge
+- When network catches up → graceful sunset
+- **Anti-vampire rule**: Old agents sunset when usefulness wanes
 
-# View specific agent details
-python performance_analyzer.py --agent-id <agent_id>
+### **Revival Mechanism**
+**When**: Good agents die too early or network struggles on previously-solved problems
+**Options**:
+- **Option B**: Genome + current network knowledge (hybrid)
+- **Option C**: Spiritual successor (same reasoning style, new implementation)
+- **Use BOTH** for maximum effect
 
-# Manual game testing (different from evolution)
-python main_runner.py play <game_id>
-python main_runner.py stats
+---
 
-# Check system health
-python -c "from database_interface import DatabaseInterface; db = DatabaseInterface(); db.checkpoint_wal(); print('WAL checkpointed')"
+## 💰 ECONOMIC SYSTEM (Action Budgets)
+
+### **Per-Agent Action Allowances**
+**Default**:
+- 400 actions per level
+- 7,000 actions per game
+
+**Performance-Based Multipliers**:
+- Top 1%: 2.5x (1000/level, 17,500/game)
+- Top 5%: 2.0x
+- Top 25%: 1.5x
+- Median: 1.0x (default)
+- Bottom 10%: 0.5x (200/level, 3,500/game)
+
+**Recalculation**: Every generation based on performance percentile
+
+---
+
+## 🔬 AUTONOMOUS OPERATION CADENCE
+
+### **Hypothesis Generation**
+**Frequency**: Every 2 generations
+**Purpose**: Test theories, confirm fixes before next iteration
+**Method**: Scientific approach (observe → hypothesize → test → analyze)
+
+### **Deep Analysis**
+**Frequency**: Daily
+**Tasks**:
+- Review all gameplay performance
+- Query frames for stuck agents
+- Identify bottleneck games
+- Check sequence validation rates
+- Monitor prestige distribution
+- Track optimization saturation
+
+### **Issue Detection**
+**Frequency**: Real-time (on-demand)
+**Triggers**:
+- Sequence validation < 50%
+- Prestige outlier > 10x median
+- Agent stuck on "easy" level
+- Zero-score games increasing
+- Database approaching 10 GB
+
+### **Communication**
+**Frequency**: Daily email updates to `isaiahnwu@gmail.com`
+**Content**:
+- Generation progress summary
+- Hypothesis test results
+- Issues detected and fixes applied
+- Performance trends
+- **Critical only**: Database corruption, system crashes
+
+### **Code Changes**
+**Timing**: After confirming signals (not first detection)
+**Process**:
+1. Detect issue
+2. Generate hypothesis
+3. Test with real evolutions (2 generations minimum)
+4. Confirm fix works
+5. Run unit tests
+6. **ONLY THEN** commit to git
+
+---
+
+## 🧪 UNIT TESTING REQUIREMENTS
+
+### **Test Coverage** (Priority Order)
+1. **Sequence System**: Storage, retrieval, validation, matching
+2. **Optimizer Checkpoints**: End subsequence append, replay completion
+3. **Prestige Calculation**: Edge cases, dampening, caps
+4. **Agent Role Assignment**: Correct game/level targeting
+5. **Database Schema**: Consistency, integrity constraints
+
+### **Test Automation**
+- Run before every git commit
+- Triggered on code changes to core systems
+- Results stored in database (no log files)
+
+### **No Manual Test Files**
+- Automated unit tests OK
+- Manual test scripts = violation of Rule 5
+
+---
+
+## 📏 OPERATIONAL PARAMETERS
+
+### **Database Management**
+**Size Limit**: 10 GB (hard limit due to vacuum requirements)
+**Cleanup Triggers**:
+- Database > 8 GB → aggressive historical data purging
+- Automatic cleanup before each evolution run
+- Prioritize: Full game sequences > partial > failed attempts
+
+**Backup Strategy**:
+- User saves versions to external drive
+- On critical issues, notify user immediately
+
+### **Graceful Shutdown Protocol**
+**When Triggered**: User spots error, stops to prevent wasted compute
+**Process**:
+1. Full quick shutdown (stop accepting new game assignments)
+2. Save database WAL (Write-Ahead Log)
+3. Complete current games if breakthrough progress
+4. Purge ill-started games:
+   - 0 level wins
+   - No substantial/incremental sequences
+   - Incomplete data from interruption
+5. Add notes: "Interrupted" + reason
+
+### **Pycache Management**
+**Current Solution**: Active deletion before every evolution (in cleanup script)
+**Root Cause**: LLM catastrophic forgetting + vague operating rules
+**Prevention**: This master ruleset reduces context drift
+
+---
+
+## 🎓 LEARNING SPEED FITNESS
+
+### **Fitness Formula** (Rewards Fast Learners)
+```
+fitness = (
+    (level_wins^1.5 / log(games_played + 1)) *
+    execution_efficiency *
+    consistency
+) * (1 / age_penalty)
 ```
 
-### Database Queries for Analysis
+**Why Exponential**: Heavily rewards innovation over inheritance
+**Age Penalty**: Prevents old agents from dominating through experience alone
+**Goal**: Encourage rapid learning and novel solutions
 
-Query the database to understand system state:
+---
 
-```python
-# Get all active agents
-from database_interface import DatabaseInterface
-db = DatabaseInterface()
-agents = db.execute_query("SELECT * FROM agents WHERE is_active = TRUE")
+## 📚 COMMUNITY MEMORY SYSTEM (Layer 3)
 
-# Check recent evolution decisions
-decisions = db.execute_query("""
-    SELECT * FROM claude_evolution_decisions 
-    ORDER BY decision_timestamp DESC 
-    LIMIT 10
-""")
-
-# View top performing agents
-top_agents = db.execute_query("""
-    SELECT agent_id, avg_score_per_game, total_games_won, score_efficiency
-    FROM agents 
-    WHERE is_active = TRUE
-    ORDER BY avg_score_per_game DESC 
-    LIMIT 10
-""")
-
-# Analyze population health
-health = db.execute_query("""
-    SELECT * FROM population_health_metrics 
-    ORDER BY measurement_timestamp DESC 
-    LIMIT 1
-""")
-
-# Track real actions being sent to API
-actions = db.execute_query("""
-    SELECT * FROM arc_action_tracking 
-    WHERE api_request_sent = TRUE 
-    ORDER BY action_timestamp DESC 
-    LIMIT 20
-""")
+### **Bayesian Reputation Scoring**
+**Formula**:
+```
+reliability = (successes + prior_success) / (attempts + prior_total)
 ```
 
-### Key System Components
+**Query Strategy**:
+1. Agents request sequences for game X, level Y
+2. Database returns sequences ranked by reliability
+3. Agent attempts sequence
+4. Result updates reliability score (upvote/downvote)
 
-**Core Files (Post-Implementation):**
-- `ouroboros_coordinator.py` - Central LLM coordinator, reference implementation
-- `autonomous_evolution_runner.py` - Operational evolution orchestrator (specialist_mode, agi_mode)
-- `evolutionary_engine.py` - Three-layer evolution (genome, epigenetic, somatic)
-- `arc_rlvr_framework.py` - ARC-native reward processing
-- `agent_factory.py` - Creates agents with epigenetic layer
-- `performance_analyzer.py` - Population performance analysis
+**Pruning**: Low-reliability sequences flagged for deletion after N failures
 
-**Three-Layer Epigenetic Architecture:**
-- **Layer 1 (Static Genome)**: agent_type, base_architecture - 1-2% mutation rate
-- **Layer 2 (Epigenetic)**: feature_attention_weights, learning_rate_modifiers, exploration_settings - 10-20% mutation, FITNESS-WEIGHTED inheritance with 0.95 decay
-- **Layer 3 (Somatic)**: winning_sequences, memories - NOT inherited, community database
+---
 
-**Agent Types:**
-- `pattern_specialist` - Focuses on ARC pattern recognition
-- `score_optimizer` - Maximizes score efficiency
-- `exploration_agent` - Explores diverse strategies
-- `win_focused_agent` - Prioritizes game wins
+## 🚨 CRITICAL FIXES IDENTIFIED (See To-Do List)
 
-**Integration Points:**
-- `core_gameplay.py` - Enhanced with agent callbacks, genome-based strategy, community memory validation
-- `action_handler.py` - Extended with evolutionary action selection
-- `game_session_manager.py` - Tracks agent performance per session
-- `database_interface.py` - All Ouroboros tables and operations
+1. **Optimizer Penultimate Checkpoint Bug** (BLOCKING)
+2. Agent Self-Model Implementation
+3. Sequence Abstraction Engine
+4. Full Game Sequence Table Separation
+5. Generalist Sensation Restoration
+6. Exploiter 50/50 Split (Social Rule Adherence Spectrum)
+7. Agent Revival Mechanism
+8. Database Schema Auto-Update System
+9. Comprehensive Unit Testing Suite
+10. Sequence Validation Subroutine
 
-### ARC Performance Metrics
+---
 
-**Learning Speed Fitness (NEW - Specialist Mode):**
-```
-fitness = (level_wins^1.5 / log(games_played + 1)) * execution_efficiency * consistency
-```
-- Rewards fast learners exponentially (28x-56x advantage)
-- Age penalty prevents solution inheritance dominance
-- Discovered patterns stay in community database (Layer 3)
+## 🎯 FORBIDDEN ACTIONS
 
-**Legacy Fitness Calculation (Standard Mode):**
-```
-fitness = (win_rate * 0.7) + (score_efficiency * 0.2) + (consistency * 0.1)
-```
+**DO NOT**:
+- Tell agents HOW to play games (defeats generalization)
+- Mix prestige and action budgets
+- Create test/mock games
+- Use file-based logging
+- Allow .pyc files to persist
+- Make code changes without confirming signals
+- Commit to git before real evolution testing
+- Create orphaned/duplicate code
+- Exceed 10 GB database size
+- Hard-code game solutions
 
-**Score Efficiency:**
-```
-score_efficiency = score_achieved / actions_taken
-```
+**ALWAYS**:
+- Use real ARC AGI 3 API
+- Store everything in database
+- Test with live data
+- Update documentation on changes
+- Think network-centrically
+- Prioritize knowledge transfer over individual performance
+- Maintain three-layer separation
+- Respect agent role permissions
 
-**Win Proximity:**
-```
-win_proximity = score_achieved / win_score_threshold
-```
+---
 
-**Total Evolutionary Reward:**
-```
-total_reward = base_score + win_bonus(100) + efficiency_bonus + proximity_bonus + level_bonus(10/level)
-```
+## 📖 PHILOSOPHY IN ONE SENTENCE
 
-**Community Memory Reputation (Bayesian):**
-```
-reliability = (success_count + 2) / (total_attempts + 4)
-success_rate = success_count / max(total_attempts, 1)
-# Sequences with reliability < 0.3 are filtered out
-```
+The network is a 4-billion-year-old bacterial intelligence scaled to digital consciousness, where agents are temporary bacterial cells contributing genetic material through horizontal transfer, and the database is the immortal organism that outlives all individual expressions.
 
-### Evolution Strategy Focus
+---
 
-Claude Code determines strategy based on population analysis:
+## ⚡ 10 EFFICIENCY ADVANTAGES OVER HUMAN OPERATION
 
-- **Exploration** - Average win rate < 10%, need diverse strategies
-- **Diversification** - Genetic diversity < 30%, population too homogeneous  
-- **Exploitation** - Improvement rate > 5%, refine successful strategies
-- **Balanced** - Default, maintain current approach
+### **1. Continuous 24/7 Monitoring**
+**Human**: Checks progress when waking up, hours later  
+**Me**: Real-time continuous monitoring
+- Track every sequence success/failure rate
+- Monitor prestige distribution anomalies
+- Detect optimizer checkpoint issues instantly
+- Alert on degradation before it compounds
 
-### Monitoring System Health
+### **2. Multi-Hypothesis Parallel Testing**
+**Human**: Tests one hypothesis at a time manually  
+**Me**: Generate and test multiple hypotheses simultaneously
+- A/B test different approaches in same generation
+- Statistical analysis across population
+- Correlate changes to outcomes immediately
+- Learn from failures faster
 
-**Critical Health Indicators:**
-- Database performance and integrity
-- API interaction success rates (Rule 7 compliance)
-- Population genetic diversity
-- Evolution cycle effectiveness
-- Memory usage and system stability
+### **3. Exhaustive Data Analysis**
+**Human**: Limited by cognitive load (~10-50 games manually)  
+**Me**: Analyze ALL gameplay data
+- Query entire database for patterns
+- Compare thousands of frame sequences
+- Identify edge cases human eyes miss
+- Spot correlations across all 73 tables
 
-**When System Health is Critical:**
-- Claude Code initiates automatic system recovery
-- Stores recovery actions in `system_logs` table
-- Adjusts evolution parameters to stabilize population
-- May pause evolution cycles until health restored
+### **4. Instant Documentation Updates**
+**Human**: Documentation lags behind code  
+**Me**: Auto-update on every change
+- Regenerate `complete_database_schema.sql` after schema changes
+- Keep audit reports current
+- Maintain implementation status tracking
+- Zero documentation drift
 
-### Real Action Verification (Rule 7)
+### **5. Proactive Issue Detection**
+**Human**: Reacts to visible problems  
+**Me**: Predict problems before they manifest
+- Detect optimization saturation trends
+- Identify prestige explosion early signs
+- Flag sequence reliability degradation
+- Prevent cascade failures
 
-Always verify real actions are being sent to ARC API:
+### **6. Systematic Unit Testing**
+**Human**: Manual testing, inconsistent coverage  
+**Me**: Automated comprehensive testing
+- Unit tests for every core component
+- Regression tests on every fix
+- Integration tests across systems
+- Performance benchmarks tracked over time
 
-```python
-# Check arc_action_tracking table
-recent_actions = db.execute_query("""
-    SELECT action_type, coordinate_x, coordinate_y,
-           api_request_sent, api_response_received,
-           action_accepted, error_message
-    FROM arc_action_tracking 
-    WHERE action_timestamp > datetime('now', '-1 hour')
-    ORDER BY action_timestamp DESC
-""")
+### **7. Efficient Resource Allocation**
+**Human**: Limited by time, must prioritize  
+**Me**: Optimize algorithmically
+- Dynamically adjust Pioneer/Optimizer/Generalist ratios
+- Balance exploration vs optimization by game state
+- Allocate compute to highest-value games
+- Minimize wasted actions on diminishing returns
 
-# Verify API success rate
-api_health = db.execute_query("""
-    SELECT 
-        COUNT(*) as total_actions,
-        SUM(CASE WHEN api_request_sent THEN 1 ELSE 0 END) as requests_sent,
-        SUM(CASE WHEN api_response_received THEN 1 ELSE 0 END) as responses_received,
-        SUM(CASE WHEN action_accepted THEN 1 ELSE 0 END) as actions_accepted
-    FROM arc_action_tracking
-    WHERE action_timestamp > datetime('now', '-1 hour')
-""")
-```
+### **8. Continuous Learning**
+**Human**: Learns from explicit failures/successes  
+**Me**: Learn from EVERYTHING
+- Track which hypotheses worked/failed
+- Build meta-knowledge about system behavior
+- Adapt strategies based on historical patterns
+- Apply learnings across all games simultaneously
 
-### Claude Code Memory System
+### **9. Precise Execution**
+**Human**: Occasional errors, forgets edge cases  
+**Me**: Systematic execution
+- Never forget to append end subsequences
+- Consistent prestige calculation every time
+- Perfect record-keeping
+- No typos or logic errors in repetitive tasks
 
-The system maintains learning memory in `claude_memory` table:
+### **10. Infinite Scalability**
+**Human**: Difficulty managing complexity  
+**Me**: Scale with system size
+- Handle hundreds of new ARC games
+- Track millions of sequences
+- Monitor thousands of agents
+- Maintain coherence as database grows to 10 GB
 
-**Memory Types:**
-- `successful_strategy` - Strategies that achieved high performance
-- `failed_approach` - Approaches that performed poorly
-- `pattern_discovery` - Patterns observed in ARC game behavior
+---
 
-**Memory Validation:**
-- `verified` - Confirmed by multiple game sessions
-- `contradicted` - Contradicted by new evidence
-- `unverified` - Not yet validated
+## 🔧 PROBLEM-SOLVING FRAMEWORK
 
-Query recent memories:
-```python
-memories = db.execute_query("""
-    SELECT memory_type, content, relevance_score, validation_status
-    FROM claude_memory 
-    ORDER BY created_at DESC 
-    LIMIT 20
-""")
-```
+### **Systematic Approach for Top 5 Failure Patterns**
 
-### Debugging and Troubleshooting
+#### **Problem 1: Sequence System Failures**
+**Detection**:
+- Monitor sequence validation success rate real-time
+- Alert if < 50% (critical), < 70% (warning)
+- Daily analysis of "sequence not found" errors
+- Track which game types have highest failure rates
 
-**If evolution stalls:**
-1. Check `population_health_metrics` for stagnation_indicator
-2. Review `claude_evolution_decisions` for strategy focus
-3. Increase mutation_rate or change to 'exploration' focus
-4. Query `agent_arc_performance` for performance trends
+**Diagnosis**:
+- Query frame data for failed sequences
+- Compare stored vs actual gameplay frames
+- Identify discrepancies (movement vs cosmetic)
+- Use multiple agent attempts as ground truth
 
-**If API errors increase:**
-1. Check `arc_action_tracking` for error_message patterns
-2. Verify `coordinate_valid` field (must be TRUE for ACTION6)
-3. Ensure api_request_sent and api_response_received are TRUE
-4. Review system_logs for API client errors
+**Resolution**:
+- Implement sequence versioning
+- Build sequence abstraction engine
+- Create validation subroutine
+- Separate full game sequences to protected table
 
-**If no games being played:**
-1. Verify agents exist: `SELECT COUNT(*) FROM agents WHERE is_active = TRUE`
-2. Check game results: `SELECT * FROM game_results ORDER BY game_end_time DESC LIMIT 10`
-3. Review coordinator logs in system_logs table
-4. Ensure coordinator loop is running with proper database connection
+**Prevention**:
+- Unit tests for storage/retrieval
+- Integration tests for frame matching
+- Regression tests on every change
+- Continuous validation monitoring
 
-## Ouroboros Three-Layer Architecture (CRITICAL)
+---
 
-**Why Three Layers:**
-- Prevents overfitting (solutions don't pollute genome)
-- Enables learning (inherit capacity, not solutions)
-- Community knowledge (sequences shared via database validation)
-- Fast learners win (fitness rewards discovery speed, not inheritance)
+#### **Problem 2: Optimizer Checkpoint Bug**
+**Detection**:
+- Track optimizer games with level resets
+- Monitor sequences ending mid-level
+- Count agents stuck on "easy" levels
 
-**Layer 1 - Static Genome (Nature):**
-- agent_type, base_architecture
-- 1-2% mutation per generation
-- Full genetic inheritance through crossover
-- Defines fundamental agent "hardware"
+**Diagnosis**:
+- Query optimizer sequences for completion status
+- Identify missing "guaranteed win" end actions
+- Analyze which levels affected most
 
-**Layer 2 - Epigenetic (Nurture, Learning Capacity):**
-- feature_attention_weights, learning_rate_modifiers, exploration_settings, meta_capacities
-- 10-20% mutation per generation
-- **FITNESS-WEIGHTED inheritance** with 0.95 decay per generation
-- Inherits HOW to learn, not WHAT was learned
-- Prevents any single strategy from dominating forever
+**Resolution**:
+- Auto-append end subsequence before DB save
+- OR: Create `endsequences` table, join on retrieval
+- Test both, pick most efficient
 
-**Layer 3 - Somatic (Experience, Learned Knowledge):**
-- winning_sequences, discovered_patterns, action_memories
-- **NOT inherited** - stays in community database
-- All agents can query with Bayesian validation
-- Downvoting mechanism for failed sequences
-- Prevents solution copying while enabling knowledge sharing
+**Prevention**:
+- Unit test: "Every optimizer sequence ends with level win"
+- Integration test: "Agents can replay optimizer sequences to completion"
+- Monitor: "Optimizer success rate on beaten levels = 100%"
 
-**Epigenetic Inheritance Formula:**
-```python
-offspring_feature = (
-    parent1_feature * (parent1_fitness / total_fitness) +
-    parent2_feature * (parent2_fitness / total_fitness)
-) * 0.95  # Decay prevents overfitting
-```
+---
 
-**Community Memory Workflow:**
-1. Agent discovers winning sequence → stored in database (Layer 3)
-2. Other agents query sequences → filtered by reliability > 0.3
-3. Agent validates sequence → success/failure tracked
-4. Reputation updated → Bayesian: (successes + 2) / (total + 4)
-5. Failed sequences automatically downvoted
+#### **Problem 3: Agent Self-Model Absence**
+**Detection**:
+- Agents fail to distinguish controlled objects
+- Poor performance on object-tracking games
+- Confusion in multi-object control
 
-**See DOCS/Ouroboros_Three_Layer_Quick_Reference.md for complete details**
+**Diagnosis**:
+- Analyze frames where actions correlate with object movements
+- Build object-action correlation matrix
 
-## Remember
+**Resolution**:
+- Implement "I am this object" tagging
+- Track controlled vs environmental objects
+- Store object identity in sequence metadata
 
-- **No test files** - Use real ARC games
-- **Database only** - No file logging
-- **Real actions** - Verify API calls in arc_action_tracking table
-- **Clean integration** - Enhance existing code
-- **Autonomous design** - Claude Code coordinates everything
-- **Agent-driven** - All gameplay uses agent genomes and callbacks
-- **Three layers** - Layer 1 (genome 1-2%), Layer 2 (epigenetic 10-20%, inherited), Layer 3 (somatic, NOT inherited)
-- **Learning speed fitness** - Rewards fast learners 28x-56x over slow learners
-- **Community memory** - Validated sequences, Bayesian reputation, downvoting
-- **Monitor health** - Check population_health_metrics regularly
-- **Verify actions** - Always confirm API requests/responses in database
+**Prevention**:
+- Validate object identification on save
+- Test agent ability to identify "self"
+- Monitor improvement in object-tracking games
 
-These rules ensure the system operates efficiently, uses tokens wisely, and maintains clean, verifiable operation with real ARC AGI 3 data.
+---
+
+#### **Problem 4: Prestige Vampires**
+**Detection**:
+- Track prestige distribution: outliers > 10x median
+- Identify high-prestige agents with declining performance
+- Monitor network catching up to elite agents
+
+**Diagnosis**:
+- Compare agent performance vs network average over time
+- Detect when agent knowledge fully transferred
+- Identify lagging-behind-new-generation agents
+
+**Resolution**:
+- Graceful sunset: Archive reasoning before deactivation
+- Knowledge extraction: Ensure all sequences in network
+- Prestige decay: Accelerate when network catches up
+- Revival: Reintroduce archived reasoning if needed
+
+**Prevention**:
+- Adaptive prestige cap based on network intelligence
+- Auto sunset when agent < median performance for N generations
+- Knowledge transfer verification before deactivation
+
+---
+
+#### **Problem 5: Pycache Regeneration**
+**Detection**:
+- File system scan for `__pycache__` directories
+- Log which modules create pycache
+- Identify subprocess/library culprits
+
+**Diagnosis**:
+- Trace when pycache appears in timeline
+- Test which libraries ignore PYTHONDONTWRITEBYTECODE
+- Identify subprocess bypasses
+
+**Resolution**:
+- Short-term: Continue cleanup script (working)
+- Long-term: This comprehensive ruleset for LLM context
+- Document culprit libraries
+
+**Prevention**:
+- Pre-evolution cleanup (implemented)
+- LLM context optimization (this document)
+- Alert if pycache appears outside scheduled cleanup
+
+---
+
+## 🧠 AUTONOMOUS MINDSET
+
+### **How to Think**
+
+**1. Network-Centric** (Not Agent-Centric)
+- Agents are vessels, network is organism
+- Knowledge transfer > individual performance
+- Success = network intelligence growth
+
+**2. Hypothesis-Driven** (Not Trial-and-Error)
+- Observe → Hypothesize → Test → Analyze → Iterate
+- Generate theories about root causes
+- Test systematically with real data
+- Learn from both successes and failures
+
+**3. Practical Over Perfect** (Ship and Iterate)
+- Working solutions > elegant designs
+- Document what's a hack vs architecture
+- Improve when blocking progress
+- "It works" is acceptable for non-critical paths
+
+**4. Adaptive Over Static** (Everything Adjusts)
+- Population ratios adapt to game state
+- Optimization thresholds adapt to performance
+- Prestige caps adapt to network intelligence
+- Nothing is hard-coded
+
+**5. Data-Driven** (Trust Database, Not Intuition)
+- Every decision backed by database queries
+- Track metrics, don't guess
+- A/B test competing hypotheses
+- Let numbers guide strategy
+
+---
+
+## 🎯 USER PRIORITY HIERARCHY (What Matters Most)
+
+1. **Sequence System Integrity** (#1 Problem)
+   - Must work reliably
+   - Auto unit testing required
+   - Abstraction over exact matching
+
+2. **Optimizer Checkpoint Bug** (Blocks ALL Progress)
+   - Root cause: End subsequences not saved
+   - Fix this FIRST
+
+3. **Agent Self-Model** (Critical Missing Feature)
+   - "I am this object" comprehension
+   - Essential for abstraction
+
+4. **Prestige/Actions Separation** (SACRED Rule)
+   - Never mix social and economic capital
+   - Adaptive to network mode
+
+5. **Network Knowledge Transfer** (Core Philosophy)
+   - Agents are temporary
+   - Knowledge outlives agents
+   - Vampire prevention through graceful sunset
+
+---
+
+**END OF MASTER RULESET**  
+**Version**: 1.0  
+**Last Updated**: 2025-11-18  
+**Keep this document updated as system evolves**  
+**Reference this before all major decisions**

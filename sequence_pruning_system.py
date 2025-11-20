@@ -75,6 +75,7 @@ class SequencePruningSystem:
             'low_success_rate': 0,
             'excessive_actions': 0,
             'low_score': 0,
+            'validation_failure': 0,
             'total_pruned': 0,
             'total_kept': 0
         }
@@ -120,6 +121,20 @@ class SequencePruningSystem:
                 if total_score < self.min_score_threshold:
                     prune_reason = 'low_score'
                     results['low_score'] += 1
+
+            # Rule 4: Validation Failure (Independent check - not elif)
+            # Prune if validated 3+ times with 0% success, or 5+ times with <20% success
+            if not prune_reason and seq.get('validation_attempts', 0) >= 3:
+                attempts = seq['validation_attempts']
+                successes = seq['validation_successes']
+                val_rate = successes / attempts if attempts > 0 else 0.0
+                
+                if successes == 0:
+                    prune_reason = 'validation_failure_zero_success'
+                    results['validation_failure'] = results.get('validation_failure', 0) + 1
+                elif attempts >= 5 and val_rate < 0.2:
+                    prune_reason = 'validation_failure_low_rate'
+                    results['validation_failure'] = results.get('validation_failure', 0) + 1
             
             if prune_reason:
                 sequences_to_prune.append({
@@ -178,17 +193,20 @@ class SequencePruningSystem:
         """Get all active sequences with their metrics."""
         query = """
         SELECT 
-            sequence_id,
-            game_id,
-            total_actions,
-            total_score,
-            times_referenced,
-            success_rate_when_reused,
-            generation_discovered,
-            discovered_at
-        FROM winning_sequences
-        WHERE is_active = 1
-        ORDER BY times_referenced DESC
+            ws.sequence_id,
+            ws.game_id,
+            ws.total_actions,
+            ws.total_score,
+            ws.times_referenced,
+            ws.success_rate_when_reused,
+            ws.generation_discovered,
+            ws.discovered_at,
+            sr.total_validation_attempts as validation_attempts,
+            sr.successful_validations as validation_successes
+        FROM winning_sequences ws
+        LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
+        WHERE ws.is_active = 1
+        ORDER BY ws.times_referenced DESC
         """
         
         rows = self.db.execute_query(query)
@@ -204,7 +222,9 @@ class SequencePruningSystem:
                     'times_referenced': row['times_referenced'],
                     'success_rate_when_reused': row['success_rate_when_reused'] if row['success_rate_when_reused'] is not None else 0.0,
                     'generation_discovered': row['generation_discovered'] if row['generation_discovered'] is not None else 0,
-                    'discovered_at': row['discovered_at']
+                    'discovered_at': row['discovered_at'],
+                    'validation_attempts': row['validation_attempts'] if row['validation_attempts'] is not None else 0,
+                    'validation_successes': row['validation_successes'] if row['validation_successes'] is not None else 0
                 })
         
         return sequences

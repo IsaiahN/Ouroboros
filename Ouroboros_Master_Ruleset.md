@@ -348,7 +348,7 @@ prestige = (
 - Database approaching 10 GB
 
 ### **Communication**
-**Frequency**: Daily email updates to `isaiahnwu@gmail.com`
+**Frequency**: Daily updates (logged to database)
 **Content**:
 - Generation progress summary
 - Hypothesis test results

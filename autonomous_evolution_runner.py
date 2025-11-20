@@ -44,7 +44,8 @@ except ImportError:
     pass
 
 from database_logger import setup_database_logging
-from database_interface import DatabaseInterface
+from enhanced_database_interface import EnhancedDatabaseInterface as DatabaseInterface
+from evolution_with_vampires import check_for_vampires  # Vampire detection
 from ouroboros_coordinator import OuroborosCoordinator
 from agent_factory import AgentFactory
 from performance_analyzer import PerformanceAnalyzer
@@ -1285,6 +1286,14 @@ class AutonomousEvolutionRunner:
             
             # Evolve new generation using EvolutionaryEngine
             print(f"\n[DNA] Evolving Generation {self.current_generation + 1}...")
+            
+            # Check for prestige vampires before breeding
+            try:
+                vampires_sunset = check_for_vampires(self.current_generation, self.db.db_path)
+                if vampires_sunset > 0:
+                    print(f"  [VAMPIRE] Sunset {vampires_sunset} prestige vampires before breeding")
+            except Exception as e:
+                print(f"  [WARN] Vampire detection failed (non-critical): {e}")
             
             evolution_engine = EvolutionaryEngine(self.db)
             
