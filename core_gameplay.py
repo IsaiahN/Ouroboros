@@ -905,6 +905,18 @@ class GameplayEngine:
                 'end_time': end_time
             }
 
+            # TASK #6: Agent Self-Model - Track performance metrics
+            if agent_id:
+                self._track_agent_performance(
+                    agent_id=agent_id,
+                    game_id=game_id,
+                    final_score=game_state.score,
+                    actions_taken=action_count,
+                    level_completions=level_completions,
+                    win=(game_state.state == "WIN"),
+                    duration_seconds=duration
+                )
+            
             # Diversity Mode: Track game diversity (Rule 10: integrated, Rule 2: database-only)
             if self.game_config.get('diversity_mode'):
                 self._track_game_diversity(game_id, game_state.score, action_count)
@@ -1753,6 +1765,237 @@ class GameplayEngine:
         except Exception as e:
             logger.error(f"Error tracking game diversity: {e}")
 
+
+
+    def _track_agent_performance(self, agent_id: str, game_id: str, 
+                                final_score: float, actions_taken: int,
+                                level_completions: int, win: bool,
+                                duration_seconds: float):
+        """
+        Track agent performance metrics for self-model (Task #6).
+        Records performance to agent_performance_history table.
+        
+        Args:
+            agent_id: Agent ID
+            game_id: Game that was played
+            final_score: Final score achieved
+            actions_taken: Total actions taken
+            level_completions: Levels completed
+            win: Whether the game was won
+            duration_seconds: Game duration
+        """
+        try:
+            # Get current performance snapshot
+            current = self.db.execute_query("""
+                SELECT games_played, total_score, total_actions, 
+                       total_levels_completed, wins, best_score, worst_score
+                FROM agent_performance_history
+                WHERE agent_id = ?
+                ORDER BY recorded_at DESC
+                LIMIT 1
+            """, (agent_id,))
+            
+            if current:
+                # Update cumulative metrics
+                games_played = current[0]['games_played'] + 1
+                total_score = current[0]['total_score'] + final_score
+                total_actions = current[0]['total_actions'] + actions_taken
+                total_levels = current[0]['total_levels_completed'] + level_completions
+                wins = current[0]['wins'] + (1 if win else 0)
+                best_score = max(current[0]['best_score'], final_score)
+                worst_score = min(current[0]['worst_score'], final_score) if current[0]['worst_score'] > 0 else final_score
+            else:
+                # First game for this agent
+                games_played = 1
+                total_score = final_score
+                total_actions = actions_taken
+                total_levels = level_completions
+                wins = 1 if win else 0
+                best_score = final_score
+                worst_score = final_score
+            
+            # Calculate averages
+            avg_score = total_score / games_played
+            avg_actions = total_actions / games_played
+            avg_levels = total_levels / games_played
+            avg_efficiency = total_score / total_actions if total_actions > 0 else 0.0
+            win_rate = wins / games_played
+            
+            # Get prestige score
+            prestige_data = self.db.execute_query("""
+                SELECT prestige_score
+                FROM agents
+                WHERE agent_id = ?
+            """, (agent_id,))
+            prestige_score = prestige_data[0]['prestige_score'] if prestige_data else 0.0
+            
+            # Get sequence contribution
+            sequences_discovered = self.db.execute_query("""
+                SELECT COUNT(*) as cnt
+                FROM winning_sequences
+                WHERE agent_id = ?
+            """, (agent_id,))[0]['cnt']
+            
+            sequences_validated = self.db.execute_query("""
+                SELECT COUNT(*) as cnt
+                FROM sequence_validation_attempts
+                WHERE agent_id = ?
+            """, (agent_id,))[0]['cnt'] if self.db.execute_query("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='sequence_validation_attempts'
+            """) else 0
+            
+            # Insert performance snapshot
+            self.db.execute_query("""
+                INSERT INTO agent_performance_history (
+                    agent_id, games_played, total_score, avg_score,
+                    best_score, worst_score, total_levels_completed,
+                    avg_levels_per_game, total_actions, avg_actions_per_game,
+                    avg_efficiency, wins, win_rate, sequences_discovered,
+                    sequences_validated, prestige_score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (agent_id, games_played, total_score, avg_score,
+                  best_score, worst_score, total_levels, avg_levels,
+                  total_actions, avg_actions, avg_efficiency, wins,
+                  win_rate, sequences_discovered, sequences_validated,
+                  prestige_score))
+            
+            self.db.checkpoint_wal()
+            
+            logger.debug(f"📊 Agent {agent_id} performance: {games_played} games, "
+                        f"avg score {avg_score:.2f}, win rate {win_rate:.1%}")
+            
+        except Exception as e:
+            logger.error(f"Error tracking agent performance: {e}")
+
+
+
+    def _get_agent_self_awareness(self, agent_id: str) -> Dict[str, Any]:
+        """
+        Get agent's self-awareness data from performance history (Task #6).
+        Allows agents to know their own performance and adjust behavior.
+        
+        Args:
+            agent_id: Agent ID
+            
+        Returns:
+            Dict with performance metrics and self-awareness insights
+        """
+        try:
+            # Get latest performance snapshot
+            perf_data = self.db.execute_query("""
+                SELECT *
+                FROM agent_performance_history
+                WHERE agent_id = ?
+                ORDER BY recorded_at DESC
+                LIMIT 1
+            """, (agent_id,))
+            
+            if not perf_data:
+                return {
+                    'has_history': False,
+                    'confidence': 0.5,  # Neutral confidence for new agents
+                    'strategy_adjustment': 'explore'  # Default to exploration
+                }
+            
+            perf = perf_data[0]
+            
+            # Calculate self-awareness metrics
+            confidence = min(1.0, perf['win_rate'] + (perf['avg_score'] / 10.0))
+            
+            # Determine strategy based on performance
+            if perf['win_rate'] > 0.7:
+                strategy = 'exploit'  # High win rate - exploit what works
+            elif perf['win_rate'] < 0.3:
+                strategy = 'explore'  # Low win rate - try new approaches
+            else:
+                strategy = 'balanced'  # Moderate - balance exploration/exploitation
+            
+            # Check if improving or declining
+            if perf['games_played'] >= 5:
+                # Get previous snapshot for trend
+                prev_data = self.db.execute_query("""
+                    SELECT avg_score, win_rate
+                    FROM agent_performance_history
+                    WHERE agent_id = ?
+                    ORDER BY recorded_at DESC
+                    LIMIT 1 OFFSET 1
+                """, (agent_id,))
+                
+                if prev_data:
+                    score_trend = perf['avg_score'] - prev_data[0]['avg_score']
+                    win_trend = perf['win_rate'] - prev_data[0]['win_rate']
+                    
+                    if score_trend > 0.5 or win_trend > 0.1:
+                        trend = 'improving'
+                    elif score_trend < -0.5 or win_trend < -0.1:
+                        trend = 'declining'
+                    else:
+                        trend = 'stable'
+                else:
+                    trend = 'unknown'
+            else:
+                trend = 'insufficient_data'
+            
+            return {
+                'has_history': True,
+                'games_played': perf['games_played'],
+                'avg_score': perf['avg_score'],
+                'best_score': perf['best_score'],
+                'win_rate': perf['win_rate'],
+                'avg_efficiency': perf['avg_efficiency'],
+                'confidence': confidence,
+                'strategy_adjustment': strategy,
+                'performance_trend': trend,
+                'prestige': perf['prestige_score'],
+                'sequences_discovered': perf['sequences_discovered']
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting agent self-awareness: {e}")
+            return {
+                'has_history': False,
+                'confidence': 0.5,
+                'strategy_adjustment': 'explore'
+            }
+    
+    def _apply_self_awareness_to_strategy(self, agent_id: str, base_config: Dict) -> Dict:
+        """
+        Apply self-awareness insights to adjust agent strategy.
+        
+        Args:
+            agent_id: Agent ID
+            base_config: Base game configuration
+            
+        Returns:
+            Modified configuration based on self-awareness
+        """
+        awareness = self._get_agent_self_awareness(agent_id)
+        
+        if not awareness['has_history']:
+            return base_config  # No history, use base config
+        
+        # Adjust exploration rate based on performance
+        if awareness['strategy_adjustment'] == 'explore':
+            base_config['exploration_rate'] = min(1.0, base_config.get('exploration_rate', 0.3) * 1.5)
+            logger.debug(f"Agent {agent_id}: Increasing exploration (low win rate)")
+        elif awareness['strategy_adjustment'] == 'exploit':
+            base_config['exploration_rate'] = max(0.1, base_config.get('exploration_rate', 0.3) * 0.5)
+            logger.debug(f"Agent {agent_id}: Decreasing exploration (high win rate)")
+        
+        # Adjust confidence-based parameters
+        base_config['confidence_level'] = awareness['confidence']
+        
+        # Log self-awareness
+        if awareness['games_played'] > 0:
+            logger.info(f"🧠 Agent {agent_id} self-awareness: "
+                       f"Win rate {awareness['win_rate']:.1%}, "
+                       f"Avg score {awareness['avg_score']:.2f}, "
+                       f"Strategy: {awareness['strategy_adjustment']}, "
+                       f"Trend: {awareness['performance_trend']}")
+        
+        return base_config
+
     # ========================================================================
     # AGENT OPERATING MODE HELPERS
     # ========================================================================
@@ -2585,6 +2828,47 @@ class GameplayEngine:
         try:
             # Extract game type prefix (e.g., 'vc33' from 'vc33-6ae7bf49eea5')
             game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            # TASK #4: Exploiter 50/50 Split Logic
+            # Check if current agent is an exploiter and their social rule adherence
+            agent_id = self.game_config.get('agent_id')
+            agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
+            is_sociopath_exploiter = False
+            
+            if agent_mode == 'exploiter' and agent_id:
+                # Query agent's social_rule_adherence
+                agent_data = self.db.execute_query("""
+                    SELECT social_rule_adherence
+                    FROM agents
+                    WHERE agent_id = ?
+                """, (agent_id,))
+                
+                if agent_data and agent_data[0]['social_rule_adherence'] is not None:
+                    social_adherence = agent_data[0]['social_rule_adherence']
+                    is_sociopath_exploiter = (social_adherence < 0.5)
+                    logger.debug(f"Agent {agent_id} social_rule_adherence: {social_adherence:.2f} ({'sociopath' if is_sociopath_exploiter else 'social'})")
+            
+            # Build ORDER BY clause based on agent type
+            if is_sociopath_exploiter:
+                # Sociopath exploiters: IGNORE community validation, prioritize efficiency only
+                order_by_clause = """
+                    ORDER BY 
+                        ws.total_actions ASC,  -- Most efficient (fewest actions)
+                        ws.total_score DESC    -- Highest score as tiebreaker
+                """
+                logger.debug(f"🦹 Sociopath exploiter mode: ignoring community validation")
+            else:
+                # Social exploiters, generalists, pioneers: RESPECT community validation
+                order_by_clause = """
+                    ORDER BY 
+                        CASE 
+                            WHEN COALESCE(sr.successful_validations, 0) > 0 THEN 0  -- Proven
+                            WHEN COALESCE(sr.total_validation_attempts, 0) = 0 THEN 1  -- Untested
+                            ELSE 2  -- Failed validations
+                        END,
+                        ws.total_actions ASC,
+                        ws.total_score DESC
+                """
             
             # Query sequences with reputation scores (community memory)
             # FIXED: Match by game TYPE prefix, not exact session ID

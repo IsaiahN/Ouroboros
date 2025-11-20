@@ -19,11 +19,17 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import sys
+# Force UTF-8 encoding for stdout/stderr to prevent UnicodeEncodeError on Windows
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
 import asyncio
 from historical_data_cleanup import HistoricalDataCleaner
 import time
 import argparse
 import signal
+import subprocess
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
