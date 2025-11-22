@@ -241,7 +241,7 @@ class AutonomousEvolutionRunner:
         signal_name = signal_names.get(signum, f'Signal {signum}')
         
         if not self.shutdown_requested:
-            print(f"\n\n[WARN]️  Received {signal_name}")
+            print(f"\n\n[WARN]  Received {signal_name}")
             print("[?] Initiating graceful shutdown cascade...")
             print("   - Current game will finish gracefully")
             print("   - No new games will start")
@@ -288,7 +288,7 @@ class AutonomousEvolutionRunner:
             print("[OK] Cleanup complete")
             
         except Exception as e:
-            print(f"[WARN]️  Cleanup error (non-critical): {e}")
+            print(f"[WARN]  Cleanup error (non-critical): {e}")
     
     def _cleanup_old_logs(self):
         """
@@ -318,7 +318,7 @@ class AutonomousEvolutionRunner:
                 print(f"  [?]  Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
                 
         except Exception as e:
-            print(f"  [WARN]️  Log cleanup failed (non-critical): {e}")
+            print(f"  [WARN]  Log cleanup failed (non-critical): {e}")
     
     def _save_checkpoint(self):
         """Save checkpoint data for resume capability."""
@@ -656,46 +656,39 @@ class AutonomousEvolutionRunner:
         
         # OPTIMIZER MODE: Focus on BEATEN games/levels ONLY - reduce action counts
         elif agent_mode == 'optimizer':
-            # CRITICAL FIX: Optimizers should NEVER work on unbeaten games
-            # That's pioneer territory. Optimizers refine what already works.
+            # CRITICAL: Optimizers REQUIRE sequences to optimize
+            # Without sequences, there's nothing to improve - skip the agent
             
-            # Get games where community has at least one win or proven sequence
-            beaten_games = []
-            for game_id in all_game_ids:
-                stats = game_stats[game_id]
-                # Check if game has wins OR proven sequences
-                has_progress = stats['has_win'] or game_id in sequences_by_game
-                
-                if has_progress:
-                    beaten_games.append(game_id)
+            # Get games where community has proven sequences
+            games_with_sequences = [
+                game_id for game_id in all_game_ids
+                if game_id in sequences_by_game and sequences_by_game[game_id]['count'] > 0
+            ]
             
-            if not beaten_games:
-                # Fallback: If no beaten games, optimizers become temporary pioneers
-                print(f"  [OPTIMIZER] No beaten games found, defaulting to pioneer behavior")
-                unbeaten_games = [g for g, s in game_stats.items() if not s['has_win']]
-                if unbeaten_games:
-                    return random.sample(unbeaten_games, min(games_per_agent, len(unbeaten_games)))
-                return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
+            if not games_with_sequences:
+                # No sequences available - optimizer cannot operate
+                print(f"  [OPTIMIZER] No games with sequences available, skipping agent")
+                return []
             
-            # Use optimization threshold system for beaten games ONLY
+            # Use optimization threshold system for games with sequences
             optimization_targets = self.optimization_tracker.get_optimization_targets(
                 agent_mode='optimizer',
                 limit=games_per_agent * 2  # Get extra targets for filtering
             )
             
-            # Filter targets to ONLY beaten games (exclude unbeaten)
-            beaten_targets = [t for t in optimization_targets 
-                            if t['game_id'] in beaten_games and t['priority_class'] != 'unbeaten']
+            # Filter targets to ONLY games with sequences
+            sequence_targets = [t for t in optimization_targets 
+                              if t['game_id'] in games_with_sequences and t['priority_class'] != 'unbeaten']
             
-            # Extract game IDs from beaten targets
-            target_games = list(set(t['game_id'] for t in beaten_targets))
+            # Extract game IDs from sequence targets
+            target_games = list(set(t['game_id'] for t in sequence_targets))
             
-            # Prioritize unoptimized beaten games
-            unoptimized_targets = [t['game_id'] for t in beaten_targets if t['priority_class'] == 'unoptimized']
+            # Prioritize unoptimized games with sequences
+            unoptimized_targets = [t['game_id'] for t in sequence_targets if t['priority_class'] == 'unoptimized']
             
             selected = []
             
-            # Only priority: Unoptimized BEATEN games (can still improve)
+            # Priority: Unoptimized games with sequences (can still improve)
             if unoptimized_targets:
                 selected.extend(random.sample(unoptimized_targets, min(games_per_agent, len(unoptimized_targets))))
             
@@ -703,44 +696,75 @@ class AutonomousEvolutionRunner:
             if len(selected) >= games_per_agent:
                 return selected[:games_per_agent]
             
-            # Fallback: If optimization tracker has no targets, use beaten games only
+            # Fallback: If optimization tracker has no targets, use games with sequences
             # (this happens on first generation before tracking is populated)
-            print(f"  [OPTIMIZER] Using fallback assignment - beaten games only (optimization tracker has {len(optimization_targets)} targets)")
+            if len(selected) < games_per_agent:
+                print(f"  [OPTIMIZER] Using fallback assignment - games with sequences only")
+                
+                # Prioritize games with more sequences (more data to optimize from)
+                sequence_priority = [
+                    {
+                        'game_id': game_id,
+                        'sequence_count': sequences_by_game[game_id]['count'],
+                        'avg_actions': sequences_by_game[game_id]['avg_actions']
+                    }
+                    for game_id in games_with_sequences
+                ]
+                
+                # Sort by sequence count
+                sequence_priority.sort(key=lambda x: x['sequence_count'], reverse=True)
+                
+                # Fill remaining slots
+                remaining = games_per_agent - len(selected)
+                for item in sequence_priority:
+                    if item['game_id'] not in selected:
+                        selected.append(item['game_id'])
+                        remaining -= 1
+                        if remaining <= 0:
+                            break
             
-            optimization_priority = []
+            if selected:
+                print(f"  [OPTIMIZER] Assigned {len(selected)} games with sequences to optimize")
+                return selected
             
-            for game_id in beaten_games:  # CRITICAL: Only iterate beaten games
-                stats = game_stats[game_id]
-                max_level = stats['max_level']
-                
-                # Skip games with no progress (nothing to optimize)
-                if max_level == 0:
-                    continue
-                
-                # Calculate optimization potential
-                avg_actions = stats['avg_actions'] if stats['avg_actions'] > 0 else 1000
-                
-                optimization_priority.append({
+            # Ultimate fallback: no viable games
+            print(f"  [OPTIMIZER] No viable optimization targets, skipping agent")
+            return []
+        
+        
+        # EXPLOITER MODE: ONLY games with proven sequences (harvest wins efficiently)
+        elif agent_mode == 'exploiter':
+            # Exploiters REQUIRE proven sequences - filter to games with sequences only
+            games_with_sequences = [
+                game_id for game_id in all_game_ids
+                if game_id in sequences_by_game and sequences_by_game[game_id]['count'] > 0
+            ]
+            
+            if not games_with_sequences:
+                # No sequences available - exploiter cannot operate
+                # Return empty list to skip this agent (better than 0-action waste)
+                print(f"  [EXPLOITER] No games with sequences available, skipping agent")
+                return []
+            
+            # Prioritize games with MORE sequences (more proven = more reliable)
+            sequence_priority = [
+                {
                     'game_id': game_id,
-                    'max_level': max_level,
-                    'avg_actions': avg_actions,
-                    'priority': max_level * avg_actions
-                })
+                    'sequence_count': sequences_by_game[game_id]['count'],
+                    'avg_actions': sequences_by_game[game_id]['avg_actions']
+                }
+                for game_id in games_with_sequences
+            ]
             
-            if optimization_priority:
-                optimization_priority.sort(key=lambda x: x['priority'], reverse=True)
-                selected = [g['game_id'] for g in optimization_priority[:games_per_agent]]
-                
-                # Fill remaining if needed
-                while len(selected) < games_per_agent and all_game_ids:
-                    game = random.choice(all_game_ids)
-                    if game not in selected:
-                        selected.append(game)
-                
-                return selected[:games_per_agent]
+            # Sort by sequence count (more sequences = more reliable)
+            sequence_priority.sort(key=lambda x: x['sequence_count'], reverse=True)
             
-            # Ultimate fallback
-            return random.sample(all_game_ids, min(games_per_agent, len(all_game_ids)))
+            # Select top games with most sequences
+            selected = [g['game_id'] for g in sequence_priority[:games_per_agent]]
+            
+            print(f"  [EXPLOITER] Assigned {len(selected)} games with proven sequences (avg {sum(g['sequence_count'] for g in sequence_priority[:len(selected)]) / max(len(selected), 1):.1f} sequences/game)")
+            
+            return selected
         
         # GENERALIST MODE: Balanced mix of unbeaten and optimization targets
         else:
@@ -839,7 +863,7 @@ class AutonomousEvolutionRunner:
                 # If shutdown was requested before entering this context, set flag immediately
                 if self.shutdown_requested:
                     engine.session_manager.is_shutting_down = True
-                    print("[PAUSE]️  Shutdown requested before generation started, exiting")
+                    print("[PAUSE]  Shutdown requested before generation started, exiting")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
                 
                 # Get available games
@@ -890,7 +914,7 @@ class AutonomousEvolutionRunner:
                 
                 # NEW: Use GameScheduler to prevent duplicate game plays
                 # This prevents the inefficiency where multiple agents play same game type sequentially
-                print("\n🎮 GAME SCHEDULER: Assigning games to prevent duplicate plays...")
+                print("\n GAME SCHEDULER: Assigning games to prevent duplicate plays...")
                 
                 # Prepare agents for scheduler (need mode from mode_assignments)
                 agents_with_modes = []
@@ -914,7 +938,7 @@ class AutonomousEvolutionRunner:
                     print("[?] No games could be assigned (all games may be in use)")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
                 
-                print(f"✓ Assigned {sum(len(g) for g in game_assignments.values())} games to {len(game_assignments)} agents\n")
+                print(f" Assigned {sum(len(g) for g in game_assignments.values())} games to {len(game_assignments)} agents\n")
                 
                 for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
                     agent_id = agent['agent_id']
@@ -935,13 +959,13 @@ class AutonomousEvolutionRunner:
                     
                     # Check for shutdown before starting this agent's games
                     if self.shutdown_requested:
-                        print(f"[PAUSE]️  Shutdown requested, skipping agent {agent_id[:8]} and remaining agents")
+                        print(f"[PAUSE]  Shutdown requested, skipping agent {agent_id[:8]} and remaining agents")
                         break
                     
                     # Run games for this agent
                     for game_idx, game_id in enumerate(agent_games):
                         if self.shutdown_requested:
-                            print("[PAUSE]️  Shutdown requested during game, stopping evaluation")
+                            print("[PAUSE]  Shutdown requested during game, stopping evaluation")
                             break
                         
                         # PERSISTENT MODE MEMORY: Assign mode for this specific game
@@ -1017,7 +1041,7 @@ class AutonomousEvolutionRunner:
                             result = await game_task
                         except asyncio.CancelledError:
                             # Game was cancelled during shutdown
-                            print(f"[PAUSE]️  Game {game_id[:8]} cancelled")
+                            print(f"[PAUSE]  Game {game_id[:8]} cancelled")
                             if self.shutdown_requested:
                                 # Propagate shutdown to session manager to prevent new actions
                                 engine.session_manager.is_shutting_down = True
@@ -1028,7 +1052,7 @@ class AutonomousEvolutionRunner:
                         if self.shutdown_requested:
                             # Propagate shutdown signal to prevent any new games
                             engine.session_manager.is_shutting_down = True
-                            print(f"[PAUSE]️  Shutdown detected after game {game_id[:8]}, ending generation early")
+                            print(f"[PAUSE]  Shutdown detected after game {game_id[:8]}, ending generation early")
                             break
                         
                         # Process ARC rewards
@@ -1176,7 +1200,7 @@ class AutonomousEvolutionRunner:
                                     if new_rule:
                                         print(f"  [?] Learned new rule: {new_rule['rule_name']}")
                                 except Exception as e:
-                                    print(f"  [WARN]️  Failed to extract rule: {e}")
+                                    print(f"  [WARN]  Failed to extract rule: {e}")
                         
                         total_score += result.get('final_score', 0)
                         
@@ -1203,7 +1227,7 @@ class AutonomousEvolutionRunner:
                     try:
                         self.curriculum.update_stage_progress(agent_id)
                     except Exception as e:
-                        print(f"  [WARN]️  Failed to update curriculum: {e}")
+                        print(f"  [WARN]  Failed to update curriculum: {e}")
                 
                 # Auto-cleanup logs every 50 games to prevent database bloat
                 if self.total_games_played % 50 == 0:
@@ -1232,13 +1256,13 @@ class AutonomousEvolutionRunner:
             
         except asyncio.CancelledError:
             # Task was cancelled during shutdown - this is expected
-            print("[PAUSE]️  Evaluation cancelled during shutdown")
+            print("[PAUSE]  Evaluation cancelled during shutdown")
             raise  # Re-raise to propagate cancellation
             
         except Exception as e:
             if self.shutdown_requested:
                 # Errors during shutdown are expected, just log briefly
-                print(f"[WARN]️  Error during shutdown evaluation (ignored): {type(e).__name__}")
+                print(f"[WARN]  Error during shutdown evaluation (ignored): {type(e).__name__}")
                 return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
             else:
                 # Real error - log details
@@ -1276,7 +1300,7 @@ class AutonomousEvolutionRunner:
             
             # Check if we should evolve
             if self.current_generation >= self.max_generations:
-                print(f"[WARN]️  Reached max generations ({self.max_generations})")
+                print(f"[WARN]  Reached max generations ({self.max_generations})")
                 return False
             
             # Use comprehensive success rate for target check
@@ -1301,7 +1325,7 @@ class AutonomousEvolutionRunner:
             top_performers = analysis.get('top_performers', [])[:5]
             
             if not top_performers:
-                print("[WARN]️  No agents with performance data, cannot evolve")
+                print("[WARN]  No agents with performance data, cannot evolve")
                 return False
             
             # Determine evolution strategy based on comprehensive success
@@ -1351,7 +1375,7 @@ class AutonomousEvolutionRunner:
                     print(f"  Fitness calculation: 30% standard + 40% diversity + 30% meta-learning")
                 
             except Exception as e:
-                print(f"[WARN]️  Evolution failed: {e}")
+                print(f"[WARN]  Evolution failed: {e}")
                 print(f"  Falling back to previous generation")
                 return False
             
@@ -1411,7 +1435,7 @@ class AutonomousEvolutionRunner:
                 display_network_intelligence_dashboard(self.current_generation)
                 
             except Exception as e:
-                print(f"[WARN]️  Network snapshot failed: {e}")
+                print(f"[WARN]  Network snapshot failed: {e}")
                 import traceback
                 traceback.print_exc()
             
@@ -1426,7 +1450,7 @@ class AutonomousEvolutionRunner:
                 display_prestige_leaderboard(self.db, limit=5)
                 
             except Exception as e:
-                print(f"[WARN]️  Prestige calculation failed: {e}")
+                print(f"[WARN]  Prestige calculation failed: {e}")
                 import traceback
                 traceback.print_exc()
             
@@ -1442,12 +1466,12 @@ class AutonomousEvolutionRunner:
                 display_viral_ecosystem_dashboard(self.db, self.current_generation)
                 
             except Exception as e:
-                print(f"[WARN]️  Viral ecosystem check failed: {e}")
+                print(f"[WARN]  Viral ecosystem check failed: {e}")
                 import traceback
                 traceback.print_exc()
             
             # PHASE 4: DISTRIBUTED REGULATION (Network Homeostasis)
-            print(f"\n[🏛️ REGULATION] Processing distributed network signals...")
+            print(f"\n[ REGULATION] Processing distributed network signals...")
             try:
                 # Step 1: Agent signal emission (quorum sensing)
                 signals_emitted = self.regulatory_engine.emit_agent_signals(self.current_generation)
@@ -1483,15 +1507,15 @@ class AutonomousEvolutionRunner:
                 if active_signals:
                     print(f"[SIGNALS] Active regulatory signals:")
                     for signal_type, data in active_signals.items():
-                        print(f"  📡 {signal_type}: {data['count']} signals (avg strength: {data['strength']:.2f})")
+                        print(f"   {signal_type}: {data['count']} signals (avg strength: {data['strength']:.2f})")
                 
                 if recent_regulations:
                     print(f"[HISTORY] Recent parameter adjustments:")
                     for param, data in recent_regulations.items():
-                        print(f"  ⚙️  {param}: {data['changes']} changes (avg: {data['avg_change']:+.3f})")
+                        print(f"    {param}: {data['changes']} changes (avg: {data['avg_change']:+.3f})")
                 
             except Exception as e:
-                print(f"[WARN]️  Distributed regulation failed: {e}")
+                print(f"[WARN]  Distributed regulation failed: {e}")
                 import traceback
                 traceback.print_exc()
             
@@ -1502,7 +1526,7 @@ class AutonomousEvolutionRunner:
                 TARGET_POPULATION = self._calculate_target_population_from_db()
             
             if population_size > TARGET_POPULATION:
-                print(f"\n[🔪] Population too large ({population_size}), pruning to {TARGET_POPULATION}...")
+                print(f"\n[] Population too large ({population_size}), pruning to {TARGET_POPULATION}...")
                 print(f"      (Adaptive target based on {TARGET_POPULATION // 10} available game types)")
                 
                 # STEP 1: PRESTIGE-BASED PROTECTION ONLY (specialist system disabled)
@@ -1519,7 +1543,7 @@ class AutonomousEvolutionRunner:
                     for agent in agents_with_prestige
                 }
                 
-                print(f"  [🛡️] Using prestige-based protection (0-80% survival chance)")
+                print(f"  [] Using prestige-based protection (0-80% survival chance)")
                 
                 # STEP 2: Identify top 10 performers for each game type (ABSOLUTE PROTECTION)
                 # Get available game types from earlier in generation
@@ -1544,7 +1568,7 @@ class AutonomousEvolutionRunner:
                     for agent in top_agents:
                         top_performers_by_game.add(agent['agent_id'])
                 
-                print(f"  [🏆] Protected top 10 performers per game type: {len(top_performers_by_game)} specialists")
+                print(f"  [] Protected top 10 performers per game type: {len(top_performers_by_game)} specialists")
                 
                 # CRITICAL FIX: Get ALL agents sorted by performance (worst first)
                 # Don't use top_performers list which is limited to top 5!
@@ -1620,7 +1644,7 @@ class AutonomousEvolutionRunner:
                     print(f"       New population size: {population_size - pruned_count}")
             
             # CLEANUP: Historical data garbage collection (prevent database bloat)
-            print(f"\n[🗑️ CLEANUP] Running historical data garbage collection...")
+            print(f"\n[ CLEANUP] Running historical data garbage collection...")
             try:
                 cleaner = HistoricalDataCleaner(self.db)
                 cleanup_results = cleaner.cleanup_all(dry_run=False)
@@ -1711,7 +1735,7 @@ class AutonomousEvolutionRunner:
         # Health check
         health = self.check_system_health()
         if not health['healthy']:
-            print(f"\n[WARN]️  System Health Issues:")
+            print(f"\n[WARN]  System Health Issues:")
             for warning in health['warnings']:
                 print(f"  - {warning}")
             
@@ -1763,7 +1787,7 @@ class AutonomousEvolutionRunner:
                 else:
                     print(f"[PHASE 5] 🧬 No compatible transfers found this generation")
             except Exception as e:
-                print(f"[PHASE 5] ❌ Horizontal transfer error: {e}")
+                print(f"[PHASE 5]  Horizontal transfer error: {e}")
             
             if not success:
                 # Check if we hit targets (comprehensive success)
@@ -1828,17 +1852,17 @@ class AutonomousEvolutionRunner:
                         break
                     
                 except asyncio.CancelledError:
-                    print("\n[WARN]️  Current cycle cancelled - shutting down gracefully")
+                    print("\n[WARN]  Current cycle cancelled - shutting down gracefully")
                     break
                 
                 except Exception as e:
                     if self.shutdown_requested:
                         # Ignore errors during shutdown - they're expected
-                        print(f"\n[WARN]️  Error during shutdown (ignored): {type(e).__name__}")
+                        print(f"\n[WARN]  Error during shutdown (ignored): {type(e).__name__}")
                         break
                     else:
                         # Real error - log and continue
-                        print(f"\n[WARN]️  Cycle error: {e}")
+                        print(f"\n[WARN]  Cycle error: {e}")
                         import traceback
                         traceback.print_exc()
                         # Continue to next cycle unless shutdown requested
@@ -1865,7 +1889,7 @@ class AutonomousEvolutionRunner:
             
         except KeyboardInterrupt:
             # Should be caught by signal handler, but just in case
-            print("\n\n[PAUSE]️  Keyboard interrupt received")
+            print("\n\n[PAUSE]  Keyboard interrupt received")
             await self._cleanup()
             self.print_final_summary()
         

@@ -79,6 +79,26 @@ class DatabaseInterface:
         """Ensure database exists with schema (maintained for backward compatibility)."""
         self._create_database_from_schema()
 
+    def get_action_effectiveness(self, game_id: str) -> list:
+        """Get action effectiveness data for a game (stub - not yet implemented).
+        
+        Args:
+            game_id: Game ID
+            
+        Returns:
+            Empty list (feature not implemented)
+        """
+        logger.debug(f"get_action_effectiveness called for {game_id} (stub)")
+        return []
+    
+    def get_action_traces(self, game_id=None, limit=100):
+        """Get action traces (stub - returns empty for now)."""
+        return []
+    
+    def get_score_history(self, game_id: str) -> list:
+        """Get score history (stub - returns empty for now)."""
+        return []
+    
     def close(self):
         """Close database connections and checkpoint WAL."""
         if hasattr(self._local, 'connection'):

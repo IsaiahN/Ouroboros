@@ -134,7 +134,7 @@ class GameplayEngine:
         self.action_handler.set_agent_mode(agent_mode, current_level=1, network_max_level=network_max_level)
         self.action_handler.visual_analyzer.set_agent_mode(agent_mode)
         if agent_mode:
-            logger.info(f"🎯 Agent mode set to: {agent_mode.upper()}")
+            logger.info(f" Agent mode set to: {agent_mode.upper()}")
         
         # Create game with agent info in tags
         game_data = await self.session_manager.create_game(
@@ -177,21 +177,21 @@ class GameplayEngine:
                     if known_sequence:
                         levels_completed_by_seq = int(known_sequence['total_score'])
                         if agent_mode == 'exploiter':
-                            logger.info(f"💎 EXPLOITER mode: Found {known_sequence['total_actions']}-action sequence "
+                            logger.info(f" EXPLOITER mode: Found {known_sequence['total_actions']}-action sequence "
                                       f"(completes {levels_completed_by_seq} levels), will replay to harvest proven results")
                         elif agent_mode == 'optimizer':
-                            logger.info(f"🔧 OPTIMIZER mode: Found {known_sequence['total_actions']}-action sequence "
+                            logger.info(f" OPTIMIZER mode: Found {known_sequence['total_actions']}-action sequence "
                                       f"(completes {levels_completed_by_seq} levels), will try to beat it")
                         elif agent_mode == 'pioneer':
-                            logger.info(f"🚀 PIONEER mode: Found {known_sequence['total_actions']}-action sequence "
+                            logger.info(f" PIONEER mode: Found {known_sequence['total_actions']}-action sequence "
                                       f"(completes {levels_completed_by_seq} levels), will replay to frontier then explore")
                         else:
-                            logger.info(f"🌐 GENERALIST mode: Found {known_sequence['total_actions']}-action sequence "
+                            logger.info(f" GENERALIST mode: Found {known_sequence['total_actions']}-action sequence "
                                       f"(completes {levels_completed_by_seq} levels), will replay exactly")
                     else:
                         # No sequence available - exploiter mode cannot proceed
                         if agent_mode == 'exploiter':
-                            logger.error(f"💎 EXPLOITER ABORT: No sequences available for {game_id} - exploiters only use proven sequences")
+                            logger.error(f" EXPLOITER ABORT: No sequences available for {game_id} - exploiters only use proven sequences")
                             return {
                                 'game_id': game_id,
                                 'final_state': 'NO_SEQUENCE_AVAILABLE',
@@ -235,7 +235,7 @@ class GameplayEngine:
                         'sequences_analyzed': checkpoint['sequences_analyzed']
                     }
                     
-                    logger.info(f"🔧 OPTIMIZER: Level {current_level_target} - Checkpoint Strategy:")
+                    logger.info(f" OPTIMIZER: Level {current_level_target} - Checkpoint Strategy:")
                     logger.info(f"   Analyzed {checkpoint['sequences_analyzed']} sequences")
                     logger.info(f"   Checkpoint at action {checkpoint['checkpoint_index']}")
                     logger.info(f"   Optimal subroutine: {len(checkpoint['optimal_subroutine'])} actions")
@@ -244,7 +244,7 @@ class GameplayEngine:
                 else:
                     # No checkpoint available, fall back to simple target
                     target_actions = known_sequence['total_actions']
-                    logger.info(f"🔧 OPTIMIZER: Level {current_level_target} - "
+                    logger.info(f" OPTIMIZER: Level {current_level_target} - "
                                f"No checkpoint identified (need 2+ sequences), will explore trying to beat {target_actions} actions")
                     if 'optimization_targets' not in self.game_config:
                         self.game_config['optimization_targets'] = {}
@@ -270,7 +270,7 @@ class GameplayEngine:
                     success_rate = validation_check[0]['success_rate'] or 0.0
                     is_proven = success_rate > 0.5
                     if is_proven:
-                        logger.info(f"✅ PROVEN sequence detected: {success_rate:.1%} success rate ({validation_check[0]['successful_validations']}/{validation_check[0]['total_validation_attempts']})")
+                        logger.info(f" PROVEN sequence detected: {success_rate:.1%} success rate ({validation_check[0]['successful_validations']}/{validation_check[0]['total_validation_attempts']})")
                 
                 # OPTIMIZER/EXPLOITER PARIAH ANALYSIS: Check if worth challenging on unbeaten level
                 agent_mode = self.game_config.get('agent_operating_mode', 'generalist')
@@ -283,14 +283,14 @@ class GameplayEngine:
                     # Optimizer/Exploiter on frontier - check if pariah is worth challenging
                     pariah_worth = self._analyze_pariah_worthiness(known_sequence, game_id)
                     if not pariah_worth['worth_challenging']:
-                        logger.info(f"⏭️  {agent_mode.upper()} skipping pariah: {pariah_worth['reason']}")
+                        logger.info(f"⏭  {agent_mode.upper()} skipping pariah: {pariah_worth['reason']}")
                         should_challenge_pariah = False
                         known_sequence = None  # Skip sequence, fall back to exploration
                     else:
-                        logger.info(f"⚔️  {agent_mode.upper()} challenging pariah: {pariah_worth['reason']}")
+                        logger.info(f"  {agent_mode.upper()} challenging pariah: {pariah_worth['reason']}")
                 
                 if should_challenge_pariah and known_sequence:
-                    logger.info(f"🔄 Replaying BEST cumulative sequence (score {known_sequence['total_score']}, {known_sequence['total_actions']} actions)")
+                    logger.info(f" Replaying BEST cumulative sequence (score {known_sequence['total_score']}, {known_sequence['total_actions']} actions)")
                     logger.info(f"[SEQUENCE REPLAY DEBUG] About to call _replay_sequence_inline for sequence {known_sequence.get('sequence_id', 'UNKNOWN')})")
                     replay_result = await self._replay_sequence_inline(
                         game_state, 
@@ -320,7 +320,7 @@ class GameplayEngine:
                                 agent_id, game_id, level_completions
                             )
                         
-                        logger.info(f"🏆 COMPLETE WIN via cumulative sequence replay!")
+                        logger.info(f" COMPLETE WIN via cumulative sequence replay!")
                         return {
                             'game_id': game_id,
                             'final_state': game_state.state,
@@ -335,14 +335,14 @@ class GameplayEngine:
                         # Replay succeeded but didn't win completely
                         # We're now at the frontier (highest known level)
                         frontier_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
-                        logger.info(f"✅ Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
+                        logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
                         
                         # MODE-SPECIFIC BEHAVIOR AT FRONTIER:
                         if agent_mode == 'generalist' or agent_mode == 'exploiter':
                             # GENERALIST/EXPLOITER: Stop here, only replay known sequences
                             # Should NOT explore beyond frontier
                             stop_reason = "GENERALIST" if agent_mode == 'generalist' else "EXPLOITER"
-                            logger.info(f"🌐 {stop_reason}: At frontier, no more sequences available - stopping")
+                            logger.info(f" {stop_reason}: At frontier, no more sequences available - stopping")
                             level_completions = int(game_state.score)
                             actions_taken = len(json.loads(known_sequence['action_sequence']))
                             await self.session_manager.finish_game("FRONTIER_REACHED", game_state.score, level_completions, actions_taken)
@@ -359,10 +359,10 @@ class GameplayEngine:
                             }
                         else:
                             # PIONEER: Continue exploring beyond frontier
-                            logger.info(f"🚀 PIONEER: At frontier, will now explore Level {frontier_level}+")
+                            logger.info(f" PIONEER: At frontier, will now explore Level {frontier_level}+")
                             # Continue to game loop below for exploration
                     else:
-                        logger.info(f"⚠️ Cumulative sequence replay failed, falling back to exploration")
+                        logger.info(f" Cumulative sequence replay failed, falling back to exploration")
                         # Continue with normal exploration below
 
             action_count = 0
@@ -393,7 +393,7 @@ class GameplayEngine:
 
                 # Check if session is still active (graceful shutdown detection)
                 if not self.session_manager.is_running or self.session_manager.is_shutting_down:
-                    logger.info(f"⚠️ Session shutdown detected, ending game gracefully")
+                    logger.info(f" Session shutdown detected, ending game gracefully")
                     break
 
                 try:
@@ -411,7 +411,7 @@ class GameplayEngine:
                     # But current_level might still be at old value if we're past the score-increase detection
                     actual_level_from_score = int(game_state.score) + 1  # Score 1 = completed level 1, now on level 2
                     if actual_level_from_score > current_level:
-                        logger.info(f"🔄 Level sync: current_level was {current_level}, updating to {actual_level_from_score} (score={game_state.score})")
+                        logger.info(f" Level sync: current_level was {current_level}, updating to {actual_level_from_score} (score={game_state.score})")
                         current_level = actual_level_from_score
                         level_action_count = 0  # Reset level counter
                         level_start_action = action_count
@@ -431,7 +431,7 @@ class GameplayEngine:
                                 if frame_similarity or level_action_count >= checkpoint_info['target_total_actions'] - checkpoint_info['checkpoint_distance']:
                                     # We're at or past the checkpoint! Execute final winning actions
                                     final_actions = checkpoint_info['final_actions']
-                                    logger.info(f"🎯 OPTIMIZER CHECKPOINT REACHED! Executing {len(final_actions)} known winning actions...")
+                                    logger.info(f" OPTIMIZER CHECKPOINT REACHED! Executing {len(final_actions)} known winning actions...")
                                     
                                     # Execute final actions
                                     checkpoint_success = True
@@ -452,14 +452,14 @@ class GameplayEngine:
                                     self.game_config[f'checkpoint_executed_{current_level}'] = True
                                     
                                     if checkpoint_success:
-                                        logger.info(f"✅ OPTIMIZER: Checkpoint sequence executed successfully!")
+                                        logger.info(f" OPTIMIZER: Checkpoint sequence executed successfully!")
                                         
                                         # OPTIMIZER CONTRIBUTION: Save optimized sequence even without winning
                                         # This is the optimizer's value - they create efficient subroutines
                                         # via level resets and iterative optimization
                                         if game_state.score > previous_score or game_state.state == "WIN":
                                             # Successfully progressed or won - save the optimized path!
-                                            logger.info(f"💾 OPTIMIZER: Saving optimized subroutine + final actions as new sequence")
+                                            logger.info(f" OPTIMIZER: Saving optimized subroutine + final actions as new sequence")
                                             
                                             # Capture the FULL sequence (exploration to checkpoint + known final actions)
                                             optimized_sequence_id = self._capture_winning_sequence(
@@ -470,12 +470,12 @@ class GameplayEngine:
                                             )
                                             
                                             if optimized_sequence_id:
-                                                logger.info(f"✅ OPTIMIZER SEQUENCE SAVED: {optimized_sequence_id}")
+                                                logger.info(f" OPTIMIZER SEQUENCE SAVED: {optimized_sequence_id}")
                                                 logger.info(f"   Total actions: {level_action_count}")
                                                 logger.info(f"   Target was: {checkpoint_info['target_total_actions']}")
                                                 improvement = checkpoint_info['target_total_actions'] - level_action_count
                                                 if improvement > 0:
-                                                    logger.info(f"   🎉 IMPROVEMENT: {improvement} actions better than target!")
+                                                    logger.info(f"    IMPROVEMENT: {improvement} actions better than target!")
                                                 
                                                 # Track optimizer contribution
                                                 if agent_id:
@@ -490,14 +490,14 @@ class GameplayEngine:
                                                     except Exception as e:
                                                         logger.debug(f"Failed to record optimizer prestige: {e}")
                                     else:
-                                        logger.warning(f"⚠️ OPTIMIZER: Checkpoint sequence failed, continuing exploration")
+                                        logger.warning(f" OPTIMIZER: Checkpoint sequence failed, continuing exploration")
                                     
                                     # Continue to next iteration (check win state, etc.)
                                     continue
                     
                     # API error backoff - wait if we had recent errors
                     if api_error_backoff > 0:
-                        logger.info(f"⏱️ API error backoff: waiting {api_error_backoff}s before next action")
+                        logger.info(f"⏱ API error backoff: waiting {api_error_backoff}s before next action")
                         await asyncio.sleep(api_error_backoff)
                         api_error_backoff = 0  # Reset after waiting
                     
@@ -531,10 +531,10 @@ class GameplayEngine:
                         
                         if is_api_error:
                             consecutive_api_errors += 1
-                            logger.warning(f"⚠️ API error #{consecutive_api_errors}: {action_error}")
+                            logger.warning(f" API error #{consecutive_api_errors}: {action_error}")
                             
                             if consecutive_api_errors >= MAX_CONSECUTIVE_API_ERRORS:
-                                logger.error(f"❌ Too many consecutive API errors ({consecutive_api_errors}), ending game")
+                                logger.error(f" Too many consecutive API errors ({consecutive_api_errors}), ending game")
                                 break  # Exit game loop
                             
                             # Exponential backoff: 1s, 2s, 4s, 8s, 16s
@@ -586,7 +586,7 @@ class GameplayEngine:
                             
                             if consecutive_no_frame_change >= STUCK_STATE_THRESHOLD:
                                 logger.warning(
-                                    f"🛑 FRONTIER STUCK STATE: {consecutive_no_frame_change} consecutive actions with "
+                                    f" FRONTIER STUCK STATE: {consecutive_no_frame_change} consecutive actions with "
                                     f"no frame change and no score increase on FRONTIER level {current_level}."
                                 )
                                 logger.info(
@@ -617,12 +617,12 @@ class GameplayEngine:
                             
                             if level_action_count > checkpoint_target * 1.5:  # 50% over target to reach checkpoint
                                 logger.warning(
-                                    f"🔧 OPTIMIZER: Too slow reaching checkpoint ({level_action_count} > {checkpoint_target * 1.5:.0f} actions), "
+                                    f" OPTIMIZER: Too slow reaching checkpoint ({level_action_count} > {checkpoint_target * 1.5:.0f} actions), "
                                     f"target was {checkpoint_target} to reach checkpoint"
                                 )
                                 # Use API reset to try different path to checkpoint
                                 if level_api_resets < MAX_API_RESETS_PER_LEVEL:
-                                    logger.info(f"🔄 OPTIMIZER: Level reset for better path to checkpoint (reset #{level_api_resets + 1})")
+                                    logger.info(f" OPTIMIZER: Level reset for better path to checkpoint (reset #{level_api_resets + 1})")
                                     try:
                                         if not self.session_manager.client:
                                             raise ValueError("Session manager client not initialized")
@@ -638,23 +638,23 @@ class GameplayEngine:
                                         actions_since_score_increase = 0
                                         self.game_config[f'checkpoint_executed_{current_level}'] = False  # Allow checkpoint retry
                                         
-                                        logger.info(f"   ✓ OPTIMIZER reset successful! Fresh path to checkpoint")
+                                        logger.info(f"    OPTIMIZER reset successful! Fresh path to checkpoint")
                                         logger.info(f"   → {MAX_API_RESETS_PER_LEVEL - level_api_resets} resets remaining")
                                         continue  # Skip to next iteration
                                         
                                     except Exception as e:
-                                        logger.error(f"   ✗ OPTIMIZER reset failed: {e}")
+                                        logger.error(f"    OPTIMIZER reset failed: {e}")
                                 else:
-                                    logger.warning(f"⚠️ OPTIMIZER: No resets remaining for level {current_level}")
+                                    logger.warning(f" OPTIMIZER: No resets remaining for level {current_level}")
                         else:
                             # No checkpoint, use simple target-based reset (fallback)
                             target_actions = self.game_config.get('optimization_targets', {}).get(current_level)
                             if target_actions and level_action_count > target_actions * 1.2:
                                 logger.warning(
-                                    f"🔧 OPTIMIZER: Exceeded target ({level_action_count} > {target_actions * 1.2:.0f} actions)"
+                                    f" OPTIMIZER: Exceeded target ({level_action_count} > {target_actions * 1.2:.0f} actions)"
                                 )
                                 if level_api_resets < MAX_API_RESETS_PER_LEVEL:
-                                    logger.info(f"🔄 OPTIMIZER: Level reset for efficiency (reset #{level_api_resets + 1})")
+                                    logger.info(f" OPTIMIZER: Level reset for efficiency (reset #{level_api_resets + 1})")
                                     try:
                                         if not self.session_manager.client:
                                             raise ValueError("Session manager client not initialized")
@@ -669,11 +669,11 @@ class GameplayEngine:
                                         action_count = max(0, action_count - level_action_count)
                                         actions_since_score_increase = 0
                                         
-                                        logger.info(f"   ✓ OPTIMIZER reset successful!")
+                                        logger.info(f"    OPTIMIZER reset successful!")
                                         continue
                                         
                                     except Exception as e:
-                                        logger.error(f"   ✗ OPTIMIZER reset failed: {e}")
+                                        logger.error(f"    OPTIMIZER reset failed: {e}")
                     
                     # Track score improvements (no destructive resets - removed to preserve pattern learning)
                     
@@ -684,8 +684,8 @@ class GameplayEngine:
                     # Previously incremented on >= 0.5 which caused overcounting with partial progress
                     if score_increase >= 1.0:  # Full level completion (ARC levels give 1.0 point each)
                         level_completions += 1
-                        logger.info(f"🎉 Level {current_level} completed! Score: {previous_score} → {game_state.score} (+{score_increase})")
-                        logger.info(f"📊 Level {current_level} stats: {level_action_count} actions, {level_api_resets} API resets used")
+                        logger.info(f" Level {current_level} completed! Score: {previous_score} → {game_state.score} (+{score_increase})")
+                        logger.info(f" Level {current_level} stats: {level_action_count} actions, {level_api_resets} API resets used")
                         
                         # Reset level-specific counters for next level
                         level_api_resets = 0  # Fresh reset budget for new level
@@ -708,7 +708,7 @@ class GameplayEngine:
                                 reason=f"level_{level_for_storage}_win"
                             )
                             if sequence_id:
-                                logger.info(f"✅ Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
+                                logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
                         
                         # Move to next level
                         previous_score = game_state.score  # Update for next level detection
@@ -735,7 +735,7 @@ class GameplayEngine:
                             )
                             
                             if partial_match:
-                                logger.info(f"⚡ CHECKPOINT FOUND: Resuming from known sequence, "
+                                logger.info(f" CHECKPOINT FOUND: Resuming from known sequence, "
                                           f"skipping {partial_match['actions_skipped']} actions!")
                                 
                                 # Replay from checkpoint
@@ -747,12 +747,12 @@ class GameplayEngine:
                                 
                                 if replay_result and replay_result['success']:
                                     game_state = replay_result['game_state']
-                                    logger.info(f"✨ Checkpoint replay successful! State: {game_state.state}, Score: {game_state.score}")
+                                    logger.info(f" Checkpoint replay successful! State: {game_state.state}, Score: {game_state.score}")
                                     consecutive_no_frame_change = 0  # Reset stuck state counter after successful replay
                                     
                                     # If we won, break out of sequence chain loop
                                     if game_state.state == "WIN":
-                                        logger.info(f"🏆 WON via checkpoint replay!")
+                                        logger.info(f" WON via checkpoint replay!")
                                         break
                                     # Otherwise update tracking and continue to check for next level
                                     previous_score = game_state.score
@@ -766,20 +766,20 @@ class GameplayEngine:
                                 
                                 # Check if Pioneer has reached frontier (highest known level for this game)
                                 if agent_mode == 'pioneer' and next_level_sequence is None:
-                                    logger.info(f"🚀 PIONEER: Reached frontier (Level {current_level}), no known sequences - EXPLORING NEW TERRITORY!")
+                                    logger.info(f" PIONEER: Reached frontier (Level {current_level}), no known sequences - EXPLORING NEW TERRITORY!")
                                     break  # Exit sequence chain loop, continue with exploration
                                 
                                 if next_level_sequence:
                                     # OPTIMIZER: Don't replay, just note target and break
                                     if agent_mode == 'optimizer':
                                         target_actions = next_level_sequence['total_actions']
-                                        logger.info(f"🔧 OPTIMIZER: Level {current_level} target = {target_actions} actions, trying to beat it")
+                                        logger.info(f" OPTIMIZER: Level {current_level} target = {target_actions} actions, trying to beat it")
                                         # Store target but don't replay - optimizer explores
                                         self.game_config[f'level_{current_level}_target'] = target_actions
                                         break  # Exit sequence chain, optimizer explores
                                     else:
                                         # GENERALIST/PIONEER: Replay sequence
-                                        logger.info(f"🎯 Found winning sequence for level {current_level}, attempting replay...")
+                                        logger.info(f" Found winning sequence for level {current_level}, attempting replay...")
                                         
                                         # FIX: Actually replay the sequence instead of just logging it!
                                         # This enables knowledge sharing for Level 2+
@@ -793,7 +793,7 @@ class GameplayEngine:
                                             replay_initial_score = previous_score
                                             game_state = replay_result['game_state']
                                             replay_final_score = game_state.score
-                                            logger.info(f"✅ Level {current_level} sequence replay successful! Score: {replay_initial_score} → {replay_final_score}, State: {game_state.state}")
+                                            logger.info(f" Level {current_level} sequence replay successful! Score: {replay_initial_score} → {replay_final_score}, State: {game_state.state}")
                                             consecutive_no_frame_change = 0  # Reset stuck state counter after successful replay
                                             
                                             # Update tracking with replay results
@@ -812,19 +812,19 @@ class GameplayEngine:
                                                 level_action_count = 0
                                                 level_start_action = action_count
                                                 level_api_resets = 0
-                                                logger.info(f"🚀 PIONEER/GENERALIST: Replay completed {levels_completed} level(s), now at level {current_level}")
+                                                logger.info(f" PIONEER/GENERALIST: Replay completed {levels_completed} level(s), now at level {current_level}")
                                                 # Loop continues to check for next level sequence
                                             else:
                                                 # Replay didn't complete a level, break out
-                                                logger.warning(f"⚠️ Level {current_level} sequence replay didn't complete level, continuing with exploration")
+                                                logger.warning(f" Level {current_level} sequence replay didn't complete level, continuing with exploration")
                                                 break
                                         else:
-                                            logger.info(f"⚠️ Level {current_level} sequence replay failed, continuing with exploration")
+                                            logger.info(f" Level {current_level} sequence replay failed, continuing with exploration")
                                             break  # Exit sequence chain, continue with exploration
                                 else:
                                     # No sequence found for this level
                                     if agent_mode == 'generalist':
-                                        logger.info(f"🌐 GENERALIST: No sequence for level {current_level}, exploring")
+                                        logger.info(f" GENERALIST: No sequence for level {current_level}, exploring")
                                     break  # Exit sequence chain
                         
                         # If we broke out of sequence chain due to WIN, exit main game loop
@@ -834,7 +834,7 @@ class GameplayEngine:
                     
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
-                        logger.warning(f"⏱️ Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
+                        logger.warning(f"⏱ Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
                         logger.info(f"Level {current_level} timed out - ENFORCING LIMIT (Biome Theory: metabolic constraints)")
                         
                         # BIOME THEORY FIX: ENFORCE the limit instead of resetting counter
@@ -859,7 +859,7 @@ class GameplayEngine:
                         "no active session" in error_msg or 
                         "no active" in error_msg or
                         "client session closed" in error_msg):
-                        logger.info(f"⚠️ Session no longer running, ending game gracefully")
+                        logger.info(f" Session no longer running, ending game gracefully")
                         break
                     else:
                         logger.error(f"Runtime error in action {action_count}: {e}")
@@ -867,7 +867,7 @@ class GameplayEngine:
                 except AttributeError as e:
                     # Handle NoneType errors during shutdown (API client session is None)
                     if "'NoneType' object has no attribute" in str(e):
-                        logger.info(f"⚠️ API client unavailable (shutdown in progress), ending game gracefully")
+                        logger.info(f" API client unavailable (shutdown in progress), ending game gracefully")
                         break
                     else:
                         logger.error(f"Attribute error in action {action_count}: {e}")
@@ -879,7 +879,7 @@ class GameplayEngine:
                         "session" in error_msg or 
                         "client" in error_msg or
                         "nonetype" in error_msg):
-                        logger.info(f"⚠️ Session/client error detected, ending game gracefully")
+                        logger.info(f" Session/client error detected, ending game gracefully")
                         break
                     # Critical errors that should stop
                     if "authentication" in error_msg or "api_key" in error_msg:
@@ -943,7 +943,7 @@ class GameplayEngine:
                     )
                     if sequence_id:
                         results['learned_sequence_id'] = sequence_id
-                        logger.info(f"✅ Captured full game winning sequence: {sequence_id}")
+                        logger.info(f" Captured full game winning sequence: {sequence_id}")
                 
                 elif game_state.score > 0:
                     # Partial progress - capture what we achieved
@@ -957,7 +957,7 @@ class GameplayEngine:
                     )
                     if sequence_id:
                         results['learned_sequence_id'] = sequence_id
-                        logger.info(f"✅ Captured partial progress sequence (score {game_state.score}): {sequence_id}")
+                        logger.info(f" Captured partial progress sequence (score {game_state.score}): {sequence_id}")
                         logger.info(f"   → Future agents can replay this to guarantee {levels_completed} level(s) minimum")
             
             # PHASE 2.5: Knowledge Recombination (AUTOMATIC - runs after EVERY game)
@@ -1041,7 +1041,7 @@ class GameplayEngine:
                         
                         if pariah_id:
                             results['pariah_created'] = pariah_id
-                            logger.info(f"☠️  Created pariah {pariah_id[:12]} from failure (score: {game_state.score:.2f})")
+                            logger.info(f"  Created pariah {pariah_id[:12]} from failure (score: {game_state.score:.2f})")
                             
                             # Spread awareness to nearby agents (horizontal transfer)
                             nearby_agents = self.db.execute_query("""
@@ -1057,7 +1057,7 @@ class GameplayEngine:
                                     aware_count += 1
                             
                             if aware_count > 0:
-                                logger.info(f"☠️  Pariah awareness spread to {aware_count} agents")
+                                logger.info(f"  Pariah awareness spread to {aware_count} agents")
 
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
                        f"Actions: {action_count}, Levels Completed: {level_completions}/{current_level}")
@@ -1129,7 +1129,7 @@ class GameplayEngine:
                             if subgoal_action_ids:
                                 action_id = subgoal_action_ids[0]
                                 reasoning = f"Following hierarchical subgoal plan (plan_id: {plan_id[:8]})"
-                                logger.info(f"📋 {reasoning}: ACTION{action_id}")
+                                logger.info(f" {reasoning}: ACTION{action_id}")
                                 return f"ACTION{action_id}", reasoning
                     
                     # No active plan - create one if game is making progress
@@ -1145,7 +1145,7 @@ class GameplayEngine:
                                 generation=self.game_config.get('generation', 0)
                             )
                             if plan_id:
-                                logger.info(f"📋 Created hierarchical plan for game {current_game_id[:8]}")
+                                logger.info(f" Created hierarchical plan for game {current_game_id[:8]}")
                             
             except Exception as e:
                 logger.debug(f"Subgoal planning error: {e}")
@@ -1165,7 +1165,7 @@ class GameplayEngine:
         if agent_id and self.game_config.get('enable_sensation_navigation', True):
             if not sensation_allowed:
                 # Generalists restricted from sensation - must use pure pattern learning
-                logger.debug(f"🚫 Generalist mode: Sensation navigation disabled (pattern-only)")
+                logger.debug(f" Generalist mode: Sensation navigation disabled (pattern-only)")
             else:
                 try:
                     # Analyze frame for emotional context
@@ -1222,7 +1222,7 @@ class GameplayEngine:
                 if action_weights:
                     logger.debug(f"🦠 Viral packages suggest: {list(action_weights.keys())[:3]}")
                 if action_penalties:
-                    logger.debug(f"☠️  Pariahs warn against: {list(action_penalties.keys())[:3]}")
+                    logger.debug(f"  Pariahs warn against: {list(action_penalties.keys())[:3]}")
                     
             except Exception as e:
                 logger.debug(f"Phase 3 influence error: {e}")
@@ -1252,7 +1252,7 @@ class GameplayEngine:
                         first_action = actions[0]
                         if first_action['type'] == 'ACTION6':
                             coord = first_action['coordinate']
-                            logger.info(f"🎯 Applying meta-learned pattern: ACTION6 at {coord}")
+                            logger.info(f" Applying meta-learned pattern: ACTION6 at {coord}")
                             logger.info(f"   Reason: {first_action['reason']}")
                             
                             # Store remaining actions for next iterations
@@ -1271,7 +1271,7 @@ class GameplayEngine:
             next_action = self._pattern_action_queue.pop(0)
             if next_action['type'] == 'ACTION6':
                 reasoning = f"Continuing meta-learned pattern: {next_action['reason']}"
-                logger.info(f"🎯 {reasoning}: ACTION6 at {next_action['coordinate']}")
+                logger.info(f" {reasoning}: ACTION6 at {next_action['coordinate']}")
                 return "ACTION6", reasoning
         
         # Fall back to default action selection WITH viral/pariah influence
@@ -1282,7 +1282,7 @@ class GameplayEngine:
         if current_game_id:
             is_unbeaten_game = self._is_unbeaten_game(current_game_id)
             if is_unbeaten_game:
-                logger.info(f"🔥 UNBEATEN GAME DETECTED: {current_game_id} - using full exploration mode")
+                logger.info(f" UNBEATEN GAME DETECTED: {current_game_id} - using full exploration mode")
                 strategy = "unbeaten_exploration"
         else:
             is_unbeaten_game = False
@@ -1337,7 +1337,7 @@ class GameplayEngine:
             
             # If net influence is strongly negative (pariah > package), try alternative
             if net_influence < -0.3:
-                logger.info(f"☠️  Avoiding {base_action} (pariah warning: {penalty:.2f})")
+                logger.info(f"  Avoiding {base_action} (pariah warning: {penalty:.2f})")
                 
                 # Find best alternative action (highest weight, lowest penalty)
                 alternatives = []
@@ -1737,7 +1737,7 @@ class GameplayEngine:
                     VALUES (?, ?, 1, ?, ?, ?, TRUE, 0.0, CURRENT_TIMESTAMP)
                 """, (agent_id, game_id, final_score, final_score, final_score))
                 
-                logger.info(f"📊 Diversity: Novel game tracked - {game_id} (score: {final_score})")
+                logger.info(f" Diversity: Novel game tracked - {game_id} (score: {final_score})")
             else:
                 # Repeated game - update metrics
                 first_score = existing[0]['first_attempt_score']
@@ -1758,9 +1758,9 @@ class GameplayEngine:
                 
                 if attempts == 2:
                     improvement = few_shot_improvement
-                    logger.info(f"📊 Diversity: Few-shot learning - {game_id} improvement: {improvement:+.3f}")
+                    logger.info(f" Diversity: Few-shot learning - {game_id} improvement: {improvement:+.3f}")
                 elif attempts > self.game_config.get('max_repeats_per_game', 5):
-                    logger.warning(f"⚠️ Diversity: Overfitting risk - {game_id} played {attempts} times")
+                    logger.warning(f" Diversity: Overfitting risk - {game_id} played {attempts} times")
                     
         except Exception as e:
             logger.error(f"Error tracking game diversity: {e}")
@@ -1862,7 +1862,7 @@ class GameplayEngine:
             
             self.db.checkpoint_wal()
             
-            logger.debug(f"📊 Agent {agent_id} performance: {games_played} games, "
+            logger.debug(f" Agent {agent_id} performance: {games_played} games, "
                         f"avg score {avg_score:.2f}, win rate {win_rate:.1%}")
             
         except Exception as e:
@@ -2206,16 +2206,16 @@ class GameplayEngine:
                 if diversity_bonus:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
-                    logger.info(f"🌟 DIVERSITY BONUS: Storing sequence for under-represented game-level (only {seq_count} exist)")
+                    logger.info(f" DIVERSITY BONUS: Storing sequence for under-represented game-level (only {seq_count} exist)")
                 elif len(actions) <= existing_actions - min_action_improvement:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
-                    logger.info(f"⚡ Optimized sequence: {existing_actions} → {len(actions)} actions "
+                    logger.info(f" Optimized sequence: {existing_actions} → {len(actions)} actions "
                               f"(efficiency: {existing_efficiency:.4f} → {efficiency:.4f})")
                 elif efficiency > existing_efficiency * min_efficiency_multiplier:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
-                    logger.info(f"📈 Improved efficiency: {existing_efficiency:.4f} → {efficiency:.4f}")
+                    logger.info(f" Improved efficiency: {existing_efficiency:.4f} → {efficiency:.4f}")
                 else:
                     logger.info(f"Existing sequence is still optimal ({existing_actions} actions, "
                               f"efficiency {existing_efficiency:.4f}) - "
@@ -2265,7 +2265,7 @@ class GameplayEngine:
                         # Check if current sequence is shorter than optimal (partial)
                         if current_action_count < target_actions:
                             # Append the guaranteed win ending
-                            logger.info(f"🔧 OPTIMIZER FIX: Partial sequence detected ({current_action_count} actions, target: {target_actions})")
+                            logger.info(f" OPTIMIZER FIX: Partial sequence detected ({current_action_count} actions, target: {target_actions})")
                             logger.info(f"   Appending {len(final_actions)} final actions to guarantee completion")
                             
                             original_length = len(actions)
@@ -2274,7 +2274,7 @@ class GameplayEngine:
                             # Update efficiency with new action count
                             efficiency = final_score / len(actions) if len(actions) > 0 else 0.0
                             
-                            logger.info(f"✅ Sequence completed: {original_length} → {len(actions)} actions (efficiency: {efficiency:.4f})")
+                            logger.info(f" Sequence completed: {original_length} → {len(actions)} actions (efficiency: {efficiency:.4f})")
                         else:
                             logger.debug(f"Optimizer sequence already complete ({current_action_count} actions)")
                     else:
@@ -2311,7 +2311,7 @@ class GameplayEngine:
                 
                 # CRITICAL: Force immediate commit to ensure sequence is saved
                 self.db.checkpoint_wal()
-                logger.info(f"💾 Sequence {sequence_id} committed to database immediately")
+                logger.info(f" Sequence {sequence_id} committed to database immediately")
                 
                 # Try to detect and store abstract pattern (only if we have valid sequence_id)
                 self._detect_and_store_abstract_pattern(
@@ -2336,7 +2336,7 @@ class GameplayEngine:
                     except Exception as e:
                         logger.warning(f"Failed to record prestige discovery: {e}")
                 
-                logger.info(f"✅ Captured winning sequence {sequence_id}: "
+                logger.info(f" Captured winning sequence {sequence_id}: "
                            f"{len(actions)} actions, efficiency {efficiency:.4f}, "
                            f"tags: {pattern_tags}, pattern: {pattern_signature.get('transformation_type', 'unknown')}")
                 
@@ -2356,7 +2356,7 @@ class GameplayEngine:
                         SET is_active = 0
                         WHERE sequence_id = ?
                     """, (worst_seq['sequence_id'],))
-                    logger.info(f"🗑️ Auto-deactivated redundant sequence {worst_seq['sequence_id'][:8]} "
+                    logger.info(f" Auto-deactivated redundant sequence {worst_seq['sequence_id'][:8]} "
                               f"({worst_seq['total_actions']} actions, keeping top 3)")
             
             return sequence_id
@@ -2499,7 +2499,7 @@ class GameplayEngine:
                 logger.debug(f"Optimizer checkpoint analysis: Only {len(sequences)} sequence(s) available, need 2+")
                 return None
             
-            logger.info(f"🔧 OPTIMIZER: Analyzing {len(sequences)} sequences to find optimal checkpoint...")
+            logger.info(f" OPTIMIZER: Analyzing {len(sequences)} sequences to find optimal checkpoint...")
             
             # Extract action sequences and find common patterns
             all_actions = []
@@ -2552,7 +2552,7 @@ class GameplayEngine:
                 'sequences_analyzed': len(sequences)
             }
             
-            logger.info(f"✅ OPTIMIZER CHECKPOINT IDENTIFIED:")
+            logger.info(f" OPTIMIZER CHECKPOINT IDENTIFIED:")
             logger.info(f"   Checkpoint at action {checkpoint_index}/{len(best_actions)}")
             logger.info(f"   Final actions: {final_actions}")
             logger.info(f"   Common patterns: {len(common_patterns)}")
@@ -2711,7 +2711,7 @@ class GameplayEngine:
                                     'match_score': match_score,
                                     'reliability': seq['reliability']
                                 }
-                                logger.info(f"🎯 Found partial match in {seq['sequence_id']}: "
+                                logger.info(f" Found partial match in {seq['sequence_id']}: "
                                           f"Skip {actions_skipped} actions, {actions_remaining} remaining "
                                           f"(reliability: {seq['reliability']:.2f})")
                             break  # Found match in this sequence, check next sequence
@@ -2721,7 +2721,7 @@ class GameplayEngine:
                     continue
             
             if best_match:
-                logger.info(f"✨ PARTIAL MATCH: {best_match['sequence']['sequence_id']} - "
+                logger.info(f" PARTIAL MATCH: {best_match['sequence']['sequence_id']} - "
                           f"Resuming from action {best_match['start_index']}, "
                           f"skipping {best_match['actions_skipped']} actions!")
                 return best_match
@@ -2785,8 +2785,8 @@ class GameplayEngine:
             
             if sequences:
                 seq = sequences[0]
-                reliability_indicator = "✓" if seq['reliability'] >= 0.5 else "?"
-                logger.info(f"📖 {reliability_indicator} Best cumulative sequence for {game_type}: "
+                reliability_indicator = "" if seq['reliability'] >= 0.5 else "?"
+                logger.info(f" {reliability_indicator} Best cumulative sequence for {game_type}: "
                            f"Score {seq['total_score']:.1f} (Level {int(seq['total_score'])}), "
                            f"{seq['total_actions']} actions, reliability {seq['reliability']:.2f}")
                 logger.info(f"[SEQUENCE REPLAY DEBUG] Returning sequence {seq.get('sequence_id', 'UNKNOWN')}")
@@ -2919,8 +2919,8 @@ class GameplayEngine:
                 # Agents can pattern-match and extract optimal sub-sequences
                 # Validation and real gameplay will determine usefulness
                 seq = sequences[0]
-                reliability_indicator = "✓" if seq['reliability'] >= 0.5 else "?"
-                logger.info(f"📖 {reliability_indicator} Found winning sequence for game type {game_type} level {level_number}: "
+                reliability_indicator = "" if seq['reliability'] >= 0.5 else "?"
+                logger.info(f" {reliability_indicator} Found winning sequence for game type {game_type} level {level_number}: "
                            f"{seq['total_actions']} actions, efficiency {seq['efficiency_score']:.4f}, "
                            f"reliability {seq['reliability']:.2f} ({seq['validators']} validations)")
                 return seq
@@ -2960,11 +2960,11 @@ class GameplayEngine:
         """
         try:
             sequence_id = sequence['sequence_id']
-            logger.info(f"🔄 Replaying sequence {sequence_id} inline (level {sequence['level_number']})")
+            logger.info(f" Replaying sequence {sequence_id} inline (level {sequence['level_number']})")
             
             # NEW: Partial sequence matching support
             if start_index > 0:
-                logger.info(f"⚡ CHECKPOINT REPLAY: Starting from action {start_index} "
+                logger.info(f" CHECKPOINT REPLAY: Starting from action {start_index} "
                           f"(skipping {start_index} actions)")
             else:
                 # Multi-stage frame matching for games with moving elements
@@ -2980,7 +2980,7 @@ class GameplayEngine:
                 
                 # Skip frame comparison if no frame data was captured
                 if not expected_initial_frame or len(expected_initial_frame) == 0:
-                    logger.debug(f"🔄 No frame data available, allowing replay based on game type match")
+                    logger.debug(f" No frame data available, allowing replay based on game type match")
                     frames_match = True
                     match_method = "no_frame_data"
                 else:
@@ -2988,11 +2988,11 @@ class GameplayEngine:
                     frames_match = self._compare_frames(expected_initial_frame, current_frame)
                     if frames_match:
                         match_method = "direct_match"
-                        logger.debug(f"✓ Frame matched via direct comparison")
+                        logger.debug(f" Frame matched via direct comparison")
                     
                     # STRICT REPLAY MODE: For proven sequences, fail hard if frames don't match
                     elif strict_replay:
-                        logger.error(f"❌ STRICT REPLAY FAILED: Frame mismatch for proven sequence {sequence_id}")
+                        logger.error(f" STRICT REPLAY FAILED: Frame mismatch for proven sequence {sequence_id}")
                         logger.error(f"   This sequence has >50% validation success rate but frames don't match")
                         logger.error(f"   Game state may have changed or sequence is corrupted")
                         return {'game_state': game_state, 'success': False}
@@ -3006,7 +3006,7 @@ class GameplayEngine:
                                     if self._compare_frames(stored_frame, current_frame):
                                         frames_match = True
                                         match_method = f"multi_frame_match_{frame_idx}"
-                                        logger.info(f"✓ Frame matched via multi-frame comparison (frame {frame_idx}/{len(expected_initial_frame)})")
+                                        logger.info(f" Frame matched via multi-frame comparison (frame {frame_idx}/{len(expected_initial_frame)})")
                                         break
                         
                         # Stage 3: Try subsequence/partial matching (90% similarity)
@@ -3015,13 +3015,13 @@ class GameplayEngine:
                             if similarity >= 0.90:
                                 frames_match = True
                                 match_method = f"partial_match_{similarity:.2f}"
-                                logger.info(f"✓ Frame matched via partial similarity ({similarity:.1%})")
+                                logger.info(f" Frame matched via partial similarity ({similarity:.1%})")
                         
                         # Stage 4: Proceed anyway - let validation track success/failure
                         if not frames_match:
                             frames_match = True  # Allow replay to proceed
                             match_method = "validation_fallback"
-                            logger.warning(f"⚠️ Frame mismatch for {sequence_id}, proceeding with replay (validation will track)")
+                            logger.warning(f" Frame mismatch for {sequence_id}, proceeding with replay (validation will track)")
                             logger.debug(f"   Expected: type={type(expected_initial_frame)}, len={len(expected_initial_frame)}")
                             logger.debug(f"   Current: type={type(current_frame)}, len={len(current_frame) if isinstance(current_frame, list) else 'N/A'}")
             
@@ -3125,9 +3125,9 @@ class GameplayEngine:
             )
             
             if replay_success:
-                logger.info(f"✅ Inline replay successful for {sequence_id}! Score: {game_state.score}")
+                logger.info(f" Inline replay successful for {sequence_id}! Score: {game_state.score}")
             else:
-                logger.warning(f"❌ Inline replay failed for {sequence_id}. "
+                logger.warning(f" Inline replay failed for {sequence_id}. "
                              f"Expected score: {sequence['total_score']}, Got: {game_state.score}")
             
             return {'game_state': game_state, 'success': replay_success}
@@ -3150,7 +3150,7 @@ class GameplayEngine:
         """
         try:
             sequence_id = sequence['sequence_id']
-            logger.info(f"🔄 Attempting to replay sequence {sequence_id} for {game_id} level {sequence['level_number']}")
+            logger.info(f" Attempting to replay sequence {sequence_id} for {game_id} level {sequence['level_number']}")
             
             if not self.session_manager.is_running:
                 await self.session_manager.start_session(game_id=game_id)
@@ -3165,7 +3165,7 @@ class GameplayEngine:
             # Simple frame comparison (can be enhanced with fuzzy matching)
             frames_match = self._compare_frames(expected_initial_frame, current_frame)
             if not frames_match:
-                logger.warning(f"⚠️ Initial frame mismatch - replay may fail for {sequence_id}")
+                logger.warning(f" Initial frame mismatch - replay may fail for {sequence_id}")
                 # Continue anyway but track this
             
             actions = json.loads(sequence['action_sequence'])
@@ -3233,11 +3233,11 @@ class GameplayEngine:
             
             # Update success rate in database
             if replay_success:
-                logger.info(f"✅ Replay successful for {sequence_id}! Score: {game_state.score}")
+                logger.info(f" Replay successful for {sequence_id}! Score: {game_state.score}")
                 # Note: success_rate_when_reused calculation would need existing value
                 # For now, just increment a success counter (schema may need update)
             else:
-                logger.warning(f"❌ Replay failed for {sequence_id}. "
+                logger.warning(f" Replay failed for {sequence_id}. "
                              f"Expected score: {sequence['total_score']}, Got: {game_state.score}")
             
             result = {
@@ -3328,8 +3328,8 @@ class GameplayEngine:
                 except Exception as e:
                     logger.warning(f"Failed to record prestige validation: {e}")
             
-            logger.info(f"📊 Recorded validation: {sequence_id} by {agent_id} - "
-                       f"{'✓ Success' if success else '✗ Failed'} "
+            logger.info(f" Recorded validation: {sequence_id} by {agent_id} - "
+                       f"{' Success' if success else ' Failed'} "
                        f"({actions_completed}/{total_actions} actions)")
             
         except Exception as e:
@@ -3416,7 +3416,7 @@ class GameplayEngine:
                   raw_success_rate, reliability_score, unique_agents,
                   recent_success_rate, trending, datetime.now().isoformat()))
             
-            logger.debug(f"📈 Updated reputation for {sequence_id}: "
+            logger.debug(f" Updated reputation for {sequence_id}: "
                         f"reliability={reliability_score:.2f}, "
                         f"success_rate={raw_success_rate:.2f}, "
                         f"trend={trending}")
@@ -3734,7 +3734,7 @@ class GameplayEngine:
                         pattern_id
                     ))
                     
-                    logger.info(f"📊 Updated pattern {pattern_id}: {new_count} occurrences")
+                    logger.info(f" Updated pattern {pattern_id}: {new_count} occurrences")
             else:
                 # Create new pattern
                 pattern_name = f"{pattern_signature.get('transformation_type', 'unknown')}_{pattern_tags[0] if pattern_tags else 'generic'}"
@@ -3816,7 +3816,7 @@ class GameplayEngine:
                     continue
             
             if best_match and best_score >= 0.3:
-                logger.info(f"🎯 Found similar pattern {best_match['pattern_id']} "
+                logger.info(f" Found similar pattern {best_match['pattern_id']} "
                            f"(similarity: {best_score:.2f})")
                 return best_match
             
@@ -4362,7 +4362,7 @@ class GameplayEngine:
                     WHERE pattern_id = ?
                 """, (new_count, new_confidence, datetime.now().isoformat(), pattern_id))
                 
-                logger.info(f"📊 Updated meta-pattern {pattern_id}: {new_count} occurrences")
+                logger.info(f" Updated meta-pattern {pattern_id}: {new_count} occurrences")
             else:
                 # Create new pattern
                 pattern_name = f"meta_{pattern_type}_{rule['type']}"
