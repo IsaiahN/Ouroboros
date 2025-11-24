@@ -155,6 +155,9 @@ class GameplayEngine:
         )
         game_state = GameState.from_dict(game_data)
         
+        # Initialize action history for abstraction engine
+        self.game_config['current_actions'] = []
+        
         # Pattern Learning: Check for known winning sequence (Rule 10: integrated)
         # Check AFTER game creation so we have the initial frame
         # MODE-AWARE: Behavior depends on agent operating mode
@@ -439,7 +442,7 @@ class GameplayEngine:
                                 # Simple frame similarity check (could be enhanced)
                                 frame_similarity = self._compare_frames(checkpoint_frame, game_state.frame)
                                 
-                                if frame_similarity or level_action_count >= checkpoint_info['target_total_actions'] - checkpoint_info['checkpoint_distance']:
+                                if frame_similarity or level_action_count >= checkpoint_info['target_total_actions'] - checkpoint_info.get('checkpoint_distance', 0):
                                     # We're at or past the checkpoint! Execute final winning actions
                                     final_actions = checkpoint_info['final_actions']
                                     logger.info(f" OPTIMIZER CHECKPOINT REACHED! Executing {len(final_actions)} known winning actions...")
@@ -2560,7 +2563,8 @@ class GameplayEngine:
                 'common_patterns': common_patterns,
                 'optimal_subroutine': optimal_subroutine,
                 'target_actions': len(best_actions),
-                'sequences_analyzed': len(sequences)
+                'sequences_analyzed': len(sequences),
+                'checkpoint_distance': checkpoint_offset
             }
             
             logger.info(f" OPTIMIZER CHECKPOINT IDENTIFIED:")
@@ -2574,7 +2578,6 @@ class GameplayEngine:
         except Exception as e:
             logger.warning(f"Error in optimizer checkpoint analysis: {e}")
             return None
-    
     def _find_common_action_patterns(self, action_sequences: List[List[int]]) -> List[List[int]]:
         """
         Find action subsequences that appear in multiple sequences.
@@ -2936,19 +2939,28 @@ class GameplayEngine:
                            f"reliability {seq['reliability']:.2f} ({seq['validators']} validations)")
                 return seq
             
-            # DISABLED: Pattern matching should be FALLBACK, not default
-            # The caller should explicitly request pattern matching by calling
-            # _find_similar_patterns() directly when at the frontier.
-            # Generalists should replay complete sequences first, not jump to pattern matching.
-            # 
-            # Pattern matching is useful for:
-            # - Pioneers at the frontier (after replaying all known sequences)
-            # - Extracting subroutines from long sequences
-            # - Cross-game pattern transfer
-            # 
-            # But it should NOT replace direct sequence replay for generalists!
+            # ABSTRACTION FALLBACK: Use pattern-based matching when no exact sequence found
+            # This enables cross-game transfer and lossy human-like pattern matching
+            if self.abstraction_engine:
+                logger.debug(f"No exact sequence, trying abstraction for {game_type} level {level_number}...")
+                try:
+                    # Get current action history for pattern matching
+                    current_actions = self.game_config.get('current_actions', [])
+                    
+                    abstract_seq = self.abstraction_engine.get_sequence_by_concept(
+                        game_id=game_id,
+                        level_number=level_number,
+                        current_actions=current_actions,
+                        pattern_similarity=0.7  # 70% pattern similarity threshold
+                    )
+                    
+                    if abstract_seq:
+                        logger.info(f"🧠 Abstraction matched sequence: {abstract_seq['sequence_id'][:12]} (pattern-based)")
+                        return abstract_seq
+                except Exception as e:
+                    logger.debug(f"Abstraction fallback failed: {e}")
             
-            logger.debug(f"No direct sequence found for game type {game_type} level {level_number}")
+            logger.debug(f"No sequence found for game type {game_type} level {level_number} (exact or abstract)")
                 
         except Exception as e:
             logger.debug(f"Error retrieving winning sequence for game type {game_type}: {e}")
@@ -3092,6 +3104,10 @@ class GameplayEngine:
                 else:
                     action = f"ACTION{action_num}"
                     game_state = await self._execute_action(action, game_state)
+                
+                # Track action for abstraction engine
+                if 'current_actions' in self.game_config:
+                    self.game_config['current_actions'].append(action_num)
                 
                 action_count += 1
                 

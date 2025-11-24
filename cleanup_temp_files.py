@@ -56,7 +56,6 @@ KEEP_FILES = {
     "real_progress_check.py",  # Progress monitoring
     "system_status_report.py",  # System status
     "monitor_game_results.py",  # Game result verification tool
-    "test_single_game.py",  # Single game debugging tool
     
     # Documentation (keep)
     "README.md",
