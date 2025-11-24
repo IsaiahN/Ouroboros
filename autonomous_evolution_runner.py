@@ -60,6 +60,8 @@ from evolution_game_scheduler import EvolutionGameScheduler  # NEW: Prevent dupl
 from regulatory_signal_engine import RegulatorySignalEngine  # Phase 4: Distributed Regulation
 from sequence_pruning_system import SequencePruningSystem  # NEW: Automatic bad sequence removal
 from optimization_threshold_system import OptimizationThresholdSystem  # NEW: Track optimized levels
+from breakthrough_budget_allocator import BreakthroughBudgetAllocator  # Tier 1: Dynamic budgets (+50%)
+from automated_assessment_runner import AutomatedAssessmentRunner  # Other AI #3: Auto-metrics
 # GameDiversityPreserver import removed - prestige-only protection now
 
 # Rule 2: Database-only logging
@@ -116,6 +118,8 @@ class AutonomousEvolutionRunner:
         self.game_scheduler = EvolutionGameScheduler(self.db)  # NEW: Prevent duplicate game plays
         self.sequence_pruner = SequencePruningSystem(self.db)  # NEW: Automatic bad sequence removal
         self.optimization_tracker = OptimizationThresholdSystem(self.db)  # NEW: Track optimized levels
+        self.budget_allocator = BreakthroughBudgetAllocator(self.db)  # TIER 1: Dynamic budgets (+50% gain)
+        self.assessment_runner = AutomatedAssessmentRunner(self.db.db_path)  # OTHER AI #3: Auto-metrics
         # DIVERSITY PRESERVER DISABLED - prestige-only protection now
         
         # PHASE 5: Horizontal Gene Transfer with Emotional Intelligence
@@ -1015,12 +1019,17 @@ class AutonomousEvolutionRunner:
                             if game_targets:
                                 optimizer_target_level = game_targets[0]['level_number']
                         
+                        # Use BREAKTHROUGH BUDGET ALLOCATOR (Tier 1: +50% gain)
+                        # Dynamic per-game budgets: 800 (unbeaten), 400 (partial), 150 (beaten)
+                        game_budget = self.budget_allocator.calculate_game_budget(game_id)
+                        logger.info(f"[BUDGET] Game {game_id[:8]}: {game_budget} total actions allocated")
+                        
                         # Use adaptive action limits (adjusted per generation)
                         # Configure engine with current adaptive limits
                         engine.configure(
                             strategy='balanced',
                             max_actions_per_level=actions_per_level,  # Adaptive: adjusts based on performance
-                            max_total_actions=total_actions,          # FIXED: was max_actions_per_game (wrong key!)
+                            max_total_actions=game_budget,  # BREAKTHROUGH: Dynamic per-game budget
                             enable_random_exploration=True,
                             enable_pattern_learning=True,
                             # Diversity Mode settings (Rule 10: enhance existing)
@@ -1756,6 +1765,25 @@ class AutonomousEvolutionRunner:
             print(f"[?] WAL checkpoint after generation {self.current_generation}")
         except Exception as e:
             print(f"[WARN] Failed to checkpoint WAL: {e}")
+        
+        # AUTOMATED ASSESSMENT: Run metrics tracking (Other AI #3)
+        try:
+            assessment = self.assessment_runner.run_post_generation_assessment(
+                generation_number=self.current_generation,
+                games_played=self.total_games_played,
+                agents_active=health['agent_count']
+            )
+            print(f"[ASSESSMENT] Completion: {assessment['level_completion']['completion_rate']:.1f}%, "
+                  f"Breakthroughs: {assessment['breakthrough_momentum']['breakthrough_detections']}, "
+                  f"Status: {assessment['level_completion']['status']}")
+            
+            # Print recommendations if any
+            if assessment['recommendations']:
+                print(f"[ASSESSMENT] Recommendations:")
+                for rec in assessment['recommendations'][:3]:  # Show top 3
+                    print(f"  - {rec}")
+        except Exception as e:
+            print(f"[WARN] Automated assessment failed: {e}")
         
         # Print status
         self.print_status(

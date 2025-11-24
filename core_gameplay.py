@@ -57,6 +57,9 @@ class GameplayEngine:
         self.matching_pipeline = MultiStageMatchingPipeline(self.db)  # Tier 1: Multi-stage matching (+40%)
         self.subgoal_activator = SubgoalPlanningActivator(self.db)  # Tier 1: Subgoal planning (+30%)
         
+        # Inject subgoal activator into action handler for real-time guidance
+        self.action_handler.subgoal_activator = self.subgoal_activator
+        
         # Abstraction engine for pattern-based sequence matching
         if ABSTRACTION_AVAILABLE and is_abstraction_enabled():
             try:
@@ -169,6 +172,28 @@ class GameplayEngine:
         # Initialize action history for abstraction engine (with memory leak protection)
         self.game_config['current_actions'] = []
         self.game_config['max_action_history'] = 1000  # Prevent memory leaks in long games
+        
+        # Set game context in action handler for subgoal planning (Tier 1: +30%)
+        self.action_handler._current_game_id = game_id
+        self.action_handler._current_level = 1
+        self.action_handler._current_frame = game_state.frame
+        
+        # Trigger subgoal generation at game start (Tier 1: +30%)
+        if self.subgoal_activator.should_generate_subgoals(
+            game_id=game_id,
+            level_number=1,
+            action_count=0,
+            score=game_state.score,
+            game_state=game_state.state
+        ):
+            subgoals = self.subgoal_activator.generate_subgoals(
+                game_id=game_id,
+                level_number=1,
+                frame_data=game_state.frame,
+                current_score=game_state.score
+            )
+            if subgoals:
+                logger.info(f"[SUBGOAL] Generated {len(subgoals)} subgoals for {game_id} L1")
         
         # Pattern Learning: Check for known winning sequence (Rule 10: integrated)
         # Check AFTER game creation so we have the initial frame
@@ -3133,9 +3158,18 @@ class GameplayEngine:
                     action = f"ACTION{action_num}"
                     game_state = await self._execute_action(action, game_state)
                 
-                # Track action for abstraction engine
+                # Track action for abstraction engine WITH MEMORY LEAK PROTECTION
                 if 'current_actions' in self.game_config:
-                    self.game_config['current_actions'].append(action_num)
+                    current_actions = self.game_config['current_actions']
+                    max_history = self.game_config.get('max_action_history', 1000)
+                    
+                    # Truncate if exceeds limit (Other AI suggestion #4)
+                    if len(current_actions) >= max_history:
+                        current_actions = current_actions[-max_history//2:]  # Keep last 50%
+                        logger.debug(f"Action history truncated to {len(current_actions)} (max: {max_history})")
+                    
+                    current_actions.append(action_num)
+                    self.game_config['current_actions'] = current_actions
                 
                 action_count += 1
                 

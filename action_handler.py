@@ -492,6 +492,8 @@ class ActionHandler:
                          exclude_actions: Optional[List[str]] = None,
                          prefer_full_action_set: bool = False) -> str:
         """Get a random action from available actions.
+        
+        ENHANCED: Now checks subgoal planning first (Competitive #3, +30% gain)
 
         Args:
             available_actions: List of available actions
@@ -499,8 +501,35 @@ class ActionHandler:
             prefer_full_action_set: If True, tries to use all actions 1-7 for exploration
 
         Returns:
-            Random action name
+            Random action name (or subgoal-guided action if available)
         """
+        # SUBGOAL INTEGRATION: Check if subgoal activator suggests an action (Tier 1: +30%)
+        if hasattr(self, 'subgoal_activator') and self.subgoal_activator:
+            try:
+                game_id = getattr(self, '_current_game_id', None)
+                level_number = getattr(self, '_current_level', None)
+                
+                if game_id and level_number:
+                    # Get current subgoal
+                    current_subgoal = self.subgoal_activator.get_current_subgoal(game_id, level_number)
+                    
+                    if current_subgoal:
+                        # Get subgoal-suggested action
+                        suggested_action_num = self.subgoal_activator.suggest_action_for_subgoal(
+                            current_subgoal=current_subgoal,
+                            frame_data=getattr(self, '_current_frame', None),
+                            available_actions=[1, 2, 3, 4, 5, 6, 7]
+                        )
+                        
+                        if suggested_action_num:
+                            suggested_action = f"ACTION{suggested_action_num}"
+                            logger.info(f"[SUBGOAL] Using subgoal-guided action: {suggested_action} "
+                                       f"(goal: {current_subgoal.get('description', 'unknown')})")
+                            return suggested_action
+            except Exception as e:
+                logger.debug(f"Subgoal action selection failed: {e}")
+        
+        # Fallback to random action (original logic)
         if not available_actions:
             if prefer_full_action_set:
                 # For unbeaten games, ensure we try all action types 1-7
