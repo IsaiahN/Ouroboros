@@ -39,7 +39,9 @@ TEMP_PATTERNS = [
     "*_analysis.py",     # Analysis scripts
     "*_report.py",       # Report scripts
     "*_check.py",        # Check scripts
-    "BugFix_*.*"         # BugFix files with any extension
+    "BugFix_*.*",        # BugFix files with any extension
+    "*.log",             # Log files (Rule 2: Database-only storage)
+    "*.txt"              # Text report files (temporary analysis outputs)
 ]
 
 # Files to KEEP (whitelist - never delete these)
@@ -192,9 +194,9 @@ def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
         for filename in files:
             filepath = root_path / filename
             
-            # Process Python files, markdown files, and summary files (case-insensitive)
+            # Process Python files, markdown files, log files, text files, and summary files (case-insensitive)
             filename_lower = filename.lower()
-            if not (filename_lower.endswith(".py") or filename_lower.endswith(".md") or "_summary." in filename_lower):
+            if not (filename_lower.endswith(".py") or filename_lower.endswith(".md") or filename_lower.endswith(".log") or filename_lower.endswith(".txt") or "_summary." in filename_lower):
                 continue
             
             # Skip DOCS directory for Python files, but allow .md files to be cleaned there
@@ -235,7 +237,7 @@ def list_temp_files(workspace_root: str = ".") -> list[Path]:
             filepath = root_path / filename
             filename_lower = filename.lower()
             
-            if not (filename_lower.endswith(".py") or filename_lower.endswith(".md") or "_summary." in filename_lower):
+            if not (filename_lower.endswith(".py") or filename_lower.endswith(".md") or filename_lower.endswith(".log") or filename_lower.endswith(".txt") or "_summary." in filename_lower):
                 continue
             
             # Skip DOCS directory for Python files, but allow .md files to be cleaned there
