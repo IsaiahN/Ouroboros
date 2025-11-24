@@ -34,6 +34,17 @@ from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
 
+# Abstraction engine imports
+try:
+    from sequence_abstraction import SequenceAbstraction
+    from abstraction_config import is_abstraction_enabled
+    ABSTRACTION_AVAILABLE = True
+except ImportError:
+    ABSTRACTION_AVAILABLE = False
+    SequenceAbstraction = None
+    def is_abstraction_enabled():
+        return False
+
 logger = logging.getLogger(__name__)
 
 
