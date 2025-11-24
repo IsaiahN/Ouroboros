@@ -57,9 +57,9 @@ class MultiStageMatchingPipeline:
     def get_sequence_with_fallback(
         self,
         game_id: str,
-        level_number: int,
-        current_actions: List[int] = None,
-        agent_config: Dict[str, Any] = None
+        level_number: int = 1,
+        current_actions: Optional[List[int]] = None,
+        agent_config: Optional[Dict[str, Any]] = None
     ) -> Tuple[Optional[List[int]], str, Dict[str, Any]]:
         """
         Attempt to retrieve sequence through cascading fallback strategies.
@@ -141,8 +141,8 @@ class MultiStageMatchingPipeline:
         LIMIT 1
         """
         result = self.db.execute_query(query, (game_id, level_number))
-        if result and result[0][0]:
-            return self._parse_actions(result[0][0])
+        if result and result[0].get('actions'):
+            return self._parse_actions(result[0]['actions'])
         return None
     
     def _stage_2_prefix_match(self, game_id: str, level_number: int, current_actions: List[int]) -> Optional[List[int]]:
@@ -156,7 +156,7 @@ class MultiStageMatchingPipeline:
         results = self.db.execute_query(query, (game_id,))
         
         for row in results:
-            actions = self._parse_actions(row[0])
+            actions = self._parse_actions(row['actions'])
             if len(actions) >= self.min_prefix_length:
                 # Check if current actions match prefix
                 if current_actions and len(current_actions) > 0:
@@ -178,8 +178,8 @@ class MultiStageMatchingPipeline:
         """
         result = self.db.execute_query(query, (game_id, level_number))
         
-        if result and result[0][0]:
-            actions = self._parse_actions(result[0][0])
+        if result and result[0].get('actions'):
+            actions = self._parse_actions(result[0]['actions'])
             if len(actions) >= self.min_suffix_length:
                 suffix = actions[-self.min_suffix_length:]
                 logger.info(f"[Pipeline] Suffix match: using last {self.min_suffix_length} actions")
@@ -198,7 +198,7 @@ class MultiStageMatchingPipeline:
         results = self.db.execute_query(query, (game_id, level_number - 1, level_number + 1))
         
         for row in results:
-            actions = self._parse_actions(row[0])
+            actions = self._parse_actions(row['actions'])
             if len(actions) >= self.min_subsequence_length:
                 # Extract middle segment
                 start_idx = len(actions) // 3
@@ -226,7 +226,7 @@ class MultiStageMatchingPipeline:
         # Simple pattern analysis: find most common action sequences
         action_patterns = {}
         for row in results:
-            actions = self._parse_actions(row[0])
+            actions = self._parse_actions(row['actions'])
             # Look for 3-action patterns
             for i in range(len(actions) - 2):
                 pattern = tuple(actions[i:i+3])
@@ -234,7 +234,7 @@ class MultiStageMatchingPipeline:
         
         # Return most common pattern
         if action_patterns:
-            most_common = max(action_patterns, key=action_patterns.get)
+            most_common = max(action_patterns, key=lambda k: action_patterns[k])
             logger.info(f"[Pipeline] Conceptual pattern match: {most_common} (seen {action_patterns[most_common]} times)")
             return list(most_common)
         

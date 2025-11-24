@@ -96,14 +96,15 @@ class AgentOperatingModeSystem:
 
         EXPLORATION PHASE (no games fully beaten):
             60% PIONEER - MAXIMUM exploration focus to find first solutions
-            10% OPTIMIZER - Minimal refinement of partial solutions
-            10% EXPLOITER - Test existing sequences for reliability
+            15% OPTIMIZER - Refine partial level wins
             20% GENERALIST - Baseline validation
+            5% EXPLOITER - Test existing sequences for reliability
 
         OPTIMIZATION PHASE (at least one game fully beaten):
             10% PIONEER - Maintain some frontier exploration
-            60% OPTIMIZER - Focus on efficiency refinement
-            30% GENERALIST - Strong baseline for comparison
+            50% OPTIMIZER - Focus on efficiency refinement
+            25% GENERALIST - Strong baseline for comparison
+            15% EXPLOITER - Harvest proven sequences
         """
         try:
             # Check if ANY games have been completely won (win_detected = TRUE)
@@ -131,9 +132,9 @@ class AgentOperatingModeSystem:
             else:
                 # EXPLORATION PHASE: No games fully beaten yet - HEAVY PIONEER FOCUS
                 self.TARGET_PIONEER_PCT = 0.60
-                self.TARGET_OPTIMIZER_PCT = 0.15  # Slightly higher to refine partials
+                self.TARGET_OPTIMIZER_PCT = 0.15  # Refine partial level wins
                 self.TARGET_GENERALIST_PCT = 0.20
-                self.TARGET_EXPLOITER_PCT = 0.05  # CRITICAL FIX: Lower in exploration (fewer sequences to exploit)
+                self.TARGET_EXPLOITER_PCT = 0.05  # Low in exploration (fewer sequences to exploit)
                 self.phase = "EXPLORATION"
                 logger.info(f"🔍 EXPLORATION PHASE: No games fully beaten yet")
                 logger.info(

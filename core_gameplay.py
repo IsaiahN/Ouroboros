@@ -171,6 +171,12 @@ class GameplayEngine:
         self.action_handler.visual_analyzer.set_agent_mode(agent_mode)
         if agent_mode:
             logger.info(f" Agent mode set to: {agent_mode.upper()}")
+            
+            # For optimizers, set target level in arc_client for tagging
+            if agent_mode == 'optimizer':
+                target_level = self.game_config.get('optimizer_target_level', 1)
+                if hasattr(self.session_manager, 'client'):
+                    self.session_manager.client._optimizer_target_level = target_level
         
         # Create game with agent info in tags
         game_data = await self.session_manager.create_game(

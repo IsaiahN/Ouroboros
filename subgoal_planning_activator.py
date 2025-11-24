@@ -251,11 +251,11 @@ class SubgoalPlanningActivator:
         """
         result = self.db.execute_query(query, (game_id, level_number))
         
-        if not result or not result[0][0]:
+        if not result or not result[0].get('action_history'):
             return False
         
         # Parse action history
-        actions = [int(a) for a in result[0][0].split(',') if a.strip().isdigit()]
+        actions = [int(a) for a in result[0]['action_history'].split(',') if a.strip().isdigit()]
         
         # Check for repeating patterns (last 10 actions)
         if len(actions) < 10:

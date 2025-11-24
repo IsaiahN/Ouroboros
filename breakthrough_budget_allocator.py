@@ -14,6 +14,7 @@ Games with 3+ level wins → LOW budget (exploitation phase)
 import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
+from typing import Optional
 from database_interface import DatabaseInterface
 import logging
 
@@ -36,7 +37,7 @@ class BreakthroughBudgetAllocator:
         self.EXPANSION_PER_LEVEL = 200
         self.EXPLOITATION_PER_LEVEL = 100
         
-    def calculate_game_budget(self, game_id: str, agent_id: str = None) -> dict:
+    def calculate_game_budget(self, game_id: str, agent_id: Optional[str] = None) -> dict:
         """
         Calculate optimal action budget for a specific game.
         

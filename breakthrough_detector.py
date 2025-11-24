@@ -132,7 +132,7 @@ class BreakthroughDetector:
             except:
                 pass
         
-        return np.mean(complexities) if complexities else 0.0
+        return float(np.mean(complexities)) if complexities else 0.0
     
     def _count_unique_visited_regions(self, action_history: List[Dict]) -> float:
         """Count unique grid regions visited (coverage)."""

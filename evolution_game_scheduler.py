@@ -75,6 +75,11 @@ class EvolutionGameScheduler:
         assignments: Dict[str, List[str]] = {}
         
         for agent in selected_agents:
+            # Check for shutdown before each agent assignment
+            if self.scheduler.is_shutting_down:
+                print("   🛑 Graceful shutdown requested - stopping game assignments")
+                break
+                
             agent_id = agent.get('agent_id')
             if not agent_id:
                 continue  # Skip if no agent_id

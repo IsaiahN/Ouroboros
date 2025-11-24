@@ -374,6 +374,12 @@ class ARCClient:
         # Add agent mode (CRITICAL: shows if optimizer/pioneer/generalist)
         if agent_mode:
             tags.append(f"mode_{agent_mode}")
+            
+            # If optimizer, add target level they're optimizing
+            # This will be set by core_gameplay when optimizer starts
+            optimizer_level = getattr(self, '_optimizer_target_level', None)
+            if agent_mode == 'optimizer' and optimizer_level:
+                tags.append(f"opt_level_{optimizer_level}")
 
         return tags
 
