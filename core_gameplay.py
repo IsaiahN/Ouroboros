@@ -49,6 +49,17 @@ class GameplayEngine:
         self.prestige_engine = PrestigeEngine(self.db)  # Phase 1: Prestige tracking
         self.sensation_engine = SensationEngine(self.db)  # Phase 4.5: Emotional intelligence
         
+        # Abstraction engine for pattern-based sequence matching
+        if ABSTRACTION_AVAILABLE and is_abstraction_enabled():
+            try:
+                self.abstraction_engine = SequenceAbstraction(db_path)
+                logger.info("Abstraction engine initialized")
+            except Exception as e:
+                self.abstraction_engine = None
+                logger.warning(f"Failed to initialize abstraction engine: {e}")
+        else:
+            self.abstraction_engine = None
+        
         # NEW: Breakthrough systems initialization
         try:
             from subgoal_planner import SubgoalPlanner

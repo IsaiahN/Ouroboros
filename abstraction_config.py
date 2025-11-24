@@ -8,8 +8,8 @@ Feature flags, settings, and backwards compatibility controls.
 
 import os
 
-# Feature flag - DEFAULT OFF for backwards compatibility
-ENABLE_ABSTRACTION = os.getenv('ENABLE_ABSTRACTION', 'false').lower() == 'true'
+# Feature flag - NOW ENABLED BY DEFAULT (abstractions replace ubersequences)
+ENABLE_ABSTRACTION = os.getenv('ENABLE_ABSTRACTION', 'true').lower() == 'true'
 
 # Abstraction levels
 ABSTRACTION_LEVELS = {

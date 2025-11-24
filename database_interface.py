@@ -680,7 +680,7 @@ class DatabaseInterface:
                 reward_data.get('derived_metrics', {}).get('score_efficiency', 0.0),
                 reward_data.get('derived_metrics', {}).get('win_proximity', 0.0),
                 reward_data.get('arc_native_rewards', {}).get('level_progressions', 0),
-                'agent_strategy',
+                reward_data.get('strategy_used', 'agent_strategy'),
                 json.dumps({}),
                 reward_data.get('evolutionary_feedback', {}).get('reward_breakdown', {}).get('base_reward', 0.0),
                 reward_data.get('evolutionary_feedback', {}).get('reward_breakdown', {}).get('win_bonus', 0.0),
