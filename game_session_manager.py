@@ -446,10 +446,11 @@ class GameSessionManager:
             'end_time': datetime.now()
         })
 
-        # Save final game result
+        # Save final game result (preserve scorecard_id from game creation)
         self.db.save_game_result({
             'game_id': self.current_game_id,
             'session_id': self.current_session_id,
+            'scorecard_id': self.client.current_scorecard_id if self.client else None,  # CRITICAL FIX: Preserve scorecard ID!
             'end_time': datetime.now(),
             'status': 'completed' if final_state == 'WIN' else 'failed',
             'final_score': final_score,
