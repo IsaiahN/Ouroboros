@@ -1022,7 +1022,7 @@ class AutonomousEvolutionRunner:
                         # Use BREAKTHROUGH BUDGET ALLOCATOR (Tier 1: +50% gain)
                         # Dynamic per-game budgets: 800 (unbeaten), 400 (partial), 150 (beaten)
                         game_budget = self.budget_allocator.calculate_game_budget(game_id)
-                        logger.info(f"[BUDGET] Game {game_id[:8]}: {game_budget} total actions allocated")
+                        print(f"[BUDGET] Game {game_id[:8]}: {game_budget} total actions allocated")
                         
                         # Use adaptive action limits (adjusted per generation)
                         # Configure engine with current adaptive limits
