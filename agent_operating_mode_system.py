@@ -392,12 +392,15 @@ class AgentOperatingModeSystem:
                 reason = f"Top performer (avg_score={stats.get('avg_score', 0):.2f}, wins={stats.get('total_wins', 0)}) - exploit proven sequences"
 
             # HIGH PERFORMERS → Optimizers (refine success)
+            # In EXPLORATION phase: only optimize if agent has proven wins (not just score)
+            # In OPTIMIZATION phase: any high scorer can optimize
             elif (
                 assigned_modes["optimizer"] < target_optimizers
                 and stats.get("avg_score", 0) > 0.6
+                and (self.phase == "OPTIMIZATION" or stats.get("total_wins", 0) > 0)
             ):
                 mode = "optimizer"
-                reason = f"High performer (avg_score={stats.get('avg_score', 0):.2f}) - refine winning strategies"
+                reason = f"High performer (avg_score={stats.get('avg_score', 0):.2f}, wins={stats.get('total_wins', 0)}) - refine winning strategies"
 
             # LOW PERFORMERS → Pioneers (need breakthrough)
             elif (
@@ -407,26 +410,46 @@ class AgentOperatingModeSystem:
                 mode = "pioneer"
                 reason = f"Struggling (avg_score={stats.get('avg_score', 0):.2f}) - needs exploration"
 
-            # MIDDLE PERFORMERS → Generalists (flexible)
+            # MIDDLE PERFORMERS → Generalists (flexible) OR Pioneers (if quota unfilled)
+            # In EXPLORATION phase: prioritize pioneer quota over generalist
+            elif self.phase == "EXPLORATION" and assigned_modes["pioneer"] < target_pioneers:
+                mode = "pioneer"
+                reason = f"EXPLORATION phase - filling pioneer quota (avg_score={stats.get('avg_score', 0):.2f})"
             elif assigned_modes["generalist"] < target_generalists:
                 mode = "generalist"
                 reason = f"Balanced performer (avg_score={stats.get('avg_score', 0):.2f}) - maintain versatility"
 
             # Fill remaining slots (if targets weren't met)
             else:
-                # Prioritize: exploiter > optimizer > generalist > pioneer
-                if assigned_modes["exploiter"] < target_exploiters:
-                    mode = "exploiter"
-                    reason = "Filling exploiter quota"
-                elif assigned_modes["optimizer"] < target_optimizers:
-                    mode = "optimizer"
-                    reason = "Filling optimizer quota"
-                elif assigned_modes["generalist"] < target_generalists:
-                    mode = "generalist"
-                    reason = "Filling generalist quota"
+                # Prioritize based on phase
+                if self.phase == "EXPLORATION":
+                    # EXPLORATION: pioneer > generalist > optimizer > exploiter
+                    if assigned_modes["pioneer"] < target_pioneers:
+                        mode = "pioneer"
+                        reason = "Filling pioneer quota (EXPLORATION priority)"
+                    elif assigned_modes["generalist"] < target_generalists:
+                        mode = "generalist"
+                        reason = "Filling generalist quota"
+                    elif assigned_modes["optimizer"] < target_optimizers:
+                        mode = "optimizer"
+                        reason = "Filling optimizer quota"
+                    else:
+                        mode = "exploiter"
+                        reason = "Filling exploiter quota"
                 else:
-                    mode = "pioneer"
-                    reason = "Filling pioneer quota"
+                    # OPTIMIZATION: optimizer > exploiter > generalist > pioneer
+                    if assigned_modes["optimizer"] < target_optimizers:
+                        mode = "optimizer"
+                        reason = "Filling optimizer quota (OPTIMIZATION priority)"
+                    elif assigned_modes["exploiter"] < target_exploiters:
+                        mode = "exploiter"
+                        reason = "Filling exploiter quota"
+                    elif assigned_modes["generalist"] < target_generalists:
+                        mode = "generalist"
+                        reason = "Filling generalist quota"
+                    else:
+                        mode = "pioneer"
+                        reason = "Filling pioneer quota"
 
             mode_assignments[agent_id] = mode
             assigned_modes[mode] += 1
