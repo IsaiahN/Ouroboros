@@ -46,25 +46,92 @@ TEMP_PATTERNS = [
 
 # Files to KEEP (whitelist - never delete these)
 KEEP_FILES = {
-    # Core system
-    "check_db.py",  # Used in diagnostics
-    "test_path_efficiency.py",  # Core feature test
-    "test_adaptive_limits.py",  # Core feature test
+    # TIER 1: Core System Files (imported 5+ times)
+    "database_interface.py",
+    "core_gameplay.py",
+    "autonomous_evolution_runner.py",
+    "arc_api_client.py",
+    "game_session_manager.py",
+    "action_handler.py",
+    "database_logger.py",
+    "prestige_engine.py",
+    "evolutionary_engine.py",
+    "horizontal_transfer_engine.py",
+    "viral_package_engine.py",
+    "rule_induction_engine.py",
+    "visual_reasoning_engine.py",
+    "network_intelligence_engine.py",
+    "regulatory_signal_engine.py",
+    "collective_reasoning_engine.py",
+    "knowledge_recombination_engine.py",
+    "sensation_engine.py",
+    "sequence_abstraction.py",
+    "sequence_pruning_system.py",
+    "performance_analyzer.py",
+    "counterfactual_analyzer.py",
+    "near_miss_analyzer.py",
+    "frustration_detector.py",
+    "agent_operating_mode_system.py",
+    "agent_self_model.py",
+    "arc_rlvr_framework.py",
     
-    # Useful utilities (keep)
-    "cleanup_temp_files.py",  # This file
-    "evolution_status_report.py",  # Useful status tool
-    "readiness_check.py",  # Pre-run check
-    "real_progress_check.py",  # Progress monitoring
-    "system_status_report.py",  # System status
-    "monitor_game_results.py",  # Game result verification tool
+    # TIER 2: Active Utilities (referenced by other files)
+    "breakthrough_budget_allocator.py",
+    "breakthrough_detector.py",
+    "multi_stage_matching_pipeline.py",
+    "subgoal_planning_activator.py",
+    "subgoal_planner.py",
+    "automated_assessment_runner.py",
+    "revive_agents.py",
+    "visual_analyzer.py",
+    "object_detector.py",
+    "optimization_threshold_system.py",
+    "specialist_coordinator.py",
+    "somatic_profile_system.py",
+    "game_diversity_preservation.py",
+    "emotional_gameplay_mixin.py",
+    "meta_learning_curriculum.py",
+    "prestige_vampire_detector.py",
+    "abstraction_config.py",
+    "abstraction_schema.py",
+    "adaptive_action_limits.py",
+    "api_reset_strategy.py",
+    "run_evolution.py",
+    "run_validation_cycle.py",
+    "schema_auto_maintenance.py",
+    "ouroboros_coordinator.py",
+    "evolution_game_scheduler.py",
+    "enhanced_database_interface.py",
+    "action_analyzer.py",
+    
+    # TIER 3: Manual Utilities
+    "check_db.py",
+    "dump_logs.py",
+    "inspect_db.py",
+    "inspect_failed_game.py",
+    "list_sequences.py",
+    "list_tables.py",
+    "reproduce_0_actions.py",
+    "review_scorecards.py",
+    "get_replay_url.py",
+    "assess_results.py",
+    "audit_prestige_system.py",
+    "monitor_game_results.py",
+    "monitor_sequence_validation.py",
+    
+    # System utilities
+    "cleanup_temp_files.py",
+    "readiness_check.py",
+    "real_progress_check.py",
+    "system_status_report.py",
+    
+    # Package init
+    "__init__.py",
     
     # Documentation (keep)
     "README.md",
-    "COMPLETE_ADAPTIVE_SCALING.py",  # Reference documentation
-    "HARDCODED_LIMITS_AUDIT.py",  # Reference documentation
-    
-    # Any files in DOCS/ or configs
+    "COMPLETE_ADAPTIVE_SCALING.py",
+    "HARDCODED_LIMITS_AUDIT.py",
 }
 
 # Directories to skip (but we'll delete __pycache__ folders entirely)
