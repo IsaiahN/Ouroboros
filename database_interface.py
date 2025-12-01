@@ -312,6 +312,33 @@ class DatabaseInterface:
     # ACTION TRACES
     # ========================================================================
 
+    def log_level_sequence_usage(self, session_id: str, game_id: str, agent_id: str, 
+                                  level_number: int, used_sequence: bool, 
+                                  sequence_id: Optional[str] = None, 
+                                  exploration_mode: Optional[str] = None):
+        """Log whether agent used a sequence or explored for a level.
+        
+        Args:
+            session_id: Training session ID
+            game_id: Game ID
+            agent_id: Agent ID
+            level_number: Level number
+            used_sequence: True if used existing sequence, False if explored
+            sequence_id: Sequence ID if used_sequence=True
+            exploration_mode: Exploration strategy if used_sequence=False
+        """
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO level_sequence_usage (
+                    session_id, game_id, agent_id, level_number,
+                    used_sequence, sequence_id, exploration_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                session_id, game_id, agent_id, level_number,
+                used_sequence, sequence_id, exploration_mode
+            ))
+            conn.commit()
+
     def save_action_trace(self, trace_data: Dict[str, Any]):
         """Save action trace to database.
 

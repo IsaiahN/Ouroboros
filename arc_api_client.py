@@ -368,8 +368,8 @@ class ARCClient:
         # Add agent information
         if agent_id:
             tags.append("agent")  # General tag indicating this is an agent run
-            # Short agent ID for identification
-            tags.append(f"agent_{agent_id[:8]}")
+            # Full agent ID for proper identification (was truncated causing "offsprin" bug)
+            tags.append(f"agent_{agent_id}")
         
         # Add agent mode (CRITICAL: shows if optimizer/pioneer/generalist)
         if agent_mode:
@@ -380,6 +380,15 @@ class ARCClient:
             optimizer_level = getattr(self, '_optimizer_target_level', None)
             if agent_mode == 'optimizer' and optimizer_level:
                 tags.append(f"opt_level_{optimizer_level}")
+        
+        # Add parent agent tracking (for offspring lineage)
+        parent_ids = getattr(self, '_parent_agent_ids', None)
+        if parent_ids:
+            if isinstance(parent_ids, (list, tuple)) and len(parent_ids) >= 2:
+                tags.append(f"parent1_{parent_ids[0]}")
+                tags.append(f"parent2_{parent_ids[1]}")
+            elif isinstance(parent_ids, str):
+                tags.append(f"parent_{parent_ids}")
 
         return tags
 
@@ -528,11 +537,43 @@ class ARCClient:
         
         logger.info(f"{action} API response - State: {response.get('state')}, Score: {response.get('score')}")
 
-        # Update game state
-        self.current_game_id = response.get("game_id")
-        self.current_guid = response.get("guid")
+        # Update game state - preserve existing values if API doesn't return them
+        # CRITICAL FIX: API sometimes doesn't include game_id/guid in response
+        # Only update if present in response to prevent losing session state
+        response_had_game_id = bool(response.get("game_id"))
+        response_had_guid = bool(response.get("guid"))
+        
+        if response.get("game_id"):
+            self.current_game_id = response.get("game_id")
+        elif not self.current_game_id:
+            logger.error(f"⚠️ CRITICAL: API response missing game_id AND current_game_id is None!")
+            
+        if response.get("guid"):
+            self.current_guid = response.get("guid")
+        elif not self.current_guid:
+            logger.error(f"⚠️ CRITICAL: API response missing guid AND current_guid is None!")
+            
+        # Note: card_id is set via open_scorecard() and should persist through actions
+        if not self.current_scorecard_id:
+            logger.error(f"⚠️ CRITICAL: current_scorecard_id is None!")
 
-        return GameState.from_dict(response)
+        # Create GameState from response
+        game_state = GameState.from_dict(response)
+        
+        # CRITICAL: Patch game_state if API didn't include game_id/guid
+        # This ensures game_state object always has valid credentials
+        patched = False
+        if not game_state.game_id and self.current_game_id:
+            game_state.game_id = self.current_game_id
+            patched = True
+        if not game_state.guid and self.current_guid:
+            game_state.guid = self.current_guid
+            patched = True
+            
+        if patched:
+            logger.warning(f"🔧 Patched GameState with preserved credentials (response had game_id={response_had_game_id}, guid={response_had_guid})")
+        
+        return game_state
 
     async def create_game(self, game_id: str, tags: Optional[List[str]] = None) -> Dict[str, Any]:
         """Create a new game by opening a scorecard and resetting the game.

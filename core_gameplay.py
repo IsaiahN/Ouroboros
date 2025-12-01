@@ -160,7 +160,10 @@ class GameplayEngine:
             await self.session_manager.start_session(mode=session_mode, game_id=game_id)
         
         # Get agent mode BEFORE creating game (needed for tags)
-        agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
+        # Check if mode is forced in game_config (e.g., from mastery mode)
+        agent_mode = self.game_config.get('agent_operating_mode')
+        if not agent_mode and agent_id:
+            agent_mode = self._get_agent_operating_mode(agent_id)
         
         # Get network max level for pioneer oscillation checks
         network_max_level = self._get_network_max_level(game_id) if game_id else 0
@@ -274,55 +277,18 @@ class GameplayEngine:
         
         try:
             # MODE-SPECIFIC SEQUENCE HANDLING
-            # OPTIMIZER: NEW STRATEGY - Analyze sequences to find penultimate checkpoint
+            # ALL MODES: Use best known sequence to progress efficiently
+            # OPTIMIZER: Will try to beat the sequence with fewer actions
             # GENERALIST/PIONEER: Replay sequence to reach frontier quickly
-            if known_sequence and agent_mode == 'optimizer':
-                # OPTIMIZER ABILITY: Identify penultimate checkpoint from multiple proven sequences
-                # Strategy:
-                # 1. Analyze multiple sequences to find common patterns and penultimate state
-                # 2. Create optimal subroutine from patterns
-                # 3. Execute subroutine to reach checkpoint
-                # 4. When checkpoint reached, execute known final actions
-                # 5. If successful, save optimized subroutine as NEW sequence (even without win)
-                # 6. Use level reset to continue optimizing
-                
-                current_level_target = int(known_sequence.get('total_score', 1))  # Level to optimize
-                checkpoint = self._analyze_optimizer_checkpoint(game_id, current_level_target)
-                
-                if checkpoint:
-                    # Store checkpoint info for use during optimization
-                    if 'optimizer_checkpoints' not in self.game_config:
-                        self.game_config['optimizer_checkpoints'] = {}
-                    
-                    self.game_config['optimizer_checkpoints'][current_level_target] = {
-                        'checkpoint_frame': checkpoint['checkpoint_frame'],
-                        'checkpoint_index': checkpoint['checkpoint_index'],
-                        'final_actions': checkpoint['final_actions'],
-                        'optimal_subroutine': checkpoint['optimal_subroutine'],
-                        'target_total_actions': checkpoint['target_actions'],
-                        'sequences_analyzed': checkpoint['sequences_analyzed']
-                    }
-                    
-                    logger.info(f" OPTIMIZER: Level {current_level_target} - Checkpoint Strategy:")
-                    logger.info(f"   Analyzed {checkpoint['sequences_analyzed']} sequences")
-                    logger.info(f"   Checkpoint at action {checkpoint['checkpoint_index']}")
-                    logger.info(f"   Optimal subroutine: {len(checkpoint['optimal_subroutine'])} actions")
-                    logger.info(f"   Final actions (checkpoint→win): {checkpoint['final_actions']}")
-                    logger.info(f"   Target to beat: {checkpoint['target_actions']} total actions")
-                else:
-                    # No checkpoint available, fall back to simple target
-                    target_actions = known_sequence['total_actions']
-                    logger.info(f" OPTIMIZER: Level {current_level_target} - "
-                               f"No checkpoint identified (need 2+ sequences), will explore trying to beat {target_actions} actions")
-                    if 'optimization_targets' not in self.game_config:
-                        self.game_config['optimization_targets'] = {}
-                    self.game_config['optimization_targets'][current_level_target] = target_actions
-                
-                # Don't replay - let optimizer explore with checkpoint guidance
-                known_sequence = None  # Clear so normal exploration happens
             
-            # If we have a known sequence (GENERALIST/PIONEER/EXPLOITER), replay it ONCE to reach frontier
-            # This is the NEW cumulative approach - replay best sequence once, not level-by-level
+            if known_sequence and agent_mode == 'optimizer':
+                # Store target for optimization (try to beat this action count)
+                target_actions = known_sequence['total_actions']
+                logger.info(f" OPTIMIZER: Will use sequence and try to optimize (target: {target_actions} actions)")
+                # Fall through to use the sequence like other agents
+            
+            # If we have a known sequence, replay it ONCE to reach frontier
+            # This is the cumulative approach - replay best sequence once, not level-by-level
             if known_sequence:
                 # Check if this is a PROVEN sequence (>50% validation success)
                 sequence_id = known_sequence['sequence_id']
@@ -405,30 +371,31 @@ class GameplayEngine:
                         frontier_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
                         logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
                         
-                        # MODE-SPECIFIC BEHAVIOR AT FRONTIER:
-                        if agent_mode == 'generalist' or agent_mode == 'exploiter':
-                            # GENERALIST/EXPLOITER: Stop here, only replay known sequences
-                            # Should NOT explore beyond frontier
-                            stop_reason = "GENERALIST" if agent_mode == 'generalist' else "EXPLOITER"
-                            logger.info(f" {stop_reason}: At frontier, no more sequences available - stopping")
-                            level_completions = int(game_state.score)
-                            actions_taken = len(json.loads(known_sequence['action_sequence']))
-                            await self.session_manager.finish_game("FRONTIER_REACHED", game_state.score, level_completions, actions_taken)
-                            
+                        # ROLE-SPECIFIC FRONTIER BEHAVIOR
+                        # EXPLOITER: STOP here - exploiters ONLY use proven sequences, never explore
+                        if agent_mode == 'exploiter':
+                            logger.info(f" EXPLOITER: Stopping at frontier (Level {frontier_level}) - exploiters only use proven sequences")
+                            await self.session_manager.finish_game(game_state.state, game_state.score, int(game_state.score), len(json.loads(known_sequence['action_sequence'])))
                             return {
                                 'game_id': game_id,
-                                'final_state': 'FRONTIER_REACHED',
+                                'final_state': game_state.state,
                                 'final_score': game_state.score,
-                                'actions_taken': actions_taken,
-                                'win': False,
-                                'method': f'{agent_mode}_frontier_stop',
-                                'sequence_id': known_sequence['sequence_id'],
-                                'frontier_level': frontier_level
+                                'actions_taken': len(json.loads(known_sequence['action_sequence'])),
+                                'win': game_state.state == 'WIN',
+                                'method': 'exploiter_sequence_replay',
+                                'sequence_id': known_sequence['sequence_id']
                             }
-                        else:
-                            # PIONEER: Continue exploring beyond frontier
-                            logger.info(f" PIONEER: At frontier, will now explore Level {frontier_level}+")
-                            # Continue to game loop below for exploration
+                        
+                        # CRITICAL FIX: Force game state to NOT_FINISHED for PIONEERS and GENERALISTS
+                        # Some games (like ls20) incorrectly report WIN/GAME_OVER after partial completion
+                        # Pioneers and Generalists should continue playing until action budget exhausted
+                        if game_state.state != "NOT_FINISHED":
+                            logger.warning(f"⚠ Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED for continuation")
+                            game_state.state = "NOT_FINISHED"
+                        
+                        # PIONEER/GENERALIST/OPTIMIZER: Continue playing until action budget exhausted
+                        logger.info(f" {agent_mode.upper()}: At frontier (Level {frontier_level}), continuing until action budget exhausted")
+                        # Continue to game loop below
                     else:
                         logger.info(f" Cumulative sequence replay failed, falling back to exploration")
                         # Continue with normal exploration below
@@ -455,14 +422,23 @@ class GameplayEngine:
             MAX_CONSECUTIVE_API_ERRORS = 5  # Break out after 5 consecutive errors
             api_error_backoff = 0  # Seconds to wait after API error (exponential backoff)
 
-            # Game loop
-            while (game_state.state == "NOT_FINISHED" and
-                   action_count < self.game_config['max_total_actions']):
+            # Game loop - continue until action budget exhausted
+            # BUGFIX: Don't trust game_state.state - some games report WIN prematurely
+            # Only stop on action limit or explicit session shutdown
+            while action_count < self.game_config['max_total_actions']:
 
                 # Check if session is still active (graceful shutdown detection)
-                if not self.session_manager.is_running or self.session_manager.is_shutting_down:
+                # Only check is_running - is_shutting_down is set by signal handlers
+                # that may be triggered accidentally and should not abort individual games
+                if not self.session_manager.is_running:
                     logger.info(f" Session shutdown detected, ending game gracefully")
                     break
+                
+                # CRITICAL: If game reports WIN/GAME_OVER but we have actions left, keep trying
+                # Some games report completion prematurely (e.g., ls20 after level 1)
+                if game_state.state != "NOT_FINISHED":
+                    logger.warning(f"⚠ Game reports '{game_state.state}' but actions remain ({action_count}/{self.game_config['max_total_actions']}) - forcing continuation")
+                    game_state.state = "NOT_FINISHED"
 
                 try:
                     # Update action handler with level progress for dynamic spam tolerance
@@ -485,83 +461,8 @@ class GameplayEngine:
                         level_start_action = action_count
                         consecutive_no_frame_change = 0
                     
-                    # OPTIMIZER CHECKPOINT: Check if we've reached penultimate checkpoint
-                    # If so, execute known final actions to complete level
-                    if agent_mode == 'optimizer' and 'optimizer_checkpoints' in self.game_config:
-                        checkpoint_info = self.game_config['optimizer_checkpoints'].get(current_level)
-                        if checkpoint_info and not self.game_config.get(f'checkpoint_executed_{current_level}', False):
-                            # Check if current frame matches checkpoint frame (approximately)
-                            checkpoint_frame = checkpoint_info['checkpoint_frame']
-                            if checkpoint_frame and game_state.frame:
-                                # Simple frame similarity check (could be enhanced)
-                                frame_similarity = self._compare_frames(checkpoint_frame, game_state.frame)
-                                
-                                if frame_similarity or level_action_count >= checkpoint_info['target_total_actions'] - checkpoint_info.get('checkpoint_distance', 0):
-                                    # We're at or past the checkpoint! Execute final winning actions
-                                    final_actions = checkpoint_info['final_actions']
-                                    logger.info(f" OPTIMIZER CHECKPOINT REACHED! Executing {len(final_actions)} known winning actions...")
-                                    
-                                    # Execute final actions
-                                    checkpoint_success = True
-                                    for final_action in final_actions:
-                                        try:
-                                            game_state = await self._execute_action(str(final_action), game_state)
-                                            action_count += 1
-                                            level_action_count += 1
-                                            
-                                            if game_state.state in ["WIN", "GAME_OVER"]:
-                                                break
-                                        except Exception as e:
-                                            logger.warning(f"Checkpoint action failed: {e}")
-                                            checkpoint_success = False
-                                            break
-                                    
-                                    # Mark checkpoint as executed for this level
-                                    self.game_config[f'checkpoint_executed_{current_level}'] = True
-                                    
-                                    if checkpoint_success:
-                                        logger.info(f" OPTIMIZER: Checkpoint sequence executed successfully!")
-                                        
-                                        # OPTIMIZER CONTRIBUTION: Save optimized sequence even without winning
-                                        # This is the optimizer's value - they create efficient subroutines
-                                        # via level resets and iterative optimization
-                                        if game_state.score > previous_score or game_state.state == "WIN":
-                                            # Successfully progressed or won - save the optimized path!
-                                            logger.info(f" OPTIMIZER: Saving optimized subroutine + final actions as new sequence")
-                                            
-                                            # Capture the FULL sequence (exploration to checkpoint + known final actions)
-                                            optimized_sequence_id = self._capture_winning_sequence(
-                                                game_id,
-                                                game_state.score,
-                                                level_number=current_level,
-                                                reason="optimizer_checkpoint_reached"
-                                            )
-                                            
-                                            if optimized_sequence_id:
-                                                logger.info(f" OPTIMIZER SEQUENCE SAVED: {optimized_sequence_id}")
-                                                logger.info(f"   Total actions: {level_action_count}")
-                                                logger.info(f"   Target was: {checkpoint_info['target_total_actions']}")
-                                                improvement = checkpoint_info['target_total_actions'] - level_action_count
-                                                if improvement > 0:
-                                                    logger.info(f"    IMPROVEMENT: {improvement} actions better than target!")
-                                                
-                                                # Track optimizer contribution
-                                                if agent_id:
-                                                    try:
-                                                        self.prestige_engine.record_discovery(
-                                                            agent_id=agent_id,
-                                                            discovery_type='optimizer_subroutine',
-                                                            sequence_id=optimized_sequence_id,
-                                                            innovation_value=0.9,  # High value for optimization
-                                                            network_enrichment_score=2.0  # Optimized sequences are valuable
-                                                        )
-                                                    except Exception as e:
-                                                        logger.debug(f"Failed to record optimizer prestige: {e}")
-                                    else:
-                                        logger.warning(f" OPTIMIZER: Checkpoint sequence failed, continuing exploration")
-                                    
-                                    # Continue to next iteration (check win state, etc.)
-                                    continue
+                    # Optimizer-specific: Save more efficient sequences when found
+                    # (This happens naturally through normal gameplay and sequence capture)
                     
                     # API error backoff - wait if we had recent errors
                     if api_error_backoff > 0:
@@ -577,7 +478,8 @@ class GameplayEngine:
                             if isinstance(action_result, GameState):
                                 game_state = action_result
                             elif isinstance(action_result, str):
-                                game_state = await self._execute_action(action_result, game_state)
+                                # BUGFIX: Pass current_level to ensure action traces are logged with correct level
+                                game_state = await self._execute_action(action_result, game_state, "", current_level)
                             else:
                                 raise ValueError(f"Invalid action callback result: {action_result}")
                         else:
@@ -670,79 +572,6 @@ class GameplayEngine:
                         # Not at frontier, don't track stuck state (sequences should handle this)
                         consecutive_no_frame_change = 0
                     
-                    # OPTIMIZER STRATEGIC RESET: Use level reset to iterate on reaching checkpoint
-                    # Key insight: Level reset is useful BEFORE reaching checkpoint
-                    # If path to checkpoint is inefficient, reset and try different exploration
-                    # This allows rapid iteration on finding optimal subroutine
-                    if agent_mode == 'optimizer':
-                        # Check if we have checkpoint info for this level
-                        checkpoint_info = self.game_config.get('optimizer_checkpoints', {}).get(current_level)
-                        
-                        if checkpoint_info:
-                            # STRATEGY: Reset if we're inefficient at reaching checkpoint
-                            # Checkpoint target = actions needed to reach penultimate state
-                            checkpoint_target = checkpoint_info['checkpoint_index']  # Actions to checkpoint
-                            
-                            if level_action_count > checkpoint_target * 1.5:  # 50% over target to reach checkpoint
-                                logger.warning(
-                                    f" OPTIMIZER: Too slow reaching checkpoint ({level_action_count} > {checkpoint_target * 1.5:.0f} actions), "
-                                    f"target was {checkpoint_target} to reach checkpoint"
-                                )
-                                # Use API reset to try different path to checkpoint
-                                if level_api_resets < MAX_API_RESETS_PER_LEVEL:
-                                    logger.info(f" OPTIMIZER: Level reset for better path to checkpoint (reset #{level_api_resets + 1})")
-                                    try:
-                                        if not self.session_manager.client:
-                                            raise ValueError("Session manager client not initialized")
-                                        
-                                        game_state = await self.session_manager.client.reset_game(
-                                            game_id,
-                                            game_data.get('scorecard_id')
-                                        )
-                                        
-                                        level_api_resets += 1
-                                        level_action_count = 0  # Reset level counter for fresh attempt
-                                        action_count = max(0, action_count - level_action_count)  # Adjust total
-                                        actions_since_score_increase = 0
-                                        self.game_config[f'checkpoint_executed_{current_level}'] = False  # Allow checkpoint retry
-                                        
-                                        logger.info(f"    OPTIMIZER reset successful! Fresh path to checkpoint")
-                                        logger.info(f"   → {MAX_API_RESETS_PER_LEVEL - level_api_resets} resets remaining")
-                                        continue  # Skip to next iteration
-                                        
-                                    except Exception as e:
-                                        logger.error(f"    OPTIMIZER reset failed: {e}")
-                                else:
-                                    logger.warning(f" OPTIMIZER: No resets remaining for level {current_level}")
-                        else:
-                            # No checkpoint, use simple target-based reset (fallback)
-                            target_actions = self.game_config.get('optimization_targets', {}).get(current_level)
-                            if target_actions and level_action_count > target_actions * 1.2:
-                                logger.warning(
-                                    f" OPTIMIZER: Exceeded target ({level_action_count} > {target_actions * 1.2:.0f} actions)"
-                                )
-                                if level_api_resets < MAX_API_RESETS_PER_LEVEL:
-                                    logger.info(f" OPTIMIZER: Level reset for efficiency (reset #{level_api_resets + 1})")
-                                    try:
-                                        if not self.session_manager.client:
-                                            raise ValueError("Session manager client not initialized")
-                                        
-                                        game_state = await self.session_manager.client.reset_game(
-                                            game_id,
-                                            game_data.get('scorecard_id')
-                                        )
-                                        
-                                        level_api_resets += 1
-                                        level_action_count = 0
-                                        action_count = max(0, action_count - level_action_count)
-                                        actions_since_score_increase = 0
-                                        
-                                        logger.info(f"    OPTIMIZER reset successful!")
-                                        continue
-                                        
-                                    except Exception as e:
-                                        logger.error(f"    OPTIMIZER reset failed: {e}")
-                    
                     # Track score improvements (no destructive resets - removed to preserve pattern learning)
                     
                     # Calculate score increase to detect level completion
@@ -758,10 +587,10 @@ class GameplayEngine:
                         # Reset level-specific counters for next level
                         level_api_resets = 0  # Fresh reset budget for new level
                         
-                        # Pattern Learning: ONLY capture if this is a VERIFIED level win
-                        # (score increased AND game is still running, meaning level truly completed)
-                        if (self.game_config.get('enable_pattern_learning', True) and 
-                            game_state.state == "NOT_FINISHED"):  # Full level completion already verified above
+                        # Pattern Learning: Capture sequence on level completion
+                        # BUGFIX: Don't check game_state.state - some games report WIN prematurely
+                        # Just verify score increased (which we already did above)
+                        if self.game_config.get('enable_pattern_learning', True):
                             
                             # SIMPLE MAPPING: level_number = score
                             # Score 1.0 = level 1 (first challenge completed)
@@ -890,9 +719,25 @@ class GameplayEngine:
                                             logger.info(f" Level {current_level} sequence replay failed, continuing with exploration")
                                             break  # Exit sequence chain, continue with exploration
                                 else:
-                                    # No sequence found for this level
+                                    # No sequence found for this level - track exploration
                                     if agent_mode == 'generalist':
                                         logger.info(f" GENERALIST: No sequence for level {current_level}, exploring")
+                                    
+                                    # Log that agent is exploring this level (no sequence used)
+                                    agent_id = self.game_config.get('agent_id', 'unknown')
+                                    session_id = self.session_manager.current_session_id
+                                    game_id = self.game_config.get('game_id', 'unknown')
+                                    
+                                    if session_id and game_id:
+                                        self.db.log_level_sequence_usage(
+                                            session_id=session_id,
+                                            game_id=game_id,
+                                            agent_id=agent_id,
+                                            level_number=current_level,
+                                            used_sequence=False,
+                                            exploration_mode='smart_exploration'
+                                        )
+                                    
                                     break  # Exit sequence chain
                         
                         # If we broke out of sequence chain due to WIN, exit main game loop
@@ -903,22 +748,28 @@ class GameplayEngine:
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
                         logger.warning(f"⏱ Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
-                        logger.info(f"Level {current_level} timed out - ENFORCING LIMIT (Biome Theory: metabolic constraints)")
                         
-                        # BIOME THEORY FIX: ENFORCE the limit instead of resetting counter
-                        # This creates evolutionary pressure for efficiency
-                        # The game ends when per-level limit reached OR total limit reached
-                        # This is CRITICAL for adaptive action limits to work properly
-                        
-                        # End the game - agent failed to complete level efficiently
-                        logger.info(f"Game ending: Level action limit enforced (efficiency pressure)")
-                        break  # Exit game loop
+                        # BUGFIX: Move to next level instead of ending game
+                        # Agent may have made progress but not completed level
+                        # Only end if no score progress at all
+                        if game_state.score > previous_score:
+                            logger.info(f"Score improved ({previous_score} → {game_state.score}), moving to next level")
+                            current_level += 1
+                            level_action_count = 0
+                            level_start_action = action_count
+                            previous_score = game_state.score
+                        else:
+                            logger.info(f"No score progress on level {current_level}, trying next level anyway")
+                            current_level += 1
+                            level_action_count = 0
+                            level_start_action = action_count
+                        # Continue until total action budget exhausted
                     
                     logger.debug(f"Action {action_count} (Level {current_level}-{level_action_count}): State={game_state.state}, Score={game_state.score}")
 
-                    # Check for completion
-                    if game_state.state in ["WIN", "GAME_OVER"]:
-                        break
+                    # REMOVED: Don't break on WIN/GAME_OVER - these are unreliable
+                    # Games may report WIN after partial completion (e.g., ls20 after level 1)
+                    # Only stop when action budget exhausted
 
                 except RuntimeError as e:
                     # Handle session shutdown gracefully
@@ -1225,15 +1076,17 @@ class GameplayEngine:
         # Get agent mode to determine if sensation is allowed
         agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
         
-        # SENSATION ACCESS BY ROLE (Phase 4.5):
+        # SENSATION ACCESS BY ROLE (Phase 4.5 - per Master Ruleset):
         # - Pioneers: NO (pure exploration, no emotional biases)
+        # - Optimizers: YES (need sensation to make efficiency decisions)
         # - Generalists: YES (feelings restored - need emotional intelligence)
+        # - Exploiters: YES (can use sensation when replaying sequences)
         sensation_allowed = (agent_mode != 'pioneer')
         
         if agent_id and self.game_config.get('enable_sensation_navigation', True):
             if not sensation_allowed:
-                # Generalists restricted from sensation - must use pure pattern learning
-                logger.debug(f" Generalist mode: Sensation navigation disabled (pattern-only)")
+                # Pioneers restricted from sensation - must use pure exploration
+                logger.debug(f" Pioneer mode: Sensation navigation disabled (pure exploration)")
             else:
                 try:
                     # Analyze frame for emotional context
@@ -1355,7 +1208,40 @@ class GameplayEngine:
         else:
             is_unbeaten_game = False
         
-        base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
+        # ===================================================================
+        # CRITICAL: NETWORK HISTORY ABSTRACTION FOR FRONTIER EXPLORATION
+        # When at frontier (no proven sequences), use collective wisdom from
+        # network's historical gameplay on this game type + level combination.
+        # This implements the user's requirement: "abstract the history of 
+        # their own gameplay as agents on this level from previous games"
+        # ===================================================================
+        network_suggested_action = None
+        current_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
+        
+        if current_game_id and agent_id:
+            network_suggestion = self._get_network_action_wisdom(
+                game_id=current_game_id,
+                level_number=current_level,
+                agent_id=agent_id,
+                current_frame=game_state.frame
+            )
+            
+            if network_suggestion:
+                network_suggested_action = network_suggestion.get('action')
+                confidence = network_suggestion.get('confidence', 0.0)
+                reasoning_detail = network_suggestion.get('reasoning', 'Network history')
+                
+                # Use network suggestion if confidence is high enough
+                if confidence >= 0.4:
+                    logger.info(f"🌐 NETWORK WISDOM: ACTION{network_suggested_action} (confidence: {confidence:.2f}) - {reasoning_detail}")
+                    base_action = f"ACTION{network_suggested_action}"
+                    # Skip to applying biases below
+                else:
+                    logger.debug(f"Network suggestion (ACTION{network_suggested_action}) confidence too low ({confidence:.2f})")
+        
+        # If no network suggestion, use smart action selection
+        if network_suggested_action is None:
+            base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
         
         # PHASE 4.5: Apply sensation-based biasing for navigation actions (1-7)
         if sensation_biases and agent_id:
@@ -2167,11 +2053,14 @@ class GameplayEngine:
         Capture winning sequence for pattern learning (Rule 2: Database-only).
         Called automatically after wins OR level completions when enable_pattern_learning=True.
         
+        CRITICAL: For full_game_win, captures ALL actions from level 1 through final level.
+        This creates a CUMULATIVE sequence that can be replayed to reach the same state.
+        
         Args:
             game_id: Game that was won
             final_score: Final score achieved
             level_number: Level number that was completed (default 1)
-            reason: Reason for capture ("win", "level_1_completion", etc.)
+            reason: Reason for capture ("win", "level_1_completion", "full_game_win", etc.)
             
         Returns:
             sequence_id if captured, None otherwise
@@ -2184,14 +2073,34 @@ class GameplayEngine:
             if not session_id:
                 return None
             
-            # Get action traces from database FOR THIS SPECIFIC LEVEL ONLY
-            # This ensures sequences only include actions taken to complete that level
-            action_traces = self.db.execute_query("""
-                SELECT action_number, coordinates, frame_before, frame_after
-                FROM action_traces
-                WHERE game_id = ? AND session_id = ? AND level_number = ?
-                ORDER BY timestamp ASC
-            """, (game_id, session_id, level_number))
+            # ================================================================
+            # CRITICAL: Cumulative vs Level-Specific Capture
+            # ================================================================
+            # For "full_game_win" or multi-level captures: Get ALL actions from level 1 onwards
+            # For level-specific captures: Get only actions for that specific level
+            # This ensures cumulative sequences contain the COMPLETE path to that state
+            # ================================================================
+            
+            if reason == "full_game_win" or (reason.startswith("partial_progress") and level_number > 1):
+                # CUMULATIVE CAPTURE: Get ALL actions from level 1 through current level
+                # This is the "stacked sequence" that can replay the entire journey
+                action_traces = self.db.execute_query("""
+                    SELECT action_number, coordinates, frame_before, frame_after, level_number
+                    FROM action_traces
+                    WHERE game_id = ? AND session_id = ? AND level_number <= ?
+                    ORDER BY timestamp ASC
+                """, (game_id, session_id, level_number))
+                logger.info(f"📦 CUMULATIVE CAPTURE: {len(action_traces) if action_traces else 0} actions from levels 1-{level_number}")
+            else:
+                # LEVEL-SPECIFIC CAPTURE: Get only actions for this specific level
+                # Used for individual level discoveries
+                action_traces = self.db.execute_query("""
+                    SELECT action_number, coordinates, frame_before, frame_after, level_number
+                    FROM action_traces
+                    WHERE game_id = ? AND session_id = ? AND level_number = ?
+                    ORDER BY timestamp ASC
+                """, (game_id, session_id, level_number))
+                logger.info(f"📦 LEVEL-SPECIFIC CAPTURE: {len(action_traces) if action_traces else 0} actions for level {level_number}")
             
             if not action_traces or len(action_traces) == 0:
                 return None
@@ -2319,35 +2228,6 @@ class GameplayEngine:
                
                 # Check if current agent is operating in Optimizer mode
                 agent_mode = self._get_agent_operating_mode(agent_id)
-                is_optimizer = (agent_mode == 'optimizer')
-                
-                if is_optimizer:
-                    # Try to get optimizer checkpoint data for this level
-                    checkpoint_data = self._analyze_optimizer_checkpoint(game_id, level_number)
-                    
-                    if checkpoint_data and checkpoint_data.get('final_actions'):
-                        final_actions = checkpoint_data['final_actions']
-                        current_action_count = len(actions)
-                        target_actions = checkpoint_data.get('target_actions', len(actions))
-                        
-                        # Check if current sequence is shorter than optimal (partial)
-                        if current_action_count < target_actions:
-                            # Append the guaranteed win ending
-                            logger.info(f" OPTIMIZER FIX: Partial sequence detected ({current_action_count} actions, target: {target_actions})")
-                            logger.info(f"   Appending {len(final_actions)} final actions to guarantee completion")
-                            
-                            original_length = len(actions)
-                            actions.extend(final_actions)
-                            
-                            # Update efficiency with new action count
-                            efficiency = final_score / len(actions) if len(actions) > 0 else 0.0
-                            
-                            logger.info(f" Sequence completed: {original_length} → {len(actions)} actions (efficiency: {efficiency:.4f})")
-                        else:
-                            logger.debug(f"Optimizer sequence already complete ({current_action_count} actions)")
-                    else:
-                        logger.debug(f"No checkpoint data for {game_id} level {level_number} - saving as-is")
-                
                 # Get scorecard_id from game_results for tracking
                 scorecard_id = None
                 try:
@@ -2525,186 +2405,6 @@ class GameplayEngine:
             return 'diverse_actions'
         else:
             return 'mixed_actions'
-    def _analyze_optimizer_checkpoint(self, game_id: str, level_number: int = 1) -> Optional[Dict]:
-        """
-        OPTIMIZER ABILITY: Analyze multiple sequences to identify:
-        1. Common winning patterns (subroutines that appear across sequences)
-        2. Penultimate checkpoint (state right before winning condition)
-        3. Final winning actions (from checkpoint to win)
-        
-        Optimizers use this to:
-        - Compress multiple sequences into optimal subroutine
-        - Know when they're close to winning (checkpoint reached)
-        - Execute known final actions after reaching checkpoint
-        - Save optimized subroutine even without winning (via level reset)
-        
-        Args:
-            game_id: Game to analyze
-            level_number: Level to analyze
-            
-        Returns:
-            Dict with 'checkpoint_frame', 'final_actions', 'common_patterns', 'subroutine' or None
-        """
-        try:
-            game_type = game_id.split('-')[0] if '-' in game_id else game_id
-            
-            # Get ALL sequences for this game/level (need multiple to find patterns)
-            sequences = self.db.execute_query("""
-                SELECT ws.*, 
-                       COALESCE(sr.reliability_score, 0.5) as reliability,
-                       COALESCE(sr.successful_validations, 0) as validations
-                FROM winning_sequences ws
-                LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
-                WHERE ws.game_id LIKE ? 
-                  AND ws.level_number = ?
-                  AND ws.is_active = 1
-                ORDER BY ws.total_score DESC, reliability DESC
-                LIMIT 10
-            """, (f"{game_type}-%", level_number))
-            
-            if len(sequences) < 2:
-                # Need at least 2 sequences to find common patterns
-                logger.debug(f"Optimizer checkpoint analysis: Only {len(sequences)} sequence(s) available, need 2+")
-                return None
-            
-            logger.info(f" OPTIMIZER: Analyzing {len(sequences)} sequences to find optimal checkpoint...")
-            
-            # Extract action sequences and find common patterns
-            all_actions = []
-            all_frames = []
-            
-            for seq in sequences:
-                actions = json.loads(seq['action_sequence'])
-                all_actions.append(actions)
-                
-                # Get frame transitions if available
-                if seq.get('frame_transitions'):
-                    try:
-                        frames = json.loads(seq['frame_transitions'])
-                        all_frames.append(frames)
-                    except:
-                        pass
-            
-            # Find common action patterns (subsequences appearing in multiple sequences)
-            common_patterns = self._find_common_action_patterns(all_actions)
-            
-            # Identify penultimate checkpoint (N actions before end, common across sequences)
-            checkpoint_offset = min(5, min(len(a) for a in all_actions) // 4)  # Last 25% or 5 actions
-            
-            # Get the final actions (from checkpoint to end) from the BEST sequence
-            best_sequence = sequences[0]
-            best_actions = json.loads(best_sequence['action_sequence'])
-            
-            if len(best_actions) <= checkpoint_offset:
-                logger.debug(f"Sequence too short ({len(best_actions)} actions) for checkpoint analysis")
-                return None
-            
-            checkpoint_index = len(best_actions) - checkpoint_offset
-            final_actions = best_actions[checkpoint_index:]
-            
-            # Get checkpoint frame if available
-            checkpoint_frame = None
-            if all_frames and len(all_frames[0]) > checkpoint_index:
-                checkpoint_frame = all_frames[0][checkpoint_index]
-            
-            # Create optimal subroutine by compressing common patterns
-            optimal_subroutine = self._compress_to_optimal_subroutine(common_patterns, best_actions[:checkpoint_index])
-            
-            result = {
-                'checkpoint_index': checkpoint_index,
-                'checkpoint_frame': checkpoint_frame,
-                'final_actions': final_actions,
-                'common_patterns': common_patterns,
-                'optimal_subroutine': optimal_subroutine,
-                'target_actions': len(best_actions),
-                'sequences_analyzed': len(sequences),
-                'checkpoint_distance': checkpoint_offset
-            }
-            
-            logger.info(f" OPTIMIZER CHECKPOINT IDENTIFIED:")
-            logger.info(f"   Checkpoint at action {checkpoint_index}/{len(best_actions)}")
-            logger.info(f"   Final actions: {final_actions}")
-            logger.info(f"   Common patterns: {len(common_patterns)}")
-            logger.info(f"   Optimal subroutine: {len(optimal_subroutine)} actions")
-            
-            return result
-            
-        except Exception as e:
-            logger.warning(f"Error in optimizer checkpoint analysis: {e}")
-            return None
-    def _find_common_action_patterns(self, action_sequences: List[List[int]]) -> List[List[int]]:
-        """
-        Find action subsequences that appear in multiple sequences.
-        These are likely important patterns for winning.
-        
-        Args:
-            action_sequences: List of action sequences to analyze
-            
-        Returns:
-            List of common patterns (each pattern is a list of actions)
-        """
-        if len(action_sequences) < 2:
-            return []
-        
-        common_patterns = []
-        min_pattern_length = 2
-        max_pattern_length = 5
-        
-        # Look for patterns of various lengths
-        for pattern_len in range(min_pattern_length, max_pattern_length + 1):
-            # Extract all patterns of this length from first sequence
-            first_seq = action_sequences[0]
-            for i in range(len(first_seq) - pattern_len + 1):
-                pattern = first_seq[i:i + pattern_len]
-                
-                # Check if this pattern appears in at least 50% of other sequences
-                count = sum(1 for seq in action_sequences[1:] if self._pattern_in_sequence(pattern, seq))
-                
-                if count >= len(action_sequences) // 2:
-                    # This pattern is common
-                    if pattern not in common_patterns:
-                        common_patterns.append(pattern)
-        
-        return common_patterns
-    
-    def _pattern_in_sequence(self, pattern: List[int], sequence: List[int]) -> bool:
-        """Check if pattern exists as subsequence in sequence"""
-        pattern_len = len(pattern)
-        for i in range(len(sequence) - pattern_len + 1):
-            if sequence[i:i + pattern_len] == pattern:
-                return True
-        return False
-    
-    def _compress_to_optimal_subroutine(self, common_patterns: List[List[int]], 
-                                       actions_before_checkpoint: List[int]) -> List[int]:
-        """
-        Compress action sequence using common patterns to create optimal subroutine.
-        
-        Strategy:
-        - Use common patterns where they exist (proven to work)
-        - Fill gaps with actions from best sequence
-        - Remove redundancy
-        
-        Args:
-            common_patterns: Common patterns found across sequences
-            actions_before_checkpoint: Actions from best sequence before checkpoint
-            
-        Returns:
-            Compressed optimal subroutine
-        """
-        if not common_patterns or not actions_before_checkpoint:
-            return actions_before_checkpoint
-        
-        # Start with best sequence actions
-        subroutine = actions_before_checkpoint[:]
-        
-        # Try to compress by using longest common patterns first
-        common_patterns.sort(key=len, reverse=True)
-        
-        # For now, return the actions (future: could do more sophisticated compression)
-        # The key is that Optimizer will EXPERIMENT with variations of this
-        return subroutine
-
     def _find_partial_sequence_match(self, game_id: str, current_frame, level_number: int = 1) -> Optional[Dict]:
         """
         Find sequences where current frame matches ANY point in the sequence.
@@ -3053,7 +2753,23 @@ class GameplayEngine:
         """
         try:
             sequence_id = sequence['sequence_id']
-            logger.info(f" Replaying sequence {sequence_id} inline (level {sequence['level_number']})")
+            level_number = sequence.get('level_number', 1)
+            logger.info(f" Replaying sequence {sequence_id} inline (level {level_number})")
+            
+            # Track that this agent is using a sequence for this level
+            agent_id = self.game_config.get('agent_id', 'unknown')
+            session_id = self.session_manager.current_session_id
+            game_id = self.game_config.get('game_id', 'unknown')
+            
+            if session_id and game_id:
+                self.db.log_level_sequence_usage(
+                    session_id=session_id,
+                    game_id=game_id,
+                    agent_id=agent_id,
+                    level_number=level_number,
+                    used_sequence=True,
+                    sequence_id=sequence_id
+                )
             
             # NEW: Partial sequence matching support
             if start_index > 0:
@@ -3070,6 +2786,14 @@ class GameplayEngine:
                 
                 frames_match = False
                 match_method = None
+                
+                # Determine if this is a proven sequence (>50% validation success)
+                validation_successes = sequence.get('validation_successes', 0)
+                validation_attempts = sequence.get('validation_attempts', 0)
+                strict_replay = False
+                if validation_attempts > 0:
+                    success_rate = validation_successes / validation_attempts
+                    strict_replay = success_rate > 0.5
                 
                 # Skip frame comparison if no frame data was captured
                 if not expected_initial_frame or len(expected_initial_frame) == 0:
@@ -3169,11 +2893,12 @@ class GameplayEngine:
                         'checkpoint_validation': True,
                         'role_compliance': f'{agent_mode} following sequence script'
                     }
-                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning)
+                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning, level_number=level_number)
                     coord_index += 1
                 else:
                     action = f"ACTION{action_num}"
-                    game_state = await self._execute_action(action, game_state)
+                    # BUGFIX: Pass level_number to ensure action traces are logged with correct level
+                    game_state = await self._execute_action(action, game_state, "", level_number)
                 
                 # Track action for abstraction engine WITH MEMORY LEAK PROTECTION
                 if 'current_actions' in self.game_config:
@@ -3328,11 +3053,12 @@ class GameplayEngine:
                         'total_steps': len(actions),
                         'coordinate': {'x': x, 'y': y}
                     }
-                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning)
+                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning, level_number=level_number)
                     coord_index += 1
                 else:
                     action = f"ACTION{action_num}"
-                    game_state = await self._execute_action(action, game_state)
+                    # BUGFIX: Pass level_number to ensure action traces are logged with correct level
+                    game_state = await self._execute_action(action, game_state, "", level_number)
                 
                 action_count += 1
                 
@@ -4528,6 +4254,144 @@ class GameplayEngine:
         except Exception as e:
             logger.warning(f"Error checking unbeaten game status for {game_id}: {e}")
             return False  # Safe default
+
+    def _get_network_action_wisdom(self, game_id: str, level_number: int, 
+                                    agent_id: str, current_frame: Any) -> Optional[Dict]:
+        """
+        CRITICAL: Get network's collective action wisdom for frontier exploration.
+        
+        Abstracts historical gameplay from all agents on this game type + level
+        to suggest the best action when no proven sequences exist.
+        
+        This implements the user's requirement:
+        "abstract the history of their own gameplay as agents on this level 
+        from previous games, and decide what to do next"
+        
+        Args:
+            game_id: Current game ID
+            level_number: Current level being played
+            agent_id: Current agent ID
+            current_frame: Current game frame for context
+            
+        Returns:
+            Dict with 'action', 'confidence', 'reasoning' or None
+        """
+        try:
+            # Extract game type prefix for cross-session learning
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            # ===================================================================
+            # STAGE 1: Query historical action traces for this game type + level
+            # Find which actions led to score improvements at this level
+            # ===================================================================
+            action_success = self.db.execute_query("""
+                SELECT 
+                    action_number,
+                    COUNT(*) as total_attempts,
+                    SUM(CASE WHEN score_change > 0 THEN 1 ELSE 0 END) as successes,
+                    AVG(score_change) as avg_score_change
+                FROM action_traces
+                WHERE game_id LIKE ? 
+                  AND level_number = ?
+                  AND action_number IS NOT NULL
+                GROUP BY action_number
+                HAVING total_attempts >= 3
+                ORDER BY avg_score_change DESC, successes DESC
+            """, (f"{game_type}-%", level_number))
+            
+            if action_success and len(action_success) > 0:
+                # Calculate success rates
+                best_action = None
+                best_confidence = 0.0
+                action_analysis = []
+                
+                for row in action_success:
+                    action_num = row['action_number']
+                    total = row['total_attempts']
+                    successes = row['successes'] or 0
+                    avg_change = row['avg_score_change'] or 0.0
+                    
+                    success_rate = successes / total if total > 0 else 0.0
+                    
+                    # Confidence = weighted combination of success rate and sample size
+                    sample_weight = min(total / 50.0, 1.0)  # More samples = more confident
+                    confidence = success_rate * 0.6 + avg_change * 0.2 + sample_weight * 0.2
+                    
+                    action_analysis.append({
+                        'action': action_num,
+                        'confidence': confidence,
+                        'success_rate': success_rate,
+                        'total_attempts': total,
+                        'avg_score_change': avg_change
+                    })
+                    
+                    if confidence > best_confidence:
+                        best_confidence = confidence
+                        best_action = action_num
+                
+                if best_action and best_confidence >= 0.3:
+                    # Get agent's social rule adherence for bias adjustment
+                    agent_data = self.db.execute_query("""
+                        SELECT social_rule_adherence
+                        FROM agents
+                        WHERE agent_id = ?
+                    """, (agent_id,))
+                    
+                    social_adherence = 0.7  # Default to social
+                    if agent_data and agent_data[0]['social_rule_adherence'] is not None:
+                        social_adherence = agent_data[0]['social_rule_adherence']
+                    
+                    # Sociopaths (low adherence) may ignore network wisdom
+                    if social_adherence < 0.3:
+                        # 30% chance sociopath ignores network wisdom
+                        import random
+                        if random.random() < 0.3:
+                            logger.debug(f"🦹 Sociopath agent ignoring network wisdom (adherence: {social_adherence:.2f})")
+                            return None
+                    
+                    reasoning = f"Network history: ACTION{best_action} has {action_analysis[0]['success_rate']:.1%} success rate at L{level_number} ({action_analysis[0]['total_attempts']} attempts)"
+                    
+                    return {
+                        'action': best_action,
+                        'confidence': min(best_confidence * social_adherence, 1.0),
+                        'reasoning': reasoning,
+                        'analysis': action_analysis
+                    }
+            
+            # ===================================================================
+            # STAGE 2: If no level-specific data, try game type patterns
+            # ===================================================================
+            game_type_patterns = self.db.execute_query("""
+                SELECT 
+                    action_number,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN score_change > 0 THEN 1 ELSE 0 END) as wins
+                FROM action_traces
+                WHERE game_id LIKE ?
+                  AND action_number IS NOT NULL
+                GROUP BY action_number
+                HAVING total >= 10
+                ORDER BY (wins * 1.0 / total) DESC
+                LIMIT 3
+            """, (f"{game_type}-%",))
+            
+            if game_type_patterns and len(game_type_patterns) > 0:
+                best = game_type_patterns[0]
+                action_num = best['action_number']
+                success_rate = best['wins'] / best['total'] if best['total'] > 0 else 0.0
+                
+                if success_rate >= 0.1:  # Lower threshold for game type fallback
+                    return {
+                        'action': action_num,
+                        'confidence': success_rate * 0.5,  # Lower confidence for general pattern
+                        'reasoning': f"Game type pattern: ACTION{action_num} works {success_rate:.1%} of time on {game_type} games"
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error getting network action wisdom: {e}")
+            return None
 
     # Phase 4.5: Sensation-based navigation helper methods
     

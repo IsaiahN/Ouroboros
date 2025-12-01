@@ -39,6 +39,8 @@ def main():
                        help='Thorough mode: 90 min intervals, 50 games/gen')
     parser.add_argument('--quick', action='store_true',
                        help='Quick test: 5 generations max')
+    parser.add_argument('--test', action='store_true',
+                       help='Minimal test: 1 agent, 1 game, 1 generation')
     parser.add_argument('--max-generations', type=int, default=None,
                        help='Override max generations (useful when resuming from checkpoint)')
     parser.add_argument('--diversity', action='store_true',
@@ -49,7 +51,16 @@ def main():
     args = parser.parse_args()
     
     # Configure based on mode
-    if args.fast:
+    if args.test:
+        print(">> TEST MODE - Minimal test (1 agent, 1 game)")
+        config = {
+            'initial_population_size': 1,
+            'games_per_generation': 1,
+            'evolution_interval_minutes': 1,
+            'max_generations': 1,
+            'target_win_rate': 0.50
+        }
+    elif args.fast:
         print(">> FAST MODE - Quick iterations")
         config = {
             'initial_population_size': 8,

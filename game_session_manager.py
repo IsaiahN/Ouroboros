@@ -52,18 +52,25 @@ class GameSessionManager:
             'games_played': []
         }
 
-        # Setup graceful shutdown
-        self._setup_signal_handlers()
+        # DISABLED: Signal handlers interfere with evolution runner's signal handling
+        # Let the evolution runner handle signals instead
+        # self._setup_signal_handlers()
 
     def _setup_signal_handlers(self):
-        """Setup signal handlers for graceful shutdown."""
-        def signal_handler(signum, frame):
-            logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-            self.is_shutting_down = True  # Set flag immediately
-            asyncio.create_task(self.shutdown())
-
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        """Setup signal handlers for graceful shutdown.
+        
+        DISABLED: This causes games to abort immediately when any SIGINT is received,
+        even if it's meant for the parent evolution process. The evolution runner
+        has its own signal handling that properly manages shutdown.
+        """
+        pass
+        # def signal_handler(signum, frame):
+        #     logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        #     self.is_shutting_down = True  # Set flag immediately
+        #     asyncio.create_task(self.shutdown())
+        #
+        # signal.signal(signal.SIGINT, signal_handler)
+        # signal.signal(signal.SIGTERM, signal_handler)
 
     def add_shutdown_handler(self, handler: Callable):
         """Add a custom shutdown handler.
@@ -351,28 +358,32 @@ class GameSessionManager:
             # Calculate score change
             score_change = game_state.score - kwargs.get('score_before', 0.0)
             
-            # Save action trace ONLY if score changed (Phase 3 optimization)
-            # Preserves reward attribution for viral packages & pariahs
-            # Reduces database bloat by 99.8% while keeping all learning data
-            if score_change != 0:  # Only store score-changing actions
-                self.db.save_action_trace({
-                    'session_id': self.current_session_id,
-                    'game_id': self.current_game_id,
-                    'action_number': action_number,
-                    'coordinates': kwargs.get('coordinates') if action == 'ACTION6' else None,
-                    'timestamp': action_start_time,
-                    'frame_before': kwargs.get('frame_before'),  # CRITICAL for viral package extraction
-                    'frame_after': game_state.frame,             # CRITICAL for pariah failure checkpoints
-                    'frame_changed': kwargs.get('frame_changed', False),
-                    'score_before': kwargs.get('score_before', 0.0),
-                    'score_after': game_state.score,
-                    'score_change': score_change,
-                    'response_data': {
-                        'action': action,
-                        'state': game_state.state,
-                        'available_actions': game_state.available_actions
-                    }
-                })
+            # Extract level_number from kwargs (CRITICAL for multi-level sequence capture)
+            level_number = kwargs.get('level_number', 1)
+            
+            # Save ALL action traces to enable sequence capture
+            # MUST log every action for _capture_winning_sequence() to reconstruct full sequences
+            # Without complete action history, breakthrough discoveries are permanently lost
+            # (Previous "score_change != 0" optimization caused Level 2-3 breakthrough data loss)
+            self.db.save_action_trace({
+                'session_id': self.current_session_id,
+                'game_id': self.current_game_id,
+                'action_number': action_number,
+                'level_number': level_number,  # CRITICAL: Must save level_number for sequence capture
+                'coordinates': kwargs.get('coordinates') if action == 'ACTION6' else None,
+                'timestamp': action_start_time,
+                'frame_before': kwargs.get('frame_before'),  # CRITICAL for viral package extraction
+                'frame_after': game_state.frame,             # CRITICAL for pariah failure checkpoints
+                'frame_changed': kwargs.get('frame_changed', False),
+                'score_before': kwargs.get('score_before', 0.0),
+                'score_after': game_state.score,
+                'score_change': score_change,
+                'response_data': {
+                    'action': action,
+                    'state': game_state.state,
+                    'available_actions': game_state.available_actions
+                }
+            })
 
             # Save score
             if self.current_session_id and self.current_game_id:
@@ -484,6 +495,8 @@ class GameSessionManager:
 
         logger.info(f"Finished game {self.current_game_id}: {final_state}, Score: {final_score}")
         self.current_game_id = None
+        # Reset is_running so next game can start a fresh session
+        self.is_running = False
 
     async def get_available_games(self) -> list:
         """Get list of available games from the API.

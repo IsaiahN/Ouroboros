@@ -279,9 +279,11 @@ class AgentOperatingModeSystem:
 
         if results and results[0]["attempts"] >= 2:  # Need at least 2 attempts to trust
             best_mode = results[0]["operating_mode"]
+            efficiency = results[0].get('avg_efficiency')
+            efficiency_str = f"{efficiency:.3f}" if efficiency is not None else "N/A"
             logger.info(
                 f"   Agent {agent_id[:8]} best mode for game {game_id}: {best_mode} "
-                f"(efficiency={results[0]['avg_efficiency']:.3f}, {results[0]['attempts']} attempts)"
+                f"(efficiency={efficiency_str}, {results[0]['attempts']} attempts)"
             )
             return best_mode
 

@@ -52,7 +52,7 @@ class SequencePruningSystem:
         self.db = db
         
         # Pruning thresholds
-        self.min_attempts_before_pruning = 10
+        self.min_attempts_before_pruning = 5  # Lowered from 10 to catch bad sequences faster
         self.min_success_rate = 0.10  # 10%
         self.max_action_count = 10000
         self.min_score_threshold = 2.0

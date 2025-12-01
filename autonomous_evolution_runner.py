@@ -49,6 +49,7 @@ from evolution_with_vampires import check_for_vampires  # Vampire detection
 from ouroboros_coordinator import OuroborosCoordinator
 from agent_factory import AgentFactory
 from performance_analyzer import PerformanceAnalyzer
+from disk_space_monitor import DiskSpaceMonitor
 from evolutionary_engine import EvolutionaryEngine
 from arc_rlvr_framework import ARCRLVRFramework
 from core_gameplay import GameplayEngine
@@ -111,6 +112,7 @@ class AutonomousEvolutionRunner:
         self.analyzer = PerformanceAnalyzer(self.db)
         self.factory = AgentFactory(self.db)
         self.adaptive_limits = AdaptiveActionLimits(self.db)  # Adaptive action limit manager
+        self.disk_monitor = DiskSpaceMonitor(db_path)  # Disk space monitoring
         self.network_intelligence = NetworkIntelligenceEngine(self.db)  # Network health tracking
         self.prestige_engine = PrestigeEngine(self.db)  # PHASE 1: Network contribution prestige
         self.viral_engine = ViralPackageEngine(self.db)  # PHASE 3: Viral packages & pariahs
@@ -178,6 +180,8 @@ class AutonomousEvolutionRunner:
         self.running = False
         self.paused = False
         self.shutdown_requested = False
+        self.shutdown_press_count = 0
+        self.shutdown_last_press_time = None
         self.current_task = None
         
         # Setup signal handlers for graceful shutdown
@@ -244,22 +248,35 @@ class AutonomousEvolutionRunner:
         
         signal_name = signal_names.get(signum, f'Signal {signum}')
         
-        if not self.shutdown_requested:
-            print(f"\n\n[WARN]  Received {signal_name}")
-            print("[?] Initiating graceful shutdown cascade...")
+        # Check if press is within time window (2 seconds)
+        current_time = time.time()
+        if self.shutdown_last_press_time is None or (current_time - self.shutdown_last_press_time) > 2.0:
+            # Reset counter if too much time passed
+            self.shutdown_press_count = 0
+        
+        # Increment press count
+        self.shutdown_press_count += 1
+        self.shutdown_last_press_time = current_time
+        
+        if self.shutdown_press_count < 3:
+            print(f"\n[⚠️  WARNING] Ctrl+C press {self.shutdown_press_count}/3")
+            print("="*80)
+            print(f"   Press {3 - self.shutdown_press_count} more time(s) within 2 seconds to shutdown")
+            print("   (Or press Ctrl+Break for immediate force quit)")
+            print("="*80 + "\n")
+        else:
+            # Third press - confirm shutdown
+            print(f"\n\n[X] Ctrl+C pressed 3 times - Confirmed shutdown")
+            print("   Initiating graceful shutdown...")
             print("   - Current game will finish gracefully")
             print("   - No new games will start")
-            print("   - Generation will complete early")
-            print("   (Press Ctrl+C again to force quit)\n")
-            self.shutdown_requested = True
+            print("   - Generation will complete early\n")
             self.running = False
-            
-            # Notify game scheduler to stop assigning games
+            self.shutdown_requested = True
             self.game_scheduler.shutdown()
-        else:
-            print(f"\n\n[X] Forced shutdown requested")
-            print("   Terminating immediately (data may be incomplete)\n")
-            sys.exit(1)
+            # Reset counter
+            self.shutdown_press_count = 0
+            self.shutdown_last_press_time = None
     
     async def _cleanup(self):
         """Perform cleanup operations before shutdown."""
@@ -1021,7 +1038,9 @@ class AutonomousEvolutionRunner:
                         
                         # Use BREAKTHROUGH BUDGET ALLOCATOR (Tier 1: +50% gain)
                         # Dynamic per-game budgets: 800 (unbeaten), 400 (partial), 150 (beaten)
-                        game_budget = self.budget_allocator.calculate_game_budget(game_id)
+                        game_budget_dict = self.budget_allocator.calculate_game_budget(game_id)
+                        game_budget = game_budget_dict['action_allowance_total']
+                        actions_per_level = game_budget_dict['action_allowance_per_level']
                         print(f"[BUDGET] Game {game_id[:8]}: {game_budget} total actions allocated")
                         
                         # Use adaptive action limits (adjusted per generation)
@@ -1393,6 +1412,20 @@ class AutonomousEvolutionRunner:
             
             print(f"[OK] Evolution complete - Created {new_agents_created} new agents")
             
+            # DISK SPACE CHECK: Monitor disk space before continuing
+            print(f"\n[DISK SPACE] Checking disk space...")
+            try:
+                safe, message, stats = self.disk_monitor.check_disk_space()
+                if not safe:
+                    print(f"[CRITICAL] {message}")
+                    print(f"[CRITICAL] STOPPING EVOLUTION: Disk space critical!")
+                    print(f"[CRITICAL] Run emergency_cleanup_mastery.py or historical_data_cleanup.py")
+                    return False  # Stop evolution
+                else:
+                    print(f"[OK] {message}")
+            except Exception as e:
+                print(f"[WARN] Disk space check failed: {e}")
+            
             # SEQUENCE PRUNING: Remove bad sequences after each generation
             print(f"\n[SEQUENCE PRUNING] Cleaning up failed sequences for generation {self.current_generation}...")
             try:
@@ -1653,7 +1686,33 @@ class AutonomousEvolutionRunner:
                     print(f"       New population size: {population_size - pruned_count}")
             
             # CLEANUP: Historical data garbage collection (prevent database bloat)
-            print(f"\n[ CLEANUP] Running historical data garbage collection...")
+            print(f"\n[🗑️ CLEANUP] Running historical data garbage collection...")
+            
+            # Agent lifecycle management (Net Navi philosophy: good players live on)
+            try:
+                from agent_lifecycle_manager import AgentLifecycleManager
+                lifecycle_mgr = AgentLifecycleManager(self.db)
+                
+                # Only run cleanup every 10 generations (not every generation)
+                if generation % 10 == 0:
+                    print(f"\n[🧬 AGENTS] Cleaning up ancient inactive agents...")
+                    agent_cleanup = lifecycle_mgr.cleanup_ancient_inactive_agents(generation, dry_run=False)
+                    
+                    if agent_cleanup['total_deleted'] > 0:
+                        print(f"  [OK] Permanently deleted {agent_cleanup['total_deleted']} ancient agents")
+                        print(f"       Zero-score (50+ gen): {agent_cleanup['zero_score_deleted']}")
+                        print(f"       Low-score (200+ gen): {agent_cleanup['low_score_deleted']}")
+                        print(f"       Good players (500+ gen): {agent_cleanup['good_player_deleted']}")
+                        print(f"       High prestige preserved: {agent_cleanup['high_prestige_archived']}")
+                    else:
+                        print(f"  [INFO] No agents old enough for deletion")
+                else:
+                    print(f"  [SKIP] Agent cleanup (only runs every 10 generations)")
+                    
+            except Exception as e:
+                print(f"  [WARN] Agent lifecycle cleanup failed: {e}")
+            
+            # Historical data cleanup
             try:
                 cleaner = HistoricalDataCleaner(self.db)
                 cleanup_results = cleaner.cleanup_all(dry_run=False)

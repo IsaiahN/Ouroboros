@@ -155,6 +155,38 @@ class SubgoalPlanner:
         except Exception as e:
             self.logger.error(f"Schema initialization error: {e}")
     
+    def generate_subgoals(self, game_id: str, level_number: int, frame_data: List[List[int]],
+                         agent_id: str = "unknown", session_id: str = "unknown",
+                         current_score: float = 0.0, generation: int = 0) -> List[Dict]:
+        """
+        Generate subgoals for a level (wrapper for create_plan).
+        
+        Args:
+            game_id: Current game
+            level_number: Current level number
+            frame_data: Current game frame
+            agent_id: Agent ID (optional)
+            session_id: Session ID (optional)
+            current_score: Current score
+            generation: Agent generation
+            
+        Returns:
+            List of subgoal dictionaries, or empty list if no plan could be created
+        """
+        try:
+            # Analyze frame to identify objectives and decompose into subgoals
+            objectives = self._identify_objectives(frame_data, current_score)
+            if not objectives:
+                return []
+            
+            primary_objective = self._select_primary_objective(objectives, current_score)
+            subgoals = self._decompose_into_subgoals(primary_objective, frame_data)
+            
+            return subgoals if subgoals else []
+        except Exception as e:
+            self.logger.error(f"Subgoal generation error: {e}")
+            return []
+
     def create_plan(self, agent_id: str, game_id: str, session_id: str,
                    current_frame: List[List[int]], current_score: float,
                    generation: int = 0) -> Optional[str]:
