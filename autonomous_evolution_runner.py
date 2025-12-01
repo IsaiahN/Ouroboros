@@ -91,7 +91,8 @@ class AutonomousEvolutionRunner:
         evolution_interval_minutes: int = 60,
         health_check_interval: int = 10,
         agi_mode: bool = False,  # Enable diversity-focused evolution
-        specialist_mode: bool = False  # NEW: Enable specialist-focused evolution
+        specialist_mode: bool = False,  # NEW: Enable specialist-focused evolution
+        skip_cleanup: bool = False  # Skip database cleanup on startup (for test mode)
     ):
         """
         Initialize autonomous runner.
@@ -171,6 +172,7 @@ class AutonomousEvolutionRunner:
         self.health_check_interval = health_check_interval
         self.agi_mode = agi_mode  # Diversity mode flag
         self.specialist_mode = specialist_mode  # NEW: Specialist mode flag
+        self.skip_cleanup = skip_cleanup  # Skip database cleanup on startup
         
         self.current_generation = 0
         self.total_games_played = 0
@@ -1905,8 +1907,12 @@ class AutonomousEvolutionRunner:
         self.print_banner()
         
         # Cleanup old logs on startup to prevent bloat from previous runs
-        print("\n[?]  Performing startup database cleanup...")
-        self._cleanup_old_logs()
+        # Skip in test mode for faster startup
+        if self.skip_cleanup:
+            print("\n[SKIP] Skipping database cleanup (test mode)")
+        else:
+            print("\n[?]  Performing startup database cleanup...")
+            self._cleanup_old_logs()
         
         try:
             # Initialize population

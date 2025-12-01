@@ -492,19 +492,30 @@ class GameplayEngine:
                         action_succeeded = True
                         
                     except Exception as action_error:
-                        # Check if this is an API error (500, connection issue, etc.)
+                        # Check if this is an API error (400, 500, connection issue, etc.)
                         error_msg = str(action_error).lower()
                         is_api_error = any(indicator in error_msg for indicator in [
+                            '400', 'bad_request', 'bad request',  # Game session ended/invalid
                             '500', 'internal server error', 'non-json response',
                             'server disconnected', 'connection', 'timeout'
                         ])
                         
                         if is_api_error:
                             consecutive_api_errors += 1
-                            logger.warning(f" API error #{consecutive_api_errors}: {action_error}")
+                            logger.warning(f"⚠ API error #{consecutive_api_errors}: {action_error}")
+                            
+                            # 400 BAD_REQUEST means game session is DEAD - exit immediately
+                            # No point retrying, the game has ended on the server side
+                            is_session_dead = any(indicator in error_msg for indicator in [
+                                '400', 'bad_request', 'bad request'
+                            ])
+                            
+                            if is_session_dead:
+                                logger.error(f"🛑 Game session terminated (400 BAD_REQUEST) - game has ended on server")
+                                break  # Exit game loop immediately
                             
                             if consecutive_api_errors >= MAX_CONSECUTIVE_API_ERRORS:
-                                logger.error(f" Too many consecutive API errors ({consecutive_api_errors}), ending game")
+                                logger.error(f"🛑 Too many consecutive API errors ({consecutive_api_errors}), ending game")
                                 break  # Exit game loop
                             
                             # Exponential backoff: 1s, 2s, 4s, 8s, 16s
@@ -771,6 +782,15 @@ class GameplayEngine:
                     # Games may report WIN after partial completion (e.g., ls20 after level 1)
                     # Only stop when action budget exhausted
 
+                except ValueError as e:
+                    # Handle frame corruption - end game immediately
+                    error_msg = str(e).lower()
+                    if "frame corruption" in error_msg:
+                        logger.error(f"❌ FRAME CORRUPTION detected - ending game immediately")
+                        break
+                    else:
+                        logger.error(f"ValueError in action {action_count}: {e}")
+                        break
                 except RuntimeError as e:
                     # Handle session shutdown gracefully
                     error_msg = str(e).lower()
@@ -1238,8 +1258,10 @@ class GameplayEngine:
                     # Skip to applying biases below
                 else:
                     logger.debug(f"Network suggestion (ACTION{network_suggested_action}) confidence too low ({confidence:.2f})")
+                    # Low confidence - fall back to smart action selection
+                    base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
         
-        # If no network suggestion, use smart action selection
+        # If no network suggestion at all, use smart action selection
         if network_suggested_action is None:
             base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
         
@@ -2917,15 +2939,14 @@ class GameplayEngine:
                 
                 # Memory leak protection: Check for momentum breakthrough (Competitive #4)
                 if hasattr(self, 'breakthrough_detector') and len(self.game_config.get('current_actions', [])) >= 50:
+                    # Build action history in the format expected by detect_micro_progress
+                    action_history = [{'action': a, 'frame': None} for a in self.game_config['current_actions'][-50:]]
                     momentum = self.breakthrough_detector.detect_micro_progress(
-                        game_id=game_id,
-                        level_number=level_number,
-                        action_history=self.game_config['current_actions'][-50:],
-                        frame_history=[],  # Would need frame storage
-                        score_history=[game_state.score]
+                        game_state=game_state,
+                        action_history=action_history
                     )
-                    if momentum and momentum.get('has_breakthrough_momentum'):
-                        logger.info(f"🚀 BREAKTHROUGH MOMENTUM detected during replay: {momentum.get('composite_score', 0):.2f}")
+                    if momentum and momentum > 0.6:  # momentum is a float, not dict
+                        logger.info(f"🚀 BREAKTHROUGH MOMENTUM detected during replay: {momentum:.2f}")
                 
                 logger.debug(f"Replay action {action_count}/{len(actions)}: ACTION{action_num}, "
                            f"Score: {game_state.score}, State: {game_state.state}")

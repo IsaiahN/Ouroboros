@@ -42,7 +42,9 @@ class HistoricalDataCleaner:
         self.db = db
         
         # Retention policies
-        self.sensation_retention_generations = 5  # Keep last 5 generations of raw events
+        # INCREASED from 5 to 100 generations due to many bug fixes causing early forgetting
+        # Sensation data is critical for learning - don't lose it during debugging phase
+        self.sensation_retention_generations = 100  # Keep last 100 generations of raw events
         self.score_history_retention_days = 7  # Keep last 7 days of score history
         self.min_records_to_clean = 100000  # Only clean if >100k records to delete
         

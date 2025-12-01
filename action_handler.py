@@ -128,6 +128,13 @@ class ActionHandler:
                 f"🔍 NON-STANDARD FRAME SIZE: {height}x{width} (expected {self.expected_frame_size[0]}x{self.expected_frame_size[1]}) {context}"
             )
             
+            # CRITICAL: Extremely small frames (like 2x64) indicate API error or corruption
+            # Valid ARC frames should be at least 10x10 - anything smaller is corrupt
+            MIN_VALID_DIMENSION = 10
+            if height < MIN_VALID_DIMENSION or width < MIN_VALID_DIMENSION:
+                logger.error(f"❌ FRAME CORRUPTION: Frame too small ({height}x{width}), likely API error - aborting game {context}")
+                return False
+            
             # Double-check: verify frame structure is consistent
             inconsistent_rows = []
             for i, row in enumerate(frame):
@@ -430,7 +437,8 @@ class ActionHandler:
         """
         # Validate frame dimensions if provided
         if frame:
-            self._validate_frame_dimensions(frame, context="at send_action_6")
+            if not self._validate_frame_dimensions(frame, context="at send_action_6"):
+                raise ValueError(f"Frame corruption detected - aborting game")
         
         # Validate coordinates if frame is provided
         if frame and not self._validate_coordinates(x, y, frame):

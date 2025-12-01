@@ -58,7 +58,8 @@ def main():
             'games_per_generation': 1,
             'evolution_interval_minutes': 1,
             'max_generations': 1,
-            'target_win_rate': 0.50
+            'target_win_rate': 0.50,
+            'skip_cleanup': True  # Skip slow database cleanup in test mode
         }
     elif args.fast:
         print(">> FAST MODE - Quick iterations")
