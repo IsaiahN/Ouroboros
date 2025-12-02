@@ -169,38 +169,48 @@ class ActionHandler:
 
         return 0 <= y < len(frame) and 0 <= x < len(frame[0])
 
-    async def _attempt_frame_recovery(self, level_number: int = 1) -> Optional['GameState']:
-        """Attempt to recover from a corrupt frame by sending a random simple action.
+    async def _attempt_frame_recovery(self, level_number: int = 1, max_attempts: int = 5) -> Optional['GameState']:
+        """Attempt to recover from a corrupt frame by sending random simple actions.
         
         When we receive a corrupt frame (like 2x64 instead of 64x64), this is likely
-        a transient API error. We try to "flush" the bad state by sending a random
-        directional action (ACTION1-5) which doesn't require coordinates.
+        a transient API error or level transition glitch. We try to "flush" the bad 
+        state by sending random directional actions (ACTION1-5) which don't require 
+        coordinates.
         
         Args:
             level_number: Current level for logging
+            max_attempts: Maximum number of recovery actions to try (default 5)
             
         Returns:
             New GameState if recovery successful, None otherwise
         """
         import random
         
-        # Try a random directional action (1-5) to flush the bad frame
-        # These don't require coordinates so they should work even with corrupt frame
-        recovery_action = random.choice([1, 2, 3, 4, 5])
-        logger.info(f"🔄 FRAME RECOVERY: Sending ACTION{recovery_action} to flush corrupt frame")
+        for attempt in range(max_attempts):
+            # Try a random directional action (1-5) to flush the bad frame
+            # These don't require coordinates so they should work even with corrupt frame
+            recovery_action = random.choice([1, 2, 3, 4, 5])
+            logger.info(f"🔄 FRAME RECOVERY [{attempt+1}/{max_attempts}]: Sending ACTION{recovery_action} to flush corrupt frame")
+            
+            try:
+                # Send the recovery action through session_manager.client (the API client)
+                result = await self.session_manager.client.send_action(f"ACTION{recovery_action}")
+                if result:
+                    # GameState is already imported at top from arc_api_client
+                    new_state = GameState.from_dict(result)
+                    frame = new_state.frame
+                    
+                    if frame and len(frame) >= 10 and frame[0] and len(frame[0]) >= 10:
+                        logger.info(f"✅ FRAME RECOVERY SUCCESS after {attempt+1} attempts! Frame: {len(frame)}x{len(frame[0])}")
+                        return new_state
+                    else:
+                        frame_size = f"{len(frame)}x{len(frame[0])}" if frame and frame[0] else "None"
+                        logger.warning(f"🔄 FRAME RECOVERY [{attempt+1}]: Frame still corrupt ({frame_size}), trying again...")
+            except Exception as e:
+                logger.warning(f"🔄 FRAME RECOVERY [{attempt+1}] error: {e}")
         
-        try:
-            # Send the recovery action directly through the API client
-            result = await self.api_client.send_action(f"ACTION{recovery_action}")
-            if result:
-                from game_state import GameState
-                new_state = GameState.from_dict(result)
-                logger.info(f"🔄 FRAME RECOVERY: Got new frame {len(new_state.frame)}x{len(new_state.frame[0]) if new_state.frame and new_state.frame[0] else 0}")
-                return new_state
-            return None
-        except Exception as e:
-            logger.error(f"🔄 FRAME RECOVERY failed: {e}")
-            return None
+        logger.error(f"❌ FRAME RECOVERY FAILED after {max_attempts} attempts")
+        return None
 
     def _is_coordinate_similar(self, coord1: Tuple[int, int], coord2: Tuple[int, int], 
                               threshold: int = 5) -> bool:

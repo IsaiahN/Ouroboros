@@ -1852,9 +1852,9 @@ class GameplayEngine:
             avg_efficiency = total_score / total_actions if total_actions > 0 else 0.0
             win_rate = wins / games_played
             
-            # Get prestige score
+            # Get prestige score (discovery_prestige in agents table)
             prestige_data = self.db.execute_query("""
-                SELECT prestige_score
+                SELECT discovery_prestige as prestige_score
                 FROM agents
                 WHERE agent_id = ?
             """, (agent_id,))
