@@ -237,10 +237,16 @@ class AutonomousEvolutionRunner:
         """
         Handle shutdown signals gracefully.
         
+        Uses sys.stderr.write instead of print() to avoid reentrant I/O errors
+        on Windows when signal handler is called while another I/O operation
+        is in progress.
+        
         Args:
             signum: Signal number
             frame: Current stack frame
         """
+        import sys
+        
         signal_names = {
             signal.SIGINT: 'SIGINT (Ctrl+C)',
             signal.SIGTERM: 'SIGTERM (Termination)',
@@ -260,25 +266,39 @@ class AutonomousEvolutionRunner:
         self.shutdown_press_count += 1
         self.shutdown_last_press_time = current_time
         
-        if self.shutdown_press_count < 3:
-            print(f"\n[⚠️  WARNING] Ctrl+C press {self.shutdown_press_count}/3")
-            print("="*80)
-            print(f"   Press {3 - self.shutdown_press_count} more time(s) within 2 seconds to shutdown")
-            print("   (Or press Ctrl+Break for immediate force quit)")
-            print("="*80 + "\n")
-        else:
-            # Third press - confirm shutdown
-            print(f"\n\n[X] Ctrl+C pressed 3 times - Confirmed shutdown")
-            print("   Initiating graceful shutdown...")
-            print("   - Current game will finish gracefully")
-            print("   - No new games will start")
-            print("   - Generation will complete early\n")
+        # Use sys.stderr.write to avoid reentrant print() issues on Windows
+        try:
+            if self.shutdown_press_count < 3:
+                msg = (f"\n[WARNING] Ctrl+C press {self.shutdown_press_count}/3\n"
+                       f"{'='*80}\n"
+                       f"   Press {3 - self.shutdown_press_count} more time(s) within 2 seconds to shutdown\n"
+                       f"   (Or press Ctrl+Break for immediate force quit)\n"
+                       f"{'='*80}\n\n")
+                sys.stderr.write(msg)
+                sys.stderr.flush()
+            else:
+                # Third press - confirm shutdown
+                msg = (f"\n\n[X] Ctrl+C pressed 3 times - Confirmed shutdown\n"
+                       f"   Initiating graceful shutdown...\n"
+                       f"   - Current game will finish gracefully\n"
+                       f"   - No new games will start\n"
+                       f"   - Generation will complete early\n\n")
+                sys.stderr.write(msg)
+                sys.stderr.flush()
+                self.running = False
+                self.shutdown_requested = True
+                self.game_scheduler.shutdown()
+                # Reset counter
+                self.shutdown_press_count = 0
+                self.shutdown_last_press_time = None
+        except Exception:
+            # If even stderr fails, just set shutdown flags silently
             self.running = False
             self.shutdown_requested = True
-            self.game_scheduler.shutdown()
-            # Reset counter
-            self.shutdown_press_count = 0
-            self.shutdown_last_press_time = None
+            try:
+                self.game_scheduler.shutdown()
+            except Exception:
+                pass
     
     async def _cleanup(self):
         """Perform cleanup operations before shutdown."""

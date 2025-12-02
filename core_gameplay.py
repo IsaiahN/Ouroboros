@@ -2151,19 +2151,41 @@ class GameplayEngine:
             return None
         
         # ================================================================
-        # CRITICAL FIX: Prevent graceful shutdown garbage sequences
+        # CRITICAL FIX: Prevent garbage sequences from polluting database
         # ================================================================
-        # Only save sequences if we ACTUALLY completed at least one level
-        # in this game session. This prevents shutdown/error scenarios from
-        # saving useless sequences that mess up the whole system.
+        # Multiple validation layers to ensure only USEFUL sequences are saved:
+        # 1. Must have completed at least 1 level in THIS session
+        # 2. Score must be > 0 (actual progress made)
+        # 3. Minimum action threshold to filter out glitches/errors
         # ================================================================
+        
+        # Validation 1: Level completions check
         if level_completions < 1:
             logger.debug(f"Skipping sequence capture - no levels completed (level_completions={level_completions})")
             return None
-            
+        
+        # Validation 2: Score check
+        if final_score <= 0:
+            logger.debug(f"Skipping sequence capture - score is 0 or negative (score={final_score})")
+            return None
+        
+        # Validation 3: Minimum action threshold (a real level completion needs multiple actions)
+        # This catches edge cases where validation 1 & 2 pass but sequence is still garbage
+        MIN_ACTIONS_FOR_VALID_SEQUENCE = 10  # Minimum 10 actions for a valid sequence
+        
         try:
             session_id = self.session_manager.current_session_id
             if not session_id:
+                return None
+            
+            # Pre-check action count before doing full capture
+            action_count_check = self.db.execute_query("""
+                SELECT COUNT(*) as cnt FROM action_traces
+                WHERE game_id = ? AND session_id = ?
+            """, (game_id, session_id))
+            
+            if action_count_check and action_count_check[0]['cnt'] < MIN_ACTIONS_FOR_VALID_SEQUENCE:
+                logger.debug(f"Skipping sequence capture - too few actions ({action_count_check[0]['cnt']} < {MIN_ACTIONS_FOR_VALID_SEQUENCE})")
                 return None
             
             # ================================================================
@@ -3023,8 +3045,23 @@ class GameplayEngine:
                            f"Score: {game_state.score}, State: {game_state.state}")
             
             # Check if replay was successful
+            # SUCCESS CRITERIA (per Master Ruleset):
+            # - For a level N sequence: agent must reach level N (score >= N-1)
+            # - score = number of levels COMPLETED, so:
+            #   - Score 0 = on level 1 (no levels completed)
+            #   - Score 1 = completed level 1, now on level 2
+            #   - Score 2 = completed levels 1+2, now on level 3
+            # - A sequence for level N is valid if agent reaches level N
+            #   which means score >= (N-1) since score N-1 means level N-1 completed = ON level N
+            target_level = sequence.get('level_number', 1)
+            current_level = int(game_state.score) + 1  # Score 0 = level 1, Score 1 = level 2, etc.
+            
+            # Success = reached target level OR better (including WIN)
             replay_success = (game_state.state == "WIN" or 
-                            game_state.score >= sequence['total_score'])
+                            current_level >= target_level)
+            
+            logger.debug(f"Sequence validation: target_level={target_level}, current_level={current_level}, "
+                        f"score={game_state.score}, success={replay_success}")
             
             # Record validation attempt for community memory (Task 4)
             failure_reason = None
@@ -3035,6 +3072,8 @@ class GameplayEngine:
                     failure_reason = 'frame_mismatch_proceeded'
                 elif action_count < len(actions):
                     failure_reason = 'incomplete_sequence'
+                elif current_level < target_level:
+                    failure_reason = f'reached_level_{current_level}_not_{target_level}'
                 else:
                     failure_reason = 'insufficient_score'
             
@@ -3060,10 +3099,10 @@ class GameplayEngine:
             )
             
             if replay_success:
-                logger.info(f" Inline replay successful for {sequence_id}! Score: {game_state.score}")
+                logger.info(f"✅ Inline replay successful for {sequence_id}! Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
             else:
-                logger.warning(f" Inline replay failed for {sequence_id}. "
-                             f"Expected score: {sequence['total_score']}, Got: {game_state.score}")
+                logger.warning(f"❌ Inline replay failed for {sequence_id}. "
+                             f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
             
             return {'game_state': game_state, 'success': replay_success}
             
@@ -3170,18 +3209,25 @@ class GameplayEngine:
             
             duration = (datetime.now() - start_time).total_seconds()
             
-            # Check if replay was successful
+            # Check if replay was successful using level-based validation
+            # (Same logic as _try_inline_replay_sequence)
+            target_level = sequence.get('level_number', 1)
+            current_level = int(game_state.score) + 1  # Score 0 = level 1, etc.
+            
             replay_success = (game_state.state == "WIN" or 
-                            game_state.score >= sequence['total_score'])
+                            current_level >= target_level)
+            
+            logger.debug(f"Replay validation: target_level={target_level}, current_level={current_level}, "
+                        f"score={game_state.score}, success={replay_success}")
             
             # Update success rate in database
             if replay_success:
-                logger.info(f" Replay successful for {sequence_id}! Score: {game_state.score}")
+                logger.info(f"✅ Replay successful for {sequence_id}! Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
                 # Note: success_rate_when_reused calculation would need existing value
                 # For now, just increment a success counter (schema may need update)
             else:
-                logger.warning(f" Replay failed for {sequence_id}. "
-                             f"Expected score: {sequence['total_score']}, Got: {game_state.score}")
+                logger.warning(f"❌ Replay failed for {sequence_id}. "
+                             f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
             
             result = {
                 'game_id': game_id,
@@ -3358,6 +3404,15 @@ class GameplayEngine:
             """, (sequence_id, total, successes, failures, partials,
                   raw_success_rate, reliability_score, unique_agents,
                   recent_success_rate, trending, datetime.now().isoformat()))
+            
+            # CRITICAL FIX: Also update winning_sequences.success_rate_when_reused
+            # This is what the pruning system checks, so it must be kept in sync!
+            self.db.execute_query("""
+                UPDATE winning_sequences
+                SET success_rate_when_reused = ?,
+                    times_referenced = ?
+                WHERE sequence_id = ?
+            """, (raw_success_rate, total, sequence_id))
             
             logger.debug(f" Updated reputation for {sequence_id}: "
                         f"reliability={reliability_score:.2f}, "
