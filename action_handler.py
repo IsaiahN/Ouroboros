@@ -169,6 +169,39 @@ class ActionHandler:
 
         return 0 <= y < len(frame) and 0 <= x < len(frame[0])
 
+    async def _attempt_frame_recovery(self, level_number: int = 1) -> Optional['GameState']:
+        """Attempt to recover from a corrupt frame by sending a random simple action.
+        
+        When we receive a corrupt frame (like 2x64 instead of 64x64), this is likely
+        a transient API error. We try to "flush" the bad state by sending a random
+        directional action (ACTION1-5) which doesn't require coordinates.
+        
+        Args:
+            level_number: Current level for logging
+            
+        Returns:
+            New GameState if recovery successful, None otherwise
+        """
+        import random
+        
+        # Try a random directional action (1-5) to flush the bad frame
+        # These don't require coordinates so they should work even with corrupt frame
+        recovery_action = random.choice([1, 2, 3, 4, 5])
+        logger.info(f"🔄 FRAME RECOVERY: Sending ACTION{recovery_action} to flush corrupt frame")
+        
+        try:
+            # Send the recovery action directly through the API client
+            result = await self.api_client.send_action(f"ACTION{recovery_action}")
+            if result:
+                from game_state import GameState
+                new_state = GameState.from_dict(result)
+                logger.info(f"🔄 FRAME RECOVERY: Got new frame {len(new_state.frame)}x{len(new_state.frame[0]) if new_state.frame and new_state.frame[0] else 0}")
+                return new_state
+            return None
+        except Exception as e:
+            logger.error(f"🔄 FRAME RECOVERY failed: {e}")
+            return None
+
     def _is_coordinate_similar(self, coord1: Tuple[int, int], coord2: Tuple[int, int], 
                               threshold: int = 5) -> bool:
         """Check if two coordinates are similar (within threshold distance).
@@ -438,7 +471,25 @@ class ActionHandler:
         # Validate frame dimensions if provided
         if frame:
             if not self._validate_frame_dimensions(frame, context="at send_action_6"):
-                raise ValueError(f"Frame corruption detected - aborting game")
+                # Frame corruption detected - try to recover with a random action
+                logger.warning(f"⚠️ FRAME CORRUPTION: Attempting recovery with random action...")
+                recovery_result = await self._attempt_frame_recovery(level_number)
+                if recovery_result:
+                    # Recovery successful - update frame and retry validation
+                    new_frame = recovery_result.frame
+                    if new_frame and self._validate_frame_dimensions(new_frame, context="after recovery"):
+                        logger.info(f"✅ FRAME RECOVERY successful! New frame: {len(new_frame)}x{len(new_frame[0]) if new_frame else 0}")
+                        frame = new_frame
+                        # Re-validate coordinates against new frame
+                        if not self._validate_coordinates(x, y, frame):
+                            logger.warning(f"Coordinates ({x}, {y}) invalid after recovery - using center of frame")
+                            y = len(frame) // 2
+                            x = len(frame[0]) // 2 if frame[0] else 0
+                    else:
+                        logger.error(f"❌ FRAME RECOVERY failed - frame still corrupt after recovery action")
+                        raise ValueError(f"Frame corruption detected - recovery failed")
+                else:
+                    raise ValueError(f"Frame corruption detected - recovery failed")
         
         # Validate coordinates if frame is provided
         if frame and not self._validate_coordinates(x, y, frame):

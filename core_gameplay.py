@@ -326,10 +326,24 @@ class GameplayEngine:
                 if should_challenge_pariah and known_sequence:
                     logger.info(f" Replaying BEST cumulative sequence (score {known_sequence['total_score']}, {known_sequence['total_actions']} actions)")
                     logger.info(f"[SEQUENCE REPLAY DEBUG] About to call _replay_sequence_inline for sequence {known_sequence.get('sequence_id', 'UNKNOWN')})")
-                    replay_result = await self._replay_sequence_inline(
-                        game_state, 
-                        known_sequence
-                    )
+                    try:
+                        replay_result = await self._replay_sequence_inline(
+                            game_state, 
+                            known_sequence
+                        )
+                    except ValueError as e:
+                        if "frame corruption" in str(e).lower():
+                            logger.error(f"❌ FRAME CORRUPTION during sequence replay - aborting game")
+                            await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
+                            return {
+                                'game_id': game_id,
+                                'final_state': 'GAME_OVER',
+                                'final_score': 0.0,
+                                'actions_taken': 0,
+                                'win': False,
+                                'method': 'aborted_frame_corruption'
+                            }
+                        raise  # Re-raise other ValueErrors
                 logger.info(f"[SEQUENCE REPLAY DEBUG] Replay completed, result={replay_result is not None}, success={replay_result.get('success', False) if replay_result else 'N/A'}")
                 
                 # Update game_state from replay result
@@ -613,7 +627,8 @@ class GameplayEngine:
                                 game_id, 
                                 game_state.score, 
                                 level_number=level_for_storage,
-                                reason=f"level_{level_for_storage}_win"
+                                reason=f"level_{level_for_storage}_win",
+                                level_completions=level_completions  # Pass actual completions
                             )
                             if sequence_id:
                                 logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
@@ -647,11 +662,25 @@ class GameplayEngine:
                                           f"skipping {partial_match['actions_skipped']} actions!")
                                 
                                 # Replay from checkpoint
-                                replay_result = await self._replay_sequence_inline(
-                                    game_state,
-                                    partial_match['sequence'],
-                                    start_index=partial_match['start_index']
-                                )
+                                try:
+                                    replay_result = await self._replay_sequence_inline(
+                                        game_state,
+                                        partial_match['sequence'],
+                                        start_index=partial_match['start_index']
+                                    )
+                                except ValueError as e:
+                                    if "frame corruption" in str(e).lower():
+                                        logger.error(f"❌ FRAME CORRUPTION during checkpoint replay - aborting game")
+                                        await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
+                                        return {
+                                            'game_id': game_id,
+                                            'final_state': 'GAME_OVER',
+                                            'final_score': 0.0,
+                                            'actions_taken': 0,
+                                            'win': False,
+                                            'method': 'aborted_frame_corruption'
+                                        }
+                                    raise
                                 
                                 if replay_result and replay_result['success']:
                                     game_state = replay_result['game_state']
@@ -691,11 +720,25 @@ class GameplayEngine:
                                         
                                         # FIX: Actually replay the sequence instead of just logging it!
                                         # This enables knowledge sharing for Level 2+
-                                        replay_result = await self._replay_sequence_inline(
-                                            game_state,
-                                            next_level_sequence,
-                                            start_index=0
-                                        )
+                                        try:
+                                            replay_result = await self._replay_sequence_inline(
+                                                game_state,
+                                                next_level_sequence,
+                                                start_index=0
+                                            )
+                                        except ValueError as e:
+                                            if "frame corruption" in str(e).lower():
+                                                logger.error(f"❌ FRAME CORRUPTION during level sequence replay - aborting game")
+                                                await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
+                                                return {
+                                                    'game_id': game_id,
+                                                    'final_state': 'GAME_OVER',
+                                                    'final_score': 0.0,
+                                                    'actions_taken': 0,
+                                                    'win': False,
+                                                    'method': 'aborted_frame_corruption'
+                                                }
+                                            raise
                                         
                                         if replay_result and replay_result['success']:
                                             replay_initial_score = previous_score
@@ -783,10 +826,13 @@ class GameplayEngine:
                     # Only stop when action budget exhausted
 
                 except ValueError as e:
-                    # Handle frame corruption - end game immediately
+                    # Handle frame corruption - only breaks if recovery failed
                     error_msg = str(e).lower()
                     if "frame corruption" in error_msg:
-                        logger.error(f"❌ FRAME CORRUPTION detected - ending game immediately")
+                        if "recovery failed" in error_msg:
+                            logger.error(f"❌ FRAME CORRUPTION: Recovery attempted but failed - ending game")
+                        else:
+                            logger.error(f"❌ FRAME CORRUPTION detected - ending game")
                         break
                     else:
                         logger.error(f"ValueError in action {action_count}: {e}")
@@ -874,30 +920,39 @@ class GameplayEngine:
                 # Future agents can replay this to guarantee the same minimum score
                 if game_state.state == "WIN":
                     # Full game win - capture complete sequence
-                    sequence_id = self._capture_winning_sequence(
-                        game_id, 
-                        game_state.score,
-                        level_number=current_level,
-                        reason="full_game_win"
-                    )
-                    if sequence_id:
-                        results['learned_sequence_id'] = sequence_id
-                        logger.info(f" Captured full game winning sequence: {sequence_id}")
+                    # Only if we actually completed levels in THIS session
+                    if level_completions > 0:
+                        sequence_id = self._capture_winning_sequence(
+                            game_id, 
+                            game_state.score,
+                            level_number=current_level,
+                            reason="full_game_win",
+                            level_completions=level_completions
+                        )
+                        if sequence_id:
+                            results['learned_sequence_id'] = sequence_id
+                            logger.info(f" Captured full game winning sequence: {sequence_id}")
+                    else:
+                        logger.info(f"⚠️ WIN state but no level_completions in this session - skipping sequence capture")
                 
-                elif game_state.score > 0:
+                elif game_state.score > 0 and level_completions > 0:
                     # Partial progress - capture what we achieved
                     # Score 3.0 = completed 3 levels, future agents should replay this
-                    levels_completed = int(game_state.score)
+                    # CRITICAL: Only if we completed levels in THIS session (not from replay)
+                    levels_completed_for_capture = int(game_state.score)
                     sequence_id = self._capture_winning_sequence(
                         game_id,
                         game_state.score,
-                        level_number=levels_completed,
-                        reason=f"partial_progress_{levels_completed}_levels"
+                        level_number=levels_completed_for_capture,
+                        reason=f"partial_progress_{levels_completed_for_capture}_levels",
+                        level_completions=level_completions
                     )
                     if sequence_id:
                         results['learned_sequence_id'] = sequence_id
                         logger.info(f" Captured partial progress sequence (score {game_state.score}): {sequence_id}")
-                        logger.info(f"   → Future agents can replay this to guarantee {levels_completed} level(s) minimum")
+                        logger.info(f"   → Future agents can replay this to guarantee {levels_completed_for_capture} level(s) minimum")
+                elif game_state.score > 0 and level_completions == 0:
+                    logger.debug(f"Score {game_state.score} but no NEW level_completions - skipping sequence capture (likely from replay or shutdown)")
             
             # PHASE 2.5: Knowledge Recombination (AUTOMATIC - runs after EVERY game)
             # This is the viral evolution accelerator - opportunistic recombination
@@ -2070,7 +2125,8 @@ class GameplayEngine:
     # ========================================================================
 
     def _capture_winning_sequence(self, game_id: str, final_score: float, 
-                                 level_number: int = 1, reason: str = "win") -> Optional[str]:
+                                 level_number: int = 1, reason: str = "win",
+                                 level_completions: int = 0) -> Optional[str]:
         """
         Capture winning sequence for pattern learning (Rule 2: Database-only).
         Called automatically after wins OR level completions when enable_pattern_learning=True.
@@ -2078,16 +2134,31 @@ class GameplayEngine:
         CRITICAL: For full_game_win, captures ALL actions from level 1 through final level.
         This creates a CUMULATIVE sequence that can be replayed to reach the same state.
         
+        VALIDATION: Only saves sequences if level_completions > 0, preventing graceful
+        shutdown garbage from polluting the sequence database.
+        
         Args:
             game_id: Game that was won
             final_score: Final score achieved
             level_number: Level number that was completed (default 1)
             reason: Reason for capture ("win", "level_1_completion", "full_game_win", etc.)
+            level_completions: Number of levels actually completed in THIS session (CRITICAL)
             
         Returns:
             sequence_id if captured, None otherwise
         """
         if not self.game_config.get('enable_pattern_learning', True):
+            return None
+        
+        # ================================================================
+        # CRITICAL FIX: Prevent graceful shutdown garbage sequences
+        # ================================================================
+        # Only save sequences if we ACTUALLY completed at least one level
+        # in this game session. This prevents shutdown/error scenarios from
+        # saving useless sequences that mess up the whole system.
+        # ================================================================
+        if level_completions < 1:
+            logger.debug(f"Skipping sequence capture - no levels completed (level_completions={level_completions})")
             return None
             
         try:
@@ -2996,8 +3067,15 @@ class GameplayEngine:
             
             return {'game_state': game_state, 'success': replay_success}
             
+        except ValueError as e:
+            # Frame corruption or other critical errors - re-raise to abort game
+            if "frame corruption" in str(e).lower():
+                logger.error(f"Frame corruption during replay - aborting game: {e}")
+                raise  # Re-raise to propagate to game loop
+            logger.error(f"ValueError in inline replay: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error in inline replay: {e}", exc_info=True)
+            logger.error(f"Error in inline replay: {e}")
             return None
 
     async def _try_replay_sequence(self, game_id: str, sequence: Dict) -> Optional[Dict[str, Any]]:
