@@ -24,7 +24,6 @@ TEMP_PATTERNS = [
     "analyze_*.py",
     "diagnose_*.py",
     "show_*.py",
-    "test_*.py",
     "run_arc_debug_*.py",
     "run_arc_game_*.py",
     "detailed_*.py",
