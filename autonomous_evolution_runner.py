@@ -280,14 +280,20 @@ class AutonomousEvolutionRunner:
                 # Third press - confirm shutdown
                 msg = (f"\n\n[X] Ctrl+C pressed 3 times - Confirmed shutdown\n"
                        f"   Initiating graceful shutdown...\n"
-                       f"   - Current game will finish gracefully\n"
+                       f"   - ALL games will END IMMEDIATELY and save their scorecards\n"
                        f"   - No new games will start\n"
-                       f"   - Generation will complete early\n\n")
+                       f"   - Database will be checkpointed\n\n")
                 sys.stderr.write(msg)
                 sys.stderr.flush()
                 self.running = False
                 self.shutdown_requested = True
                 self.game_scheduler.shutdown()
+                
+                # CRITICAL: Also set shutdown flag on current engine if available
+                # This ensures games in progress exit immediately
+                if hasattr(self, '_current_engine') and self._current_engine:
+                    self._current_engine.session_manager.is_shutting_down = True
+                
                 # Reset counter
                 self.shutdown_press_count = 0
                 self.shutdown_last_press_time = None
@@ -903,6 +909,9 @@ class AutonomousEvolutionRunner:
             
             async with GameplayEngine(api_key, db_path=self.db.db_path) as engine:
                 
+                # Store engine reference for shutdown handler access
+                self._current_engine = engine
+                
                 # If shutdown was requested before entering this context, set flag immediately
                 if self.shutdown_requested:
                     engine.session_manager.is_shutting_down = True
@@ -982,6 +991,19 @@ class AutonomousEvolutionRunner:
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
                 
                 print(f" Assigned {sum(len(g) for g in game_assignments.values())} games to {len(game_assignments)} agents\n")
+                
+                # ================================================================
+                # ERROR DETECTION: Stop evolution early if API is broken
+                # ================================================================
+                # Track consecutive failures to detect system-wide issues
+                # This prevents wasting compute when API is down or games aren't working
+                # ================================================================
+                consecutive_zero_score_games = 0  # Games with 0 score
+                consecutive_error_games = 0  # Games that threw errors
+                ZERO_SCORE_THRESHOLD = 10  # Stop after 10 consecutive zero-score games
+                ERROR_THRESHOLD = 5  # Stop after 5 consecutive errors
+                total_zero_score_games = 0  # Track total for reporting
+                total_error_games = 0
                 
                 for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
                     agent_id = agent['agent_id']
@@ -1104,6 +1126,43 @@ class AutonomousEvolutionRunner:
                             engine.session_manager.is_shutting_down = True
                             print(f"[PAUSE]  Shutdown detected after game {game_id[:8]}, ending generation early")
                             break
+                        
+                        # ================================================================
+                        # ERROR DETECTION: Track game failures
+                        # ================================================================
+                        game_score = result.get('final_score', 0)
+                        game_error = result.get('error') or result.get('final_state') in ['GAME_OVER', 'ERROR', 'NO_SEQUENCE_AVAILABLE']
+                        
+                        if game_error or game_score == 0:
+                            if game_error:
+                                consecutive_error_games += 1
+                                total_error_games += 1
+                                consecutive_zero_score_games = 0  # Reset other counter
+                            else:
+                                consecutive_zero_score_games += 1
+                                total_zero_score_games += 1
+                                consecutive_error_games = 0  # Reset other counter
+                            
+                            # Check thresholds
+                            if consecutive_error_games >= ERROR_THRESHOLD:
+                                print(f"\n[🛑 CRITICAL] {consecutive_error_games} consecutive game errors detected!")
+                                print(f"   Stopping evolution early to prevent wasted compute.")
+                                print(f"   Last error: {result.get('error', 'Unknown')}")
+                                print(f"   Total errors this generation: {total_error_games}")
+                                self.shutdown_requested = True
+                                engine.session_manager.is_shutting_down = True
+                                break
+                            
+                            if consecutive_zero_score_games >= ZERO_SCORE_THRESHOLD:
+                                print(f"\n[⚠️ WARNING] {consecutive_zero_score_games} consecutive zero-score games!")
+                                print(f"   This may indicate API issues or broken game logic.")
+                                print(f"   Total zero-score games: {total_zero_score_games}")
+                                # Don't stop, but warn - could be legitimately hard games
+                                consecutive_zero_score_games = 0  # Reset to give more chances
+                        else:
+                            # Game succeeded with score > 0
+                            consecutive_zero_score_games = 0
+                            consecutive_error_games = 0
                         
                         # Process ARC rewards
                         rlvr = ARCRLVRFramework(self.db)
@@ -1302,10 +1361,14 @@ class AutonomousEvolutionRunner:
                 print(f"  Wins: {total_wins}/{len(results)} ({summary['win_rate']:.1%})")
                 print(f"  Avg Score: {summary['avg_score']:.2f}")
                 
+                # Clear engine reference on normal exit
+                self._current_engine = None
+                
                 return summary
             
         except asyncio.CancelledError:
             # Task was cancelled during shutdown - this is expected
+            self._current_engine = None  # Clear reference
             print("[PAUSE]  Evaluation cancelled during shutdown")
             raise  # Re-raise to propagate cancellation
             
@@ -1731,8 +1794,13 @@ class AutonomousEvolutionRunner:
                 else:
                     print(f"  [SKIP] Agent cleanup (only runs every 10 generations)")
                     
+            except NameError as ne:
+                # NameError typically means a variable/module is not defined
+                print(f"  [WARN] Agent lifecycle cleanup NameError: {ne}")
+                import traceback
+                traceback.print_exc()
             except Exception as e:
-                print(f"  [WARN] Agent lifecycle cleanup failed: {e}")
+                print(f"  [WARN] Agent lifecycle cleanup failed: {type(e).__name__}: {e}")
             
             # Historical data cleanup
             try:

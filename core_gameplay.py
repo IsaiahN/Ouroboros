@@ -442,10 +442,16 @@ class GameplayEngine:
             while action_count < self.game_config['max_total_actions']:
 
                 # Check if session is still active (graceful shutdown detection)
-                # Only check is_running - is_shutting_down is set by signal handlers
-                # that may be triggered accidentally and should not abort individual games
+                # Check BOTH is_running AND is_shutting_down
+                # When shutdown is requested, we should exit immediately and save current state
                 if not self.session_manager.is_running:
-                    logger.info(f" Session shutdown detected, ending game gracefully")
+                    logger.info(f"⏹ Session stopped, ending game gracefully")
+                    break
+                
+                if self.session_manager.is_shutting_down:
+                    logger.info(f"🛑 SHUTDOWN REQUESTED - ending game immediately to save state")
+                    logger.info(f"   Current score: {game_state.score}, Actions: {action_count}")
+                    # Break immediately - the finally block will save results
                     break
                 
                 # CRITICAL: If game reports WIN/GAME_OVER but we have actions left, keep trying
@@ -560,12 +566,13 @@ class GameplayEngine:
                     # Check if this level is at the frontier (no known sequences)
                     is_frontier_level = False
                     if agent_mode == 'pioneer' and self.game_config.get('enable_pattern_learning', True):
-                        # Quick check if any sequences exist for this level
+                        # Quick check if any ACTIVE sequences exist for this level
+                        # (Inactive sequences are trash - don't count them as "covered")
                         game_type = game_id.split('-')[0] if '-' in game_id else game_id
                         frontier_check = self.db.execute_query("""
                             SELECT COUNT(*) as seq_count
                             FROM winning_sequences
-                            WHERE game_id LIKE ? AND level_number = ?
+                            WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
                         """, (f"{game_type}-%", current_level))
                         is_frontier_level = (not frontier_check or frontier_check[0]['seq_count'] == 0)
                     
@@ -623,15 +630,36 @@ class GameplayEngine:
                             # Score N.0 = level N (Nth challenge completed)
                             level_for_storage = int(game_state.score)
                             
+                            # ================================================================
+                            # BUG FIX (2024-12-03): Use CUMULATIVE capture for L2+
+                            # ================================================================
+                            # PROBLEM: "level_X_win" triggered level-specific capture, which
+                            # only saved the actions for THAT level. This created L2 sequences
+                            # that couldn't be replayed (missing L1 actions to get there first).
+                            # 
+                            # FIX: For L2+, use "partial_progress" reason which triggers 
+                            # cumulative capture (L1 through current level). This creates
+                            # complete sequences that can be replayed from game start.
+                            # 
+                            # L1 still uses level-specific (no cumulative needed - it IS L1)
+                            # ================================================================
+                            if level_for_storage == 1:
+                                capture_reason = "level_1_win"  # L1: level-specific is fine
+                            else:
+                                capture_reason = f"partial_progress_{level_for_storage}_levels"  # L2+: CUMULATIVE
+                            
                             sequence_id = self._capture_winning_sequence(
                                 game_id, 
                                 game_state.score, 
                                 level_number=level_for_storage,
-                                reason=f"level_{level_for_storage}_win",
+                                reason=capture_reason,
                                 level_completions=level_completions  # Pass actual completions
                             )
                             if sequence_id:
-                                logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
+                                if level_for_storage > 1:
+                                    logger.info(f"📦 Captured CUMULATIVE sequence for levels 1-{level_for_storage} (score={game_state.score}): {sequence_id}")
+                                else:
+                                    logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
                         
                         # Move to next level
                         previous_score = game_state.score  # Update for next level detection
@@ -1357,6 +1385,7 @@ class GameplayEngine:
             sensation_reasoning = None
         
         # PHASE 3: Apply viral package / pariah influence to action selection
+        viral_reasoning = None  # Initialize before conditional blocks
         if action_weights or action_penalties:
             # Convert base_action to int
             action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
@@ -2169,9 +2198,20 @@ class GameplayEngine:
             logger.debug(f"Skipping sequence capture - score is 0 or negative (score={final_score})")
             return None
         
-        # Validation 3: Minimum action threshold (a real level completion needs multiple actions)
-        # This catches edge cases where validation 1 & 2 pass but sequence is still garbage
-        MIN_ACTIONS_FOR_VALID_SEQUENCE = 10  # Minimum 10 actions for a valid sequence
+        # ================================================================
+        # VALIDATION 3: Quality-Based Filtering (FIXED 2024-01)
+        # ================================================================
+        # OLD APPROACH (BROKEN): MIN_ACTIONS = 10 blocked 85.5% of valid wins!
+        #   - as66 Level 1 can be won in 1 action legitimately
+        #   - 777 completions but only 6 sequences captured (0.8%)
+        # 
+        # NEW APPROACH: Allow ANY action count, but reject JUNK:
+        #   - Junk = long sequences with only 1 unique action (ACTION6 spam)
+        #   - Short sequences (< 5 actions) are ALWAYS valid if they won
+        #   - Longer sequences need at least 2 distinct action types
+        # ================================================================
+        MIN_ACTIONS_FOR_VALID_SEQUENCE = 1  # Allow single-action wins
+        JUNK_THRESHOLD = 50  # Sequences longer than this need diversity
         
         try:
             session_id = self.session_manager.current_session_id
@@ -2184,8 +2224,10 @@ class GameplayEngine:
                 WHERE game_id = ? AND session_id = ?
             """, (game_id, session_id))
             
-            if action_count_check and action_count_check[0]['cnt'] < MIN_ACTIONS_FOR_VALID_SEQUENCE:
-                logger.debug(f"Skipping sequence capture - too few actions ({action_count_check[0]['cnt']} < {MIN_ACTIONS_FOR_VALID_SEQUENCE})")
+            action_count = action_count_check[0]['cnt'] if action_count_check else 0
+            
+            if action_count < MIN_ACTIONS_FOR_VALID_SEQUENCE:
+                logger.debug(f"Skipping sequence capture - no actions recorded")
                 return None
             
             # ================================================================
@@ -2231,6 +2273,18 @@ class GameplayEngine:
                     except:
                         pass
             
+            # ================================================================
+            # JUNK DETECTION: Reject long single-action-type spam
+            # ================================================================
+            # Short sequences (<50 actions) are always valid if they won
+            # Long sequences need at least 2 distinct action types
+            # This catches ACTION6 coordinate spam without blocking real wins
+            # ================================================================
+            unique_action_types = len(set(actions))
+            if len(actions) > JUNK_THRESHOLD and unique_action_types == 1:
+                logger.warning(f"Rejecting JUNK sequence: {len(actions)} actions but only 1 unique type (likely ACTION6 spam)")
+                return None
+            
             efficiency = final_score / len(actions) if len(actions) > 0 else 0.0
             
             # NO ACTION CEILING: Even very long sequences can contain valuable subroutines
@@ -2248,10 +2302,24 @@ class GameplayEngine:
             
             # Check if we already have a winning sequence for this game/level
             # ANTI-GAMING: Check BEST sequence globally (not just by this agent)
+            # ================================================================
+            # BUG FIX (2024-01): Only compare against ACTIVE sequences!
+            # ================================================================
+            # Previously, this query included ALL sequences (active + inactive).
+            # This caused a silent capture failure:
+            # 1. Game has 11 sequences, all INACTIVE (deactivated as trash)
+            # 2. Diversity check says "0 active, diversity bonus applies!"
+            # 3. But existing check found an inactive sequence with efficiency 1.0
+            # 4. New sequence couldn't beat efficiency 1.0, so REJECTED
+            # 5. Result: Game-level with 0 active sequences, but new ones blocked!
+            #
+            # FIX: Only compare against ACTIVE sequences. If all sequences are
+            # inactive, treat it like a new game-level and store the new sequence.
+            # ================================================================
             existing = self.db.execute_query("""
                 SELECT sequence_id, total_actions, efficiency_score, agent_id
                 FROM winning_sequences
-                WHERE game_id = ? AND level_number = ?
+                WHERE game_id = ? AND level_number = ? AND is_active = 1
                 ORDER BY efficiency_score DESC
                 LIMIT 1
             """, (game_id, level_number))
@@ -2542,13 +2610,14 @@ class GameplayEngine:
         try:
             game_type = game_id.split('-')[0] if '-' in game_id else game_id
             
-            # Get all sequences for this game type and level with frame transitions
+            # Get all ACTIVE sequences for this game type and level with frame transitions
+            # (Don't try to match against inactive/deactivated sequences)
             sequences = self.db.execute_query("""
                 SELECT ws.*, 
                        COALESCE(sr.reliability_score, 0.5) as reliability
                 FROM winning_sequences ws
                 LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
-                WHERE ws.game_id LIKE ? AND ws.level_number = ?
+                WHERE ws.game_id LIKE ? AND ws.level_number = ? AND ws.is_active = 1
                   AND ws.frame_transitions IS NOT NULL
                 ORDER BY reliability DESC, ws.efficiency_score DESC
                 LIMIT 10
@@ -2979,6 +3048,21 @@ class GameplayEngine:
                 if game_state.state != "NOT_FINISHED":
                     break
                 
+                # ================================================================
+                # BUG FIX: Use ACTUAL level (from score) not sequence's level_number
+                # ================================================================
+                # Previously, actions during replay were logged with the sequence's
+                # level_number (e.g., L2 or L3), even when score was 0 (L1).
+                # This caused capture to fail because:
+                # 1. Agent wins L1 (score 0→1)
+                # 2. Capture queries WHERE level_number = 1
+                # 3. But all replay actions were logged as L2 → no matches!
+                # 
+                # FIX: Use score-based level_number: int(score) + 1
+                # Score 0 = on level 1, Score 1 = on level 2, etc.
+                # ================================================================
+                actual_level = int(game_state.score) + 1
+                
                 # Execute action
                 if action_num == 6 and coord_index < len(coordinates):
                     coord = coordinates[coord_index]
@@ -3008,12 +3092,12 @@ class GameplayEngine:
                         'checkpoint_validation': True,
                         'role_compliance': f'{agent_mode} following sequence script'
                     }
-                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning, level_number=level_number)
+                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning, level_number=actual_level)
                     coord_index += 1
                 else:
                     action = f"ACTION{action_num}"
-                    # BUGFIX: Pass level_number to ensure action traces are logged with correct level
-                    game_state = await self._execute_action(action, game_state, "", level_number)
+                    # Use actual_level (score-based) not sequence's level_number
+                    game_state = await self._execute_action(action, game_state, "", actual_level)
                 
                 # Track action for abstraction engine WITH MEMORY LEAK PROTECTION
                 if 'current_actions' in self.game_config:
@@ -3303,6 +3387,34 @@ class GameplayEngine:
             
             # Update sequence reputation
             self._update_sequence_reputation(sequence_id)
+            
+            # QUICK VALIDATION: Flag bad sequences immediately (don't wait for pruning)
+            # This prevents wasting resources on obviously broken sequences
+            try:
+                from quick_sequence_validator import QuickSequenceValidator
+                quick_validator = QuickSequenceValidator(self.db)
+                
+                # Detect frame mismatch (first action failed = likely frame corruption)
+                frame_mismatch = (actions_completed == 0 and not success and 
+                                 failure_reason and 'frame' in failure_reason.lower())
+                
+                result = quick_validator.record_replay_result(
+                    sequence_id=sequence_id,
+                    success=success,
+                    failure_reason=failure_reason,
+                    frame_mismatch=frame_mismatch,
+                    actions_completed=actions_completed,
+                    total_actions=total_actions
+                )
+                
+                if result['action'] == 'deactivated':
+                    logger.warning(f"⚡ QUICK DEACTIVATE: {sequence_id[:12]} - {result['reason']}")
+                elif result['action'] == 'flagged':
+                    logger.info(f"⚠️ QUICK FLAG: {sequence_id[:12]} - {result['reason']} ({result['consecutive_failures']} consecutive failures)")
+            except ImportError:
+                pass  # Quick validator not available
+            except Exception as qv_error:
+                logger.debug(f"Quick validation error (non-critical): {qv_error}")
             
             # Phase 1: Record validation attempt for prestige tracking
             if agent_id and agent_id != 'unknown':
