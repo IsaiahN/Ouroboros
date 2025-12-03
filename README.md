@@ -2,7 +2,7 @@
 
 A clean, modular implementation of essential ARC-AGI-3 game functionality with autonomous evolutionary agents. This system combines core game mechanics with an evolutionary framework where agents evolve to master ARC games.
 
-Initial Thesis: [AGI is not a brain: It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
+Initial Thesis: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
 ## Features
 
