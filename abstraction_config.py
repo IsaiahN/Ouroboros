@@ -70,3 +70,20 @@ def get_default_matching_mode():
     if not ENABLE_ABSTRACTION:
         return MATCHING_MODES['EXACT']
     return DEFAULT_MATCHING_MODE
+
+def get_abstraction_config():
+    """Get full abstraction configuration dictionary."""
+    return {
+        'enabled': ENABLE_ABSTRACTION,
+        'matching_mode': get_default_matching_mode(),
+        'levels': ABSTRACTION_LEVELS,
+        'min_conceptual_confidence': MIN_CONCEPTUAL_CONFIDENCE,
+        'min_adaptation_confidence': MIN_ADAPTATION_CONFIDENCE,
+        'min_pattern_frequency': MIN_PATTERN_FREQUENCY,
+        'pattern_similarity_threshold': PATTERN_SIMILARITY_THRESHOLD,
+        'lazy_extraction': LAZY_EXTRACTION,
+        'async_extraction': ASYNC_EXTRACTION,
+        'max_extraction_threads': MAX_EXTRACTION_THREADS,
+        'log_abstraction': LOG_ABSTRACTION,
+        'ab_test_enabled': AB_TEST_ENABLED
+    }

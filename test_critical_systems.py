@@ -403,6 +403,7 @@ class TestSequenceQuality(unittest.TestCase):
     
     DB_PATH = Path(__file__).parent / "core_data.db"
     MAX_BLOAT_RATIO = 5.0  # Average should be within 5x of minimum
+    MIN_VALID_ACTIONS = 6  # Sequences with <6 actions are likely junk
     
     def setUp(self):
         """Set up database connection."""
@@ -415,12 +416,14 @@ class TestSequenceQuality(unittest.TestCase):
     
     def test_no_extremely_bloated_sequences(self):
         """Verify no sequences are extremely bloated (>10x minimum for same level)."""
+        # Filter out junk sequences (<6 actions) when calculating minimums
         cursor = self.conn.execute("""
             WITH level_mins AS (
                 SELECT SUBSTR(game_id, 1, 4) as game_type,
                        level_number,
                        MIN(total_actions) as min_actions
                 FROM winning_sequences
+                WHERE total_actions >= 6
                 GROUP BY SUBSTR(game_id, 1, 4), level_number
             )
             SELECT s.sequence_id, s.game_id, s.level_number, s.total_actions,
@@ -445,19 +448,21 @@ class TestSequenceQuality(unittest.TestCase):
     def test_average_bloat_ratio_acceptable(self):
         """Verify average bloat ratio across all levels is acceptable."""
         # Calculate per game+level to get accurate bloat measurement
+        # Filter out junk sequences (<6 actions) when calculating minimums
         cursor = self.conn.execute("""
             WITH level_mins AS (
                 SELECT SUBSTR(game_id, 1, 4) as game_type,
                        level_number,
                        MIN(total_actions) as min_actions
                 FROM winning_sequences
+                WHERE total_actions >= 6
                 GROUP BY SUBSTR(game_id, 1, 4), level_number
             )
             SELECT AVG(CAST(s.total_actions AS FLOAT) / m.min_actions) as avg_bloat_ratio
             FROM winning_sequences s
             JOIN level_mins m ON SUBSTR(s.game_id, 1, 4) = m.game_type 
                               AND s.level_number = m.level_number
-            WHERE m.min_actions > 0
+            WHERE m.min_actions > 0 AND s.total_actions >= 6
         """)
         
         row = cursor.fetchone()

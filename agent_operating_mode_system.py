@@ -541,11 +541,36 @@ class AgentOperatingModeSystem:
         mode: str,
         reason: str,
     ):
-        """Record mode assignment to database"""
+        """Record mode assignment to database and update social_rule_adherence"""
         import uuid
 
         mode_id = f"mode_{uuid.uuid4().hex[:12]}"
         params = self.MODE_PARAMETERS[mode]
+        
+        # FIX: Set social_rule_adherence based on role per Master Ruleset
+        # Exploiters get 50/50 split: sociopathic (0.0-0.3) vs social (0.7-1.0)
+        # All other roles get moderate social adherence (0.5-0.8)
+        if mode == 'exploiter':
+            # 50% sociopathic, 50% social per Master Ruleset
+            if random.random() < 0.5:
+                social_rule_adherence = random.uniform(0.0, 0.3)  # Sociopathic
+            else:
+                social_rule_adherence = random.uniform(0.7, 1.0)  # Social
+        elif mode == 'pioneer':
+            # Pioneers: moderate-high (explore but can use network hints)
+            social_rule_adherence = random.uniform(0.4, 0.7)
+        elif mode == 'optimizer':
+            # Optimizers: higher social (rely on proven sequences)
+            social_rule_adherence = random.uniform(0.6, 0.9)
+        else:  # generalist
+            # Generalists: balanced social adherence
+            social_rule_adherence = random.uniform(0.5, 0.8)
+        
+        # Update agent's social_rule_adherence in agents table
+        self.db.execute_query(
+            "UPDATE agents SET social_rule_adherence = ? WHERE agent_id = ?",
+            (social_rule_adherence, agent_id)
+        )
 
         self.db.execute_query(
             """
