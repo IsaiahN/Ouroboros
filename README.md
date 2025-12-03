@@ -38,6 +38,7 @@ The system mimics biological evolution with three distinct layers of information
 -   **Layer 1: Static Genome (Nature)**. Hard-coded traits (e.g., neural architecture type). Low mutation, high stability.
 -   **Layer 2: Epigenetic (Nurture)**. Learning rates and biases. Inherited but decays over generations of agents. Allows temporary adaptation to environmental stress.
 -   **Layer 3: Somatic (Culture)**. Real-time knowledge (e.g., "Red pixels are dangerous"). High plasticity. **Not inherited** biologically but stored in the Community Database for all agents to access.
+
 Features derived from these layers:
 
 - Horizontal Gene Transfer: Agents swapping strategies regardless of lineage.

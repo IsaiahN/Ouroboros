@@ -238,7 +238,46 @@ class OptimizationThresholdSystem:
                    f"{summary['still_optimizing']} still optimizing, "
                    f"{summary['newly_optimized']} newly optimized")
         
+        # Cleanup stale entries where sequences no longer exist
+        stale_count = self._cleanup_stale_optimization_status()
+        if stale_count > 0:
+            logger.info(f"[OPTIMIZATION] Cleaned up {stale_count} stale optimization_status entries (sequences deleted)")
+        
         return summary
+    
+    def _cleanup_stale_optimization_status(self) -> int:
+        """
+        Remove optimization_status entries where the sequences no longer exist.
+        This happens when sequences are purged/deleted but optimization_status wasn't updated.
+        
+        Returns:
+            Number of stale entries removed
+        """
+        # Find optimization_status entries with no matching active sequences
+        stale_entries = self.db.execute_query("""
+            SELECT os.status_id, os.game_id, os.level_number
+            FROM optimization_status os
+            WHERE NOT EXISTS (
+                SELECT 1 FROM winning_sequences ws
+                WHERE ws.game_id = os.game_id 
+                  AND ws.level_number = os.level_number
+                  AND ws.is_active = 1
+            )
+        """)
+        
+        if stale_entries:
+            # Delete stale entries
+            for entry in stale_entries:
+                self.db.execute_query("""
+                    DELETE FROM optimization_status
+                    WHERE status_id = ?
+                """, (entry['status_id'],))
+            
+            self.db.checkpoint_wal()
+            sample_entries = [f"{e['game_id']} L{e['level_number']}" for e in stale_entries[:5]]
+            logger.debug(f"Removed {len(stale_entries)} stale optimization_status entries: {sample_entries}")
+        
+        return len(stale_entries)
     
     def is_level_optimized(self, game_id: str, level_number: int) -> bool:
         """
@@ -296,7 +335,10 @@ class OptimizationThresholdSystem:
             # Non-optimizers don't use this system
             return []
         
-        # Get unoptimized levels (high value targets)
+        # RULE: Optimizers ONLY work on levels WITH existing sequences to optimize
+        # Per Master Ruleset: "Work on beaten games ONLY" / "NEVER work on unbeaten LEVELS"
+        
+        # Get unoptimized levels that HAVE sequences (viable optimizer targets)
         unoptimized = self.db.execute_query("""
             SELECT 
                 game_id,
@@ -309,6 +351,7 @@ class OptimizationThresholdSystem:
                 'unoptimized' as priority_class
             FROM optimization_status
             WHERE is_optimized = FALSE
+              AND total_sequences > 0  -- CRITICAL: Must have sequences to optimize!
             ORDER BY 
                 generations_without_improvement ASC,  -- Prefer recently improved
                 improvement_rate DESC,                 -- Prefer high improvement potential
@@ -316,36 +359,12 @@ class OptimizationThresholdSystem:
             LIMIT ?
         """, (limit,))
         
-        # Also get unbeaten levels (no sequences yet - highest value)
-        all_games = self.db.execute_query("""
-            SELECT DISTINCT SUBSTR(game_id, 1, 4) as game_type
-            FROM agent_arc_performance
-            LIMIT 100
-        """)
+        # REMOVED: Unbeaten levels logic
+        # Optimizers should NEVER target games with NO sequences
+        # That's Pioneer work! Optimizers refine EXISTING solutions.
+        # Previous bug: Was sending optimizers to games with 0 sequences (like vc33)
         
-        unbeaten = []
-        for game in all_games[:limit]:
-            game_type = game['game_type']
-            # Check if this game has ANY sequences
-            has_seq = self.db.execute_query("""
-                SELECT COUNT(*) as cnt FROM winning_sequences
-                WHERE game_id LIKE ?
-            """, (f"{game_type}%",))
-            
-            if has_seq[0]['cnt'] == 0:
-                unbeaten.append({
-                    'game_id': game_type,
-                    'level_number': 1,
-                    'best_actions': None,
-                    'best_efficiency': None,
-                    'generations_without_improvement': 0,
-                    'improvement_rate': 0.0,
-                    'total_sequences': 0,
-                    'priority_class': 'unbeaten'
-                })
-        
-        # Combine and prioritize: unbeaten > unoptimized
-        targets = unbeaten + unoptimized
+        targets = unoptimized  # Only unoptimized levels WITH sequences
         
         return targets[:limit]
     

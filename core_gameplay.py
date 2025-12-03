@@ -262,7 +262,7 @@ class GameplayEngine:
                             logger.info(f" GENERALIST mode: Found {known_sequence['total_actions']}-action sequence "
                                       f"(completes {levels_completed_by_seq} levels), will replay exactly")
                     else:
-                        # No sequence available - exploiter mode cannot proceed
+                        # No sequence available - exploiter/optimizer mode cannot proceed
                         if agent_mode == 'exploiter':
                             logger.error(f" EXPLOITER ABORT: No sequences available for {game_id} - exploiters only use proven sequences")
                             return {
@@ -273,6 +273,19 @@ class GameplayEngine:
                                 'win': False,
                                 'method': 'exploiter_abort_no_sequence',
                                 'error': 'Exploiter mode requires proven sequences but none available'
+                            }
+                        elif agent_mode == 'optimizer':
+                            # RULE FIX: Optimizers ONLY work on levels WITH sequences
+                            # Per Master Ruleset: "Work on beaten games ONLY" 
+                            logger.error(f" OPTIMIZER ABORT: No sequences available for {game_id} - optimizers require sequences to improve")
+                            return {
+                                'game_id': game_id,
+                                'final_state': 'NO_SEQUENCE_AVAILABLE',
+                                'final_score': 0.0,
+                                'actions_taken': 0,
+                                'win': False,
+                                'method': 'optimizer_abort_no_sequence',
+                                'error': 'Optimizer mode requires existing sequences to optimize but none available'
                             }
                 except Exception as e:
                     logger.debug(f"Pattern learning lookup error: {e}")
