@@ -74,7 +74,7 @@ def check_for_vampires(generation: int, db_path: str = "core_data.db"):
     vampires = detector.detect_vampires(generation, threshold_multiplier=10.0)
     
     if vampires:
-        logger.info(f"⚠️  Found {len(vampires)} prestige vampires")
+        logger.info(f"[WARN]  Found {len(vampires)} prestige vampires")
         
         for v in vampires:
             logger.info(f"  - {v['agent_id'][:12]}... "
@@ -83,11 +83,11 @@ def check_for_vampires(generation: int, db_path: str = "core_data.db"):
         
         # Sunset vampires
         detector.sunset_vampires(vampires, generation, dry_run=False)
-        logger.info(f"✅ Sunset {len(vampires)} vampire agents")
+        logger.info(f"[OK] Sunset {len(vampires)} vampire agents")
         
         return len(vampires)
     else:
-        logger.info("✅ No prestige vampires detected")
+        logger.info("[OK] No prestige vampires detected")
         return 0
 
 if __name__ == "__main__":

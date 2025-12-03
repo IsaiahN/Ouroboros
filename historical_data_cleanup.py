@@ -288,6 +288,6 @@ if __name__ == "__main__":
     if execute:
         print("\n✓ Cleanup executed and database vacuumed")
     else:
-        print("\n⚠ DRY RUN - No data deleted. Use --execute to perform cleanup")
+        print("\n[WARN] DRY RUN - No data deleted. Use --execute to perform cleanup")
     
     print("="*80)

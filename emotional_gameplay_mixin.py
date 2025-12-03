@@ -88,4 +88,4 @@ if __name__ == "__main__":
         if curiosity != 1.0:
             print(f"  Curiosity: {curiosity:.1f}x")
     
-    print("\n✅ Somatic profiles working!")
+    print("\n[OK] Somatic profiles working!")

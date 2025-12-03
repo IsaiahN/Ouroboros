@@ -765,11 +765,11 @@ def create_horizontal_transfer_tables(db: DatabaseInterface) -> bool:
         db.execute_query("CREATE INDEX IF NOT EXISTS idx_transfers_recipient ON horizontal_transfer_events(recipient_agent_id)")
         db.execute_query("CREATE INDEX IF NOT EXISTS idx_chains_generation ON knowledge_propagation_chains(chain_start_generation)")
         
-        print("✅ Phase 5 horizontal transfer tables created successfully")
+        print("[OK] Phase 5 horizontal transfer tables created successfully")
         return True
         
     except Exception as e:
-        print(f"❌ Error creating horizontal transfer tables: {e}")
+        print(f"[FAIL] Error creating horizontal transfer tables: {e}")
         return False
 
 
@@ -807,20 +807,20 @@ def main():
         print(f"  Compatibility between {agent1[:8]}... and {agent2[:8]}...: {compatibility:.3f}")
         
         # Test transfer
-        print(f"\n🔄 Testing horizontal transfer...")
+        print(f"\n[SYNC] Testing horizontal transfer...")
         
         transfer_id = transfer_engine.initiate_horizontal_transfer(
             agent1, agent2, 'layer_3_somatic', 0
         )
         
         if transfer_id:
-            print(f"  ✅ Transfer successful: {transfer_id}")
+            print(f"  [OK] Transfer successful: {transfer_id}")
         else:
-            print(f"  ❌ Transfer failed (normal - success is probabilistic)")
+            print(f"  [FAIL] Transfer failed (normal - success is probabilistic)")
     
     # Get transfer statistics
     stats = transfer_engine.get_transfer_statistics(0)
-    print(f"\n📊 Transfer Statistics:")
+    print(f"\n[STATS] Transfer Statistics:")
     print(f"  Generation: {stats['generation']}")
     layer_stats = stats.get('layer_statistics', [])
     print(f"  Layer Stats: {len(layer_stats)} layers active")
@@ -828,7 +828,7 @@ def main():
         for layer in layer_stats:
             print(f"    Layer {layer['transfer_layer']}: {layer['successful_transfers']}/{layer['total_attempts']} success")
     
-    print("\n🚀 Phase 5 horizontal transfer system ready!")
+    print("\n[LAUNCH] Phase 5 horizontal transfer system ready!")
     print("Integration point: Call execute_generation_transfers() from autonomous_evolution_runner.py")
     
     return True

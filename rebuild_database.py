@@ -124,7 +124,7 @@ if space_saved > 1.0:  # Saved more than 1GB
     print(f"   Space reclaimed: {space_saved:.2f} GB")
     print(f"   WARNING: No backup created (insufficient disk space)")
 else:
-    print(f"\n⚠️ Not enough space saved to justify replacement")
+    print(f"\n[WARN] Not enough space saved to justify replacement")
     print(f"   Keeping old database")
     os.remove(new_db)
 

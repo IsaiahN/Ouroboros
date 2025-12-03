@@ -2,7 +2,8 @@
 
 ## Mission Transition: Human to Autonomous Oversight
 ## Reference Foundation
-- DOCS\ouroboros_final_implementation.md  (LLM Reference guide you should follow)
+- DOCS\how_the_system_works.md (MASTER REFERENCE)
+- DOCS\ouroboros_final_implementation.md  (Technical Implementation)
 - DOCS\ouroboros - biome theory.md
 - DOCS\Ouroboros Concept.md
 - DOCS\Ouroboros_Three_Layer_Quick_Reference.md
@@ -21,6 +22,7 @@
 - Ensure that the system learn how to play the rules of the game on its on
 
 **New Autonomous Role:**
+- **Follow the Master Ruleset** in `.github/copilot-instructions.md`
 - Generate superior hypotheses using ouroboros_final_implementation principles
 - Optimize agent rules, mixes, and modes through systematic experimentation
 - Replace manual monitoring with automated performance analysis

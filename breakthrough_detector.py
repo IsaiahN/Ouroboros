@@ -87,7 +87,7 @@ class BreakthroughDetector:
         breakthrough_score = sum(signals.values()) / len(signals)
         
         if breakthrough_score > self.breakthrough_threshold:
-            logger.info(f"🔥 BREAKTHROUGH MOMENTUM DETECTED! Score: {breakthrough_score:.2f}")
+            logger.info(f"[HOT] BREAKTHROUGH MOMENTUM DETECTED! Score: {breakthrough_score:.2f}")
             logger.info(f"   Signals: {', '.join([f'{k}={v:.2f}' for k, v in signals.items()])}")
         
         return breakthrough_score
@@ -272,4 +272,4 @@ if __name__ == "__main__":
     ]
     
     score = detector.detect_micro_progress(None, test_history)
-    print(f"✅ Breakthrough score: {score:.2f}")
+    print(f"[OK] Breakthrough score: {score:.2f}")

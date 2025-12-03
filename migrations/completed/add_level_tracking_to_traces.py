@@ -26,23 +26,23 @@ def migrate():
             ALTER TABLE action_traces 
             ADD COLUMN level_number INTEGER DEFAULT 1
         """)
-        print("✅ Added level_number column to action_traces")
+        print("[OK] Added level_number column to action_traces")
         
         # Create index for faster level-based queries
         db.execute_query("""
             CREATE INDEX IF NOT EXISTS idx_action_traces_level 
             ON action_traces(game_id, session_id, level_number)
         """)
-        print("✅ Created index for level-based queries")
+        print("[OK] Created index for level-based queries")
         
         # Verify column exists
         result = db.execute_query("""
             SELECT COUNT(*) as count FROM action_traces 
             WHERE level_number IS NOT NULL
         """)
-        print(f"✅ Verified: {result[0]['count']} traces have level_number")
+        print(f"[OK] Verified: {result[0]['count']} traces have level_number")
         
-        print("\n✅ Migration complete!")
+        print("\n[OK] Migration complete!")
         print("\nNext steps:")
         print("1. Update action_handler to pass current_level when recording traces")
         print("2. Update database_interface.log_action_trace() to accept level_number")
@@ -51,9 +51,9 @@ def migrate():
         
     except Exception as e:
         if "duplicate column name" in str(e).lower():
-            print("⚠️  Column already exists, skipping...")
+            print("[WARN]  Column already exists, skipping...")
         else:
-            print(f"❌ Error: {e}")
+            print(f"[FAIL] Error: {e}")
             raise
 
 if __name__ == "__main__":

@@ -546,16 +546,16 @@ class ARCClient:
         if response.get("game_id"):
             self.current_game_id = response.get("game_id")
         elif not self.current_game_id:
-            logger.error(f"⚠️ CRITICAL: API response missing game_id AND current_game_id is None!")
+            logger.error(f"[WARN] CRITICAL: API response missing game_id AND current_game_id is None!")
             
         if response.get("guid"):
             self.current_guid = response.get("guid")
         elif not self.current_guid:
-            logger.error(f"⚠️ CRITICAL: API response missing guid AND current_guid is None!")
+            logger.error(f"[WARN] CRITICAL: API response missing guid AND current_guid is None!")
             
         # Note: card_id is set via open_scorecard() and should persist through actions
         if not self.current_scorecard_id:
-            logger.error(f"⚠️ CRITICAL: current_scorecard_id is None!")
+            logger.error(f"[WARN] CRITICAL: current_scorecard_id is None!")
 
         # Create GameState from response
         game_state = GameState.from_dict(response)
@@ -571,7 +571,7 @@ class ARCClient:
             patched = True
             
         if patched:
-            logger.warning(f"🔧 Patched GameState with preserved credentials (response had game_id={response_had_game_id}, guid={response_had_guid})")
+            logger.warning(f"[FIX] Patched GameState with preserved credentials (response had game_id={response_had_game_id}, guid={response_had_guid})")
         
         return game_state
 

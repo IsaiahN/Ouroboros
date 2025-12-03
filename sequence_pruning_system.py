@@ -401,7 +401,7 @@ def display_pruning_report(stats: Dict[str, Any]):
         print(f"\nSequence Quality: {quality_pct:.1f}% high-success")
         
         if quality_pct < 20:
-            print("  ⚠️  Low quality - most sequences failing")
+            print("  [WARN]  Low quality - most sequences failing")
         elif quality_pct < 50:
             print("  ⚙️  Moderate quality - some good sequences")
         else:
@@ -442,6 +442,6 @@ if __name__ == "__main__":
         print("="*70)
         
         if args.dry_run:
-            print("\n⚠️  DRY RUN - No sequences were actually deleted")
+            print("\n[WARN]  DRY RUN - No sequences were actually deleted")
         else:
             print("\n✓ Sequences deactivated (audit trail preserved)")

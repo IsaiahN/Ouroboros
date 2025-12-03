@@ -152,7 +152,7 @@ def analyze_backup_db(db_path: Path, current_sequences: Dict[Tuple[str, int], in
         conn = sqlite3.connect(str(db_path), timeout=30)
         conn.row_factory = sqlite3.Row
     except Exception as e:
-        print(f"  ❌ Cannot open {db_path.name}: {e}")
+        print(f"  [FAIL] Cannot open {db_path.name}: {e}")
         return results
     
     try:
@@ -163,11 +163,11 @@ def analyze_backup_db(db_path: Path, current_sequences: Dict[Tuple[str, int], in
                 WHERE type='table' AND name='winning_sequences'
             """).fetchone()
         except sqlite3.DatabaseError as e:
-            print(f"  ❌ Database error in {db_path.name}: {e}")
+            print(f"  [FAIL] Database error in {db_path.name}: {e}")
             return results
         
         if not tables:
-            print(f"  ⚠️  No winning_sequences table in {db_path.name}")
+            print(f"  [WARN]  No winning_sequences table in {db_path.name}")
             return results
         
         # Detect schema - check which columns exist
@@ -281,13 +281,13 @@ def print_analysis_report(db_name: str, results: Dict[str, List[SequenceInfo]]):
     print(f"📁 {db_name}")
     print(f"{'='*60}")
     print(f"  Total sequences: {total}")
-    print(f"  🚀 FRONTIER (new levels): {len(frontier)}")
+    print(f"  [LAUNCH] FRONTIER (new levels): {len(frontier)}")
     print(f"  ⚡ BETTER (fewer actions): {len(better)}")
     print(f"  ➖ Duplicate/worse: {len(duplicate)}")
-    print(f"  ❌ Invalid (lp85/bloated): {len(invalid)}")
+    print(f"  [FAIL] Invalid (lp85/bloated): {len(invalid)}")
     
     if frontier:
-        print(f"\n  🚀 FRONTIER SEQUENCES:")
+        print(f"\n  [LAUNCH] FRONTIER SEQUENCES:")
         # Group by game type
         by_game: Dict[str, List[SequenceInfo]] = {}
         for seq in frontier:
@@ -389,17 +389,17 @@ def import_sequences(sequences: List[SequenceInfo], dry_run: bool = True) -> int
                     1     # is_active
                 ))
                 imported += 1
-                print(f"  ✅ Imported {seq.game_id} L{seq.level_number} ({seq.action_count} actions)")
+                print(f"  [OK] Imported {seq.game_id} L{seq.level_number} ({seq.action_count} actions)")
                 
             except Exception as e:
-                print(f"  ⚠️  Failed to import {seq.game_id} L{seq.level_number}: {e}")
+                print(f"  [WARN]  Failed to import {seq.game_id} L{seq.level_number}: {e}")
                 imported += 1
                 
             except Exception as e:
-                print(f"  ⚠️  Failed to import {seq.game_id} L{seq.level_number}: {e}")
+                print(f"  [WARN]  Failed to import {seq.game_id} L{seq.level_number}: {e}")
         
         conn.commit()
-        print(f"\n✅ Imported {imported} sequences")
+        print(f"\n[OK] Imported {imported} sequences")
         return imported
         
     finally:
@@ -415,7 +415,7 @@ def main():
     print(f"Backup directory: {BACKUP_DIR}")
     
     # Get current state
-    print("\n📊 Analyzing current database...")
+    print("\n[STATS] Analyzing current database...")
     global current_sequences
     current_sequences = get_current_sequences()
     current_max_levels = get_current_max_levels()
@@ -475,7 +475,7 @@ def main():
     print("\n" + "="*60)
     print("RECOVERY SUMMARY")
     print("="*60)
-    print(f"\n🚀 FRONTIER sequences to import: {len(all_frontier)}")
+    print(f"\n[LAUNCH] FRONTIER sequences to import: {len(all_frontier)}")
     if all_frontier:
         by_game: Dict[str, List[SequenceInfo]] = {}
         for seq in all_frontier:
@@ -511,10 +511,10 @@ def main():
     to_import = all_frontier + all_better
     
     if not to_import:
-        print("\n✅ No new sequences to import - current database is up to date!")
+        print("\n[OK] No new sequences to import - current database is up to date!")
         return
     
-    print(f"\n📦 Total sequences to import: {len(to_import)}")
+    print(f"\n[PKG] Total sequences to import: {len(to_import)}")
     
     # Ask for confirmation
     print("\n" + "-"*60)
@@ -522,11 +522,11 @@ def main():
     
     if response == 'y':
         imported = import_sequences(to_import, dry_run=False)
-        print(f"\n✅ Successfully imported {imported} sequences!")
+        print(f"\n[OK] Successfully imported {imported} sequences!")
     elif response == 'dry':
         import_sequences(to_import, dry_run=True)
     else:
-        print("\n❌ Import cancelled")
+        print("\n[FAIL] Import cancelled")
 
 
 if __name__ == "__main__":

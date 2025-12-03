@@ -68,7 +68,7 @@ class BreakthroughBudgetAllocator:
             total = self.EXPLOITATION_BUDGET
             reason = f"Beaten game ({level_wins}+ levels) - optimization budget"
         
-        logger.info(f"🎯 Budget for {game_id}: {total} total, {per_level}/level ({phase})")
+        logger.info(f"[TARGET] Budget for {game_id}: {total} total, {per_level}/level ({phase})")
         logger.debug(f"   Reason: {reason}")
         
         return {
@@ -129,7 +129,7 @@ class BreakthroughBudgetAllocator:
         total_budget = sum(b['action_allowance_total'] for b in budgets.values())
         avg_budget = total_budget / len(budgets) if budgets else 0
         
-        logger.info(f"\n📊 BUDGET ALLOCATION SUMMARY:")
+        logger.info(f"\n[STATS] BUDGET ALLOCATION SUMMARY:")
         logger.info(f"   Total Games: {len(game_ids)}")
         logger.info(f"   DISCOVERY ({discovery_count}): {discovery_count/len(game_ids)*100:.1f}% @ {self.DISCOVERY_BUDGET} actions")
         logger.info(f"   EXPANSION ({expansion_count}): {expansion_count/len(game_ids)*100:.1f}% @ {self.EXPANSION_BUDGET} actions")
@@ -154,6 +154,6 @@ if __name__ == "__main__":
         game_ids = [g['game_id'] for g in test_games]
         allocator.log_budget_distribution(game_ids)
         
-        print("\n✅ Breakthrough Budget Allocator test complete")
+        print("\n[OK] Breakthrough Budget Allocator test complete")
     else:
-        print("⚠️  No games found in database")
+        print("[WARN]  No games found in database")

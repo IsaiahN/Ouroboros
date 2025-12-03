@@ -215,7 +215,7 @@ if __name__ == "__main__":
     success = maintenance.regenerate_schema_file()
     
     if success:
-        print("\n✅ Schema exported successfully")
+        print("\n[OK] Schema exported successfully")
         
         # Show version history
         history = maintenance.get_version_history(limit=5)
@@ -225,4 +225,4 @@ if __name__ == "__main__":
                 print(f"  {v['version_number']}: {v['changes_summary']}")
                 print(f"    Tables: {v['table_count']}, Columns: {v['total_columns']}")
     else:
-        print("\n❌ Schema export failed")
+        print("\n[FAIL] Schema export failed")

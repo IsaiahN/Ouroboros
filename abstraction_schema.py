@@ -134,7 +134,7 @@ def create_abstraction_tables(db_path="core_data.db"):
             ON detected_objects(game_id, level_number)
         """)
         
-        logger.info("✅ All abstraction tables created successfully")
+        logger.info("[OK] All abstraction tables created successfully")
         return True
         
     except Exception as e:
@@ -159,7 +159,7 @@ def verify_abstraction_schema(db_path="core_data.db"):
             logger.error(f"Missing table: {table_name}")
             return False
     
-    logger.info("✅ All abstraction tables verified")
+    logger.info("[OK] All abstraction tables verified")
     return True
 
 
@@ -169,19 +169,19 @@ if __name__ == "__main__":
     print("=" * 70)
     
     if not is_abstraction_enabled():
-        print("\n⚠️  ENABLE_ABSTRACTION is false")
+        print("\n[WARN]  ENABLE_ABSTRACTION is false")
         print("Set environment variable: ENABLE_ABSTRACTION=true")
         print("\nSkipping table creation (backwards compatible)")
     else:
-        print("\n✅ ENABLE_ABSTRACTION is true")
+        print("\n[OK] ENABLE_ABSTRACTION is true")
         print("\nCreating tables...")
         
         if create_abstraction_tables():
-            print("\n✅ Schema created successfully")
+            print("\n[OK] Schema created successfully")
             
             if verify_abstraction_schema():
-                print("✅ Schema verified")
+                print("[OK] Schema verified")
             else:
-                print("❌ Schema verification failed")
+                print("[FAIL] Schema verification failed")
         else:
-            print("\n❌ Schema creation failed")
+            print("\n[FAIL] Schema creation failed")

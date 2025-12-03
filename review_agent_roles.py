@@ -89,8 +89,8 @@ class TestPioneerBehavior(unittest.TestCase):
         
     def test_pioneer_has_sensation_disabled(self):
         """Pioneers should NOT use sensation/feelings (per master ruleset)."""
-        # From rules: "❌ NO subsequence matching on level they're pioneering"
-        # and "✅ Full exploration, no subsequence matching ON FRONTIER LEVELS"
+        # From rules: "[FAIL] NO subsequence matching on level they're pioneering"
+        # and "[OK] Full exploration, no subsequence matching ON FRONTIER LEVELS"
         # Sensation engine should be disabled for pioneers on frontier
         agent_mode = 'pioneer'
         is_frontier = True
@@ -105,7 +105,7 @@ class TestOptimizerBehavior(unittest.TestCase):
     
     def test_optimizer_works_on_beaten_games_only(self):
         """Optimizer should only work on games with proven sequences."""
-        # From rules: "❌ NEVER work on unbeaten LEVELS in unbeaten games"
+        # From rules: "[FAIL] NEVER work on unbeaten LEVELS in unbeaten games"
         game_has_sequence = True
         agent_mode = 'optimizer'
         
@@ -149,7 +149,7 @@ class TestGeneralistBehavior(unittest.TestCase):
         
     def test_generalist_uses_sensation(self):
         """Generalist should use sensation/feelings (per master ruleset)."""
-        # From rules: "✅ **Sensation/feelings ENABLED** (use emotional intelligence)"
+        # From rules: "[OK] **Sensation/feelings ENABLED** (use emotional intelligence)"
         agent_mode = 'generalist'
         
         should_use_sensation = (agent_mode == 'generalist')
@@ -170,7 +170,7 @@ class TestExploiterBehavior(unittest.TestCase):
     
     def test_exploiter_only_optimized_games(self):
         """Exploiter should only work on fully optimized games."""
-        # From rules: "✅ Only games marked 'OPTIMIZED'"
+        # From rules: "[OK] Only games marked 'OPTIMIZED'"
         game_is_optimized = True
         agent_mode = 'exploiter'
         

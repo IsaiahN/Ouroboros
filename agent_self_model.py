@@ -256,9 +256,9 @@ if __name__ == "__main__":
     """)
     
     if result:
-        print("✅ agent_object_control table exists")
+        print("[OK] agent_object_control table exists")
     else:
-        print("❌ Table creation failed")
+        print("[FAIL] Table creation failed")
     
     # Test basic functionality
     test_controlled = ["x:5,y:10", "x:6,y:10"]
@@ -266,8 +266,8 @@ if __name__ == "__main__":
     
     retrieved = asm.get_controlled_objects("test_agent", "test_game", 1)
     if retrieved == test_controlled:
-        print("✅ Store and retrieve working")
+        print("[OK] Store and retrieve working")
     else:
-        print(f"❌ Mismatch: {retrieved} != {test_controlled}")
+        print(f"[FAIL] Mismatch: {retrieved} != {test_controlled}")
     
-    print("\n✅ Agent Self-Model system operational")
+    print("\n[OK] Agent Self-Model system operational")

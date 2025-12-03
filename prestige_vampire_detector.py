@@ -239,7 +239,7 @@ class PrestigeVampireDetector:
                     WHERE agent_id = ?
                 """, (agent_id,))
                 
-                logger.info(f"✅ Sunset vampire {agent_id[:8]}...")
+                logger.info(f"[OK] Sunset vampire {agent_id[:8]}...")
             else:
                 logger.info(f"🔍 DRY RUN: Would sunset {agent_id[:8]}...")
         
@@ -280,6 +280,6 @@ if __name__ == "__main__":
             print(f"\n{'DRY RUN: ' if args.dry_run else ''}Sunsetting vampires...")
             detector.sunset_vampires(vampires, args.generation, dry_run=args.dry_run)
         else:
-            print("\n⚠️  Use --sunset flag to actually sunset these agents")
+            print("\n[WARN]  Use --sunset flag to actually sunset these agents")
     else:
-        print("\n✅ No prestige vampires detected")
+        print("\n[OK] No prestige vampires detected")

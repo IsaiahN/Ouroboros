@@ -288,7 +288,7 @@ class AgentRevivalSystem:
             ))
             
             logger.info(
-                f"✅ Revived agent {new_agent_id} "
+                f"[OK] Revived agent {new_agent_id} "
                 f"(parent: {archived_agent.get('agent_id')}, mode: {revival_mode})"
             )
             
@@ -365,21 +365,21 @@ if __name__ == "__main__":
         """)
         
         if result:
-            print("✅ agent_revivals table exists")
+            print("[OK] agent_revivals table exists")
         else:
-            print("❌ Table creation failed")
+            print("[FAIL] Table creation failed")
         
         # Test trigger detection
         triggers = revival_system.detect_revival_triggers(args.generation)
-        print(f"\n✅ Detected {len(triggers)} revival triggers")
+        print(f"\n[OK] Detected {len(triggers)} revival triggers")
         for trigger in triggers:
             print(f"  - {trigger['trigger']}: {len(trigger.get('candidates', []))} candidates")
         
-        print("\n✅ Agent Revival system operational")
+        print("\n[OK] Agent Revival system operational")
     else:
         # Run actual revival
         revived = revival_system.process_revival_triggers(args.generation, args.max)
-        print(f"\n🔄 Revived {len(revived)} agents:")
+        print(f"\n[SYNC] Revived {len(revived)} agents:")
         for agent_id in revived:
             print(f"  - {agent_id}")
 

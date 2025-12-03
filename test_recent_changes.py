@@ -483,9 +483,9 @@ if __name__ == "__main__":
     print(f"Errors: {len(result.errors)}")
     
     if result.wasSuccessful():
-        print("\n✅ ALL TESTS PASSED - Recent changes verified")
+        print("\n[OK] ALL TESTS PASSED - Recent changes verified")
     else:
-        print("\n❌ SOME TESTS FAILED")
+        print("\n[FAIL] SOME TESTS FAILED")
         if result.failures:
             print("\nFailed tests:")
             for test, traceback in result.failures:

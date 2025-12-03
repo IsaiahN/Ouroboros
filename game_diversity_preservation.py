@@ -217,7 +217,7 @@ class GameDiversityPreserver:
         
         # Show endangered games
         if endangered:
-            print(f"\n  ⚠️  Endangered games:")
+            print(f"\n  [WARN]  Endangered games:")
             for game_id in endangered:
                 count = counts.get(game_id, 0)
                 print(f"    {game_id}: {count} specialists (need {self.min_specialists - count} more)")
@@ -284,8 +284,8 @@ if __name__ == "__main__":
     print(f"  New assignments: {result['assignments_made']}")
     
     if result['assignments_made'] > 0:
-        print("\n✅ Diversity restored!")
+        print("\n[OK] Diversity restored!")
     else:
-        print("\n✅ All games have sufficient coverage")
+        print("\n[OK] All games have sufficient coverage")
     
     print("=" * 80)

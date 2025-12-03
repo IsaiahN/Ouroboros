@@ -320,7 +320,7 @@ if __name__ == "__main__":
     abstraction = SequenceAbstraction()
     
     # Test pattern similarity
-    print("\n🧪 Test: Action Pattern Similarity")
+    print("\n[TEST] Test: Action Pattern Similarity")
     p1 = [1, 3, 1, 3, 1, 3]
     p2 = [1, 3, 1, 3, 1, 3]
     p3 = [1, 3, 1, 3]
@@ -331,17 +331,17 @@ if __name__ == "__main__":
     print(f"  Different: {abstraction._pattern_similarity(p1, p4):.2%}")
     
     # Test multi-sequence concept extraction
-    print("\n🧪 Test: Multi-Sequence Concept Extraction")
+    print("\n[TEST] Test: Multi-Sequence Concept Extraction")
     concept = abstraction.extract_multi_sequence_concept("vc33", level_number=1, min_sequences=3)
     
     if concept:
-        print(f"  📊 Concept: {concept['description']}")
+        print(f"  [STATS] Concept: {concept['description']}")
         print(f"  Sample: {concept['sample_size']} sequences")
         print(f"  Confidence: {concept['confidence']:.0%}")
         
         if concept['invariant_positions']:
             action_names = {1: "right", 2: "down", 3: "left", 4: "up", 5: "select", 6: "submit", 7: "reset"}
-            print(f"\n  🔒 INVARIANTS (MUST do):")
+            print(f"\n  [LOCK] INVARIANTS (MUST do):")
             for inv in concept['invariant_positions'][:5]:
                 coord_str = ""
                 if inv.get('coordinates'):
@@ -359,15 +359,15 @@ if __name__ == "__main__":
                 print(f"     Pos {inv['position']}: ACTION{inv['action']} ({action_names.get(inv['action'], '?')}){coord_str}")
         
         if concept['variable_regions']:
-            print(f"\n  🔄 VARIANTS (CAN adapt):")
+            print(f"\n  [SYNC] VARIANTS (CAN adapt):")
             for region in concept['variable_regions'][:3]:
                 print(f"     Pos {region['start']}-{region['end']}: {len(region['options'])} options")
         
-        print(f"\n  📝 Template: {' → '.join(concept['template'][:10])}")
+        print(f"\n  [NOTE] Template: {' → '.join(concept['template'][:10])}")
     else:
         print("  Need more sequences")
     
-    print("\n✅ Multi-sequence concept extraction ready!")
-    print("\n💡 BREAKTHROUGH: Comparing sequences reveals TRUE concepts!")
+    print("\n[OK] Multi-sequence concept extraction ready!")
+    print("\n[IDEA] BREAKTHROUGH: Comparing sequences reveals TRUE concepts!")
     print("   Invariants = what MUST happen")
     print("   Variants = what CAN adapt")

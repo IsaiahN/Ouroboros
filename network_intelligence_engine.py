@@ -573,7 +573,7 @@ def display_network_intelligence_dashboard(generation: int):
     """, (generation,))
     
     if not snapshot:
-        print("\n⚠️  No network data available yet for this generation.")
+        print("\n[WARN]  No network data available yet for this generation.")
         return
     
     s = snapshot[0]

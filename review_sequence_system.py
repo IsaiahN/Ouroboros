@@ -808,10 +808,10 @@ if __name__ == '__main__':
     print()
     
     if result.wasSuccessful():
-        print("✅ ALL TESTS PASSED")
+        print("[OK] ALL TESTS PASSED")
         sys.exit(0)
     else:
-        print("❌ SOME TESTS FAILED")
+        print("[FAIL] SOME TESTS FAILED")
         if result.failures:
             print("\nFailures:")
             for test, traceback in result.failures:

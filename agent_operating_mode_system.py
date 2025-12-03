@@ -124,7 +124,7 @@ class AgentOperatingModeSystem:
                 self.TARGET_EXPLOITER_PCT = 0.15  # Higher in optimization phase
                 self.phase = "OPTIMIZATION"
                 logger.info(
-                    f"🎯 OPTIMIZATION PHASE: {full_wins[0]['win_count']} games fully beaten"
+                    f"[TARGET] OPTIMIZATION PHASE: {full_wins[0]['win_count']} games fully beaten"
                 )
                 logger.info(
                     f"   Distribution: 10% PIONEER, 50% OPTIMIZER, 25% GENERALIST, 15% EXPLOITER"
@@ -225,14 +225,14 @@ class AgentOperatingModeSystem:
                 self.phase = "OPTIMIZATION"
 
                 logger.info(f"\n{'=' * 80}")
-                logger.info(f"🎯 PHASE TRANSITION: EXPLORATION → OPTIMIZATION")
+                logger.info(f"[TARGET] PHASE TRANSITION: EXPLORATION → OPTIMIZATION")
                 logger.info(f"{'=' * 80}")
-                logger.info(f"✅ {full_wins[0]['win_count']} games fully beaten!")
+                logger.info(f"[OK] {full_wins[0]['win_count']} games fully beaten!")
                 logger.info(
-                    f"📊 Old distribution: 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST"
+                    f"[STATS] Old distribution: 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST"
                 )
                 logger.info(
-                    f"📊 New distribution: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST"
+                    f"[STATS] New distribution: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST"
                 )
                 logger.info(
                     f"   Focus shifting from exploration to efficiency refinement"
@@ -247,7 +247,7 @@ class AgentOperatingModeSystem:
                 self.TARGET_GENERALIST_PCT = 0.20
                 self.phase = "EXPLORATION"
                 logger.warning(
-                    f"⚠️ PHASE REVERT: OPTIMIZATION → EXPLORATION (no wins found)"
+                    f"[WARN] PHASE REVERT: OPTIMIZATION → EXPLORATION (no wins found)"
                 )
                 return True
 

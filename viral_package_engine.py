@@ -909,7 +909,7 @@ def display_viral_ecosystem_dashboard(db: DatabaseInterface, generation: int):
     print("="*80)
     
     # Top viral packages
-    print("\n🦠 TOP VIRAL PACKAGES (Positive Selection)")
+    print("\n[VIRAL] TOP VIRAL PACKAGES (Positive Selection)")
     print("-" * 80)
     packages = engine.get_top_packages(5)
     
@@ -924,7 +924,7 @@ def display_viral_ecosystem_dashboard(db: DatabaseInterface, generation: int):
         print("  No viral packages yet - create from winning sequences")
     
     # Top pariahs
-    print("\n☠️  TOP PARIAHS (Negative Selection)")
+    print("\n[SKULL]  TOP PARIAHS (Negative Selection)")
     print("-" * 80)
     pariahs = engine.get_top_pariahs(5)
     
@@ -951,7 +951,7 @@ def display_viral_ecosystem_dashboard(db: DatabaseInterface, generation: int):
     
     if stats:
         s = stats[0]
-        print("\n📊 ECOSYSTEM STATISTICS")
+        print("\n[STATS] ECOSYSTEM STATISTICS")
         print("-" * 80)
         print(f"  Viral Packages: {s['total_packages']} active")
         print(f"  Package Infections: {s['total_infections']} total")
@@ -959,7 +959,7 @@ def display_viral_ecosystem_dashboard(db: DatabaseInterface, generation: int):
         print(f"  Pariah Awareness: {s['total_awareness']} agents aware")
         
         if s['total_packages'] > 0 and s['total_pariahs'] > 0:
-            print(f"\n  🎯 Bidirectional Evolution ACTIVE")
+            print(f"\n  [TARGET] Bidirectional Evolution ACTIVE")
             print(f"     Packages guide toward success, Pariahs warn of failure")
     
     print("="*80)

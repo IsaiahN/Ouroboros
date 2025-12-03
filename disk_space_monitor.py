@@ -57,11 +57,11 @@ class DiskSpaceMonitor:
             
         # Warning: Low disk space
         elif free_gb < self.MIN_FREE_SPACE_GB:
-            warnings.append(f"⚠️ WARNING: Low disk space - {free_gb:.2f} GB free (< {self.MIN_FREE_SPACE_GB} GB)")
+            warnings.append(f"[WARN] WARNING: Low disk space - {free_gb:.2f} GB free (< {self.MIN_FREE_SPACE_GB} GB)")
             
         # Warning: Database too large
         if db_size_gb > self.MAX_DB_SIZE_GB:
-            msg = f"⚠️ WARNING: Database is {db_size_gb:.2f} GB (> {self.MAX_DB_SIZE_GB} GB limit)"
+            msg = f"[WARN] WARNING: Database is {db_size_gb:.2f} GB (> {self.MAX_DB_SIZE_GB} GB limit)"
             warnings.append(msg)
             if db_size_gb > self.MAX_DB_SIZE_GB * 2:
                 critical = True

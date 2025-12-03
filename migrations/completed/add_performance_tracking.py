@@ -65,4 +65,4 @@ if new_content == content:
 with open(FILE_PATH, "w", encoding="utf-8") as f:
     f.write(new_content)
 
-print("✅ Successfully added performance tracking call to play_single_game")
+print("[OK] Successfully added performance tracking call to play_single_game")

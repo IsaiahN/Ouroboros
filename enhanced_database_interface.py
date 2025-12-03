@@ -58,7 +58,7 @@ if __name__ == "__main__":
     print("\nCreating test table...")
     db.execute_query("CREATE TABLE IF NOT EXISTS integration_test (id INTEGER, value TEXT)")
     
-    print("\n✅ Enhanced database interface working!")
+    print("\n[OK] Enhanced database interface working!")
     print("Schema should have been auto-exported")
     
     # Clean up

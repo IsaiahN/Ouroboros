@@ -332,7 +332,7 @@ if __name__ == "__main__":
     print("=" * 70)
     
     if not is_abstraction_enabled():
-        print("\n⚠️  ENABLE_ABSTRACTION is false")
+        print("\n[WARN]  ENABLE_ABSTRACTION is false")
         print("Set: ENABLE_ABSTRACTION=true to enable")
     else:
         detector = ObjectDetector()
@@ -352,10 +352,10 @@ if __name__ == "__main__":
             test_frame, "test_game", 1, 0
         )
         
-        print(f"\n✅ Detected {len(objects)} objects")
+        print(f"\n[OK] Detected {len(objects)} objects")
         for obj in objects:
             props = json.loads(obj['properties'])
             print(f"  - Color {props['color']}: {props['area']} cells at {props['center']}")
         
         detector.store_detected_objects(objects)
-        print("\n✅ Objects stored in database")
+        print("\n[OK] Objects stored in database")

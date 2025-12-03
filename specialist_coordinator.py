@@ -219,11 +219,11 @@ class SpecialistCoordinator:
         """Print current specialist assignments and performance"""
         summary = self.get_specialist_performance_summary()
         
-        print(f"\n📊 Specialist System Status:")
+        print(f"\n[STATS] Specialist System Status:")
         print(f"   Total Specialists: {summary['total_specialists']}")
         
         if summary['top_performers']:
-            print(f"\n🏆 Top Performing Specialists:")
+            print(f"\n[TROPHY] Top Performing Specialists:")
             for i, spec in enumerate(summary['top_performers'], 1):
                 print(f"   {i}. Agent {spec['agent_id'][:8]}...")
                 print(f"      Games: {spec['assigned_games']}")

@@ -57,7 +57,7 @@ class ScorecardReviewer:
         Returns:
             Dict with scorecard summary statistics
         """
-        print(f"📊 Reviewing scorecards table at {self.scorecards_url}")
+        print(f"[STATS] Reviewing scorecards table at {self.scorecards_url}")
         
         # This would use browser_subagent to:
         # 1. Navigate to scorecards page
@@ -91,7 +91,7 @@ class ScorecardReviewer:
         Returns:
             Dict with analysis of gameplay
         """
-        print(f"🎮 Reviewing scorecard: {scorecard_id}")
+        print(f"[GAME] Reviewing scorecard: {scorecard_id}")
         print(f"⏩ Playback speed: {speed_multiplier}x")
         
         # This would use browser_subagent to:
@@ -155,14 +155,14 @@ class ScorecardReviewer:
         Returns:
             Markdown formatted report
         """
-        report = f"""# 🎮 ARC Scorecards Review Report
+        report = f"""# [GAME] ARC Scorecards Review Report
 
 **Date**: {datetime.now().isoformat()}
 **Total Scorecards Reviewed**: {len(scorecards_data)}
 
 ---
 
-## 📊 Scorecard Summary
+## [STATS] Scorecard Summary
 
 """
         
@@ -186,27 +186,27 @@ class ScorecardReviewer:
 
 async def main():
     """Main entry point for scorecard review."""
-    print("🚀 Starting ARC Scorecard Review Automation\n")
+    print("[LAUNCH] Starting ARC Scorecard Review Automation\n")
     
     reviewer = ScorecardReviewer()
     
     # Ensure logged in
     if not await reviewer.ensure_logged_in():
-        print("❌ Failed to log in. Please check credentials.")
+        print("[FAIL] Failed to log in. Please check credentials.")
         return
     
-    print("✅ Login verified\n")
+    print("[OK] Login verified\n")
     
     # Review scorecards table
     table_summary = await reviewer.review_scorecards_table()
-    print(f"📊 Table review complete: {table_summary}\n")
+    print(f"[STATS] Table review complete: {table_summary}\n")
     
     # Example: Review a specific scorecard (would be automated in practice)
     # scorecard_analysis = await reviewer.review_scorecard_playback("example-scorecard-id", speed_multiplier=5)
-    # print(f"🎮 Scorecard analysis: {scorecard_analysis}\n")
+    # print(f"[GAME] Scorecard analysis: {scorecard_analysis}\n")
     
-    print("✅ Scorecard review automation complete!")
-    print("\n💡 To integrate with browser automation:")
+    print("[OK] Scorecard review automation complete!")
+    print("\n[IDEA] To integrate with browser automation:")
     print("   1. Use browser_subagent to navigate to scorecards page")
     print("   2. Extract table data from DOM")
     print("   3. Click scorecard IDs to view playback")

@@ -82,6 +82,13 @@
 - Database extensions → `complete_database_schema.sql`
 - Never create duplicate functionality
 
+### **RULE 11: No Unicode Emojis**
+- NEVER use Unicode emoji characters in code (✅, ❌, 🦠, 📦, etc.)
+- Use ASCII alternatives: `[OK]`, `[FAIL]`, `[VIRAL]`, `[PKG]`, etc.
+- **Why**: Windows cp1252 encoding errors prevent scripts from running
+- **Applies to**: All print statements, logger messages, comments, docstrings
+- **Enforcement**: Run `python remove_emojis.py` if emojis accidentally added
+
 ---
 
 ## 🧬 NETWORK-CENTRIC DESIGN PHILOSOPHY

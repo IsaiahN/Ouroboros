@@ -535,7 +535,7 @@ class PrestigeEngine:
                         )
                         
                         self.logger.info(
-                            f"🦠 VIRAL SPREAD: Agent {agent_id[:8]} used {discoverer_id[:8]}'s "
+                            f"[VIRAL] VIRAL SPREAD: Agent {agent_id[:8]} used {discoverer_id[:8]}'s "
                             f"sequence {sequence_id[:8]} - "
                             f"{'SUCCESS' if success else 'FAILED'} "
                             f"(total uses: {new_uses}, success rate: {new_success_rate:.1%})"

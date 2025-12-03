@@ -33,6 +33,7 @@ from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
+from agent_self_model import AgentSelfModel
 
 # Abstraction engine imports
 try:
@@ -67,6 +68,7 @@ class GameplayEngine:
         self.breakthrough_detector = BreakthroughDetector()  # Tier 1: Momentum detection
         self.matching_pipeline = MultiStageMatchingPipeline(self.db)  # Tier 1: Multi-stage matching (+40%)
         self.subgoal_activator = SubgoalPlanningActivator(self.db)  # Tier 1: Subgoal planning (+30%)
+        self.agent_self_model = AgentSelfModel(db_path)  # Self-model: Track controlled objects
         
         # Inject subgoal activator into action handler for real-time guidance
         self.action_handler.subgoal_activator = self.subgoal_activator
@@ -317,7 +319,7 @@ class GameplayEngine:
                     # Optimizer/Exploiter on frontier - check if pariah is worth challenging
                     pariah_worth = self._analyze_pariah_worthiness(known_sequence, game_id)
                     if not pariah_worth['worth_challenging']:
-                        logger.info(f"⏭  {agent_mode.upper()} skipping pariah: {pariah_worth['reason']}")
+                        logger.info(f"[SKIP]  {agent_mode.upper()} skipping pariah: {pariah_worth['reason']}")
                         should_challenge_pariah = False
                         known_sequence = None  # Skip sequence, fall back to exploration
                     else:
@@ -333,7 +335,7 @@ class GameplayEngine:
                         )
                     except ValueError as e:
                         if "frame corruption" in str(e).lower():
-                            logger.error(f"❌ FRAME CORRUPTION during sequence replay - aborting game")
+                            logger.error(f"[FAIL] FRAME CORRUPTION during sequence replay - aborting game")
                             await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
                             return {
                                 'game_id': game_id,
@@ -404,7 +406,7 @@ class GameplayEngine:
                         # Some games (like ls20) incorrectly report WIN/GAME_OVER after partial completion
                         # Pioneers and Generalists should continue playing until action budget exhausted
                         if game_state.state != "NOT_FINISHED":
-                            logger.warning(f"⚠ Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED for continuation")
+                            logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED for continuation")
                             game_state.state = "NOT_FINISHED"
                         
                         # PIONEER/GENERALIST/OPTIMIZER: Continue playing until action budget exhausted
@@ -445,11 +447,11 @@ class GameplayEngine:
                 # Check BOTH is_running AND is_shutting_down
                 # When shutdown is requested, we should exit immediately and save current state
                 if not self.session_manager.is_running:
-                    logger.info(f"⏹ Session stopped, ending game gracefully")
+                    logger.info(f"[END] Session stopped, ending game gracefully")
                     break
                 
                 if self.session_manager.is_shutting_down:
-                    logger.info(f"🛑 SHUTDOWN REQUESTED - ending game immediately to save state")
+                    logger.info(f"[STOP] SHUTDOWN REQUESTED - ending game immediately to save state")
                     logger.info(f"   Current score: {game_state.score}, Actions: {action_count}")
                     # Break immediately - the finally block will save results
                     break
@@ -457,7 +459,7 @@ class GameplayEngine:
                 # CRITICAL: If game reports WIN/GAME_OVER but we have actions left, keep trying
                 # Some games report completion prematurely (e.g., ls20 after level 1)
                 if game_state.state != "NOT_FINISHED":
-                    logger.warning(f"⚠ Game reports '{game_state.state}' but actions remain ({action_count}/{self.game_config['max_total_actions']}) - forcing continuation")
+                    logger.warning(f"[WARN] Game reports '{game_state.state}' but actions remain ({action_count}/{self.game_config['max_total_actions']}) - forcing continuation")
                     game_state.state = "NOT_FINISHED"
 
                 try:
@@ -486,7 +488,7 @@ class GameplayEngine:
                     
                     # API error backoff - wait if we had recent errors
                     if api_error_backoff > 0:
-                        logger.info(f"⏱ API error backoff: waiting {api_error_backoff}s before next action")
+                        logger.info(f"[TIME] API error backoff: waiting {api_error_backoff}s before next action")
                         await asyncio.sleep(api_error_backoff)
                         api_error_backoff = 0  # Reset after waiting
                     
@@ -522,7 +524,7 @@ class GameplayEngine:
                         
                         if is_api_error:
                             consecutive_api_errors += 1
-                            logger.warning(f"⚠ API error #{consecutive_api_errors}: {action_error}")
+                            logger.warning(f"[WARN] API error #{consecutive_api_errors}: {action_error}")
                             
                             # 400 BAD_REQUEST means game session is DEAD - exit immediately
                             # No point retrying, the game has ended on the server side
@@ -531,11 +533,11 @@ class GameplayEngine:
                             ])
                             
                             if is_session_dead:
-                                logger.error(f"🛑 Game session terminated (400 BAD_REQUEST) - game has ended on server")
+                                logger.error(f"[STOP] Game session terminated (400 BAD_REQUEST) - game has ended on server")
                                 break  # Exit game loop immediately
                             
                             if consecutive_api_errors >= MAX_CONSECUTIVE_API_ERRORS:
-                                logger.error(f"🛑 Too many consecutive API errors ({consecutive_api_errors}), ending game")
+                                logger.error(f"[STOP] Too many consecutive API errors ({consecutive_api_errors}), ending game")
                                 break  # Exit game loop
                             
                             # Exponential backoff: 1s, 2s, 4s, 8s, 16s
@@ -657,9 +659,27 @@ class GameplayEngine:
                             )
                             if sequence_id:
                                 if level_for_storage > 1:
-                                    logger.info(f"📦 Captured CUMULATIVE sequence for levels 1-{level_for_storage} (score={game_state.score}): {sequence_id}")
+                                    logger.info(f"[PKG] Captured CUMULATIVE sequence for levels 1-{level_for_storage} (score={game_state.score}): {sequence_id}")
                                 else:
                                     logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
+                        
+                        # Agent Self-Model: Track controlled objects on level completion
+                        if agent_id and hasattr(self, 'agent_self_model'):
+                            try:
+                                # Build action/frame history for this level
+                                action_history = self.session_manager.action_history[-level_action_count:] if hasattr(self.session_manager, 'action_history') else []
+                                frame_history = self.session_manager.frame_history[-level_action_count:] if hasattr(self.session_manager, 'frame_history') else []
+                                
+                                if action_history and frame_history:
+                                    controlled, confidence = self.agent_self_model.identify_controlled_objects(
+                                        game_id, current_level, action_history, frame_history
+                                    )
+                                    if controlled and confidence > 0.3:
+                                        self.agent_self_model.store_control_map(
+                                            agent_id, game_id, current_level, controlled, confidence
+                                        )
+                            except Exception as e:
+                                logger.debug(f"Agent self-model tracking error: {e}")
                         
                         # Move to next level
                         previous_score = game_state.score  # Update for next level detection
@@ -698,7 +718,7 @@ class GameplayEngine:
                                     )
                                 except ValueError as e:
                                     if "frame corruption" in str(e).lower():
-                                        logger.error(f"❌ FRAME CORRUPTION during checkpoint replay - aborting game")
+                                        logger.error(f"[FAIL] FRAME CORRUPTION during checkpoint replay - aborting game")
                                         await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
                                         return {
                                             'game_id': game_id,
@@ -756,7 +776,7 @@ class GameplayEngine:
                                             )
                                         except ValueError as e:
                                             if "frame corruption" in str(e).lower():
-                                                logger.error(f"❌ FRAME CORRUPTION during level sequence replay - aborting game")
+                                                logger.error(f"[FAIL] FRAME CORRUPTION during level sequence replay - aborting game")
                                                 await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
                                                 return {
                                                     'game_id': game_id,
@@ -829,7 +849,7 @@ class GameplayEngine:
                     
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
-                        logger.warning(f"⏱ Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
+                        logger.warning(f"[TIME] Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
                         
                         # BUGFIX: Move to next level instead of ending game
                         # Agent may have made progress but not completed level
@@ -858,9 +878,9 @@ class GameplayEngine:
                     error_msg = str(e).lower()
                     if "frame corruption" in error_msg:
                         if "recovery failed" in error_msg:
-                            logger.error(f"❌ FRAME CORRUPTION: Recovery attempted but failed - ending game")
+                            logger.error(f"[FAIL] FRAME CORRUPTION: Recovery attempted but failed - ending game")
                         else:
-                            logger.error(f"❌ FRAME CORRUPTION detected - ending game")
+                            logger.error(f"[FAIL] FRAME CORRUPTION detected - ending game")
                         break
                     else:
                         logger.error(f"ValueError in action {action_count}: {e}")
@@ -961,7 +981,7 @@ class GameplayEngine:
                             results['learned_sequence_id'] = sequence_id
                             logger.info(f" Captured full game winning sequence: {sequence_id}")
                     else:
-                        logger.info(f"⚠️ WIN state but no level_completions in this session - skipping sequence capture")
+                        logger.info(f"[WARN] WIN state but no level_completions in this session - skipping sequence capture")
                 
                 elif game_state.score > 0 and level_completions > 0:
                     # Partial progress - capture what we achieved
@@ -1012,7 +1032,7 @@ class GameplayEngine:
                     )
                     if package_id:
                         results['viral_package_created'] = package_id
-                        logger.info(f"🦠 Created viral package {package_id[:12]} from winning sequence")
+                        logger.info(f"[VIRAL] Created viral package {package_id[:12]} from winning sequence")
                         
                         # Spread to nearby agents (horizontal transfer opportunity)
                         # Get 3 random other agents for potential infection
@@ -1029,7 +1049,7 @@ class GameplayEngine:
                                 spread_count += 1
                         
                         if spread_count > 0:
-                            logger.info(f"🦠 Viral package spread to {spread_count} agents")
+                            logger.info(f"[VIRAL] Viral package spread to {spread_count} agents")
                 
                 # If LOSS: Create pariah from failure pattern
                 elif not results['win'] and game_state.score < 1.0:
@@ -1244,7 +1264,7 @@ class GameplayEngine:
                 action_penalties = viral_engine.get_pariah_action_penalties(agent_id)
                 
                 if action_weights:
-                    logger.debug(f"🦠 Viral packages suggest: {list(action_weights.keys())[:3]}")
+                    logger.debug(f"[VIRAL] Viral packages suggest: {list(action_weights.keys())[:3]}")
                 if action_penalties:
                     logger.debug(f"  Pariahs warn against: {list(action_penalties.keys())[:3]}")
                     
@@ -1413,7 +1433,7 @@ class GameplayEngine:
                     best_alt = alternatives[0][0]
                     alt_influence = alternatives[0][1]
                     reasoning = f"Viral package suggested ACTION{best_alt} (net influence: {alt_influence:.2f}) - avoiding pariah penalty on {base_action} (penalty: {penalty:.2f})"
-                    logger.info(f"🦠 Switching to ACTION{best_alt} (viral package suggestion)")
+                    logger.info(f"[VIRAL] Switching to ACTION{best_alt} (viral package suggestion)")
                     
                     # Include sensation reasoning if available
                     if sensation_reasoning:
@@ -1422,7 +1442,7 @@ class GameplayEngine:
                     return f"ACTION{best_alt}", reasoning
             
             elif net_influence > 0.3:
-                logger.info(f"🦠 Reinforcing {base_action} (viral package boost: {weight:.2f})")
+                logger.info(f"[VIRAL] Reinforcing {base_action} (viral package boost: {weight:.2f})")
                 viral_reasoning = f"Viral package reinforcement (weight: {weight:.2f})"
             else:
                 viral_reasoning = None
@@ -2247,7 +2267,7 @@ class GameplayEngine:
                     WHERE game_id = ? AND session_id = ? AND level_number <= ?
                     ORDER BY timestamp ASC
                 """, (game_id, session_id, level_number))
-                logger.info(f"📦 CUMULATIVE CAPTURE: {len(action_traces) if action_traces else 0} actions from levels 1-{level_number}")
+                logger.info(f"[PKG] CUMULATIVE CAPTURE: {len(action_traces) if action_traces else 0} actions from levels 1-{level_number}")
             else:
                 # LEVEL-SPECIFIC CAPTURE: Get only actions for this specific level
                 # Used for individual level discoveries
@@ -2257,7 +2277,7 @@ class GameplayEngine:
                     WHERE game_id = ? AND session_id = ? AND level_number = ?
                     ORDER BY timestamp ASC
                 """, (game_id, session_id, level_number))
-                logger.info(f"📦 LEVEL-SPECIFIC CAPTURE: {len(action_traces) if action_traces else 0} actions for level {level_number}")
+                logger.info(f"[PKG] LEVEL-SPECIFIC CAPTURE: {len(action_traces) if action_traces else 0} actions for level {level_number}")
             
             if not action_traces or len(action_traces) == 0:
                 return None
@@ -2899,7 +2919,7 @@ class GameplayEngine:
                 )
                 
                 if sequence_actions and stage_used != 'random':
-                    logger.info(f"🎯 Multi-stage match [{stage_used.upper()}]: {len(sequence_actions)} actions, "
+                    logger.info(f"[TARGET] Multi-stage match [{stage_used.upper()}]: {len(sequence_actions)} actions, "
                                f"confidence {metadata.get('confidence', 0):.2f}")
                     # Convert to sequence dict format
                     return {
@@ -3123,7 +3143,7 @@ class GameplayEngine:
                         action_history=action_history
                     )
                     if momentum and momentum > 0.6:  # momentum is a float, not dict
-                        logger.info(f"🚀 BREAKTHROUGH MOMENTUM detected during replay: {momentum:.2f}")
+                        logger.info(f"[LAUNCH] BREAKTHROUGH MOMENTUM detected during replay: {momentum:.2f}")
                 
                 logger.debug(f"Replay action {action_count}/{len(actions)}: ACTION{action_num}, "
                            f"Score: {game_state.score}, State: {game_state.state}")
@@ -3183,9 +3203,9 @@ class GameplayEngine:
             )
             
             if replay_success:
-                logger.info(f"✅ Inline replay successful for {sequence_id}! Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
+                logger.info(f"[OK] Inline replay successful for {sequence_id}! Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
             else:
-                logger.warning(f"❌ Inline replay failed for {sequence_id}. "
+                logger.warning(f"[FAIL] Inline replay failed for {sequence_id}. "
                              f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
             
             return {'game_state': game_state, 'success': replay_success}
@@ -3306,11 +3326,11 @@ class GameplayEngine:
             
             # Update success rate in database
             if replay_success:
-                logger.info(f"✅ Replay successful for {sequence_id}! Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
+                logger.info(f"[OK] Replay successful for {sequence_id}! Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
                 # Note: success_rate_when_reused calculation would need existing value
                 # For now, just increment a success counter (schema may need update)
             else:
-                logger.warning(f"❌ Replay failed for {sequence_id}. "
+                logger.warning(f"[FAIL] Replay failed for {sequence_id}. "
                              f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
             
             result = {
@@ -3410,7 +3430,7 @@ class GameplayEngine:
                 if result['action'] == 'deactivated':
                     logger.warning(f"⚡ QUICK DEACTIVATE: {sequence_id[:12]} - {result['reason']}")
                 elif result['action'] == 'flagged':
-                    logger.info(f"⚠️ QUICK FLAG: {sequence_id[:12]} - {result['reason']} ({result['consecutive_failures']} consecutive failures)")
+                    logger.info(f"[WARN] QUICK FLAG: {sequence_id[:12]} - {result['reason']} ({result['consecutive_failures']} consecutive failures)")
             except ImportError:
                 pass  # Quick validator not available
             except Exception as qv_error:

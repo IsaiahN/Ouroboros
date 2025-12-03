@@ -25,7 +25,7 @@ def assess_phase4_readiness():
         ''')
         diversity = diversity_result[0]['knowledge_diversity_index'] if diversity_result else 0
         indicators['diversity'] = {'value': diversity, 'target': 3.0, 'met': diversity > 3.0}
-        status = "✅" if diversity > 3.0 else "❌"
+        status = "[OK]" if diversity > 3.0 else "[FAIL]"
         print(f'1. Knowledge diversity index: {diversity:.3f} (target: >3.0) {status}')
     except Exception as e:
         indicators['diversity'] = {'value': 0, 'target': 3.0, 'met': False}
@@ -40,7 +40,7 @@ def assess_phase4_readiness():
         ''')
         redundancy = redundancy_result[0]['redundancy_index'] if redundancy_result else 0
         indicators['redundancy'] = {'value': redundancy, 'target': 2.0, 'met': redundancy > 2.0}
-        status = "✅" if redundancy > 2.0 else "❌"
+        status = "[OK]" if redundancy > 2.0 else "[FAIL]"
         print(f'2. Knowledge redundancy index: {redundancy:.3f} (target: >2.0) {status}')
     except Exception as e:
         indicators['redundancy'] = {'value': 0, 'target': 2.0, 'met': False}
@@ -55,7 +55,7 @@ def assess_phase4_readiness():
         ''')
         metabolism = perf_result[0]['avg_efficiency'] if perf_result and perf_result[0]['avg_efficiency'] else 0
         indicators['metabolism'] = {'value': metabolism, 'target': 0.05, 'met': metabolism > 0.05}
-        status = "✅" if metabolism > 0.05 else "❌"
+        status = "[OK]" if metabolism > 0.05 else "[FAIL]"
         print(f'3. Network metabolism efficiency: {metabolism:.4f} (target: >0.05) {status}')
     except Exception as e:
         indicators['metabolism'] = {'value': 0, 'target': 0.05, 'met': False}
@@ -92,14 +92,14 @@ def assess_phase4_readiness():
                 contribution_pct = (top_prestige_result[0]['top_prestige'] / 
                                    total_prestige_result[0]['total']) * 100
                 indicators['contribution'] = {'value': contribution_pct, 'target': 60.0, 'met': contribution_pct >= 60.0}
-                status = "✅" if contribution_pct >= 60.0 else "❌"
+                status = "[OK]" if contribution_pct >= 60.0 else "[FAIL]"
                 print(f'4. Top 20% network contribution: {contribution_pct:.1f}% (target: ≥60%) {status}')
             else:
                 indicators['contribution'] = {'value': 0, 'target': 60.0, 'met': False}
-                print('4. Top 20% network contribution: No prestige data ❌')
+                print('4. Top 20% network contribution: No prestige data [FAIL]')
         else:
             indicators['contribution'] = {'value': 0, 'target': 60.0, 'met': False}
-            print('4. Top 20% network contribution: No agents ❌')
+            print('4. Top 20% network contribution: No agents [FAIL]')
     except Exception as e:
         indicators['contribution'] = {'value': 0, 'target': 60.0, 'met': False}
         print(f'4. Top 20% network contribution: Error - {e}')
@@ -109,7 +109,7 @@ def assess_phase4_readiness():
         vp_result = db.execute_query('SELECT COUNT(*) FROM viral_information_packages')
         vp_count = vp_result[0]['COUNT(*)'] if vp_result else 0
         indicators['viral_packages'] = {'value': vp_count, 'target': 10, 'met': vp_count >= 10}
-        status = "✅" if vp_count >= 10 else "❌"
+        status = "[OK]" if vp_count >= 10 else "[FAIL]"
         print(f'5. Viral packages: {vp_count} (target: ≥10) {status}')
     except Exception as e:
         indicators['viral_packages'] = {'value': 0, 'target': 10, 'met': False}
@@ -125,11 +125,11 @@ def assess_phase4_readiness():
             infection_count = infection_result[0]['COUNT(DISTINCT agent_id)'] if infection_result else 0
             infection_rate = (infection_count / total_agents) * 100
             indicators['infection_rate'] = {'value': infection_rate, 'target': 60.0, 'met': infection_rate > 60.0}
-            status = "✅" if infection_rate > 60.0 else "❌"
+            status = "[OK]" if infection_rate > 60.0 else "[FAIL]"
             print(f'6. Viral infection rate: {infection_rate:.1f}% (target: >60%) {status}')
         else:
             indicators['infection_rate'] = {'value': 0, 'target': 60.0, 'met': False}
-            print('6. Viral infection rate: No agents ❌')
+            print('6. Viral infection rate: No agents [FAIL]')
     except Exception as e:
         indicators['infection_rate'] = {'value': 0, 'target': 60.0, 'met': False}
         print(f'6. Viral infection rate: Error - {e}')
@@ -139,7 +139,7 @@ def assess_phase4_readiness():
         pariah_result = db.execute_query('SELECT COUNT(*) FROM pariahs')
         pariah_count = pariah_result[0]['COUNT(*)'] if pariah_result else 0
         indicators['pariahs'] = {'value': pariah_count, 'target': 5, 'met': pariah_count >= 5}
-        status = "✅" if pariah_count >= 5 else "❌"
+        status = "[OK]" if pariah_count >= 5 else "[FAIL]"
         print(f'7. Pariahs (failure patterns): {pariah_count} (target: ≥5) {status}')
     except Exception as e:
         indicators['pariahs'] = {'value': 0, 'target': 5, 'met': False}
@@ -152,11 +152,11 @@ def assess_phase4_readiness():
             awareness_count = awareness_result[0]['COUNT(DISTINCT agent_id)'] if awareness_result else 0
             awareness_rate = (awareness_count / total_agents) * 100
             indicators['pariah_awareness'] = {'value': awareness_rate, 'target': 50.0, 'met': awareness_rate > 50.0}
-            status = "✅" if awareness_rate > 50.0 else "❌"
+            status = "[OK]" if awareness_rate > 50.0 else "[FAIL]"
             print(f'8. Pariah awareness rate: {awareness_rate:.1f}% (target: >50%) {status}')
         else:
             indicators['pariah_awareness'] = {'value': 0, 'target': 50.0, 'met': False}
-            print('8. Pariah awareness rate: No agents ❌')
+            print('8. Pariah awareness rate: No agents [FAIL]')
     except Exception as e:
         indicators['pariah_awareness'] = {'value': 0, 'target': 50.0, 'met': False}
         print(f'8. Pariah awareness rate: Error - {e}')
@@ -172,15 +172,15 @@ def assess_phase4_readiness():
     print('=' * 80)
     
     if readiness_score >= 80:
-        print('🚀 READY FOR PHASE 4 IMPLEMENTATION!')
+        print('[LAUNCH] READY FOR PHASE 4 IMPLEMENTATION!')
         print('   All critical systems operational, metrics meet thresholds')
         recommendation = "PROCEED"
     elif readiness_score >= 60:
-        print('⚠️  MOSTLY READY - Consider Phase 4 implementation')
+        print('[WARN]  MOSTLY READY - Consider Phase 4 implementation')
         print('   Core systems working, some metrics need improvement')
         recommendation = "PROCEED_WITH_CAUTION"
     else:
-        print('❌ NOT READY for Phase 4')
+        print('[FAIL] NOT READY for Phase 4')
         print('   Need more evolution cycles to improve metrics')
         recommendation = "WAIT"
     
@@ -190,12 +190,12 @@ def assess_phase4_readiness():
     # Show what's working
     working_systems = [name for name, data in indicators.items() if data['met']]
     if working_systems:
-        print(f'✅ Working systems: {", ".join(working_systems)}')
+        print(f'[OK] Working systems: {", ".join(working_systems)}')
     
     # Show what needs work
     needs_work = [name for name, data in indicators.items() if not data['met']]
     if needs_work:
-        print(f'❌ Needs improvement: {", ".join(needs_work)}')
+        print(f'[FAIL] Needs improvement: {", ".join(needs_work)}')
     
     print()
     print('RECOMMENDATION:', recommendation)

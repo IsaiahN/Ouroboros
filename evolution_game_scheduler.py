@@ -53,7 +53,7 @@ class EvolutionGameScheduler:
             available_game_ids = self._get_all_available_games()
         
         if not available_game_ids:
-            print("⚠️  No games available in database!")
+            print("[WARN]  No games available in database!")
             return {}
         
         # Calculate games per agent
@@ -66,7 +66,7 @@ class EvolutionGameScheduler:
             selected_agents = agents
             games_per_agent = max(1, total_games_to_play // len(agents))
         
-        print(f"\n🎮 GAME SCHEDULER: Assigning {total_games_to_play} games to {len(selected_agents)} agents")
+        print(f"\n[GAME] GAME SCHEDULER: Assigning {total_games_to_play} games to {len(selected_agents)} agents")
         print(f"   Games per agent: {games_per_agent}")
         print(f"   Available games: {len(available_game_ids)}")
         print(f"   Mode distribution: {self._count_modes(selected_agents)}\n")
@@ -77,7 +77,7 @@ class EvolutionGameScheduler:
         for agent in selected_agents:
             # Check for shutdown before each agent assignment
             if self.scheduler.is_shutting_down:
-                print("   🛑 Graceful shutdown requested - stopping game assignments")
+                print("   [STOP] Graceful shutdown requested - stopping game assignments")
                 break
                 
             agent_id = agent.get('agent_id')
@@ -103,7 +103,7 @@ class EvolutionGameScheduler:
                 else:
                     # If no games available and agent is not already optimizer, make them one
                     if agent_mode != 'optimizer' and not self.scheduler.is_shutting_down:
-                        print(f"   🔄 Converting {agent_id} to optimizer mode (all games occupied)")
+                        print(f"   [SYNC] Converting {agent_id} to optimizer mode (all games occupied)")
                         game_id = self.scheduler.get_next_game_for_agent(
                             agent_id=agent_id,
                             agent_mode='optimizer',  # Try as optimizer (can share games)
@@ -114,11 +114,11 @@ class EvolutionGameScheduler:
                         if game_id:
                             agent_games.append(game_id)
                         elif not self.scheduler.is_shutting_down:
-                            print(f"   ⚠️  No games available even as optimizer for {agent_id}")
+                            print(f"   [WARN]  No games available even as optimizer for {agent_id}")
                             break
                     else:
                         if not self.scheduler.is_shutting_down:
-                            print(f"   ⚠️  No more games available for {agent_id}")
+                            print(f"   [WARN]  No more games available for {agent_id}")
                         break
             
             if agent_games:

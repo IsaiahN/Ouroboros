@@ -208,11 +208,11 @@ class SequenceValidationMonitor:
         stats = self.get_validation_stats()
 
         if not stats.get("table_exists"):
-            report_lines.append("⚠️  VALIDATION TRACKING NOT ACTIVE")
+            report_lines.append("[WARN]  VALIDATION TRACKING NOT ACTIVE")
             report_lines.append(stats["message"])
             return "\n".join(report_lines)
 
-        report_lines.append("📊 OVERALL STATISTICS")
+        report_lines.append("[STATS] OVERALL STATISTICS")
         report_lines.append("-" * 80)
         report_lines.append(f"Total Sequences Tracked: {stats['total_sequences']}")
         report_lines.append(f"Total Validation Attempts: {stats['total_attempts']}")
@@ -227,7 +227,7 @@ class SequenceValidationMonitor:
         elif overall_rate < 0.7:
             report_lines.append("🟡 WARNING: Success rate below 70%")
         else:
-            report_lines.append("✅ HEALTHY: Success rate above 70%")
+            report_lines.append("[OK] HEALTHY: Success rate above 70%")
 
         report_lines.append("")
 
@@ -250,7 +250,7 @@ class SequenceValidationMonitor:
         # Failing games
         failing = self.get_failing_games()
         if failing:
-            report_lines.append("❌ GAMES WITH LOW VALIDATION SUCCESS (<70%)")
+            report_lines.append("[FAIL] GAMES WITH LOW VALIDATION SUCCESS (<70%)")
             report_lines.append("-" * 80)
             report_lines.append(
                 f"{'Game':<20} {'Level':<8} {'Seqs':<8} {'Rate':<10} {'Attempts':<10}"
@@ -266,7 +266,7 @@ class SequenceValidationMonitor:
         # Proven sequences
         proven = self.get_proven_sequences()
         if proven:
-            report_lines.append("✅ PROVEN SEQUENCES (>80% validation success)")
+            report_lines.append("[OK] PROVEN SEQUENCES (>80% validation success)")
             report_lines.append("-" * 80)
             report_lines.append(
                 f"{'Game':<20} {'Level':<8} {'Rate':<10} {'Attempts':<10}"

@@ -18,7 +18,7 @@ def apply_migrations():
     db = sqlite3.connect('core_data.db')
     cursor = db.cursor()
     
-    print("🚀 Applying High Priority Migrations...")
+    print("[LAUNCH] Applying High Priority Migrations...")
     
     # =================================================================
     # FIX #3: Create winning_sequences tables
@@ -72,14 +72,14 @@ def apply_migrations():
     
     if 'social_rule_adherence' not in columns:
         cursor.execute('ALTER TABLE agents ADD COLUMN social_rule_adherence REAL DEFAULT 0.5')
-        print("   ✅ Added social_rule_adherence column")
+        print("   [OK] Added social_rule_adherence column")
         
         # Update existing Exploiters with bimodal distribution
         cursor.execute("SELECT agent_id FROM agents WHERE agent_type = 'exploiter'")
         exploiters = cursor.fetchall()
         
         if exploiters:
-            print(f"   📊 Updating {len(exploiters)} existing Exploiters with bimodal distribution...")
+            print(f"   [STATS] Updating {len(exploiters)} existing Exploiters with bimodal distribution...")
             import random
             for i, (agent_id,) in enumerate(exploiters):
                 # 50/50 split: Sociopath (0.0-0.2) or Conformist (0.8-1.0)
@@ -94,7 +94,7 @@ def apply_migrations():
                     WHERE agent_id = ?
                 ''', (adherence, agent_id))
     else:
-        print("   ⏭️  Column already exists, skipping")
+        print("   [SKIP]️  Column already exists, skipping")
     
     # =================================================================
     # Commit changes
@@ -104,20 +104,20 @@ def apply_migrations():
     # =================================================================
     # Verify migrations
     #================================================================
-    print("\n✅ Verifying migrations...")
+    print("\n[OK] Verifying migrations...")
     
     cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='winning_sequences'")
     if cursor.fetchone()[0] == 1:
-        print("   ✅ winning_sequences table created")
+        print("   [OK] winning_sequences table created")
     
     cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='winning_sequences_full_game'")
     if cursor.fetchone()[0] == 1:
-        print("   ✅ winning_sequences_full_game table created")
+        print("   [OK] winning_sequences_full_game table created")
     
     cursor.execute("PRAGMA table_info(agents)")
     columns = [row[1] for row in cursor.fetchall()]
     if 'social_rule_adherence' in columns:
-        print("   ✅ social_rule_adherence column exists")
+        print("   [OK] social_rule_adherence column exists")
         
         # Show distribution
         cursor.execute('''
@@ -134,12 +134,12 @@ def apply_migrations():
         ''')
         dist = cursor.fetchall()
         if dist:
-            print("\n   📊 Exploiter Distribution:")
+            print("\n   [STATS] Exploiter Distribution:")
             for type_name, count in dist:
                 print(f"      {type_name}: {count}")
     
     db.close()
-    print("\n🎉 Migrations applied successfully!")
+    print("\n[WIN] Migrations applied successfully!")
 
 if __name__ == '__main__':
     apply_migrations()

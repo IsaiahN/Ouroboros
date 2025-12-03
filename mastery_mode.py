@@ -62,7 +62,7 @@ class MasteryMode:
         
     def _handle_shutdown(self, signum, frame):
         """Handle graceful shutdown."""
-        logger.info(f"\n🛑 Mastery mode shutdown requested (signal {signum})")
+        logger.info(f"\n[STOP] Mastery mode shutdown requested (signal {signum})")
         self.is_shutting_down = True
         
     async def run_mastery_session(self) -> Dict[str, Any]:
@@ -75,7 +75,7 @@ class MasteryMode:
         setup_database_logging()
         
         logger.info("=" * 80)
-        logger.info("🎯 MASTERY MODE INITIATED")
+        logger.info("[TARGET] MASTERY MODE INITIATED")
         logger.info("=" * 80)
         logger.info(f"Agent: {self.agent_id}")
         logger.info(f"Game: {self.game_id}")
@@ -87,7 +87,7 @@ class MasteryMode:
         # Get agent info
         agent_info = self.db.get_agent(self.agent_id)
         if not agent_info:
-            logger.error(f"❌ Agent {self.agent_id} not found in database")
+            logger.error(f"[FAIL] Agent {self.agent_id} not found in database")
             return {'success': False, 'error': 'Agent not found'}
         
         # Determine agent mode
@@ -143,7 +143,7 @@ class MasteryMode:
                 
                 logger.info("")
                 logger.info("=" * 80)
-                logger.info(f"🎮 MASTERY ATTEMPT #{attempt_num}/{self.max_attempts}")
+                logger.info(f"[GAME] MASTERY ATTEMPT #{attempt_num}/{self.max_attempts}")
                 logger.info("=" * 80)
                 
                 try:
@@ -186,18 +186,18 @@ class MasteryMode:
                     # Update best scores
                     if final_score > best_score:
                         best_score = final_score
-                        logger.info(f"🌟 NEW BEST SCORE: {best_score} (levels: {levels_completed})")
+                        logger.info(f"[STAR] NEW BEST SCORE: {best_score} (levels: {levels_completed})")
                     
                     if levels_completed > best_levels:
                         best_levels = levels_completed
-                        logger.info(f"🏆 NEW BEST LEVELS: {best_levels}")
+                        logger.info(f"[TROPHY] NEW BEST LEVELS: {best_levels}")
                     
                     # Check for WIN
                     if final_state == "WIN":
                         win_achieved = True
                         logger.info("")
                         logger.info("=" * 80)
-                        logger.info("🎉 MASTERY ACHIEVED - WIN STATE REACHED!")
+                        logger.info("[WIN] MASTERY ACHIEVED - WIN STATE REACHED!")
                         logger.info("=" * 80)
                         logger.info(f"Attempts: {attempt_num}")
                         logger.info(f"Final Score: {final_score}")
@@ -218,7 +218,7 @@ class MasteryMode:
                         await asyncio.sleep(1)
                     
                 except Exception as e:
-                    logger.error(f"❌ Attempt #{attempt_num} error: {e}")
+                    logger.error(f"[FAIL] Attempt #{attempt_num} error: {e}")
                     attempts.append({
                         'attempt': attempt_num,
                         'error': str(e),
@@ -229,7 +229,7 @@ class MasteryMode:
                     await asyncio.sleep(2)
             
         except Exception as e:
-            logger.error(f"❌ Mastery session error: {e}")
+            logger.error(f"[FAIL] Mastery session error: {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -241,7 +241,7 @@ class MasteryMode:
         
         logger.info("")
         logger.info("=" * 80)
-        logger.info("📊 MASTERY SESSION SUMMARY")
+        logger.info("[STATS] MASTERY SESSION SUMMARY")
         logger.info("=" * 80)
         logger.info(f"Agent: {self.agent_id}")
         logger.info(f"Game: {self.game_id}")
@@ -249,7 +249,7 @@ class MasteryMode:
         logger.info(f"Attempts: {len(attempts)}")
         logger.info(f"Best Score: {best_score}")
         logger.info(f"Best Levels: {best_levels}")
-        logger.info(f"Win Achieved: {'YES ✅' if win_achieved else 'NO ❌'}")
+        logger.info(f"Win Achieved: {'YES [OK]' if win_achieved else 'NO [FAIL]'}")
         
         if self.is_shutting_down:
             logger.info(f"Stopped: Graceful shutdown")

@@ -158,7 +158,7 @@ if match:
     with open(FILE_PATH, "w", encoding="utf-8") as f:
         f.write(new_content)
 
-    print("✅ Successfully added self-awareness methods to GameplayEngine")
+    print("[OK] Successfully added self-awareness methods to GameplayEngine")
     print("\nMethods added:")
     print("  - _get_agent_self_awareness(agent_id)")
     print("  - _apply_self_awareness_to_strategy(agent_id, base_config)")

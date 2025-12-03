@@ -106,11 +106,11 @@ class ActionHandler:
             True if frame is valid (has data), False if corrupted/empty
         """
         if not frame:
-            logger.error(f"❌ FRAME CORRUPTION: Empty frame {context}")
+            logger.error(f"[FAIL] FRAME CORRUPTION: Empty frame {context}")
             return False
         
         if not frame[0]:
-            logger.error(f"❌ FRAME CORRUPTION: Frame has no columns {context}")
+            logger.error(f"[FAIL] FRAME CORRUPTION: Frame has no columns {context}")
             return False
         
         height = len(frame)
@@ -119,7 +119,7 @@ class ActionHandler:
         
         # Check if dimensions changed
         if self.last_frame_size and self.last_frame_size != current_size:
-            logger.warning(f"⚠️ FRAME DIMENSION CHANGE: {self.last_frame_size} → {current_size} {context}")
+            logger.warning(f"[WARN] FRAME DIMENSION CHANGE: {self.last_frame_size} → {current_size} {context}")
             self.frame_size_warnings += 1
         
         # Check if dimensions are NOT the expected 64x64
@@ -132,7 +132,7 @@ class ActionHandler:
             # Valid ARC frames should be at least 10x10 - anything smaller is corrupt
             MIN_VALID_DIMENSION = 10
             if height < MIN_VALID_DIMENSION or width < MIN_VALID_DIMENSION:
-                logger.error(f"❌ FRAME CORRUPTION: Frame too small ({height}x{width}), likely API error - aborting game {context}")
+                logger.error(f"[FAIL] FRAME CORRUPTION: Frame too small ({height}x{width}), likely API error - aborting game {context}")
                 return False
             
             # Double-check: verify frame structure is consistent
@@ -142,11 +142,11 @@ class ActionHandler:
                     inconsistent_rows.append((i, len(row)))
             
             if inconsistent_rows:
-                logger.error(f"❌ FRAME CORRUPTION: Inconsistent row widths at rows {inconsistent_rows[:5]} {context}")
+                logger.error(f"[FAIL] FRAME CORRUPTION: Inconsistent row widths at rows {inconsistent_rows[:5]} {context}")
                 return False
             
             # Non-standard but consistent - might be legitimate level variation
-            logger.info(f"✅ Frame structure consistent at {height}x{width}, continuing {context}")
+            logger.info(f"[OK] Frame structure consistent at {height}x{width}, continuing {context}")
         
         # Update tracking
         self.last_frame_size = current_size
@@ -190,7 +190,7 @@ class ActionHandler:
             # Try a random directional action (1-5) to flush the bad frame
             # These don't require coordinates so they should work even with corrupt frame
             recovery_action = random.choice([1, 2, 3, 4, 5])
-            logger.info(f"🔄 FRAME RECOVERY [{attempt+1}/{max_attempts}]: Sending ACTION{recovery_action} to flush corrupt frame")
+            logger.info(f"[SYNC] FRAME RECOVERY [{attempt+1}/{max_attempts}]: Sending ACTION{recovery_action} to flush corrupt frame")
             
             try:
                 # Send the recovery action through session_manager.client (the API client)
@@ -201,15 +201,15 @@ class ActionHandler:
                     frame = new_state.frame
                     
                     if frame and len(frame) >= 10 and frame[0] and len(frame[0]) >= 10:
-                        logger.info(f"✅ FRAME RECOVERY SUCCESS after {attempt+1} attempts! Frame: {len(frame)}x{len(frame[0])}")
+                        logger.info(f"[OK] FRAME RECOVERY SUCCESS after {attempt+1} attempts! Frame: {len(frame)}x{len(frame[0])}")
                         return new_state
                     else:
                         frame_size = f"{len(frame)}x{len(frame[0])}" if frame and frame[0] else "None"
-                        logger.warning(f"🔄 FRAME RECOVERY [{attempt+1}]: Frame still corrupt ({frame_size}), trying again...")
+                        logger.warning(f"[SYNC] FRAME RECOVERY [{attempt+1}]: Frame still corrupt ({frame_size}), trying again...")
             except Exception as e:
-                logger.warning(f"🔄 FRAME RECOVERY [{attempt+1}] error: {e}")
+                logger.warning(f"[SYNC] FRAME RECOVERY [{attempt+1}] error: {e}")
         
-        logger.error(f"❌ FRAME RECOVERY FAILED after {max_attempts} attempts")
+        logger.error(f"[FAIL] FRAME RECOVERY FAILED after {max_attempts} attempts")
         return None
 
     def _is_coordinate_similar(self, coord1: Tuple[int, int], coord2: Tuple[int, int], 
@@ -302,12 +302,12 @@ class ActionHandler:
                     # If frame is changing, this might be productive pseudo-button spam
                     if frame_changing and self.consecutive_similar_coordinate < dynamic_threshold + 5:
                         result['reason'] = f'Productive spam: {self.consecutive_similar_coordinate} clicks (frame changing)'
-                        logger.info(f"✅ Productive pseudo-button spam at ({x}, {y}) - frame changing!")
+                        logger.info(f"[OK] Productive pseudo-button spam at ({x}, {y}) - frame changing!")
                     else:
                         result['spam_detected'] = True
                         result['is_diverse'] = False
                         result['reason'] = f'Coordinate spam: {self.consecutive_similar_coordinate} clicks (threshold: {dynamic_threshold})'
-                        logger.warning(f"⚠️ Coordinate spam detected at ({x}, {y}) - {self.consecutive_similar_coordinate} clicks")
+                        logger.warning(f"[WARN] Coordinate spam detected at ({x}, {y}) - {self.consecutive_similar_coordinate} clicks")
             else:
                 self.consecutive_similar_coordinate = 0
         
@@ -327,12 +327,12 @@ class ActionHandler:
                 if max_count >= 3:
                     if frame_changing:
                         result['reason'] = f'Productive oscillation: {len(unique_coords)} buttons (frame changing)'
-                        logger.info(f"✅ Productive pseudo-button oscillation - frame changing!")
+                        logger.info(f"[OK] Productive pseudo-button oscillation - frame changing!")
                     else:
                         result['oscillation_detected'] = True
                         result['is_diverse'] = False
                         result['reason'] = f'Coordinate oscillation: bouncing between {len(unique_coords)} spots'
-                        logger.warning(f"⚠️ Coordinate oscillation detected: {unique_coords}")
+                        logger.warning(f"[WARN] Coordinate oscillation detected: {unique_coords}")
                         
                         # Signal visual analyzer about oscillation
                         self.visual_analyzer.oscillation_detected = True
@@ -482,13 +482,13 @@ class ActionHandler:
         if frame:
             if not self._validate_frame_dimensions(frame, context="at send_action_6"):
                 # Frame corruption detected - try to recover with a random action
-                logger.warning(f"⚠️ FRAME CORRUPTION: Attempting recovery with random action...")
+                logger.warning(f"[WARN] FRAME CORRUPTION: Attempting recovery with random action...")
                 recovery_result = await self._attempt_frame_recovery(level_number)
                 if recovery_result:
                     # Recovery successful - update frame and retry validation
                     new_frame = recovery_result.frame
                     if new_frame and self._validate_frame_dimensions(new_frame, context="after recovery"):
-                        logger.info(f"✅ FRAME RECOVERY successful! New frame: {len(new_frame)}x{len(new_frame[0]) if new_frame else 0}")
+                        logger.info(f"[OK] FRAME RECOVERY successful! New frame: {len(new_frame)}x{len(new_frame[0]) if new_frame else 0}")
                         frame = new_frame
                         # Re-validate coordinates against new frame
                         if not self._validate_coordinates(x, y, frame):
@@ -496,7 +496,7 @@ class ActionHandler:
                             y = len(frame) // 2
                             x = len(frame[0]) // 2 if frame[0] else 0
                     else:
-                        logger.error(f"❌ FRAME RECOVERY failed - frame still corrupt after recovery action")
+                        logger.error(f"[FAIL] FRAME RECOVERY failed - frame still corrupt after recovery action")
                         raise ValueError(f"Frame corruption detected - recovery failed")
                 else:
                     raise ValueError(f"Frame corruption detected - recovery failed")
@@ -658,7 +658,7 @@ class ActionHandler:
         """
         # CRITICAL: Validate frame dimensions first
         if not self._validate_frame_dimensions(frame, context="at get_smart_coordinates entry"):
-            logger.error("❌ Frame validation failed, falling back to safe coordinates")
+            logger.error("[FAIL] Frame validation failed, falling back to safe coordinates")
             # Return safe fallback coordinates
             return 32, 32, "Fallback center (frame validation failed)"
         
@@ -695,7 +695,7 @@ class ActionHandler:
                     self.consecutive_similar_coordinate = 0
                 
                 elif diversity_check['oscillation_detected']:
-                    logger.warning(f"🔄 Coordinate oscillation detected (unproductive) - trying pseudo-button pathfinding")
+                    logger.warning(f"[SYNC] Coordinate oscillation detected (unproductive) - trying pseudo-button pathfinding")
                     # Try pathfinding between oscillating points
                     combination_target = self.visual_analyzer._find_combination_target(
                         analysis.get("targets", [])
@@ -704,7 +704,7 @@ class ActionHandler:
                         x, y, reason = combination_target
                         # CRITICAL: Validate coordinates are within frame bounds
                         if not self._validate_coordinates(x, y, frame):
-                            logger.warning(f"⚠️ Pathfinding target ({x}, {y}) outside frame bounds, using exploratory")
+                            logger.warning(f"[WARN] Pathfinding target ({x}, {y}) outside frame bounds, using exploratory")
                             x, y = self.visual_analyzer.get_exploratory_coordinates(
                                 frame,
                                 radius=self.visual_analyzer.exploration_radius
@@ -712,7 +712,7 @@ class ActionHandler:
                             reason = "Exploratory (invalid pathfinding target)"
                         else:
                             reason = f"Pseudo-button pathfinding: {reason}"
-                            logger.info(f"🎯 Pathfinding target: ({x}, {y})")
+                            logger.info(f"[TARGET] Pathfinding target: ({x}, {y})")
                     else:
                         # Force wide exploration
                         self.visual_analyzer.exploration_radius = min(
@@ -731,16 +731,16 @@ class ActionHandler:
                 
                 elif 'Productive spam' in diversity_check['reason'] or 'Productive oscillation' in diversity_check['reason']:
                     # Log productive spam/oscillation (frame is changing)
-                    logger.info(f"✅ {diversity_check['reason']} at ({x}, {y})")
+                    logger.info(f"[OK] {diversity_check['reason']} at ({x}, {y})")
                 
                 # FINAL VALIDATION: Ensure coordinates are within bounds before returning
                 if not self._validate_coordinates(x, y, frame):
-                    logger.error(f"❌ Final validation failed: ({x}, {y}) outside bounds for frame {len(frame)}x{len(frame[0]) if frame else 0}")
+                    logger.error(f"[FAIL] Final validation failed: ({x}, {y}) outside bounds for frame {len(frame)}x{len(frame[0]) if frame else 0}")
                     # Fallback to safe center coordinates
                     x = len(frame[0]) // 2 if frame and frame[0] else 0
                     y = len(frame) // 2 if frame else 0
                     reason = "Fallback to center (validation failed)"
-                    logger.warning(f"⚠️ Using fallback coordinates: ({x}, {y})")
+                    logger.warning(f"[WARN] Using fallback coordinates: ({x}, {y})")
                 
                 # Mark this coordinate as clicked to avoid spamming
                 self.visual_analyzer.mark_coordinate_clicked(x, y)
@@ -906,7 +906,7 @@ class ActionHandler:
         if strategy == "unbeaten_exploration" or is_unbeaten_game:
             # For unbeaten games: Ensure ALL available actions 1-7 are tried
             # This gives maximum exploration for difficult games
-            logger.info(f"🎯 UNBEATEN GAME MODE: Trying full action set for exploration")
+            logger.info(f"[TARGET] UNBEATEN GAME MODE: Trying full action set for exploration")
             
             # Check if we've been missing any action types
             all_possible = ["ACTION1", "ACTION2", "ACTION3", "ACTION4", "ACTION5", "ACTION6", "ACTION7"]
@@ -915,7 +915,7 @@ class ActionHandler:
             if untried_actions:
                 # Prioritize actions we haven't tried recently
                 selected_action = random.choice(untried_actions)
-                logger.info(f"✨ Trying untested action: {selected_action}")
+                logger.info(f"[NEW] Trying untested action: {selected_action}")
             else:
                 # All actions tried recently, use normal diversity selection but include ACTION6
                 selected_action = self._select_with_diversity(available)

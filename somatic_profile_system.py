@@ -172,4 +172,4 @@ if __name__ == "__main__":
                 print(f"    {emotion}: {modified:.1f}x")
         print()
     
-    print("✅ Somatic profiles loaded successfully")
+    print("[OK] Somatic profiles loaded successfully")

@@ -408,9 +408,9 @@ if __name__ == "__main__":
     print(f"Errors: {len(result.errors)}")
     
     if result.wasSuccessful():
-        print("\n✅ ALL TESTS PASSED")
+        print("\n[OK] ALL TESTS PASSED")
     else:
-        print("\n❌ SOME TESTS FAILED")
+        print("\n[FAIL] SOME TESTS FAILED")
         if result.failures:
             print("\nFailed tests:")
             for test, _ in result.failures:

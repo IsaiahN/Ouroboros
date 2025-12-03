@@ -67,8 +67,8 @@ def main():
     print(f"\n" + "=" * 80)
     print(f"BACKFILL COMPLETE")
     print(f"=" * 80)
-    print(f"📦 Viral packages created: {packages_created}")
-    print(f"🦠 Infections spread: {infections_created}")
+    print(f"[PKG] Viral packages created: {packages_created}")
+    print(f"[VIRAL] Infections spread: {infections_created}")
     print("=" * 80 + "\n")
     
     # Show dashboard

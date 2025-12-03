@@ -1145,7 +1145,7 @@ class AutonomousEvolutionRunner:
                             
                             # Check thresholds
                             if consecutive_error_games >= ERROR_THRESHOLD:
-                                print(f"\n[🛑 CRITICAL] {consecutive_error_games} consecutive game errors detected!")
+                                print(f"\n[[STOP] CRITICAL] {consecutive_error_games} consecutive game errors detected!")
                                 print(f"   Stopping evolution early to prevent wasted compute.")
                                 print(f"   Last error: {result.get('error', 'Unknown')}")
                                 print(f"   Total errors this generation: {total_error_games}")
@@ -1154,7 +1154,7 @@ class AutonomousEvolutionRunner:
                                 break
                             
                             if consecutive_zero_score_games >= ZERO_SCORE_THRESHOLD:
-                                print(f"\n[⚠️ WARNING] {consecutive_zero_score_games} consecutive zero-score games!")
+                                print(f"\n[[WARN] WARNING] {consecutive_zero_score_games} consecutive zero-score games!")
                                 print(f"   This may indicate API issues or broken game logic.")
                                 print(f"   Total zero-score games: {total_zero_score_games}")
                                 # Don't stop, but warn - could be legitimately hard games

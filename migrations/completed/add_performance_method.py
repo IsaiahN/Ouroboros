@@ -99,7 +99,7 @@ PERFORMANCE_TRACKING_METHOD = '''
             
             self.db.checkpoint_wal()
             
-            logger.debug(f"📊 Agent {agent_id} performance: {games_played} games, "
+            logger.debug(f"[STATS] Agent {agent_id} performance: {games_played} games, "
                         f"avg score {avg_score:.2f}, win rate {win_rate:.1%}")
             
         except Exception as e:
@@ -132,7 +132,7 @@ if match:
     with open(FILE_PATH, "w", encoding="utf-8") as f:
         f.write(new_content)
 
-    print("✅ Successfully added _track_agent_performance method to GameplayEngine")
+    print("[OK] Successfully added _track_agent_performance method to GameplayEngine")
 else:
     print("ERROR: Could not find insertion point after _track_game_diversity")
     exit(1)

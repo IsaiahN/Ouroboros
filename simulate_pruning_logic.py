@@ -27,7 +27,7 @@ print()
 
 # Grace period check (line 103)
 if age_generations < generations_grace_period:
-    print(f"❌ SKIPPED: Grace period not met (age {age_generations} < {generations_grace_period})")
+    print(f"[FAIL] SKIPPED: Grace period not met (age {age_generations} < {generations_grace_period})")
 else:
     print(f"✓ Grace period passed (age {age_generations} >= {generations_grace_period})")
     print()
@@ -41,7 +41,7 @@ else:
         prune_reason = 'excessive_actions'
         print(f"  ✓ WOULD PRUNE: {prune_reason}")
     else:
-        print(f"  ❌ Not triggered")
+        print(f"  [FAIL] Not triggered")
     print()
     
     # Rule 2: Low success rate (line 113-117)
@@ -57,9 +57,9 @@ else:
                 prune_reason = 'low_success_rate'
                 print(f"  ✓✓✓ SHOULD PRUNE: {prune_reason}")
             else:
-                print(f"  ❌ Success rate OK")
+                print(f"  [FAIL] Success rate OK")
         else:
-            print(f"  ❌ Not enough attempts")
+            print(f"  [FAIL] Not enough attempts")
     else:
         print(f"  SKIPPED (already has prune_reason: {prune_reason})")
     print()
@@ -76,9 +76,9 @@ else:
                 prune_reason = 'low_score'
                 print(f"  ✓ WOULD PRUNE: {prune_reason}")
             else:
-                print(f"  ❌ Score OK")
+                print(f"  [FAIL] Score OK")
         else:
-            print(f"  ❌ Not enough attempts")
+            print(f"  [FAIL] Not enough attempts")
     else:
         print(f"  SKIPPED (already has prune_reason: {prune_reason})")
     print()
@@ -86,4 +86,4 @@ else:
     if prune_reason:
         print(f"✓✓✓ FINAL VERDICT: SHOULD BE PRUNED ({prune_reason})")
     else:
-        print(f"❌ FINAL VERDICT: WOULD NOT BE PRUNED")
+        print(f"[FAIL] FINAL VERDICT: WOULD NOT BE PRUNED")

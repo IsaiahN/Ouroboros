@@ -146,18 +146,18 @@ class PrestigeAuditor:
         data = self.get_prestige_stats()
 
         if "error" in data:
-            report_lines.append(f"⚠️  ERROR: {data['error']}")
+            report_lines.append(f"[WARN]  ERROR: {data['error']}")
             return "\n".join(report_lines)
 
         if data.get("status") == "EMPTY":
-            report_lines.append("⚠️  NO AGENTS FOUND")
+            report_lines.append("[WARN]  NO AGENTS FOUND")
             return "\n".join(report_lines)
 
         stats = data["stats"]
 
         # Statistics
         try:
-            report_lines.append("📊 POPULATION STATISTICS")
+            report_lines.append("[STATS] POPULATION STATISTICS")
             report_lines.append("-" * 80)
             report_lines.append(f"Population Size: {stats['count']}")
             report_lines.append(
@@ -170,7 +170,7 @@ class PrestigeAuditor:
             report_lines.append(f"Std Dev:         {stats.get('stdev', 0):.2f}")
             report_lines.append("")
         except Exception as e:
-            report_lines.append(f"⚠️ Error formatting statistics: {e}")
+            report_lines.append(f"[WARN] Error formatting statistics: {e}")
             report_lines.append(f"Raw stats: {stats}")
 
         # Health Checks
@@ -184,7 +184,7 @@ class PrestigeAuditor:
                 f"🔴 FAILED: Found {len(negatives)} agents with negative prestige"
             )
         else:
-            report_lines.append("✅ PASSED: No negative prestige values")
+            report_lines.append("[OK] PASSED: No negative prestige values")
 
         # Check 2: Outliers
         outliers = self.find_outliers(data)
@@ -197,7 +197,7 @@ class PrestigeAuditor:
                     f"   - Agent {o['agent_id'][:8]}: {o['prestige']:.2f} ({o['ratio']:.1f}x median)"
                 )
         else:
-            report_lines.append("✅ PASSED: No extreme outliers (>5x median)")
+            report_lines.append("[OK] PASSED: No extreme outliers (>5x median)")
 
         # Check 3: Vampires
         vampires = self.find_vampires(data)
@@ -210,7 +210,7 @@ class PrestigeAuditor:
                     f"   - Agent {v['agent_id'][:8]}: Prestige {v['prestige']:.2f}, Wins {v['wins']}"
                 )
         else:
-            report_lines.append("✅ PASSED: No obvious vampires detected")
+            report_lines.append("[OK] PASSED: No obvious vampires detected")
 
         report_lines.append("")
         report_lines.append("=" * 80)

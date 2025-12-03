@@ -135,7 +135,7 @@ class GameScheduler:
         
         if not available_infos:
             if not self.is_shutting_down:
-                print(f"⚠️  No games available - all {len(available_games)} games are in use")
+                print(f"[WARN]  No games available - all {len(available_games)} games are in use")
             return None
         
         # Apply scheduling rules
@@ -229,7 +229,7 @@ class GameScheduler:
             ]
             
             for active in agents_to_remove:
-                print(f"⚠️  Removing stale agent {active.agent_id} from game: {game_id}")
+                print(f"[WARN]  Removing stale agent {active.agent_id} from game: {game_id}")
                 agents.remove(active)
             
             # If no agents left on this game, mark for removal
