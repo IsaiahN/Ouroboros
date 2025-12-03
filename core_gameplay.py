@@ -2231,20 +2231,9 @@ class GameplayEngine:
             logger.debug(f"Skipping sequence capture - score is 0 or negative (score={final_score})")
             return None
         
-        # ================================================================
-        # VALIDATION 3: Quality-Based Filtering (FIXED 2024-01)
-        # ================================================================
-        # OLD APPROACH (BROKEN): MIN_ACTIONS = 10 blocked 85.5% of valid wins!
-        #   - as66 Level 1 can be won in 1 action legitimately
-        #   - 777 completions but only 6 sequences captured (0.8%)
-        # 
-        # NEW APPROACH: Allow ANY action count, but reject JUNK:
-        #   - Junk = long sequences with only 1 unique action (ACTION6 spam)
-        #   - Short sequences (< 5 actions) are ALWAYS valid if they won
-        #   - Longer sequences need at least 2 distinct action types
-        # ================================================================
-        MIN_ACTIONS_FOR_VALID_SEQUENCE = 1  # Allow single-action wins
-        JUNK_THRESHOLD = 50  # Sequences longer than this need diversity
+        # VALIDATION 3: Minimum action check
+        # Allow ANY action count - if the agent completed a level, the sequence is valid
+        MIN_ACTIONS_FOR_VALID_SEQUENCE = 3  # Allow action >= 3 wins
         
         try:
             session_id = self.session_manager.current_session_id
@@ -2305,18 +2294,6 @@ class GameplayEngine:
                         coordinates.append(coord)
                     except:
                         pass
-            
-            # ================================================================
-            # JUNK DETECTION: Reject long single-action-type spam
-            # ================================================================
-            # Short sequences (<50 actions) are always valid if they won
-            # Long sequences need at least 2 distinct action types
-            # This catches ACTION6 coordinate spam without blocking real wins
-            # ================================================================
-            unique_action_types = len(set(actions))
-            if len(actions) > JUNK_THRESHOLD and unique_action_types == 1:
-                logger.warning(f"Rejecting JUNK sequence: {len(actions)} actions but only 1 unique type (likely ACTION6 spam)")
-                return None
             
             efficiency = final_score / len(actions) if len(actions) > 0 else 0.0
             
