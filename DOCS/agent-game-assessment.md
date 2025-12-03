@@ -53,6 +53,65 @@ Beat every level of every game in ARC 3 AGI system to prove the Ouroboros theory
 - Longer cycles for comprehensive evolutionary progress
 - Automated analysis after each cycle completion
 
+### run_evolution.py Command Reference
+
+**Basic Usage:**
+```bash
+python run_evolution.py              # Standard mode (default)
+python run_evolution.py --fast       # Fast iterations
+python run_evolution.py --thorough   # Deep evaluation
+python run_evolution.py --quick      # Quick 5-generation test
+python run_evolution.py --test       # Minimal test (1 agent, 1 game)
+```
+
+**Available Parameters:**
+
+| Flag | Description | Population | Games/Gen | Interval | Max Gens |
+|------|-------------|------------|-----------|----------|----------|
+| (none) | Standard balanced evolution | 10 | 10 | 60 min | 50 |
+| `--fast` | Quick iterations | 8 | 5 | 30 min | 30 |
+| `--thorough` | Deep evaluation | 15 | 20 | 90 min | 20 |
+| `--quick` | Quick test run | 5 | 5 | 15 min | 5 |
+| `--test` | Minimal test | 1 | 1 | 1 min | 1 |
+
+**Optional Modifiers:**
+
+| Flag | Description |
+|------|-------------|
+| `--max-generations N` | Override max generations (useful when resuming) |
+| `--diversity` | Enable AGI/diversity mode (generalization focus, anti-overfitting) |
+| `--specialist` | Enable specialist mode (deep mastery, repetition-based learning) |
+
+**Examples:**
+```bash
+# Run 2 generations for hypothesis testing
+python run_evolution.py --max-generations 2
+
+# Fast mode with diversity focus
+python run_evolution.py --fast --diversity
+
+# Thorough evaluation with custom generation limit
+python run_evolution.py --thorough --max-generations 10
+
+# Specialist mode for deep game mastery
+python run_evolution.py --specialist
+```
+
+**Configuration Output:**
+When run, the script displays the active configuration:
+```
+Configuration:
+  Initial Population: 10 agents
+  Games per Generation: 10
+  Evolution Interval: 60 minutes
+  Max Generations: 50
+  Target Win Rate: 50%
+```
+
+**Requirements:**
+- Valid `ARC_API_KEY` must be set in `.env` file
+- Automatically runs `cleanup_temp_files()` on startup
+
 ### Hypothesis Generation Framework
 - Analyze performance patterns across games and agent types
 - Identify bottlenecks in level progression
@@ -79,6 +138,52 @@ Beat every level of every game in ARC 3 AGI system to prove the Ouroboros theory
 - Critical preservation: Protect evolutionary history and agent knowledge
 - Backup protocol: Automatic backups before SQL schema changes
 - Storage optimization: Regular vacuuming with storage constraints in mind
+
+### safe_cleanup.py - Database Cleanup Reference
+
+The primary database cleanup routine. Automatically runs every 10 generations during evolution, or can be run manually.
+
+**Usage:**
+```bash
+python safe_cleanup.py              # Dry run (shows what would be deleted)
+python safe_cleanup.py --execute    # Actually perform cleanup
+```
+
+**What it Cleans (Safely):**
+
+| Table | Retention Policy | Purpose |
+|-------|------------------|---------|
+| `game_results` | Delete zero-score | Failed games provide no learning value |
+| `score_history` | Keep 7 days | Tick-by-tick score logging (debugging) |
+| `system_logs` | Keep 5,000 | System operation logs |
+| `navigation_state_history` | Keep 50,000 | Agent navigation breadcrumbs |
+| `action_traces` | Keep 100,000 | Detailed action logs |
+| `sensation_learning_events` | Keep 200,000 | Emotional learning events |
+| `agent_operating_modes` | Keep 100,000 | Mode assignment history |
+
+**What it Preserves (NEVER deleted):**
+- Winning sequences (critical!)
+- Active agents and their genomes/epigenetics
+- Positive-score game results
+- Learned rules, patterns, prestige scores
+- Full game sequences
+
+**Programmatic Usage:**
+```python
+from safe_cleanup import SafeDatabaseCleaner
+
+cleaner = SafeDatabaseCleaner()
+results = cleaner.cleanup(dry_run=False, verbose=True)
+print(f"Deleted {results['total_deleted']} rows")
+
+# Verify critical data
+cleaner.verify_critical_data()
+```
+
+**Integration:**
+- Called automatically every 10 generations in `autonomous_evolution_runner.py`
+- Replaces the older `HistoricalDataCleaner` (more comprehensive)
+- Does NOT run VACUUM (requires 2x disk space) - deleted space is reused
 
 ### Change Management
 - Regular updates on optimization progress and findings

@@ -25,7 +25,7 @@ if sys.platform == 'win32':
     sys.stderr.reconfigure(encoding='utf-8')
 
 import asyncio
-from historical_data_cleanup import HistoricalDataCleaner
+from safe_cleanup import SafeDatabaseCleaner  # Primary cleanup routine
 import time
 import argparse
 import signal
@@ -1802,30 +1802,22 @@ class AutonomousEvolutionRunner:
             except Exception as e:
                 print(f"  [WARN] Agent lifecycle cleanup failed: {type(e).__name__}: {e}")
             
-            # Historical data cleanup
+            # Safe database cleanup (comprehensive - replaces HistoricalDataCleaner)
             try:
-                cleaner = HistoricalDataCleaner(self.db)
-                cleanup_results = cleaner.cleanup_all(dry_run=False)
+                cleaner = SafeDatabaseCleaner()
+                cleanup_results = cleaner.cleanup(dry_run=False, verbose=False)
                 
-                # Report sensation events cleanup
-                sensation = cleanup_results.get('sensation_events', {})
-                if sensation['action'] == 'cleaned':
-                    print(f"  [OK] Deleted {sensation['deleted']:,} old sensation events (kept last {cleaner.sensation_retention_generations} generations)")
-                elif sensation['action'] == 'skipped':
-                    print(f"  [SKIP] Sensation events: {sensation.get('reason', 'Not enough to clean')}")
-                
-                # Report score history cleanup
-                scores = cleanup_results.get('score_history', {})
-                if scores['action'] == 'cleaned':
-                    print(f"  [OK] Deleted {scores['deleted']:,} old score history records (kept last {cleaner.score_history_retention_days} days)")
-                elif scores['action'] == 'skipped':
-                    print(f"  [SKIP] Score history: {scores.get('reason', 'Not enough to clean')}")
-                
-                if cleanup_results.get('vacuumed'):
-                    print(f"  [OK] Database vacuumed and optimized")
+                total_deleted = cleanup_results['total_deleted']
+                if total_deleted > 0:
+                    print(f"  [OK] Safe cleanup deleted {total_deleted:,} rows:")
+                    for table, stats in cleanup_results['tables_cleaned'].items():
+                        if stats.get('deleted', 0) > 0:
+                            print(f"       - {table}: {stats['deleted']:,}")
+                else:
+                    print(f"  [SKIP] No cleanup needed (all tables within limits)")
                 
             except Exception as e:
-                print(f"  [WARN] Cleanup failed: {e}")
+                print(f"  [WARN] Safe cleanup failed: {e}")
             
             return True
             

@@ -89,6 +89,25 @@
 - **Applies to**: All print statements, logger messages, comments, docstrings
 - **Enforcement**: Run `python remove_emojis.py` if emojis accidentally added
 
+### **RULE 12: Use SafeDatabaseCleaner for Cleanup**
+- Use `safe_cleanup.py` for ALL database cleanup operations
+- **Automatic**: Runs every 10 generations in `autonomous_evolution_runner.py`
+- **Manual**: `python safe_cleanup.py` (dry run) or `python safe_cleanup.py --execute`
+- **What it cleans** (safely):
+  - Zero-score game results (failed games)
+  - Old score history (>7 days)
+  - Excess system logs (keep 5,000)
+  - Old navigation state history (keep 50,000)
+  - Old action traces (keep 100,000)
+  - Old sensation learning events (keep 200,000)
+  - Old agent operating modes (keep 100,000)
+- **What it preserves** (NEVER deleted):
+  - Winning sequences
+  - Active agents
+  - Positive-score game results
+  - All learned knowledge (rules, patterns, etc.)
+- **Why**: Prevents database bloat while preserving all critical learning data
+
 ---
 
 ## 🧬 NETWORK-CENTRIC DESIGN PHILOSOPHY

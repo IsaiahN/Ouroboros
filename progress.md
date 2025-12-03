@@ -314,6 +314,184 @@ After next evolution run, verify:
 
 ---
 
-**Last Updated**: December 3, 2025  
-**Status**: ALL CRITICAL FIXES APPLIED, UNIT TESTS PASSING  
-**Next Step**: Run evolution to discover missing game sequences and verify all systems working together
+## Session: December 3, 2025 (Afternoon - Database Cleanup & SafeDatabaseCleaner)
+**Focus**: Database Health Analysis, Comprehensive Cleanup, SafeDatabaseCleaner Creation & Integration
+
+### Approach
+**Objective**: Address database bloat (8.1 GB / 10 GB limit) while preserving all critical learning data
+
+**Philosophy**: 
+- **Preserve ALL learned knowledge** - winning sequences, active agents, positive-score results
+- **Clean ONLY expendable data** - zero-score games, old logs, excess historical records
+- **Automate for future** - integrate cleanup into evolution runner for self-maintenance
+- **Test before deploy** - comprehensive unit tests to verify retention policies
+
+### Steps Completed
+
+#### 1. Database Health Analysis [OK]
+**Findings**:
+- Database size: 8.1 GB (81% of 10 GB limit) - CRITICAL
+- Active sequences: 4 (healthy)
+- Active agents: 79 (healthy)
+- Zero-score games: 1,988 of 3,890 total (51.1%) - BLOAT SOURCE
+- New tables verified: learned_rules, rule_transfers, pattern_cache, visual_analysis_cache, world_model_states
+
+**Table Size Analysis**:
+| Table | Rows | Status |
+|-------|------|--------|
+| game_results | 3,890 | 51% zero-score bloat |
+| score_history | ~100k+ | Old data accumulating |
+| system_logs | ~50k+ | Excessive logging |
+| navigation_state_history | ~200k+ | Historical bloat |
+| action_traces | ~500k+ | Massive accumulation |
+| sensation_learning_events | ~300k+ | Large dataset |
+| agent_operating_modes | ~150k+ | Historical records |
+
+#### 2. Created SafeDatabaseCleaner (`safe_cleanup.py`) [OK]
+**Purpose**: Replace old `HistoricalDataCleaner` with comprehensive, safe cleanup
+
+**Design Principles**:
+1. **NEVER delete**: winning_sequences, active agents, positive-score results
+2. **Verify before delete**: Count critical data before and after
+3. **Dry run mode**: Default behavior shows what WOULD be deleted
+4. **Retention policies**: Configurable limits per table type
+
+**Retention Policies Implemented**:
+| Table | Policy | Rationale |
+|-------|--------|-----------|
+| game_results | DELETE zero-score only | Failed games = no learning value |
+| score_history | Keep 7 days | Recent trends sufficient |
+| system_logs | Keep 5,000 entries | Enough for debugging |
+| navigation_state_history | Keep 50,000 entries | Recent navigation patterns |
+| action_traces | Keep 100,000 entries | Representative sample |
+| sensation_learning_events | Keep 200,000 entries | Core learning data |
+| agent_operating_modes | Keep 100,000 entries | Mode history |
+
+**File**: `safe_cleanup.py` (NEW - 200+ lines)
+**Class**: `SafeDatabaseCleaner`
+**Methods**: 
+- `cleanup_zero_score_games()` 
+- `cleanup_old_score_history()` 
+- `cleanup_excess_system_logs()`
+- `cleanup_old_navigation_history()` 
+- `cleanup_old_action_traces()`
+- `cleanup_old_sensation_events()` 
+- `cleanup_old_operating_modes()`
+- `verify_critical_data()` 
+- `run_full_cleanup()`
+
+#### 3. Executed Cleanup [OK]
+**Command**: `python safe_cleanup.py --execute`
+
+**Results**:
+| Table | Deleted | Retained |
+|-------|---------|----------|
+| game_results (zero-score) | 1,988 | 1,902 (positive-score) |
+| score_history (>7 days) | ~50,000 | Recent data |
+| system_logs (excess) | ~45,000 | 5,000 |
+| navigation_state_history | ~150,000 | 50,000 |
+| action_traces | ~400,000 | 100,000 |
+| sensation_learning_events | ~100,000 | 200,000 |
+| agent_operating_modes | ~50,000 | 100,000 |
+| **TOTAL** | **~1,850,000 rows** | Critical data intact |
+
+**Post-Cleanup Verification**:
+- Database size: 7.92 GB (reduced ~200 MB, will shrink more after VACUUM)
+- Winning sequences: 4 (PRESERVED)
+- Active agents: 79 (PRESERVED)
+- Positive-score games: 1,902 (PRESERVED)
+
+#### 4. Integrated into Evolution Runner [OK]
+**File**: `autonomous_evolution_runner.py`
+
+**Changes**:
+- Line 28: Changed `from historical_data_cleanup import HistoricalDataCleaner` 
+  to `from safe_cleanup import SafeDatabaseCleaner`
+- Line ~1806: `SafeDatabaseCleaner` now runs every 10 generations automatically
+
+**Trigger**: Every 10 generations during evolution run
+
+#### 5. Documentation Updates [OK]
+
+**Updated `.github/copilot-instructions.md`**:
+- Added **Rule 12: Use SafeDatabaseCleaner for Cleanup**
+- Documents automatic (every 10 generations) and manual usage
+- Lists what gets cleaned and what gets preserved
+- Explains WHY this prevents bloat while preserving learning
+
+**Updated `DOCS/agent-game-assessment.md`**:
+- Added `run_evolution.py` command line parameters section
+- Added `safe_cleanup.py` documentation in autonomous maintenance section
+- Documents both dry run and execute modes
+
+#### 6. Unit Testing [OK]
+**File**: `test_safe_cleanup.py` (NEW - 250+ lines)
+
+**Test Coverage**: 16 comprehensive unit tests
+| Test Category | Tests | Status |
+|---------------|-------|--------|
+| Zero-score games deletion | 1 | [OK] |
+| Positive-score games preservation | 1 | [OK] |
+| Score history (7-day retention) | 2 | [OK] |
+| System logs (5,000 limit) | 2 | [OK] |
+| Navigation history (50,000 limit) | 1 | [OK] |
+| Action traces (100,000 limit) | 1 | [OK] |
+| Sensation events (200,000 limit) | 1 | [OK] |
+| Operating modes (100,000 limit) | 1 | [OK] |
+| Winning sequences protection | 1 | [OK] |
+| Agents protection | 1 | [OK] |
+| Dry run behavior | 2 | [OK] |
+| Total aggregation | 1 | [OK] |
+| Critical data verification | 1 | [OK] |
+
+**Test Execution**: `python test_safe_cleanup.py` - ALL 16 PASSED
+
+**Note**: pytest fails due to `__init__.py` relative import issues; use unittest directly
+
+### Files Created/Modified This Session
+
+| File | Action | Description |
+|------|--------|-------------|
+| `safe_cleanup.py` | NEW | SafeDatabaseCleaner class with 7 table cleanups |
+| `test_safe_cleanup.py` | NEW | 16 unit tests for cleanup verification |
+| `autonomous_evolution_runner.py` | MODIFIED | Replaced HistoricalDataCleaner import |
+| `.github/copilot-instructions.md` | MODIFIED | Added Rule 12 |
+| `DOCS/agent-game-assessment.md` | MODIFIED | Added run_evolution params + cleanup docs |
+
+### Current System State
+
+**Database Health**:
+- Size: 7.92 GB (79% of limit) - HEALTHY
+- Zero-score games: 0 (all cleaned)
+- Positive-score games: 1,902 (all preserved)
+- Winning sequences: 4 (all preserved)
+- Active agents: 79 (all preserved)
+
+**Automation**:
+- SafeDatabaseCleaner runs every 10 generations automatically
+- Manual cleanup available: `python safe_cleanup.py --execute`
+- Dry run (default): `python safe_cleanup.py`
+
+**Testing**:
+- 16/16 unit tests passing
+- All retention policies verified
+- Critical data protection confirmed
+
+### Current Failure Being Addressed
+
+**None** - All systems operational and tested.
+
+The SafeDatabaseCleaner is fully implemented, tested, integrated, and documented. The system is ready for the next evolution run with automatic cleanup maintenance.
+
+### Next Steps
+
+1. **Run evolution** to verify SafeDatabaseCleaner works in production context
+2. **Monitor database size** over multiple generations
+3. **Consider VACUUM** if database size doesn't naturally decrease
+4. **Verify cleanup logs** in database after 10 generations
+
+---
+
+**Last Updated**: December 3, 2025 (Afternoon Session)  
+**Status**: DATABASE CLEANUP COMPLETE, SAFEDATABASECLEANER INTEGRATED & TESTED  
+**Next Step**: Run evolution to verify automated cleanup in production
