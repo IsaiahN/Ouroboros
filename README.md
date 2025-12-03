@@ -1,390 +1,127 @@
-# Ouroboros - ARC AGI 3 Autonomous Evolution System
+# Ouroboros: Autonomous ARC AGI Evolution
 
-A clean, modular implementation of essential ARC-AGI-3 game functionality with autonomous evolutionary agents. This system combines core game mechanics with an evolutionary framework where agents evolve to master ARC games.
+**The Network is the Organism.**
 
-## Features
+Ouroboros is an evolutionary system designed to solve the ARC-AGI-3 challenge. Unlike traditional agents, it treats the entire population as a single learning network, preserving knowledge across generations through a centralized database.
 
-### Core Game Mechanics
-- **Clean ARC API Client**: Simple interface for interacting with ARC-AGI-3 API
-- **Session Management**: Handle game sessions with graceful startup and shutdown
-- **Action Handling**: Send and validate game actions with automatic tracing
-- **Database Persistence**: Store game data, action traces, and performance metrics
-- **Gameplay Engine**: Complete game playing logic with multiple strategies
-- **Performance Tracking**: Built-in statistics and effectiveness analysis
-
-### Ouroboros Evolution System
-- **Autonomous Evolution**: Self-managing evolutionary system (Claude Code as coordinator)
-- **Specialist Agents**: Deep mastery of specific games through focused repetition
-- **Diversity Mode**: Generalization across diverse game types
-- **Adaptive Action Limits**: Dynamic adjustment based on performance
-- **Pattern Learning**: Capture and replay winning sequences
-- **Meta-Learning**: Rule induction and visual reasoning
-- **Database-Only Storage**: All data in SQLite, no log files (Rule 2)
-- **Graceful Shutdown**: Ctrl+C saves all progress via WAL checkpoint
+Thesis: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
 ## Quick Start
 
-### Evolution System (Recommended)
-
-Run autonomous evolution to develop high-performing agents:
-
 ```bash
-# Specialist mode - agents master specific games (recommended for high scores)
-python run_evolution.py --specialist --quick
-
-# Standard balanced mode
+# Start the autonomous evolution loop (Recommended)
 python run_evolution.py
 
-# Diversity mode - generalization focus
+# Run in "Specialist Mode" (Deep mastery of specific games)
+python run_evolution.py --specialist
+
+# Run in "Diversity Mode" (Focus on generalization)
 python run_evolution.py --diversity
-
-# Fast testing iterations
-python run_evolution.py --fast --specialist
 ```
 
-**Modes:**
-- `--specialist`: Each agent masters 2-3 specific games (achieves 2.0-3.0+ scores)
-- `--diversity`: Agents trained on diverse games (generalization over specialization)
-- `--quick`: 5 generations for testing
-- `--fast`: 30-minute evolution intervals
-- `--thorough`: 90-minute intervals, 50 games per generation
-
-**Graceful Shutdown:**
-Press **Ctrl+C** once to initiate graceful shutdown:
-- Current game completes or cancels
-- WAL checkpoint saves all data
-- Database closes cleanly
-- Checkpoint state saved for resume
-
-### Manual Game Testing
-
-```bash
-# Play a single game manually
-python main_runner.py play <game_id>
-
-# Show database statistics
-python main_runner.py stats
-
-# List available games
-python main_runner.py list
-```
-
-## Core Components
-
-### ARCClient
-- Connect to ARC-AGI-3 API
-- Manage scorecards and game state with automatic tagging
-- Send actions with retry logic and error handling
-- Handle authentication and rate limiting
-- Generate automatic tags including "BitterLesson", git branch, and commit ID
-
-### GameSessionManager
-- Manage session lifecycle (start/shutdown)
-- Track session statistics
-- Handle graceful interruption
-- Coordinate between API and database
-
-### ActionHandler
-- Send different types of actions (ACTION1-ACTION7)
-- Validate coordinates for ACTION6
-- Detect frame changes
-- Track action effectiveness
-
-### DatabaseInterface
-- Store game results and action traces
-- Manage session data
-- Query performance statistics
-- Handle database schema initialization
-
-### GameplayEngine
-- Complete game playing logic
-- Multiple built-in strategies
-- Support for custom action callbacks
-- Session and multi-game management
-
-## Advanced Usage
-
-### Python API Usage
-
-```python
-import asyncio
-from core_gameplay import GameplayEngine
-
-async def play_game():
-    # Initialize with your API key
-    async with GameplayEngine(api_key="your_arc_api_key") as engine:
-        # Play a single game
-        result = await engine.play_single_game("game_123")
-        print(f"Final score: {result['final_score']}")
-        print(f"Won: {result['win']}")
-
-asyncio.run(play_game())
-```
-
-### Environment Setup
-
-#### Option 1: Using .env file (Recommended)
-
-1. Copy the example environment file:
-```bash
-cp .env.example .env
-```
-
-2. Edit `.env` and add your ARC-AGI-3 API key:
-```bash
-# ARC-AGI-3 API Configuration (REQUIRED)
-ARC_API_KEY=your_actual_api_key_here
-
-# Optional: Database Configuration
-DATABASE_PATH=core_data.db
-
-# Optional: Logging Configuration
-LOG_LEVEL=INFO
-
-# Python Configuration
-# Disable Python bytecode (.pyc) file generation
-PYTHONDONTWRITEBYTECODE=1
-```
-
-#### Option 2: Using environment variables
-
-```bash
-export ARC_API_KEY="your_arc_api_key_here"
-```
-
-### Custom Strategy
-
-```python
-async def my_strategy(game_state, action_handler):
-    """Custom action selection strategy."""
-    if game_state.score < 50:
-        # Conservative approach at low scores
-        return "ACTION1"
-    else:
-        # More aggressive when score is higher
-        return action_handler.get_random_action(game_state.available_actions)
-
-async with GameplayEngine() as engine:
-    result = await engine.play_single_game("game_123", my_strategy)
-```
-
-### Manual Session Management
-
-```python
-from game_session_manager import GameSessionManager
-from action_handler import ActionHandler
-
-session_manager = GameSessionManager()
-action_handler = ActionHandler(session_manager)
-
-try:
-    # Start session
-    session_id = await session_manager.start_session()
-
-    # Create game
-    game_data = await session_manager.create_game("game_123")
-
-    # Send actions
-    game_state = await action_handler.send_action_1()
-    game_state = await action_handler.send_action_6(x=5, y=3, frame=game_state.frame)
-
-    # Finish game
-    await session_manager.finish_game(game_state.state, game_state.score)
-
-finally:
-    await session_manager.shutdown()
-```
-
-### Database Operations
-
-```python
-from CORE_GAME_MECHANICS import DatabaseInterface
-
-db = DatabaseInterface("my_games.db")
-
-# Get performance statistics
-stats = db.get_database_stats()
-print(f"Total games played: {stats['game_results_count']}")
-
-# Get recent game results
-recent_games = db.get_game_results(limit=10)
-for game in recent_games:
-    print(f"Game {game['game_id']}: {game['final_score']} points")
-
-# Analyze action effectiveness
-effectiveness = db.get_action_effectiveness("game_123")
-for action in effectiveness:
-    print(f"ACTION{action['action_number']}: {action['success_rate']:.2f} success rate")
-```
-
-## Database Schema
-
-The module creates the following core tables:
-
-- **training_sessions**: Session metadata and statistics
-- **game_results**: Individual game outcomes
-- **action_traces**: Detailed action logging
-- **action_effectiveness**: Action performance tracking
-- **score_history**: Score progression over time
-- **global_counters**: System state counters
-
-## Configuration
-
-The `GameplayEngine` can be configured with various parameters:
-
-```python
-engine.configure(
-    max_actions_per_game=100,      # Maximum actions per game
-    action_timeout=30.0,           # Timeout for actions
-    strategy='balanced',           # Default strategy
-    enable_random_exploration=True, # Allow random exploration
-    coordinate_retry_limit=3       # Retries for ACTION6
-)
-```
-
-## Scorecard Tagging
-
-### Automatic Tag Generation
-
-The ARCClient automatically generates identifying tags for each scorecard created with the ARC-AGI-3 API:
-
-**Core Tags:**
-- `core_game_mechanics` - Identifies this module
-- `BitterLesson` - Project identifier
-
-**Git Information** (when available):
-- `branch_{branch_name}` - Current git branch (e.g., `branch_v1.0.1`)
-- `commit_{short_hash}` - Short commit hash (e.g., `commit_2506d85`)
-- `git_unavailable` - Fallback when git is not available
-
-**Runtime Information:**
-- `pid_{process_id}` - Process identifier
-- `thread_{thread_id}` - Thread identifier
-- `session_{session_id}` - Session identifier (first 8 characters)
-- `game_{game_id}` - Game identifier
-- `ts_{timestamp}` - Timestamp (HHMMSS format)
-- `sys_{system}` - Operating system (windows, linux, darwin)
-
-**Example Tags:**
-```
-["core_game_mechanics", "BitterLesson", "branch_v1.0.1", "commit_2506d85",
- "pid_12345", "thread_67890", "session_abc12345", "game_test_001",
- "ts_143022", "sys_windows"]
-```
-
-This tagging system helps track and identify game sessions across different environments and git states.
-
-## Python Configuration
-
-### Disabling Python Bytecode Files
-
-The project is configured to disable Python bytecode (`.pyc`) file generation to keep the workspace clean:
-
-- **Environment Variable**: `PYTHONDONTWRITEBYTECODE=1` (set in `.env` file)
-- **Command Line**: Use `python -B` to run scripts with bytecode generation disabled
-- **Git**: `__pycache__/` directories are automatically ignored via `.gitignore`
-
-**Benefits:**
-- Cleaner project directory without `__pycache__` folders
-- Reduced file system clutter during development
-- Simplified version control (no bytecode files to track)
-
-**Alternative Methods:**
-```bash
-# Run with bytecode disabled
-python -B main_runner.py
-
-# Or set environment variable manually
-export PYTHONDONTWRITEBYTECODE=1
-python main_runner.py
-```
-
-## Built-in Strategies
-
-- **balanced**: Uses action effectiveness data when available, falls back to random
-- **random**: Random action selection
-- **conservative**: Avoids ACTION6, prefers "safe" actions
-- **exploration**: Prefers ACTION6 for exploration
-
-## Error Handling
-
-The module includes comprehensive error handling:
-
-- API authentication errors
-- Rate limiting with exponential backoff
-- Game completion detection
-- Database transaction safety
-- Graceful shutdown on interruption
-
-## Database Logging
-
-All application logs are stored in the database instead of files for better organization and queryability:
-
-```python
-from database_logger import setup_database_logging
-
-# Set up database logging (automatic in all modules)
-db_handler = setup_database_logging()
-
-# Logs are written to both console and database 'system_logs' table
-# Log level controlled by LOG_LEVEL environment variable
-```
-
-### Viewing Logs
-
-```python
-from database_logger import get_recent_logs
-
-# Get recent logs from database
-logs = get_recent_logs(limit=50, level='INFO')
-
-# Filter by session or game
-session_logs = get_recent_logs(session_id='session_123')
-game_logs = get_recent_logs(game_id='game_456')
-```
-
-**Benefits of Database Logging:**
-- No log files cluttering the filesystem
-- Structured, queryable log data
-- Session and game context tracking
-- Automatic cleanup and organization
-- Enhanced searching and filtering
-
-## File Structure
-
-```
-CORE_GAME_MECHANICS/
-├── __init__.py                 # Module initialization and exports
-├── arc_api_client.py          # ARC-AGI-3 API client
-├── database_interface.py      # Database operations
-├── game_session_manager.py    # Session lifecycle management
-├── action_handler.py          # Action sending and validation
-├── core_gameplay.py           # Main gameplay engine
-├── main_runner.py             # Command-line interface
-├── example_usage.py           # Usage examples
-├── core_database_schema.sql   # Database schema
-└── README.md                  # This file
-```
-
-## Requirements
-
-- Python 3.7+
-- aiohttp
-- sqlite3 (built-in)
-- python-dotenv (optional, for .env file support)
-- ARC-AGI-3 API key
-
-## Installation
-
-1. Copy the `CORE_GAME_MECHANICS` folder to your project
-2. Install dependencies: `pip install aiohttp python-dotenv`
-3. Set up environment variables (see Environment Setup section above)
-4. Run examples: `python -m CORE_GAME_MECHANICS.example_usage`
-
-## Examples
-
-See `example_usage.py` for comprehensive examples of all functionality.
-
-## License
-
-This module is part of the Tabula Rasa project.
+### Command Line Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--specialist` | **Recommended**. Agents master specific games (2-3 each). High scores. |
+| `--diversity` | Focus on generalization and novel games. Prevents overfitting. |
+| `--fast` | Fast iterations: 30 min intervals, 5 games/generation. |
+| `--thorough` | Deep evaluation: 90 min intervals, 20 games/generation. |
+| `--quick` | Quick test run: Max 5 generations. |
+| `--test` | Minimal smoke test: 1 agent, 1 game, 1 generation. |
+| `--max-generations N` | Override maximum generations (useful for tests). |
+
+## Core Concepts
+
+### 1. Evolutionary Biome Architecture
+The system mimics biological evolution with three distinct layers of information:
+-   **Layer 1: Static Genome (Nature)**. Hard-coded traits (e.g., neural architecture type). Low mutation, high stability.
+-   **Layer 2: Epigenetic (Nurture)**. Learning rates and biases. Inherited but decays over generations (0.95 decay factor). Allows temporary adaptation to environmental stress.
+-   **Layer 3: Somatic (Culture)**. Real-time knowledge (e.g., "Red pixels are dangerous"). High plasticity. **Not inherited** biologically but stored in the Community Database for all agents to access.
+Features derived from these layers:
+
+- Horizontal Gene Transfer: Agents swapping strategies regardless of lineage.
+- Viral Packages: Successful strategies spreading rapidly through a network.
+- Pariahs: Failure patterns marked for avoidance.
+
+### 2. Sensation Engine of the Network
+Agents possess "Semantic Sensation" that biases their navigation (Actions 1-7):
+-   **Perception**: Agents recognize objects (e.g., "Blue Square").
+-   **Sensation**: Objects trigger emotional states (Frustrated, Cautious, Curious, Confident) based on history.
+-   **Action Bias**: Emotions influence movement. "Fear" causes retreat; "Curiosity" drives exploration.
+-   **Navigation State**: A floating-point value (-1.0 to +1.0) representing the agent's current mood.
+
+### 3. Agent Roles
+The workforce is divided into specialized roles:
+-   **Pioneers**: Frontier explorers that seek novel solutions on unbeaten levels.
+-   **Optimizers**: Efficiency experts that refine existing solutions on beaten games.
+-   **Generalists**: Balanced validators that ensure solution robustness.
+-   **Exploiters**: Post-optimization refiners that operate on a **Network Adherence Spectrum**:
+    -   **High Adherence**: Strictly follow network wisdom and established patterns.
+    -   **Low Adherence**: Ignore social rules to find unconventional micro-optimizations (the "maverick" approach).
+
+### 4. Agent Self-Model
+Agents develop a concept of "Self-Direction" vs "Collective Intelligence" vs "Environment":
+-   **Self-Recognition**: Tracks which pixels/objects move in response to agent actions.
+-   **Confidence Maps**: Builds a probability map of controlled elements.
+-   **Agency**: Allows agents to distinguish between their actions and environmental physics.
+-   **Self-Direction**: Agents can choose to act on their own or follow the collective intelligience (The Network) based on their assigned role.
+
+### 5. Abstraction & Symbolic Reasoning
+To solve complex tasks, the system moves beyond pixel manipulation:
+-   **Symbolic Reasoning**: Converts grid states into logical symbols (e.g., `Shape(Color.RED, Pos(0,0))`). Agents reason about relationships between these symbols rather than raw pixels.
+-   **Rule Induction**: Derives abstract rules (e.g., "Fill all enclosed areas with blue") from symbolic relationships.
+-   **Counterfactual Analysis**: "What if?" reasoning to test hypotheses before acting.
+
+### 6. Sequence Abstraction
+The system learns and generalizes action sequences:
+-   **Winning Sequences**: Complete solutions stored in the database.
+-   **Sequence Abstraction**: Identifies reusable *patterns* within sequences (e.g., "Move to corner" is a reusable sub-sequence).
+-   **Replay & Refinement**: Agents replay abstract sequences to reach the "frontier" (unsolved levels), allowing them to focus compute on the unknown levels.
+
+### 7. Prestige vs. Action Allowances (The "Sacred Separation")
+The system strictly separates Social Capital from Economic Capital, unlike human societies where they often mix:
+
+| Feature | Prestige (Social Capital) | Action Allowance (Economic Capital) |
+| :--- | :--- | :--- |
+| **Definition** | Respect earned by contributing to the network (teaching, validating). | The computational budget (actions/currency) an agent can spend. |
+| **Source** | Earned by **helping others** (e.g., uploading useful sequences). | Earned by **personal performance** (high scores, efficiency). |
+| **Function** | Determines **influence** (breeding rights, sequence priority). | Determines **lifespan** (how long they can play/explore). |
+| **Philosophy** | "What you give to the tribe." | "What you earn for yourself." |
+| **Separation** | **Prestige cannot buy Actions.** A famous teacher who plays poorly will still run out of energy. | **Actions cannot buy Prestige.** A rich but selfish agent has no influence. |
+
+**Adaptive Action Budgets**:
+Action limits are not static, but adaptively meritocratic. The system dynamically adjusts allowances based performance. High-performing agents receive larger budgets, allowing them to tackle deeper, more complex problems.
+
+### 8. Game State Modes
+The system dynamically shifts its strategy based on the state of each game:
+-   **Exploration Mode** (Unbeaten Games):
+    -   **60% Pioneers**: Aggressively search for *any* solution.
+    -   **Target**: Frontier levels (unsolved).
+-   **Optimization Mode** (Beaten Games):
+    -   **70% Optimizers**: Refine existing solutions to reduce action counts.
+    -   **Target**: Efficiency and robustness.
+    -   **Transition**: Happens  when the first full game win is achieved for that game type.
+
+
+### 9. System Maintenance & Safety
+The system includes autonomous maintenance to ensure long-term stability:
+-   **Database Vacuuming**: Automatically optimizes the SQLite database to prevent bloat.
+-   **Sequence Pruning**: Aggressively removes "dead" sequences (low success rate, excessive actions) to keep the knowledge base clean.
+-   **Agent Sunsetting**: Agents are automatically retired after a set number of generations or if performance stagnates, ensuring the population remains fresh and competitive.
+-   **Semantic Forgetting**: Unused knowledge and weak object-sensation mappings decay over time (Generational Forgetting), preventing the accumulation of obsolete data.
+-   **Disk Monitoring**: Enforces a 10GB hard limit on database size.
+-   **Pycache Prevention**: Strictly enforces `PYTHONDONTWRITEBYTECODE=1` to keep the file system clean.
+-   **Graceful Shutdown**: Handles `Ctrl+C` signals to ensure WAL (Write-Ahead Log) checkpoints are written before exiting, preventing data corruption.
+
+## 📂 Key Files
+-   `run_evolution.py`: Main entry point.
+-   `core_data.db`: The "network" (SQLite database storing ALL knowledge).
+-   `DOCS/how_the_system_works.md`: Detailed system architecture.
+
+## 🛠️ Configuration
+-   **Environment**: Copy `.env.example` to `.env` and set `ARC_API_KEY`.
+-   **Logs**: All logs are stored in `core_data.db` (No log files!).
+-   **Shutdown**: Press `Ctrl+C` ONCE for graceful shutdown (saves state & closes scorecard(s)).
+
+---

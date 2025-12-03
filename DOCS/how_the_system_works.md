@@ -29,6 +29,7 @@ The system operates on a **Three-Layer Architecture**:
 -   **Plasticity**: High.
 -   **Inheritance**: **NOT INHERITED**. Stored in the Community Database.
 -   **Access**: Agents query the database for sequences based on Bayesian reputation.
+-   **Agent Self-Model**: Tracks "self" vs "environment" (e.g., "I control the red pixel").
 
 ## 3. The Autonomous Loop (Ouroboros)
 The system runs in a continuous autonomous loop managed by the **Claude Code Coordinator**:
@@ -44,10 +45,10 @@ The system runs in a continuous autonomous loop managed by the **Claude Code Coo
 ## 4. Agent Roles
 Agents are specialized to ensure efficient coverage of the problem space:
 
--   **PIONEERS (60%)**: Explore unbeaten "frontier" levels. No subsequence matching allowed on frontier.
--   **OPTIMIZERS (30%)**: Refine solutions for beaten games. Use level resets and checkpoints.
+-   **PIONEERS (60%)**: Explore unbeaten "frontier" levels. Use best known sequences to reach the edge, then explore.
+-   **OPTIMIZERS (30%)**: Refine solutions for beaten games. Focus on reducing action counts and finding more efficient paths.
 -   **GENERALISTS (10%)**: Balanced players with **Emotional Intelligence** (Sensation Engine). Validate others' work.
--   **EXPLOITERS (5-15%)**: Micro-optimize fully solved games. Split 50/50 between "Social" (follow network) and "Sociopath" (ignore network) to find novel efficiencies.
+-   **EXPLOITERS (5-15%)**: Micro-optimize fully solved games. **REQUIRE** proven sequences; do not explore. Split 50/50 between "Social" and "Sociopath".
 
 **Dynamic Role Distribution**:
 The mix of agents changes based on the game state:
@@ -69,6 +70,22 @@ The mix of agents changes based on the game state:
 ### Regulatory Signal Engine
 -   Maintains homeostasis (balance) in the network.
 -   Signals like "Population Stress" or "Diversity Crisis" trigger automatic parameter adjustments (e.g., increasing mutation rates).
+
+### Breakthrough Systems (Tier 1-3)
+-   **Subgoal Planner**: Decomposes problems into hierarchical plans (Objective -> Subgoals -> Actions).
+-   **Frustration Detector**: Uses quorum sensing to detect collective failure and trigger "Desperation Mode".
+-   **Near-Miss Analyzer**: Learns from "almost winning" runs (15-18/20 scores).
+-   **Collective Reasoning**: Enables multi-agent collaboration on hard problems.
+-   **Counterfactual Analyzer**: Performs "What if?" analysis to find alternative paths.
+
+### Meta-Learning (AGI Mode)
+-   **Meta-Learning Curriculum**: 4-stage progression (Specialization -> Generalization).
+-   **Rule Induction**: Learns abstract IF-THEN rules from successful runs.
+-   **Visual Reasoning**: Analyzes grids for symmetry, patterns, and shapes.
+
+### Agent Self-Model
+-   Tracks which objects/pixels agents control ("I am this object").
+-   Builds confidence maps based on action-response correlations.
 
 ### Sequence System
 -   **Full Game Sequences**: The "Holy Grail" - completing an entire game in one run.
