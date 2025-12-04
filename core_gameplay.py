@@ -1560,17 +1560,45 @@ class GameplayEngine:
                         # Self-model: Track controlled objects on every exploration action
                         if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
                             try:
-                                # Get recent action traces for this session
-                                session_id = self.session_manager.current_session_id
-                                if session_id:
-                                    controlled, confidence = self.agent_self_model.detect_controlled_objects(
-                                        session_id, window_size=10
-                                    )
-                                    # Only store if we have high confidence identification
-                                    if controlled and confidence > 0.5:
-                                        self.agent_self_model.store_control_map(
-                                            agent_id, game_id, current_level, controlled, confidence
+                                # Build action trace for recent actions in this session
+                                if hasattr(self, '_recent_action_traces'):
+                                    self._recent_action_traces.append({
+                                        'action_type': action,
+                                        'frame_before': previous_frame_data,
+                                        'frame_after': game_state.frame
+                                    })
+                                    # Keep last 10 actions for control detection
+                                    self._recent_action_traces = self._recent_action_traces[-10:]
+                                    
+                                    # Every 5 actions, analyze control patterns
+                                    if len(self._recent_action_traces) >= 5:
+                                        action_sequence = [t for t in self._recent_action_traces]
+                                        frame_sequence = [{'grid': t.get('frame_before', [])} for t in self._recent_action_traces]
+                                        frame_sequence.append({'grid': game_state.frame or []})
+                                        
+                                        controlled, confidence = self.agent_self_model.identify_controlled_objects(
+                                            game_id, current_level, action_sequence, frame_sequence
                                         )
+                                        
+                                        # Store if confident
+                                        if controlled and confidence > 0.5:
+                                            self.agent_self_model.store_control_map(
+                                                agent_id, game_id, current_level, controlled, confidence
+                                            )
+                                            
+                                            # Share discovery to network for cross-agent validation
+                                            action_response_map = self._build_action_response_map(self._recent_action_traces)
+                                            self.agent_self_model.share_control_discovery_to_network(
+                                                agent_id=agent_id,
+                                                game_id=game_id,
+                                                level=current_level,
+                                                controlled_objects=controlled,
+                                                action_response_map=action_response_map,
+                                                confidence=confidence,
+                                                generation=self.game_config.get('generation', 0)
+                                            )
+                                else:
+                                    self._recent_action_traces = []
                             except Exception as e:
                                 logger.debug(f"Self-model action update failed: {e}")
                     
@@ -3157,10 +3185,52 @@ class GameplayEngine:
     # SELF-MODEL & WORLD-MODEL CONTEXT HELPERS
     # ========================================================================
     
+    def _build_action_response_map(self, action_traces: List[Dict]) -> Dict[str, List[str]]:
+        """Build a map of action types to responding coordinates.
+        
+        Used for sharing 'I am this object' discoveries to network.
+        
+        Args:
+            action_traces: List of action trace dictionaries with action_type, frame_before, frame_after
+        
+        Returns:
+            Dictionary mapping action type -> list of responding coordinates
+        """
+        action_map = {}
+        
+        for trace in action_traces:
+            action_type = trace.get('action_type', 'unknown')
+            frame_before = trace.get('frame_before', [])
+            frame_after = trace.get('frame_after', [])
+            
+            if not frame_before or not frame_after:
+                continue
+            
+            # Find changed coordinates
+            changed_coords = []
+            for y in range(min(len(frame_before), len(frame_after))):
+                if not isinstance(frame_before[y], (list, tuple)) or not isinstance(frame_after[y], (list, tuple)):
+                    continue
+                for x in range(min(len(frame_before[y]), len(frame_after[y]))):
+                    if frame_before[y][x] != frame_after[y][x]:
+                        changed_coords.append(f"x:{x},y:{y}")
+            
+            if changed_coords:
+                if action_type not in action_map:
+                    action_map[action_type] = []
+                action_map[action_type].extend(changed_coords)
+        
+        # Deduplicate
+        for action_type in action_map:
+            action_map[action_type] = list(set(action_map[action_type]))
+        
+        return action_map
+    
     def _build_self_model_context(self, agent_id: Optional[str], game_id: str, level: int) -> Dict[str, Any]:
         """Build self-model context for reasoning JSON.
         
         Retrieves what the agent knows about which objects it controls.
+        Also queries network-validated control hypotheses for bootstrapping.
         
         Args:
             agent_id: Agent identifier
@@ -3173,14 +3243,15 @@ class GameplayEngine:
         context = {
             'objects_agent_controls': [],
             'control_confidence': 0.0,
-            'object_dependencies': []  # Future: track object relationships
+            'object_dependencies': [],
+            'network_control_hypotheses': []  # Cross-agent validated hypotheses
         }
         
         if not agent_id:
             return context
         
         try:
-            # Get controlled objects from agent_self_model
+            # Get controlled objects from agent_self_model (agent's own knowledge)
             controlled = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
             if controlled:
                 context['objects_agent_controls'] = controlled[:10]  # Limit for JSON size
@@ -3192,6 +3263,22 @@ class GameplayEngine:
                 """, (agent_id, game_id, level))
                 if result:
                     context['control_confidence'] = result[0]['confidence']
+            
+            # Get network-validated control hypotheses (other agents' discoveries)
+            network_hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                game_id, level, min_reliability=0.4
+            )
+            if network_hypotheses:
+                # Include top 3 network hypotheses for reference
+                context['network_control_hypotheses'] = [
+                    {
+                        'id': h['hypothesis_id'],
+                        'controlled': h['controlled_objects'][:5],  # Limit size
+                        'reliability': round(h['reliability'], 2),
+                        'validated_by_win': h['validated_by_win']
+                    }
+                    for h in network_hypotheses[:3]
+                ]
         except Exception as e:
             logger.debug(f"Self-model context build failed: {e}")
         
@@ -3775,11 +3862,12 @@ class GameplayEngine:
         Mark hypotheses as validated when an agent wins past the level they referenced.
         
         Called after a successful level completion to upvote relevant hypotheses.
+        Also validates network object control hypotheses (I am this object knowledge).
         """
         try:
             game_type = game_id[:4] if game_id else ''
             
-            # Upvote and validate hypotheses for levels we've now beaten
+            # Upvote and validate failure hypotheses for levels we've now beaten
             self.db.execute_query("""
                 UPDATE network_failure_hypotheses
                 SET validated_by_win = TRUE,
@@ -3789,6 +3877,21 @@ class GameplayEngine:
                   AND level_number < ?
                   AND validated_by_win = FALSE
             """, (game_type, level_number))
+            
+            # ALSO validate "I am this object" control hypotheses
+            # These helped the agent understand what it controls, leading to the win
+            if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                # Get hypotheses that were used for this game/level
+                hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                    game_id, level_number, min_reliability=0.0  # Get all, even low reliability
+                )
+                for h in hypotheses:
+                    self.agent_self_model.validate_control_hypothesis(
+                        h['hypothesis_id'],
+                        success=True,
+                        validated_by_win=True
+                    )
+                logger.debug(f"Validated {len(hypotheses)} control hypotheses on {game_id} L{level_number} win")
             
         except Exception as e:
             logger.debug(f"Failed to validate hypotheses: {e}")

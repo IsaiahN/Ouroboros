@@ -31,6 +31,11 @@ class AgentSelfModel:
     - Which pixels/objects respond to agent actions
     - Correlation between actions and frame changes
     - Controlled vs environmental objects
+    
+    Network Knowledge Sharing:
+    - Agents share "I am this object" discoveries to network_object_control_hypotheses
+    - Other agents validate/refute these hypotheses during gameplay
+    - Bayesian reputation scoring determines reliability
     """
     
     def __init__(self, db_path: str = "core_data.db"):
@@ -39,7 +44,8 @@ class AgentSelfModel:
         self._ensure_tables()
     
     def _ensure_tables(self):
-        """Create agent_object_control table if needed."""
+        """Create agent_object_control and network hypothesis tables if needed."""
+        # Individual agent control maps
         self.db.execute_query("""
             CREATE TABLE IF NOT EXISTS agent_object_control (
                 agent_id TEXT,
@@ -50,6 +56,41 @@ class AgentSelfModel:
                 learned_at TEXT,
                 PRIMARY KEY (agent_id, game_id, level_number)
             )
+        """)
+        
+        # Network-level "I am this object" hypotheses - shared across agents
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS network_object_control_hypotheses (
+                hypothesis_id TEXT PRIMARY KEY,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- The hypothesis: "I control object at these coordinates"
+                control_pattern TEXT NOT NULL,
+                action_response_map TEXT NOT NULL,
+                
+                -- Discovery context
+                discovered_by_agent TEXT NOT NULL,
+                discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                discovery_generation INTEGER DEFAULT 0,
+                
+                -- Validation tracking (Bayesian reputation)
+                validation_attempts INTEGER DEFAULT 0,
+                validation_successes INTEGER DEFAULT 0,
+                validation_failures INTEGER DEFAULT 0,
+                reliability_score REAL DEFAULT 0.5,
+                
+                -- Status
+                is_active BOOLEAN DEFAULT TRUE,
+                last_validated DATETIME,
+                validated_by_win BOOLEAN DEFAULT FALSE
+            )
+        """)
+        
+        # Index for fast lookup by game type
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_object_hypotheses_game 
+            ON network_object_control_hypotheses(game_type, level_number, is_active)
         """)
     
     def identify_controlled_objects(
@@ -242,6 +283,205 @@ class AgentSelfModel:
                 self.store_control_map(agent_id, game_id, level, controlled, confidence)
         
         return control_map
+    
+    # ========================================================================
+    # NETWORK KNOWLEDGE SHARING: "I AM THIS OBJECT" HYPOTHESES
+    # ========================================================================
+    
+    def share_control_discovery_to_network(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int,
+        controlled_objects: List[str],
+        action_response_map: Dict[str, List[str]],
+        confidence: float,
+        generation: int = 0
+    ) -> Optional[str]:
+        """
+        Share "I am this object" discovery to network for other agents to validate.
+        
+        This is the core of network-level self-model learning:
+        - Agent discovers which objects it controls
+        - Shares hypothesis to network
+        - Other agents validate during their gameplay
+        - High-reliability patterns become network knowledge
+        
+        Args:
+            agent_id: Discovering agent
+            game_id: Game where discovery was made
+            level: Level number
+            controlled_objects: Coordinates of controlled objects
+            action_response_map: Maps action types to responding coordinates
+            confidence: Discovery confidence
+            generation: Current evolution generation
+        
+        Returns:
+            hypothesis_id if shared, None if already exists or low confidence
+        """
+        if confidence < 0.6 or not controlled_objects:
+            return None
+        
+        # Extract game type (e.g., 'ft09' from 'ft09-abc123')
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Create control pattern signature for deduplication
+        pattern_signature = self._create_pattern_signature(controlled_objects, action_response_map)
+        
+        # Check if similar hypothesis already exists
+        existing = self.db.execute_query("""
+            SELECT hypothesis_id, validation_attempts, reliability_score
+            FROM network_object_control_hypotheses
+            WHERE game_type = ? AND level_number = ? AND control_pattern = ? AND is_active = TRUE
+        """, (game_type, level, pattern_signature))
+        
+        if existing:
+            # Update existing with validation attempt
+            return existing[0]['hypothesis_id']
+        
+        # Create new hypothesis
+        hypothesis_id = f"oc_{game_type}_L{level}_{uuid.uuid4().hex[:8]}"
+        
+        self.db.execute_query("""
+            INSERT INTO network_object_control_hypotheses
+            (hypothesis_id, game_type, level_number, control_pattern, action_response_map,
+             discovered_by_agent, discovery_generation, reliability_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            hypothesis_id,
+            game_type,
+            level,
+            pattern_signature,
+            json.dumps(action_response_map),
+            agent_id,
+            generation,
+            confidence  # Initial reliability = discovery confidence
+        ))
+        
+        logger.info(
+            f"[NETWORK] Agent {agent_id[:8]} shared 'I am object' hypothesis: "
+            f"{hypothesis_id} for {game_type} L{level} ({len(controlled_objects)} objects)"
+        )
+        
+        return hypothesis_id
+    
+    def get_network_control_hypotheses(
+        self,
+        game_id: str,
+        level: int,
+        min_reliability: float = 0.3
+    ) -> List[Dict]:
+        """
+        Get network-validated "I am this object" hypotheses for a game/level.
+        
+        Use this to bootstrap agent self-model with network knowledge.
+        
+        Args:
+            game_id: Game identifier
+            level: Level number
+            min_reliability: Minimum reliability score to return
+        
+        Returns:
+            List of hypothesis dictionaries with control patterns and reliability
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        results = self.db.execute_query("""
+            SELECT 
+                hypothesis_id,
+                control_pattern,
+                action_response_map,
+                reliability_score,
+                validation_attempts,
+                validation_successes,
+                validated_by_win
+            FROM network_object_control_hypotheses
+            WHERE game_type = ? AND level_number = ? 
+                  AND is_active = TRUE AND reliability_score >= ?
+            ORDER BY reliability_score DESC, validated_by_win DESC
+            LIMIT 5
+        """, (game_type, level, min_reliability))
+        
+        hypotheses = []
+        for row in results or []:
+            hypotheses.append({
+                'hypothesis_id': row['hypothesis_id'],
+                'controlled_objects': json.loads(row['control_pattern']) if row['control_pattern'].startswith('[') else row['control_pattern'].split(','),
+                'action_response_map': json.loads(row['action_response_map']) if row['action_response_map'] else {},
+                'reliability': row['reliability_score'],
+                'validation_count': row['validation_attempts'],
+                'success_rate': row['validation_successes'] / max(1, row['validation_attempts']),
+                'validated_by_win': row['validated_by_win']
+            })
+        
+        return hypotheses
+    
+    def validate_control_hypothesis(
+        self,
+        hypothesis_id: str,
+        success: bool,
+        validated_by_win: bool = False
+    ):
+        """
+        Record validation result for a network control hypothesis.
+        
+        Called when an agent uses a network hypothesis and succeeds/fails.
+        Updates Bayesian reliability score.
+        
+        Args:
+            hypothesis_id: Hypothesis being validated
+            success: Whether the hypothesis helped (True) or failed (False)
+            validated_by_win: Whether validation came from level/game win
+        """
+        # Get current stats
+        current = self.db.execute_query("""
+            SELECT validation_attempts, validation_successes, validation_failures, reliability_score
+            FROM network_object_control_hypotheses
+            WHERE hypothesis_id = ?
+        """, (hypothesis_id,))
+        
+        if not current:
+            return
+        
+        row = current[0]
+        attempts = row['validation_attempts'] + 1
+        successes = row['validation_successes'] + (1 if success else 0)
+        failures = row['validation_failures'] + (0 if success else 1)
+        
+        # Bayesian reliability update with prior
+        prior_successes = 1  # Weak prior
+        prior_total = 2
+        reliability = (successes + prior_successes) / (attempts + prior_total)
+        
+        # Mark validated_by_win if this validation was from a win
+        win_flag = validated_by_win or row.get('validated_by_win', False)
+        
+        # Deactivate if reliability drops too low
+        is_active = reliability >= 0.2
+        
+        self.db.execute_query("""
+            UPDATE network_object_control_hypotheses
+            SET validation_attempts = ?,
+                validation_successes = ?,
+                validation_failures = ?,
+                reliability_score = ?,
+                validated_by_win = ?,
+                is_active = ?,
+                last_validated = CURRENT_TIMESTAMP
+            WHERE hypothesis_id = ?
+        """, (attempts, successes, failures, reliability, win_flag, is_active, hypothesis_id))
+        
+        if not is_active:
+            logger.info(f"[NETWORK] Control hypothesis {hypothesis_id} deactivated (reliability: {reliability:.2f})")
+    
+    def _create_pattern_signature(self, controlled_objects: List[str], action_map: Dict) -> str:
+        """
+        Create a signature for deduplication of similar patterns.
+        
+        Uses sorted coordinates to ensure consistent comparison.
+        """
+        sorted_objects = sorted(controlled_objects)
+        return json.dumps(sorted_objects)
 
 
 # ============================================================================
