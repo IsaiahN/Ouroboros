@@ -727,3 +727,418 @@ class AgentOperatingModeSystem:
         else:
             # User Decision: Option A (Act like Generalist/Replay exactly)
             return "replay"
+
+    # =========================================================================
+    # ROLE SELF-DETERMINATION SYSTEM
+    # =========================================================================
+    # Agents can self-determine their roles based on:
+    # 1. Performance history per role (efficiency, win rate)
+    # 2. Semantic feedback (frustration, satisfaction from sensation engine)
+    # 3. Network contribution (sequences discovered)
+    # 
+    # Agents start with assigned roles, but can:
+    # - Develop a preferred_role based on fit scores
+    # - Lock into a role when they find a good fit (role_locked=True)
+    # - Request role changes (with cooldown)
+    # =========================================================================
+
+    def get_agent_role(self, agent_id: str, generation: int) -> str:
+        """
+        Get agent's role for this generation - respects self-determination.
+        
+        Priority:
+        1. Locked role (agent found their niche)
+        2. Preferred role (agent wants to try this, if capacity allows)
+        3. Assigned role (population quota fallback)
+        
+        Args:
+            agent_id: Agent ID
+            generation: Current generation
+            
+        Returns:
+            Role string ('pioneer', 'optimizer', 'generalist', 'exploiter')
+        """
+        # Get agent's self-determination state
+        agent = self.db.execute_query("""
+            SELECT preferred_role, role_locked, role_confidence, 
+                   last_role_switch_gen, role_switch_cooldown
+            FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if not agent:
+            return 'generalist'  # Fallback
+        
+        agent_data = agent[0]
+        
+        # 1. Locked agents stay in their role (found their niche)
+        if agent_data.get('role_locked') and agent_data.get('preferred_role'):
+            logger.debug(f"Agent {agent_id[:8]} locked into {agent_data['preferred_role']}")
+            return agent_data['preferred_role']
+        
+        # 2. Agent has a preference and cooldown is over
+        if agent_data.get('preferred_role'):
+            cooldown = agent_data.get('role_switch_cooldown', 2)
+            last_switch = agent_data.get('last_role_switch_gen', 0)
+            
+            if generation - last_switch >= cooldown:
+                # Check if role has capacity (soft limit)
+                if self._role_has_capacity(agent_data['preferred_role'], generation):
+                    return agent_data['preferred_role']
+                # High-confidence agents can overflow
+                elif agent_data.get('role_confidence', 0) > 0.8:
+                    logger.info(f"Agent {agent_id[:8]} overflowing into {agent_data['preferred_role']} (high confidence)")
+                    return agent_data['preferred_role']
+        
+        # 3. Fall back to last assigned role or generalist
+        last_mode = self.db.execute_query("""
+            SELECT operating_mode FROM agent_operating_modes
+            WHERE agent_id = ? ORDER BY generation DESC LIMIT 1
+        """, (agent_id,))
+        
+        if last_mode:
+            return last_mode[0]['operating_mode']
+        
+        return 'generalist'
+
+    def _role_has_capacity(self, role: str, generation: int) -> bool:
+        """Check if a role has capacity (below target percentage)."""
+        # Get current distribution
+        distribution = self.get_population_mode_distribution(generation)
+        total = sum(distribution.values())
+        
+        if total == 0:
+            return True
+        
+        current_pct = distribution.get(role, 0) / total
+        
+        # Get target percentage for this role
+        target_pcts = {
+            'pioneer': self.TARGET_PIONEER_PCT,
+            'optimizer': self.TARGET_OPTIMIZER_PCT,
+            'generalist': self.TARGET_GENERALIST_PCT,
+            'exploiter': self.TARGET_EXPLOITER_PCT
+        }
+        
+        target = target_pcts.get(role, 0.25)
+        
+        # Allow 10% overflow above target
+        return current_pct < (target * 1.1)
+
+    def update_role_fit_after_game(self, agent_id: str, role: str, game_result: Dict) -> None:
+        """
+        Update agent's fit score for their current role after each game.
+        Called automatically after every game to track role effectiveness.
+        
+        Args:
+            agent_id: Agent ID
+            role: Role played during this game
+            game_result: Dict with final_score, win, actions_taken, frustration_level, etc.
+        """
+        # Get or create role performance record
+        perf = self.db.execute_query("""
+            SELECT * FROM agent_role_performance WHERE agent_id = ? AND role = ?
+        """, (agent_id, role))
+        
+        if perf:
+            perf = dict(perf[0])
+        else:
+            # Create new record
+            perf = {
+                'agent_id': agent_id,
+                'role': role,
+                'games_played': 0,
+                'total_score': 0.0,
+                'total_wins': 0,
+                'total_actions': 0,
+                'sequences_discovered': 0,
+                'avg_frustration': 0.5,
+                'avg_satisfaction': 0.5,
+                'role_fit_score': 0.0,
+                'consecutive_good_generations': 0
+            }
+        
+        # Update metrics
+        perf['games_played'] += 1
+        perf['total_score'] += game_result.get('final_score', 0)
+        perf['total_wins'] += 1 if game_result.get('win') else 0
+        perf['total_actions'] += game_result.get('actions_taken', 0)
+        
+        # Track sequence discoveries
+        if game_result.get('learned_sequence_id'):
+            perf['sequences_discovered'] += 1
+        
+        # Semantic feedback from sensation engine (exponential moving average)
+        if 'frustration_level' in game_result:
+            perf['avg_frustration'] = (perf['avg_frustration'] * 0.9 + 
+                                       game_result['frustration_level'] * 0.1)
+        
+        if 'satisfaction_level' in game_result:
+            perf['avg_satisfaction'] = (perf['avg_satisfaction'] * 0.9 + 
+                                        game_result['satisfaction_level'] * 0.1)
+        
+        # Calculate composite fit score
+        games = max(perf['games_played'], 1)
+        actions = max(perf['total_actions'], 1)
+        
+        efficiency = perf['total_score'] / actions  # Score per action
+        win_rate = perf['total_wins'] / games
+        discovery_rate = perf['sequences_discovered'] / games
+        semantic_quality = (1.0 - perf['avg_frustration']) * perf['avg_satisfaction']
+        
+        # Weighted composite - different roles value different things
+        if role == 'pioneer':
+            # Pioneers value discovery and exploration
+            perf['role_fit_score'] = (
+                discovery_rate * 0.4 +      # Pioneers find new things
+                semantic_quality * 0.3 +     # Not frustrated by exploration
+                efficiency * 0.2 +           # Some efficiency matters
+                win_rate * 0.1               # Wins less important for pioneers
+            )
+        elif role == 'optimizer':
+            # Optimizers value efficiency
+            perf['role_fit_score'] = (
+                efficiency * 0.5 +           # Efficiency is key
+                win_rate * 0.3 +             # Should win often
+                semantic_quality * 0.15 +    # Satisfaction from refinement
+                discovery_rate * 0.05        # Some optimization discoveries
+            )
+        elif role == 'exploiter':
+            # Exploiters value consistent wins with minimal effort
+            perf['role_fit_score'] = (
+                win_rate * 0.5 +             # Must win consistently
+                efficiency * 0.3 +           # Efficient execution
+                semantic_quality * 0.2       # Satisfaction from harvesting
+            )
+        else:  # generalist
+            # Generalists are balanced
+            perf['role_fit_score'] = (
+                efficiency * 0.3 +
+                win_rate * 0.3 +
+                semantic_quality * 0.2 +
+                discovery_rate * 0.2
+            )
+        
+        # Save updated performance
+        self.db.execute_query("""
+            INSERT OR REPLACE INTO agent_role_performance
+            (agent_id, role, games_played, total_score, total_wins, total_actions,
+             sequences_discovered, avg_frustration, avg_satisfaction, role_fit_score,
+             consecutive_good_generations, last_updated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (
+            agent_id, role, perf['games_played'], perf['total_score'],
+            perf['total_wins'], perf['total_actions'], perf['sequences_discovered'],
+            perf['avg_frustration'], perf['avg_satisfaction'], perf['role_fit_score'],
+            perf.get('consecutive_good_generations', 0)
+        ))
+        
+        # Check for role preference update
+        self._update_role_preference(agent_id)
+
+    def _update_role_preference(self, agent_id: str) -> None:
+        """
+        Update agent's preferred role based on fit scores across all roles.
+        Called after each game to potentially update preference.
+        """
+        # Get all role performances for this agent
+        performances = self.db.execute_query("""
+            SELECT role, role_fit_score, games_played, consecutive_good_generations
+            FROM agent_role_performance
+            WHERE agent_id = ?
+            ORDER BY role_fit_score DESC
+        """, (agent_id,))
+        
+        if not performances or len(performances) == 0:
+            return
+        
+        # Need at least 5 games in a role to consider it
+        valid_performances = [p for p in performances if p['games_played'] >= 5]
+        
+        if not valid_performances:
+            return
+        
+        best = valid_performances[0]
+        best_role = best['role']
+        best_score = best['role_fit_score']
+        
+        # Get second best for comparison
+        second_best_score = 0.0
+        if len(valid_performances) > 1:
+            second_best_score = valid_performances[1]['role_fit_score']
+        
+        # Update preferred role if clearly better (>0.1 difference)
+        if best_score > second_best_score + 0.1:
+            self.db.execute_query("""
+                UPDATE agents SET 
+                    preferred_role = ?,
+                    role_confidence = ?
+                WHERE agent_id = ?
+            """, (best_role, best_score, agent_id))
+            
+            logger.debug(f"Agent {agent_id[:8]} prefers {best_role} (fit={best_score:.2f})")
+        
+        # Check for role lock (found niche)
+        self._check_role_lock(agent_id, best_role, best_score, second_best_score)
+
+    def _check_role_lock(self, agent_id: str, best_role: str, 
+                         best_score: float, second_best_score: float) -> None:
+        """
+        Check if agent should lock into their best role.
+        
+        Lock criteria:
+        - Played at least 15 games in preferred role
+        - Fit score > 0.65 
+        - Fit score significantly better than second best (>0.15 difference)
+        """
+        perf = self.db.execute_query("""
+            SELECT games_played, consecutive_good_generations
+            FROM agent_role_performance
+            WHERE agent_id = ? AND role = ?
+        """, (agent_id, best_role))
+        
+        if not perf:
+            return
+        
+        games_in_role = perf[0]['games_played']
+        consecutive_good = perf[0].get('consecutive_good_generations', 0)
+        
+        # Lock conditions
+        should_lock = (
+            games_in_role >= 15 and
+            best_score > 0.65 and
+            best_score > second_best_score + 0.15
+        )
+        
+        if should_lock:
+            # Get current generation
+            gen_result = self.db.execute_query("""
+                SELECT MAX(generation) as gen FROM agent_operating_modes WHERE agent_id = ?
+            """, (agent_id,))
+            current_gen = gen_result[0]['gen'] if gen_result and gen_result[0]['gen'] else 0
+            
+            self.db.execute_query("""
+                UPDATE agents SET 
+                    preferred_role = ?,
+                    role_locked = TRUE,
+                    role_lock_generation = ?,
+                    role_confidence = ?
+                WHERE agent_id = ?
+            """, (best_role, current_gen, best_score, agent_id))
+            
+            logger.info(f"[ROLE LOCK] Agent {agent_id[:8]} locked into {best_role} "
+                       f"(fit={best_score:.2f}, games={games_in_role})")
+
+    def request_role_change(self, agent_id: str, desired_role: str, 
+                           generation: int) -> Tuple[bool, str]:
+        """
+        Agent requests to change role. Evaluated based on:
+        - Cooldown period (2 generations)
+        - Role capacity
+        - Agent's fit score for desired role
+        
+        Args:
+            agent_id: Agent ID
+            desired_role: Role agent wants to switch to
+            generation: Current generation
+            
+        Returns:
+            (approved, reason) tuple
+        """
+        # Check if agent is locked
+        agent = self.db.execute_query("""
+            SELECT role_locked, last_role_switch_gen, role_switch_cooldown
+            FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if not agent:
+            return False, "Agent not found"
+        
+        agent_data = agent[0]
+        
+        if agent_data.get('role_locked'):
+            return False, "Agent is role-locked (found their niche)"
+        
+        # Check cooldown
+        cooldown = agent_data.get('role_switch_cooldown', 2)
+        last_switch = agent_data.get('last_role_switch_gen', 0)
+        
+        if generation - last_switch < cooldown:
+            remaining = cooldown - (generation - last_switch)
+            return False, f"Cooldown not complete ({remaining} generations remaining)"
+        
+        # Check capacity (soft limit - high fit agents can overflow)
+        has_capacity = self._role_has_capacity(desired_role, generation)
+        
+        # Get agent's fit score for desired role
+        fit_result = self.db.execute_query("""
+            SELECT role_fit_score FROM agent_role_performance
+            WHERE agent_id = ? AND role = ?
+        """, (agent_id, desired_role))
+        
+        fit_score = fit_result[0]['role_fit_score'] if fit_result else 0.0
+        
+        if has_capacity or fit_score > 0.7:  # High-fit agents can overflow
+            # Approve the change
+            self.db.execute_query("""
+                UPDATE agents SET 
+                    preferred_role = ?,
+                    last_role_switch_gen = ?
+                WHERE agent_id = ?
+            """, (desired_role, generation, agent_id))
+            
+            logger.info(f"[ROLE CHANGE] Agent {agent_id[:8]} -> {desired_role} (fit={fit_score:.2f})")
+            return True, f"Role change approved (fit={fit_score:.2f})"
+        
+        return False, f"No capacity and fit too low ({fit_score:.2f})"
+
+    def get_role_fit_summary(self, agent_id: str) -> Dict:
+        """
+        Get summary of agent's fit scores across all roles.
+        Useful for debugging and agent introspection.
+        """
+        performances = self.db.execute_query("""
+            SELECT role, role_fit_score, games_played, total_wins, 
+                   avg_frustration, avg_satisfaction
+            FROM agent_role_performance
+            WHERE agent_id = ?
+        """, (agent_id,))
+        
+        agent = self.db.execute_query("""
+            SELECT preferred_role, role_locked, role_confidence
+            FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        summary = {
+            'agent_id': agent_id,
+            'preferred_role': agent[0]['preferred_role'] if agent else None,
+            'role_locked': agent[0]['role_locked'] if agent else False,
+            'role_confidence': agent[0]['role_confidence'] if agent else 0.0,
+            'role_fits': {}
+        }
+        
+        for p in performances:
+            summary['role_fits'][p['role']] = {
+                'fit_score': p['role_fit_score'],
+                'games_played': p['games_played'],
+                'win_rate': p['total_wins'] / max(p['games_played'], 1),
+                'frustration': p['avg_frustration'],
+                'satisfaction': p['avg_satisfaction']
+            }
+        
+        return summary
+
+    def get_locked_agents_count(self) -> Dict[str, int]:
+        """Get count of locked agents per role."""
+        results = self.db.execute_query("""
+            SELECT preferred_role, COUNT(*) as count
+            FROM agents
+            WHERE role_locked = TRUE AND is_active = TRUE
+            GROUP BY preferred_role
+        """)
+        
+        counts = {'pioneer': 0, 'optimizer': 0, 'generalist': 0, 'exploiter': 0}
+        for r in results:
+            if r['preferred_role']:
+                counts[r['preferred_role']] = r['count']
+        
+        return counts

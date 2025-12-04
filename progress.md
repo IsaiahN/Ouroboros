@@ -2,6 +2,521 @@
 
 ---
 
+## Session: December 4, 2025 (1:15:00 PM - Role Self-Determination System)
+**Focus**: Implement agent role self-determination based on performance and semantics
+
+### Approach
+
+**Philosophy**: Agents should self-determine their roles based on their own history, not be forced into roles by population quotas every generation. This aligns with Biome Theory - agents are autonomous organisms that adapt through experience.
+
+**Design Principles**:
+1. **Initial Assignment**: Agents get assigned roles based on quotas (current system)
+2. **Role Exploration**: Agents track performance per role (efficiency, wins, discoveries)
+3. **Preference Emergence**: Best-fit role becomes `preferred_role`
+4. **Role Lock**: When fit is proven (15+ games, >0.65 fit, >0.15 difference from 2nd best), agent locks into role
+5. **Cooldown**: 2 generations between role switches to prevent oscillation
+
+### Implementation Steps
+
+#### Step 1: Database Schema (1:15 PM) [OK]
+Added new columns to `agents` table:
+- `preferred_role` TEXT - Agent's self-determined preferred role
+- `role_confidence` REAL - Confidence in preferred role (0.0-1.0)
+- `role_locked` BOOLEAN - Whether agent is locked into role
+- `role_lock_generation` INTEGER - Generation when locked
+- `last_role_switch_gen` INTEGER - Last generation agent switched roles
+- `role_switch_cooldown` INTEGER - Minimum generations between switches (default 2)
+
+Created new table `agent_role_performance`:
+```sql
+CREATE TABLE agent_role_performance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    games_played INTEGER DEFAULT 0,
+    total_score REAL DEFAULT 0.0,
+    total_wins INTEGER DEFAULT 0,
+    total_actions INTEGER DEFAULT 0,
+    sequences_discovered INTEGER DEFAULT 0,
+    avg_frustration REAL DEFAULT 0.5,
+    avg_satisfaction REAL DEFAULT 0.5,
+    role_fit_score REAL DEFAULT 0.0,
+    consecutive_good_generations INTEGER DEFAULT 0,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(agent_id, role)
+);
+```
+
+#### Step 2: Role Fit Calculation (1:25 PM) [OK]
+**File**: `agent_operating_mode_system.py`
+
+Added methods:
+- `get_agent_role()` - Respects locked/preferred roles before quotas
+- `update_role_fit_after_game()` - Updates fit score after each game
+- `_update_role_preference()` - Updates preferred role based on best fit
+- `_check_role_lock()` - Checks if agent should lock into role
+- `request_role_change()` - Handles agent role change requests
+- `get_role_fit_summary()` - Debug utility for agent introspection
+- `get_locked_agents_count()` - Count locked agents per role
+
+**Role-Specific Fit Scoring**:
+| Role | Efficiency | Win Rate | Discoveries | Semantics |
+|------|-----------|----------|-------------|-----------|
+| Pioneer | 20% | 10% | 40% | 30% |
+| Optimizer | 50% | 30% | 5% | 15% |
+| Exploiter | 30% | 50% | 0% | 20% |
+| Generalist | 30% | 30% | 20% | 20% |
+
+#### Step 3: Integration with Gameplay (1:35 PM) [OK]
+**File**: `core_gameplay.py`
+
+- Updated `_get_agent_operating_mode()` to check locked/preferred roles first
+- Added role fit update call after every game completion
+- Includes semantic feedback (frustration, satisfaction) from sensation engine
+
+### Files Modified
+
+| File | Lines | Changes |
+|------|-------|---------|
+| `agent_operating_mode_system.py` | +350 | Role self-determination methods |
+| `core_gameplay.py` | ~3360, ~2140 | `_get_agent_operating_mode()` update, fit tracking |
+
+### Verification
+
+- `pylanceFileSyntaxErrors`: PASSED (both files)
+- Database schema: VERIFIED (6 new columns + 1 new table)
+
+### How It Works
+
+```
+Game Start:
+  1. _get_agent_operating_mode(agent_id) checks:
+     - role_locked? -> return preferred_role
+     - preferred_role with high confidence? -> return preferred_role
+     - else -> return last assigned mode
+
+Game End:
+  2. update_role_fit_after_game() calculates:
+     - efficiency = total_score / total_actions
+     - win_rate = total_wins / games_played
+     - discovery_rate = sequences_discovered / games_played
+     - semantic_quality = (1 - frustration) * satisfaction
+     - role_fit_score = weighted combination based on role
+  
+  3. _update_role_preference() evaluates:
+     - If best fit > second best + 0.1 -> set preferred_role
+     
+  4. _check_role_lock() locks if:
+     - games_in_role >= 15
+     - role_fit_score > 0.65
+     - fit > second_best + 0.15
+```
+
+### Expected Behavior
+
+After a few generations:
+- [ ] Agents naturally drift toward roles they perform best in
+- [ ] Locked agents exempt from population rebalancing
+- [ ] Population quotas only apply to unlocked agents
+- [ ] Semantic feedback influences role fit (frustrated pioneers may become optimizers)
+- [ ] Role switches have 2-generation cooldown
+
+---
+
+## Session: December 4, 2025 (12:45:32 PM - Documentation Update)
+**Focus**: Comprehensive documentation of all session work
+
+This entry consolidates all work done in the 11:30 AM session for permanent record.
+
+---
+
+## Session: December 4, 2025 (11:30:00 AM - 12:45:00 PM) - Level 2+ Progression Fix & Revival Integration
+**Focus**: Fix critical bug preventing level 2+ progression, implement Biome Theory revival system
+
+### Overall Approach
+
+**Philosophy**: The system follows "Biome Theory" from the Master Ruleset - agents are temporary vessels, the network is the immortal organism. Knowledge must never be lost when agents die.
+
+**Session Goals**:
+1. **Diagnose L2 Issue**: Understand why no games progress past Level 1
+2. **Fix Root Cause**: Implement smart WIN/GAME_OVER detection
+3. **Biome Phase 1**: Integrate agent revival system (resurrect valuable agents)
+4. **Biome Phase 2**: Archive agent knowledge before deletion (no knowledge loss)
+
+### Detailed Problem Analysis
+
+**Symptom**: All games stopping at score=1.0 with only 6-7 actions
+
+**Database Investigation**:
+```sql
+-- Query revealed the issue
+SELECT game_id, MAX(action_count) as max_action, MAX(final_score) as max_score 
+FROM game_results GROUP BY game_id ORDER BY max_score DESC;
+-- Result: Every game had max_score=1.0, max_action=6-7
+```
+
+**Root Cause Chain**:
+1. Many ARC games report "WIN" or "GAME_OVER" after completing Level 1
+2. Previous code fix (from earlier bug) respected this API verdict blindly
+3. Games exited immediately after L1 instead of continuing to L2
+4. Example: Game `ls20` reports "WIN" after EVERY level, not just the final one
+5. The `win_score` field tells us how many levels the game actually has
+
+**The Solution**: Only treat as truly finished if `score >= win_score` (completed all levels)
+
+### Completed Steps (Chronological Order)
+
+#### Step 1: Database Diagnosis (11:35 AM) [OK]
+**Action**: Queried database to understand L2 failure pattern
+
+```sql
+-- Found: All games at score=1.0, 6-7 actions max
+SELECT game_id, MAX(final_score), MAX(action_count), status
+FROM game_results GROUP BY game_id;
+```
+
+**Discovery**: Games were being marked `status=failed` even with `score=1.0` because they weren't "WIN" state
+
+#### Step 2: Fixed Premature WIN/GAME_OVER Detection (11:50 AM) [OK]
+**File**: `core_gameplay.py` (lines ~1421-1443)
+
+**Logic Change**:
+- Before: `if state == "WIN": break` (trusted API blindly)
+- After: Only stop if `score >= win_score` (truly completed) OR `score == 0 && GAME_OVER` (truly failed)
+
+**Code Implemented**:
+```python
+if game_state.state == "WIN":
+    if game_state.score >= game_state.win_score and game_state.win_score > 0:
+        logger.info(f"[WIN] Game fully won! Score: {game_state.score}/{game_state.win_score}")
+        break
+    else:
+        # Premature WIN - game continues
+        logger.debug(f"[CONTINUE] Premature WIN (score {game_state.score}/{game_state.win_score})")
+        game_state.state = "NOT_FINISHED"
+        
+elif game_state.state == "GAME_OVER":
+    if game_state.score == 0:
+        logger.info(f"[GAME_OVER] True failure with zero score")
+        break
+    else:
+        # Possible premature GAME_OVER with progress
+        logger.debug(f"[CONTINUE] GAME_OVER with score {game_state.score} - continuing")
+        game_state.state = "NOT_FINISHED"
+```
+
+#### Step 3: Fixed Game Status Recording (12:00 PM) [OK]
+**File**: `game_session_manager.py` (lines ~545-558)
+
+**Three-Tier Status System**:
+| Status | Condition | Meaning |
+|--------|-----------|---------|
+| `completed` | `state == "WIN"` | Full game win |
+| `partial` | `score > 0` | Progress made but not complete |
+| `failed` | `score == 0` | No progress |
+
+**Code**:
+```python
+if game_state == "WIN":
+    status = "completed"
+elif final_score > 0:
+    status = "partial"
+else:
+    status = "failed"
+```
+
+#### Step 4: Phase 1 - Agent Revival Integration (12:15 PM) [OK]
+**File**: `autonomous_evolution_runner.py` (lines ~1805-1835)
+
+**What It Does**: Every 5 generations, checks if network needs agent revival
+
+**Revival Triggers Detected**:
+1. **Performance Regression**: Network struggling on previously-solved games
+2. **Diversity Collapse**: All agents too similar (genetic bottleneck)
+3. **Specialist Need**: Specific game type lacks expert agents
+
+**Code Added**:
+```python
+# Biome Theory: Agent Revival System (Phase 1)
+if generation % 5 == 0:
+    from revive_agents import AgentRevivalSystem
+    revival_system = AgentRevivalSystem()
+    
+    triggers = revival_system.detect_revival_triggers(generation)
+    for trigger in triggers:
+        for candidate in trigger.get('candidates', [])[:2]:  # Max 2 per trigger
+            revived = revival_system.revive_agent(
+                candidate['agent_id'],
+                mode='hybrid',  # Option B from Master Ruleset
+                generation=generation
+            )
+```
+
+#### Step 5: Phase 2 - Archive Before Deletion (12:30 PM) [OK]
+**File**: `agent_lifecycle_manager.py` (lines ~201-261)
+
+**Philosophy**: No agent dies without their knowledge being preserved
+
+**New Method**: `_archive_agent_knowledge(agent_id: str)`
+- Extracts genome, epigenetics, sensation profile
+- Saves to `agent_archive` table (existing)
+- Saves discoveries to `archived_agent_discoveries` table (new)
+
+**New Database Table Created**:
+```sql
+CREATE TABLE archived_agent_discoveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    discovery_type TEXT NOT NULL,
+    discovery_data TEXT,
+    archived_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_archived_discoveries_agent ON archived_agent_discoveries(agent_id);
+```
+
+**Integration Points**:
+- `_remove_single_agent()` calls `_archive_agent_knowledge()` first
+- `_cull_agent()` calls `_archive_agent_knowledge()` first
+- `_force_remove_agent()` calls `_archive_agent_knowledge()` first
+
+#### Step 6: Syntax Verification (12:40 PM) [OK]
+Ran `pylanceFileSyntaxErrors` on all modified files:
+- `core_gameplay.py` - PASSED
+- `game_session_manager.py` - PASSED  
+- `agent_lifecycle_manager.py` - PASSED
+- `autonomous_evolution_runner.py` - PASSED
+
+### Files Modified This Session
+
+| File | Lines | Changes |
+|------|-------|---------|
+| `core_gameplay.py` | ~1421-1443 | Smart WIN/GAME_OVER detection, L2+ fix |
+| `game_session_manager.py` | ~85-95, ~545-558 | `set_current_generation()`, three-tier status |
+| `agent_lifecycle_manager.py` | ~201-261 | `_archive_agent_knowledge()` method |
+| `autonomous_evolution_runner.py` | ~1805-1835 | Revival system integration |
+
+### Current Failure Being Addressed
+
+**STATUS**: NO ACTIVE FAILURES - All fixes implemented, awaiting test run
+
+**Next Step Required**: Run evolution test to verify:
+```powershell
+python run_evolution.py --fast --max-generations 2
+```
+
+### Expected Verification After Test Run
+
+| Check | Expected Result |
+|-------|-----------------|
+| Games score > 1.0 | L2+ progression working |
+| `[CONTINUE] Premature WIN` in logs | Smart detection working |
+| `level_completions` matches score | Tracking fixed |
+| Revival triggers detected | Biome Phase 1 working |
+| `archived_agent_discoveries` has data | Biome Phase 2 working |
+
+### Architecture Notes
+
+**Why This Matters (Biome Theory)**:
+- Agents are temporary bacterial cells
+- Network is the immortal organism
+- Knowledge transfer > individual performance
+- No knowledge should ever be lost on agent death
+- Revival allows valuable genetic material to return when needed
+
+---
+
+## Session: December 4, 2025 (10:50 AM - Bug Fixes & Selective Model Updates)
+**Focus**: Fix critical bugs and implement selective world/self model updates during exploration only
+
+### Approach
+**Objective**: Address three runtime issues discovered during evolution testing
+1. **Respect API State**: Never force continuation when API says GAME_OVER - it's impossible
+2. **Generation Number Fix**: Ensure generation number reaches ARCClient for scorecard tags
+3. **Selective Model Updates**: Only update world/self models during exploration, NOT during sequence replay
+4. **Every-Action Updates**: Update both models on every exploration action (not just milestones)
+
+### Problem Identified
+
+**Three issues discovered during evolution run:**
+
+1. **GAME_OVER Forcing** (CRITICAL BUG):
+   - Log: `[WARN] Game reports 'GAME_OVER' but actions remain (53/400) - forcing continuation`
+   - Problem: Code was overriding GAME_OVER state and continuing - this is impossible
+   - Root Cause: Outdated logic assumed some games report completion prematurely
+
+2. **Generation Number Missing in Tags**:
+   - Symptom: Scorecard tags missing `gen_N` identifier
+   - Root Cause: `ARCClient` is recreated in `create_game()`, losing the `_current_generation` value
+   - The `configure()` method sets it on `session_manager.client`, but client is `None` at that point
+
+3. **Selective Model Updates**:
+   - User requirement: World/self models should update on exploration ONLY
+   - Sequence replays shouldn't pollute models with replay data
+   - Should update on EVERY exploration action, not just milestones
+
+### Completed Steps
+
+#### 1. Fixed GAME_OVER Forcing Bug [OK]
+**File**: `core_gameplay.py` (line ~1420)
+
+**Before (broken)**:
+```python
+# CRITICAL: If game reports WIN/GAME_OVER but we have actions left, keep trying
+# Some games report completion prematurely (e.g., ls20 after level 1)
+if game_state.state != "NOT_FINISHED":
+    logger.warning(f"[WARN] Game reports '{game_state.state}' but actions remain - forcing continuation")
+    game_state.state = "NOT_FINISHED"
+```
+
+**After (fixed)**:
+```python
+# CRITICAL: If game reports WIN or GAME_OVER, respect the API's verdict
+# The API is the source of truth - never force continuation
+if game_state.state == "WIN":
+    logger.info(f"[WIN] Game won! Final score: {game_state.score}")
+    break
+elif game_state.state == "GAME_OVER":
+    logger.info(f"[GAME_OVER] Game ended by API. Score: {game_state.score}")
+    break
+```
+
+#### 2. Added World Model Update on Every Exploration Action [OK]
+**File**: `core_gameplay.py` (line ~1515)
+
+**Change**: Moved world model update from level-completion-only to every-action
+```python
+# Only increment counters if action succeeded
+if action_succeeded:
+    action_count += 1
+    level_action_count += 1
+    
+    # Update world model after EVERY action (not just milestones)
+    # This is necessary for accurate world state tracking
+    if self.symbolic_engine and game_state.frame:
+        try:
+            self.symbolic_engine.update(
+                action=action if isinstance(action, int) else 0,
+                new_frame=np.array(game_state.frame)
+            )
+        except Exception as e:
+            logger.debug(f"World model action update failed: {e}")
+```
+
+#### 3. Removed Redundant Level-Completion World Model Update [OK]
+**File**: `core_gameplay.py` (line ~1678)
+
+**Before**: Had duplicate world model update on level completion
+**After**: Added comment noting updates happen on every action now
+```python
+# NOTE: World model now updates on every action (see action_succeeded block above)
+# No need for redundant level completion update
+```
+
+#### 4. Fixed Generation Number Propagation [OK]
+**Files**: `game_session_manager.py`, `core_gameplay.py`
+
+**Problem**: ARCClient created AFTER configure() is called, so `_current_generation` not set
+**Solution**: 
+- Store generation in GameSessionManager
+- Added `set_current_generation()` method for proper encapsulation
+- Propagate to ARCClient when client is created in `create_game()`
+
+**Changes to `game_session_manager.py`**:
+```python
+# Added to __init__:
+self._current_generation: Optional[int] = None
+
+# Added new method:
+def set_current_generation(self, generation: int) -> None:
+    """Set current generation for scorecard tagging."""
+    self._current_generation = generation
+    if self.client:
+        self.client._current_generation = generation
+    logger.debug(f"Set current generation to {generation} for scorecard tagging")
+
+# In create_game() - propagates to newly created client:
+if self._current_generation is not None:
+    self.client._current_generation = self._current_generation
+```
+
+**Changes to `core_gameplay.py` configure()**:
+```python
+if 'current_generation' in config:
+    gen = config['current_generation']
+    if hasattr(self, 'session_manager') and self.session_manager:
+        self.session_manager.set_current_generation(gen)
+```
+
+#### 5. Added Self-Model Update on Every Exploration Action [OK]
+**File**: `core_gameplay.py` (line ~1533)
+
+**Change**: Added self-model tracking in the same block as world-model updates:
+```python
+# Self-model: Track controlled objects on every exploration action
+if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+    try:
+        session_id = self.session_manager.current_session_id
+        if session_id:
+            controlled, confidence = self.agent_self_model.detect_controlled_objects(
+                session_id, window_size=10
+            )
+            # Only store if we have high confidence identification
+            if controlled and confidence > 0.5:
+                self.agent_self_model.store_control_map(
+                    agent_id, game_id, current_level, controlled, confidence
+                )
+    except Exception as e:
+        logger.debug(f"Self-model action update failed: {e}")
+```
+
+### Files Modified This Session
+
+| File | Action | Description |
+|------|--------|-------------|
+| `core_gameplay.py` | MODIFIED | Fixed GAME_OVER forcing, added every-action world/self model updates, fixed configure() |
+| `game_session_manager.py` | MODIFIED | Added `set_current_generation()` method and generation propagation |
+
+### Verification
+
+**Syntax Check**: `pylanceFileSyntaxErrors` → No syntax errors in both files
+**Pylance Warning**: Only "too complex to analyze" on `play_single_game()` (non-blocking)
+
+### Current System State
+
+**GAME_OVER Handling**: FIXED
+- Now respects API state - breaks loop on WIN or GAME_OVER
+- No more "forcing continuation" warnings
+
+**World Model Updates**: FIXED
+- Now updates on every exploration action
+- Skipped during sequence replay (separate method)
+- Removed redundant level-completion update
+
+**Self-Model Updates**: FIXED
+- Now updates on every exploration action (same block as world-model)
+- Only stores when confidence > 0.5
+- Skipped during sequence replay
+
+**Generation Number**: FIXED
+- Stored in session_manager via `set_current_generation()`
+- Propagated to ARCClient in `create_game()`
+- Should now appear in scorecard tags as `gen_N`
+
+### Current Failure Being Addressed
+
+**None** - All identified issues have been fixed. Ready for evolution test.
+
+### Next Steps
+
+1. Run evolution: `python run_evolution.py --fast --max-generations 2`
+2. Verify in logs:
+   - No "forcing continuation" warnings
+   - `gen_N` in scorecard tags
+   - `[WORLD-MODEL]` and `[SELF-MODEL]` logs during exploration
+   - Clean GAME_OVER handling
+
+---
+
 ## Session: December 4, 2025 (10:16 AM - Integration of Unused Reasoning Systems)
 **Focus**: Integrate SymbolicReasoningEngine, RuleInductionEngine, and AgentSelfModel into reasoning API output
 

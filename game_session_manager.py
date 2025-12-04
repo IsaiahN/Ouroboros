@@ -81,6 +81,21 @@ class GameSessionManager:
         """
         self.shutdown_handlers.append(handler)
 
+    def set_current_generation(self, generation: int) -> None:
+        """Set current generation number for scorecard tagging.
+        
+        This is stored and propagated to ARCClient when create_game() is called,
+        ensuring the generation number appears in scorecard tags.
+        
+        Args:
+            generation: Current evolution generation number
+        """
+        self._current_generation = generation
+        # Also set on client if it exists (may be None before first game)
+        if self.client:
+            self.client._current_generation = generation
+        logger.debug(f"Set current generation to {generation} for scorecard tagging")
+
     async def start_session(self, mode: str = "gameplay", game_id: Optional[str] = None) -> str:
         """Start a new game session.
 
@@ -528,12 +543,20 @@ class GameSessionManager:
         })
 
         # Save final game result (preserve scorecard_id from game creation)
+        # Status logic: 'completed' if WIN, 'partial' if score > 0 but not WIN, 'failed' if score == 0
+        if final_state == 'WIN':
+            status = 'completed'
+        elif final_score > 0:
+            status = 'partial'  # Made progress but didn't fully win
+        else:
+            status = 'failed'
+        
         self.db.save_game_result({
             'game_id': self.current_game_id,
             'session_id': self.current_session_id,
             'scorecard_id': self.client.current_scorecard_id if self.client else None,  # CRITICAL FIX: Preserve scorecard ID!
             'end_time': datetime.now(),
-            'status': 'completed' if final_state == 'WIN' else 'failed',
+            'status': status,
             'final_score': final_score,
             'total_actions': actions_taken if actions_taken > 0 else self.session_stats['total_actions'],  # CRITICAL FIX: Use per-game count!
             'win_detected': final_state == 'WIN',

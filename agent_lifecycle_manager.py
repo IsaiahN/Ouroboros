@@ -113,6 +113,8 @@ class AgentLifecycleManager:
             
             if not dry_run and zero_score_agents:
                 for agent_id, gen, score, prestige in zero_score_agents:
+                    # Phase 2: Archive agent's knowledge before deletion
+                    self._archive_agent_knowledge(conn, agent_id)
                     conn.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
                     logger.debug(f"  Deleted zero-score agent: {agent_id} (Gen {gen})")
                 conn.commit()
@@ -136,6 +138,8 @@ class AgentLifecycleManager:
             
             if not dry_run and low_score_agents:
                 for agent_id, gen, score, prestige in low_score_agents:
+                    # Phase 2: Archive agent's knowledge before deletion
+                    self._archive_agent_knowledge(conn, agent_id)
                     conn.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
                     logger.debug(f"  Deleted low-score agent: {agent_id} (Gen {gen}, Score: {score:.2f})")
                 conn.commit()
@@ -158,6 +162,8 @@ class AgentLifecycleManager:
             
             if not dry_run and good_player_agents:
                 for agent_id, gen, score, prestige in good_player_agents:
+                    # Phase 2: Archive agent's knowledge before deletion (good players have valuable knowledge)
+                    self._archive_agent_knowledge(conn, agent_id)
                     conn.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
                     logger.debug(f"  Deleted good player (ancient): {agent_id} (Gen {gen}, Score: {score:.2f})")
                 conn.commit()
@@ -192,6 +198,75 @@ class AgentLifecycleManager:
         logger.info(f"    High prestige archived: {stats['high_prestige_archived']} (NEVER deleted)")
         
         return stats
+    
+    def _archive_agent_knowledge(self, conn, agent_id: str) -> None:
+        """
+        Archive agent's knowledge before deletion (Phase 2 of Biome Theory).
+        
+        Extracts and stores:
+        - Agent metadata (genome, epigenetics, sensation profile)
+        - Performance stats
+        - Winning sequences (already in DB, just mark creator)
+        - Object control maps
+        - Rule discoveries
+        
+        This ensures no knowledge is lost when agents die - their "genetic material"
+        is released into the horizontal gene transfer pool.
+        
+        Args:
+            conn: Database connection
+            agent_id: Agent to archive
+        """
+        import json
+        
+        try:
+            # Get agent data
+            cursor = conn.execute("""
+                SELECT agent_id, genome, epigenetics, sensation_profile,
+                       generation, best_single_game_score, total_games_played,
+                       total_games_won, discovery_prestige, social_rule_adherence
+                FROM agents
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            agent_data = cursor.fetchone()
+            if not agent_data:
+                return
+            
+            # Archive to agent_archive table
+            archive_data = {
+                'genome': agent_data[1],
+                'epigenetics': agent_data[2],
+                'sensation_profile': agent_data[3],
+                'best_score': agent_data[5],
+                'games_played': agent_data[6],
+                'games_won': agent_data[7],
+                'prestige': agent_data[8],
+                'social_rule_adherence': agent_data[9]
+            }
+            
+            conn.execute("""
+                INSERT OR REPLACE INTO agent_archive 
+                (agent_id, archived_at, agent_data, generation)
+                VALUES (?, datetime('now'), ?, ?)
+            """, (agent_id, json.dumps(archive_data), agent_data[4]))
+            
+            # Archive any object control maps this agent discovered
+            conn.execute("""
+                INSERT OR IGNORE INTO archived_agent_discoveries 
+                (agent_id, discovery_type, discovery_data, archived_at)
+                SELECT agent_id, 'object_control', 
+                       json_object('game_id', game_id, 'level_number', level_number, 
+                                   'controlled_objects', controlled_objects, 'confidence', confidence),
+                       datetime('now')
+                FROM agent_object_control
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            logger.debug(f"  Archived knowledge for agent {agent_id[:12]}")
+            
+        except Exception as e:
+            logger.debug(f"  Failed to archive agent {agent_id[:12]}: {e}")
     
     def get_lifecycle_stats(self) -> Dict[str, Any]:
         """Get current agent lifecycle statistics."""

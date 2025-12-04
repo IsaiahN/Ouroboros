@@ -1804,6 +1804,39 @@ class AutonomousEvolutionRunner:
             except Exception as e:
                 print(f"  [WARN] Agent lifecycle cleanup failed: {type(e).__name__}: {e}")
             
+            # Phase 1: Agent Revival System (Biome Theory)
+            # Check if any agents should be revived based on triggers
+            if generation % 5 == 0:  # Check every 5 generations
+                try:
+                    from revive_agents import AgentRevivalSystem
+                    revival_system = AgentRevivalSystem()
+                    
+                    triggers = revival_system.detect_revival_triggers(generation)
+                    revived_count = 0
+                    
+                    for trigger in triggers:
+                        if trigger.get('candidates'):
+                            # Try to revive the best candidate
+                            candidate = trigger['candidates'][0]
+                            revived = revival_system.revive_agent(
+                                candidate.get('agent_id') if isinstance(candidate, dict) else candidate,
+                                mode='hybrid',  # Option B from Master Ruleset
+                                generation=generation
+                            )
+                            if revived:
+                                revived_count += 1
+                                print(f"  [REVIVAL] Revived agent due to {trigger['trigger']}: {revived['agent_id'][:12]}")
+                    
+                    if revived_count > 0:
+                        print(f"  [OK] Revival system resurrected {revived_count} agents")
+                    else:
+                        print(f"  [SKIP] No revival triggers detected")
+                        
+                except ImportError:
+                    print(f"  [SKIP] Revival system not available (revive_agents.py not found)")
+                except Exception as e:
+                    print(f"  [WARN] Revival system failed: {e}")
+            
             # Safe database cleanup (comprehensive - replaces HistoricalDataCleaner)
             try:
                 cleaner = SafeDatabaseCleaner()

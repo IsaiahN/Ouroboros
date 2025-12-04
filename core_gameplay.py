@@ -200,11 +200,8 @@ class GameplayEngine:
         if 'current_generation' in config:
             gen = config['current_generation']
             if hasattr(self, 'session_manager') and self.session_manager:
-                # Store on session_manager (will propagate to client when created)
-                self.session_manager._current_generation = gen
-                # Also set on existing client if available
-                if hasattr(self.session_manager, 'client') and self.session_manager.client:
-                    self.session_manager.client._current_generation = gen
+                # Use the proper method which handles propagation
+                self.session_manager.set_current_generation(gen)
         
         logger.info(f"Updated game config: {config}")
 
@@ -914,7 +911,7 @@ class GameplayEngine:
     # END OF REFACTORED HELPER METHODS
     # =========================================================================
 
-    async def play_single_game(self, game_id: str,
+    async def play_single_game(self, game_id: str, # type: ignore
                               action_callback: Optional[Callable] = None,
                               agent_id: Optional[str] = None) -> Dict[str, Any]:
         """Play a single game to completion with optional pattern learning.
@@ -1421,14 +1418,29 @@ class GameplayEngine:
                     # Break immediately - the finally block will save results
                     break
                 
-                # CRITICAL: If game reports WIN or GAME_OVER, respect the API's verdict
-                # The API is the source of truth - never force continuation
+                # CRITICAL: Check if game is truly finished vs premature WIN/GAME_OVER
+                # Some games (like ls20) report WIN after each level completion, not just the final one
+                # We should only stop if:
+                # 1. score >= win_score (actually won the full game)
+                # 2. OR game_state.state == "GAME_OVER" AND score == 0 (truly failed)
+                # Otherwise, continue playing until action budget exhausted
                 if game_state.state == "WIN":
-                    logger.info(f"[WIN] Game won! Final score: {game_state.score}")
-                    break
+                    if game_state.score >= game_state.win_score and game_state.win_score > 0:
+                        logger.info(f"[WIN] Game fully won! Final score: {game_state.score}/{game_state.win_score}")
+                        break
+                    else:
+                        # Premature WIN - some games report WIN after each level
+                        logger.debug(f"[CONTINUE] Premature WIN detected (score {game_state.score}/{game_state.win_score}) - continuing")
+                        game_state.state = "NOT_FINISHED"
                 elif game_state.state == "GAME_OVER":
-                    logger.info(f"[GAME_OVER] Game ended by API. Score: {game_state.score}")
-                    break
+                    if game_state.score == 0:
+                        # True failure - no progress made
+                        logger.info(f"[GAME_OVER] Game ended with zero score")
+                        break
+                    else:
+                        # Possible premature GAME_OVER - some games do this after levels
+                        logger.debug(f"[CONTINUE] GAME_OVER with score {game_state.score} - continuing exploration")
+                        game_state.state = "NOT_FINISHED"
 
                 try:
                     # Update action handler with level progress for dynamic spam tolerance
@@ -2120,6 +2132,31 @@ class GameplayEngine:
                             
                             if aware_count > 0:
                                 logger.info(f"  Pariah awareness spread to {aware_count} agents")
+
+            # ROLE SELF-DETERMINATION: Update agent's role fit score after game
+            # This enables agents to self-determine their preferred roles based on performance
+            if agent_id and agent_mode:
+                try:
+                    from agent_operating_mode_system import AgentOperatingModeSystem
+                    mode_system = AgentOperatingModeSystem(self.db)
+                    
+                    # Include semantic feedback from sensation engine if available
+                    game_result_with_semantics = dict(results)
+                    
+                    # Get frustration level from sensation engine
+                    if hasattr(self, 'sensation_engine') and self.sensation_engine:
+                        try:
+                            sensation_state = self.sensation_engine.get_agent_sensation_state(agent_id)
+                            if sensation_state:
+                                game_result_with_semantics['frustration_level'] = sensation_state.get('frustration', 0.5)
+                                game_result_with_semantics['satisfaction_level'] = sensation_state.get('satisfaction', 0.5)
+                        except Exception:
+                            pass
+                    
+                    mode_system.update_role_fit_after_game(agent_id, agent_mode, game_result_with_semantics)
+                    logger.debug(f"[ROLE FIT] Updated role fit for {agent_id[:8]} in {agent_mode} role")
+                except Exception as e:
+                    logger.debug(f"Role fit update failed (non-critical): {e}")
 
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
                        f"Actions: {action_count}, Levels Completed: {level_completions}/{current_level}")
@@ -3324,17 +3361,40 @@ class GameplayEngine:
         """
         Get the current operating mode for an agent.
         
+        Uses ROLE SELF-DETERMINATION system:
+        1. Locked role (agent found their niche) - highest priority
+        2. Preferred role (agent's choice, if capacity allows)
+        3. Last assigned role (fallback)
+        
         Args:
             agent_id: Agent ID to check
             
         Returns:
-            'pioneer', 'optimizer', 'generalist', or None if not set
+            'pioneer', 'optimizer', 'generalist', 'exploiter', or None if not set
         """
         if not agent_id:
             return None
             
         try:
-            # Query most recent mode assignment for this agent
+            # PRIORITY 1: Check if agent has a locked or preferred role (self-determined)
+            agent_role = self.db.execute_query("""
+                SELECT preferred_role, role_locked, role_confidence
+                FROM agents
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if agent_role and agent_role[0]:
+                data = agent_role[0]
+                # Locked agents always use their preferred role
+                if data.get('role_locked') and data.get('preferred_role'):
+                    logger.debug(f"Agent {agent_id[:8]} using locked role: {data['preferred_role']}")
+                    return data['preferred_role']
+                # High-confidence preferred role
+                if data.get('preferred_role') and data.get('role_confidence', 0) > 0.6:
+                    logger.debug(f"Agent {agent_id[:8]} using preferred role: {data['preferred_role']}")
+                    return data['preferred_role']
+            
+            # PRIORITY 2: Fall back to most recent assigned mode
             mode_data = self.db.execute_query("""
                 SELECT operating_mode
                 FROM agent_operating_modes
