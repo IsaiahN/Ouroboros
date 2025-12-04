@@ -56,7 +56,25 @@ class AgentFactory:
             agent.agent_id, agent_type
         )
         
-        # Update agent with sensation capabilities
+        # Two-Streams Phase 2: Role-specific self/network bias defaults
+        # self_network_bias: 0.0 = fully trust network (hive mind), 1.0 = fully trust self
+        ROLE_BIAS_DEFAULTS = {
+            'pioneer': 0.7,       # Trust self more (exploring unknown)
+            'optimizer': 0.3,     # Trust network more (refining known solutions)
+            'exploiter': 0.2,     # Trust network more (replaying proven sequences)
+            'generalist': 0.5,    # Balanced
+            'pattern_specialist': 0.6,
+            'score_optimizer': 0.4,
+            'exploration_agent': 0.65,
+            'win_focused_agent': 0.45,
+            'hybrid_agent': 0.5
+        }
+        
+        # Get role from genome if available, else use agent_type
+        agent_role = genome.get('role', agent_type)
+        initial_bias = ROLE_BIAS_DEFAULTS.get(agent_role, ROLE_BIAS_DEFAULTS.get(agent_type, 0.5))
+        
+        # Update agent with sensation capabilities and Two-Streams bias
         agent_dict = agent.to_dict()
         agent_dict.update({
             'sensation_profile': json.dumps(sensation_profile),
@@ -64,7 +82,10 @@ class AgentFactory:
             'action_biases': json.dumps({}),
             'sensation_learning_rate': 0.3,
             'state_update_sensitivity': 0.7,
-            'emotional_intelligence_score': 0.0
+            'emotional_intelligence_score': 0.0,
+            # Two-Streams: Self/Network bias (0.0=network, 1.0=self)
+            'self_network_bias': initial_bias,
+            'bias_learning_rate': 0.1  # How fast agent adjusts bias based on outcomes
         })
 
         # Store agent in database (Rule 2)

@@ -2,6 +2,150 @@
 
 ---
 
+## Session: December 4, 2025 (1:23:00 PM - Two-Streams Consciousness Implementation)
+**Focus**: Implement full Two-Streams consciousness features from two_streams_implementation_plan.md
+
+### Overview
+
+Implemented 5 core consciousness features for agent decision-making:
+1. **Role-Cohort Network Wisdom** - Differential trust by role/cohort
+2. **Weaving Report (Self-Reflection)** - Introspection output for every action
+3. **Stream A/B Bias Parameter** - Explicit self vs network trust (alpha)
+4. **Semantic Impressions** - Personal object associations
+5. **Recursive Meta-Learning** - Learn to trust self vs network
+
+### Database Changes
+
+#### Phase 1: Schema Foundation [OK]
+**New Tables Created**:
+- `decision_weaving_reports` - Stores sampled decision introspection (10% sample rate)
+- `role_cohort_wisdom` - Aggregated per-role sequence success data
+
+**New Columns Added**:
+- `agents.self_network_bias` REAL DEFAULT 0.5 (0=network, 1=self)
+- `agents.bias_learning_rate` REAL DEFAULT 0.1
+- `sequence_reputation.role_success_pioneer` REAL DEFAULT 0.5
+- `sequence_reputation.role_success_optimizer` REAL DEFAULT 0.5
+- `sequence_reputation.role_success_exploiter` REAL DEFAULT 0.5
+- `sequence_reputation.role_success_generalist` REAL DEFAULT 0.5
+- `sequence_reputation.avg_frustration_on_success` REAL DEFAULT 0.5
+- `sequence_reputation.avg_satisfaction_on_success` REAL DEFAULT 0.5
+- `object_sensation_mappings.personal_meaning` TEXT
+- `object_sensation_mappings.impression_strength` REAL DEFAULT 0.5
+- `sensation_learning_events.aligned_with_stream` TEXT
+
+**Schema Stats**: 107 tables, 1393 columns
+
+### Implementation Details
+
+#### Phase 2: Bias Parameter [OK]
+**File**: `agent_factory.py`
+- Added role-specific default biases when creating agents:
+  - Pioneer: 0.7 (trust self - exploring unknown)
+  - Optimizer: 0.3 (trust network - refining solutions)
+  - Exploiter: 0.2 (trust network - replaying sequences)
+  - Generalist: 0.5 (balanced)
+- New agents get `self_network_bias` and `bias_learning_rate` columns initialized
+
+#### Phase 3: Weaving Report [OK]
+**File**: `agent_self_model.py`
+- Added `WeavingReporter` class with methods:
+  - `generate_report()` - Creates full self-reflection for every action
+  - `format_for_api()` - Compact version for 16KB API limit
+  - `should_store_locally()` - Sampling logic (10% + conflicts + terminals)
+  - `store_report()` - Persist to database
+  - `update_outcome()` - Track decision correctness for meta-learning
+
+**File**: `core_gameplay.py`
+- Added `_build_self_reflection_context()` method
+- Enhanced `_format_reasoning_for_api()` to include self-reflection
+- Added `_get_private_memory_strength()` - Agent's experience-based signal
+- Added `_get_network_recommendation_strength()` - Network's confidence
+- Every API payload now includes `self_reflection` block with:
+  - Three internal networks (emotional, semantic, identity)
+  - Two-Streams weighting (private memory, network wisdom, bias)
+  - Conflict detection and narrative summary
+
+#### Phase 4: Role-Cohort Wisdom [OK]
+**File**: `viral_package_engine.py`
+- Added `get_cohort_wisdom()` function - Query sequence success by role
+- Added `update_sequence_role_reputation()` function - Track per-role sequence outcomes
+- Cohort wisdom is cached in `role_cohort_wisdom` table for performance
+
+#### Phase 5: Semantic Impressions [OK]
+**File**: `sensation_engine.py`
+- Added `form_semantic_impression()` - Create personal object associations
+- Added `query_personal_impression()` - Retrieve agent's memory of an object
+- Added `get_impression_action_bias()` - Calculate aggregate bias from perceived objects
+- Uses existing `object_sensation_mappings` table with new columns
+
+#### Phase 6: Meta-Learning [OK]
+**File**: `agent_operating_mode_system.py`
+- Added `update_meta_bias()` - Adjust self/network bias based on outcome
+- Added `record_stream_alignment()` - Track which stream decisions aligned with
+- Added `get_agent_stream_stats()` - Query historical stream performance
+- Meta-learning updates bias with dampening at extremes to prevent oscillation
+
+### Post-Implementation
+
+#### Cleanup Integration [OK]
+**File**: `safe_cleanup.py`
+- Added `weaving_reports_retention = 50000` entries
+- Added `cohort_wisdom_retention_days = 7` days
+- New methods: `_clean_weaving_reports()`, `_clean_cohort_wisdom()`
+
+### Files Modified
+
+| File | Lines Changed | Description |
+|------|--------------|-------------|
+| `agent_factory.py` | +25 | Role-specific bias initialization |
+| `agent_self_model.py` | +280 | WeavingReporter class |
+| `core_gameplay.py` | +200 | Self-reflection context, import changes |
+| `viral_package_engine.py` | +150 | Cohort wisdom functions |
+| `sensation_engine.py` | +130 | Semantic impression methods |
+| `agent_operating_mode_system.py` | +150 | Meta-learning bias updates |
+| `safe_cleanup.py` | +60 | New table cleanup |
+
+### Verification
+
+All files passed `pylanceFileSyntaxErrors` check:
+- `agent_factory.py` - PASSED
+- `agent_self_model.py` - PASSED
+- `viral_package_engine.py` - PASSED
+- `sensation_engine.py` - PASSED
+- `agent_operating_mode_system.py` - PASSED
+- `core_gameplay.py` - PASSED
+- `safe_cleanup.py` - PASSED
+
+### Example API Self-Reflection Payload
+
+Every action now includes this self-reflection block:
+```json
+{
+  "self_reflection": {
+    "emotional_network": 0.575,
+    "semantic_network": 0.65,
+    "identity_network": 0.7,
+    "private_memory": 0.45,
+    "network_wisdom": 0.8,
+    "self_trust_bias": 0.7,
+    "decision_weight": 0.555,
+    "conflict": true,
+    "emotion": "curious",
+    "narrative": "Curious | bias=0.70 | trusting self"
+  }
+}
+```
+
+### Next Steps
+
+1. Run 2-generation test evolution to verify integration
+2. Monitor weaving reports being generated
+3. Observe bias drift over multiple generations
+4. Track cohort wisdom hit rates
+
+---
+
 ## Session: December 4, 2025 (1:15:00 PM - Role Self-Determination System)
 **Focus**: Implement agent role self-determination based on performance and semantics
 

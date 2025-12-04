@@ -21,7 +21,7 @@ BIOLOGY-INSPIRED: Ant colonies, bacterial quorum sensing, neural exploration/exp
 """
 
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 import random
 import logging
@@ -1142,3 +1142,167 @@ class AgentOperatingModeSystem:
                 counts[r['preferred_role']] = r['count']
         
         return counts
+
+    # ========================================================================
+    # TWO-STREAMS: META-LEARNING (Learn to Trust Self vs Network)
+    # ========================================================================
+    
+    def update_meta_bias(
+        self,
+        agent_id: str,
+        decision_aligned_with: str,
+        outcome_success: bool
+    ) -> None:
+        """
+        Update agent's self/network bias based on decision outcome.
+        
+        Two-Streams Philosophy: Agents should learn WHEN to trust themselves
+        vs when to trust the network. This is recursive meta-learning.
+        
+        Args:
+            agent_id: Agent to update
+            decision_aligned_with: 'private' (trusted self) or 'network' (trusted network)
+            outcome_success: Whether the decision led to success
+        """
+        # Get current bias and learning rate
+        agent = self.db.execute_query("""
+            SELECT self_network_bias, bias_learning_rate
+            FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if not agent:
+            return
+        
+        current_bias = agent[0]['self_network_bias'] or 0.5
+        learning_rate = agent[0]['bias_learning_rate'] or 0.1
+        
+        # Calculate bias adjustment
+        # If decision aligned with self and succeeded -> increase self trust
+        # If decision aligned with network and succeeded -> decrease self trust
+        # Opposite adjustments for failures
+        
+        if decision_aligned_with == 'private':
+            # Trusted self
+            if outcome_success:
+                adjustment = learning_rate  # Self was right, increase self trust
+            else:
+                adjustment = -learning_rate  # Self was wrong, decrease self trust
+        elif decision_aligned_with == 'network':
+            # Trusted network
+            if outcome_success:
+                adjustment = -learning_rate  # Network was right, decrease self trust
+            else:
+                adjustment = learning_rate  # Network was wrong, increase self trust
+        else:  # 'balanced'
+            # No strong adjustment for balanced decisions
+            adjustment = 0.0
+        
+        # Apply adjustment with dampening for extreme values
+        # Harder to move away from extremes (avoid oscillation)
+        dampening = 1.0 - abs(current_bias - 0.5) * 0.5  # Max dampening at extremes
+        adjustment *= dampening
+        
+        new_bias = current_bias + adjustment
+        new_bias = max(0.0, min(1.0, new_bias))  # Clamp to valid range
+        
+        # Update database
+        self.db.execute_query("""
+            UPDATE agents SET self_network_bias = ? WHERE agent_id = ?
+        """, (new_bias, agent_id))
+        
+        logger.debug(
+            f"[META-BIAS] Agent {agent_id[:8]}: {current_bias:.2f} -> {new_bias:.2f} "
+            f"(aligned={decision_aligned_with}, success={outcome_success})"
+        )
+    
+    def record_stream_alignment(
+        self,
+        agent_id: str,
+        game_id: str,
+        action_taken: int,
+        aligned_with: str,
+        reward: float,
+        generation: int
+    ) -> None:
+        """
+        Record which stream (private/network) a decision aligned with.
+        
+        This extends sensation_learning_events to track stream alignment
+        for meta-learning analysis.
+        
+        Args:
+            agent_id: Agent who made decision
+            game_id: Game context
+            action_taken: Action that was taken
+            aligned_with: 'private', 'network', or 'balanced'
+            reward: Outcome reward signal
+            generation: Current generation
+        """
+        import uuid
+        from datetime import datetime
+        
+        try:
+            self.db.execute_query("""
+                INSERT INTO sensation_learning_events
+                (event_id, agent_id, game_id, generation, action_taken, 
+                 reward_received, aligned_with_stream, event_timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                f"stream_{uuid.uuid4().hex[:12]}",
+                agent_id, game_id, generation, action_taken,
+                reward, aligned_with, datetime.now().isoformat()
+            ))
+        except Exception as e:
+            logger.debug(f"Stream alignment recording failed: {e}")
+    
+    def get_agent_stream_stats(self, agent_id: str) -> Dict[str, Any]:
+        """
+        Get statistics on agent's stream alignment history.
+        
+        Useful for understanding whether agent should trust self or network more.
+        
+        Returns:
+            Dictionary with success rates for private vs network decisions
+        """
+        stats = self.db.execute_query("""
+            SELECT 
+                aligned_with_stream,
+                COUNT(*) as total,
+                AVG(CASE WHEN reward_received > 0 THEN 1.0 ELSE 0.0 END) as success_rate
+            FROM sensation_learning_events
+            WHERE agent_id = ? AND aligned_with_stream IS NOT NULL
+            GROUP BY aligned_with_stream
+        """, (agent_id,))
+        
+        result = {
+            'private_success_rate': 0.5,
+            'network_success_rate': 0.5,
+            'balanced_success_rate': 0.5,
+            'private_count': 0,
+            'network_count': 0,
+            'balanced_count': 0
+        }
+        
+        for s in (stats or []):
+            stream = s['aligned_with_stream']
+            if stream == 'private':
+                result['private_success_rate'] = s['success_rate'] or 0.5
+                result['private_count'] = s['total']
+            elif stream == 'network':
+                result['network_success_rate'] = s['success_rate'] or 0.5
+                result['network_count'] = s['total']
+            elif stream == 'balanced':
+                result['balanced_success_rate'] = s['success_rate'] or 0.5
+                result['balanced_count'] = s['total']
+        
+        # Calculate recommended bias based on historical performance
+        private_weight = result['private_success_rate'] * max(1, result['private_count'])
+        network_weight = result['network_success_rate'] * max(1, result['network_count'])
+        total_weight = private_weight + network_weight
+        
+        if total_weight > 0:
+            result['recommended_bias'] = private_weight / total_weight
+        else:
+            result['recommended_bias'] = 0.5
+        
+        return result

@@ -42,7 +42,16 @@ from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
-from agent_self_model import AgentSelfModel
+from agent_self_model import AgentSelfModel, WeavingReporter
+
+# Two-Streams: Import cohort wisdom for role-based sequence selection
+try:
+    from viral_package_engine import get_cohort_wisdom, update_sequence_role_reputation
+    COHORT_WISDOM_AVAILABLE = True
+except ImportError:
+    COHORT_WISDOM_AVAILABLE = False
+    get_cohort_wisdom = None
+    update_sequence_role_reputation = None
 
 # Rule induction and symbolic reasoning imports
 try:
@@ -129,6 +138,9 @@ class GameplayEngine:
         self.matching_pipeline = MultiStageMatchingPipeline(self.db)  # Tier 1: Multi-stage matching (+40%)
         self.subgoal_activator = SubgoalPlanningActivator(self.db)  # Tier 1: Subgoal planning (+30%)
         self.agent_self_model = AgentSelfModel(db_path)  # Self-model: Track controlled objects
+        
+        # Two-Streams: Weaving reporter for self-reflection in every action
+        self.weaving_reporter = WeavingReporter(self.db)
         
         # Inject subgoal activator into action handler for real-time guidance
         self.action_handler.subgoal_activator = self.subgoal_activator  # type: ignore[attr-defined]
@@ -1720,161 +1732,11 @@ class GameplayEngine:
                         level_start_action = action_count  # Mark where this level starts
                         consecutive_no_frame_change = 0  # CRITICAL FIX: Reset stuck state counter on level completion
                         
-                        # DEPRECATED: Old level-by-level sequence chaining loop
-                        # Now using cumulative sequence approach (replay best sequence ONCE to frontier)
-                        # This entire loop is DISABLED in favor of the cleaner approach above
-                        # Keeping code for reference but it should NOT execute
-                        # 
-                        # The new approach:
-                        # 1. Get BEST cumulative sequence (highest score)
-                        # 2. Replay it ONCE (reaches frontier)
-                        # 3. Generalist stops, Pioneer continues exploring
-                        #
-                        # OLD APPROACH (DISABLED):
-                        if False:  # DISABLED - using cumulative approach instead
-                            # Try partial sequence matching first
-                            partial_match = self._find_partial_sequence_match(
-                                game_id, game_state.frame, current_level
-                            )
-                            
-                            if partial_match:
-                                logger.info(f" CHECKPOINT FOUND: Resuming from known sequence, "
-                                          f"skipping {partial_match['actions_skipped']} actions!")
-                                
-                                # Replay from checkpoint
-                                try:
-                                    replay_result = await self._replay_sequence_inline(
-                                        game_state,
-                                        partial_match['sequence'],
-                                        start_index=partial_match['start_index']
-                                    )
-                                except ValueError as e:
-                                    if "frame corruption" in str(e).lower():
-                                        logger.error(f"[FAIL] FRAME CORRUPTION during checkpoint replay - aborting game")
-                                        await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
-                                        return {
-                                            'game_id': game_id,
-                                            'final_state': 'GAME_OVER',
-                                            'final_score': 0.0,
-                                            'actions_taken': 0,
-                                            'win': False,
-                                            'method': 'aborted_frame_corruption'
-                                        }
-                                    raise
-                                
-                                if replay_result and replay_result['success']:
-                                    game_state = replay_result['game_state']
-                                    logger.info(f" Checkpoint replay successful! State: {game_state.state}, Score: {game_state.score}")
-                                    consecutive_no_frame_change = 0  # Reset stuck state counter after successful replay
-                                    
-                                    # If we won, break out of sequence chain loop
-                                    if game_state.state == "WIN":
-                                        logger.info(f" WON via checkpoint replay!")
-                                        break
-                                    # Otherwise update tracking and continue to check for next level
-                                    previous_score = game_state.score
-                                else:
-                                    # Partial match replay failed, try complete sequence
-                                    break
-                            else:
-                                # No partial match, check for complete sequence for new level
-                                # MODE-AWARE: Behavior depends on agent mode
-                                next_level_sequence = self._get_best_sequence_for_game(game_id, current_level)
-                                
-                                # Check if Pioneer has reached frontier (highest known level for this game)
-                                if agent_mode == 'pioneer' and next_level_sequence is None:
-                                    logger.info(f" PIONEER: Reached frontier (Level {current_level}), no known sequences - EXPLORING NEW TERRITORY!")
-                                    break  # Exit sequence chain loop, continue with exploration
-                                
-                                if next_level_sequence:
-                                    # OPTIMIZER: Don't replay, just note target and break
-                                    if agent_mode == 'optimizer':
-                                        target_actions = next_level_sequence['total_actions']
-                                        logger.info(f" OPTIMIZER: Level {current_level} target = {target_actions} actions, trying to beat it")
-                                        # Store target but don't replay - optimizer explores
-                                        self.game_config[f'level_{current_level}_target'] = target_actions
-                                        break  # Exit sequence chain, optimizer explores
-                                    else:
-                                        # GENERALIST/PIONEER: Replay sequence
-                                        logger.info(f" Found winning sequence for level {current_level}, attempting replay...")
-                                        
-                                        # FIX: Actually replay the sequence instead of just logging it!
-                                        # This enables knowledge sharing for Level 2+
-                                        try:
-                                            replay_result = await self._replay_sequence_inline(
-                                                game_state,
-                                                next_level_sequence,
-                                                start_index=0
-                                            )
-                                        except ValueError as e:
-                                            if "frame corruption" in str(e).lower():
-                                                logger.error(f"[FAIL] FRAME CORRUPTION during level sequence replay - aborting game")
-                                                await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
-                                                return {
-                                                    'game_id': game_id,
-                                                    'final_state': 'GAME_OVER',
-                                                    'final_score': 0.0,
-                                                    'actions_taken': 0,
-                                                    'win': False,
-                                                    'method': 'aborted_frame_corruption'
-                                                }
-                                            raise
-                                        
-                                        if replay_result and replay_result['success']:
-                                            replay_initial_score = previous_score
-                                            game_state = replay_result['game_state']
-                                            replay_final_score = game_state.score
-                                            logger.info(f" Level {current_level} sequence replay successful! Score: {replay_initial_score} → {replay_final_score}, State: {game_state.state}")
-                                            consecutive_no_frame_change = 0  # Reset stuck state counter after successful replay
-                                            
-                                            # Update tracking with replay results
-                                            previous_score = replay_final_score
-                                            
-                                            # If we won completely, exit main loop
-                                            if game_state.state == "WIN":
-                                                logger.info(f"� WON via level {current_level} sequence replay!")
-                                                break
-                                            
-                                            # Check if replay completed one or more levels
-                                            levels_completed = int(replay_final_score - replay_initial_score)
-                                            if levels_completed > 0:
-                                                level_completions += levels_completed
-                                                current_level += levels_completed
-                                                level_action_count = 0
-                                                level_start_action = action_count
-                                                level_api_resets = 0
-                                                logger.info(f" PIONEER/GENERALIST: Replay completed {levels_completed} level(s), now at level {current_level}")
-                                                # Loop continues to check for next level sequence
-                                            else:
-                                                # Replay didn't complete a level, break out
-                                                logger.warning(f" Level {current_level} sequence replay didn't complete level, continuing with exploration")
-                                                break
-                                        else:
-                                            logger.info(f" Level {current_level} sequence replay failed, continuing with exploration")
-                                            break  # Exit sequence chain, continue with exploration
-                                else:
-                                    # No sequence found for this level - track exploration
-                                    if agent_mode == 'generalist':
-                                        logger.info(f" GENERALIST: No sequence for level {current_level}, exploring")
-                                    
-                                    # Log that agent is exploring this level (no sequence used)
-                                    agent_id = self.game_config.get('agent_id', 'unknown')
-                                    session_id = self.session_manager.current_session_id
-                                    game_id = self.game_config.get('game_id', 'unknown')
-                                    
-                                    if session_id and game_id:
-                                        self.db.log_level_sequence_usage(
-                                            session_id=session_id,
-                                            game_id=game_id,
-                                            agent_id=agent_id,
-                                            level_number=current_level,
-                                            used_sequence=False,
-                                            exploration_mode='smart_exploration'
-                                        )
-                                    
-                                    break  # Exit sequence chain
+                        # NOTE: Old level-by-level sequence chaining was REMOVED (Dec 2024)
+                        # Now using cumulative sequence approach: replay best sequence ONCE to frontier
+                        # See 3-TRY FALLBACK SYSTEM above for the new approach
                         
-                        # If we broke out of sequence chain due to WIN, exit main game loop
+                        # If we won via level completion, exit main game loop
                         if game_state.state == "WIN":
                             break
 
@@ -3288,7 +3150,7 @@ class GameplayEngine:
         
         Converts human-readable reasoning text into structured JSON metadata
         for transmission to ARC API. Includes agent context, game state,
-        self-model, and world-model information.
+        self-model, world-model, and Two-Streams self-reflection.
         
         Args:
             action: Action being taken (e.g., "ACTION6")
@@ -3328,6 +3190,11 @@ class GameplayEngine:
         # Add world-model context (obstacles, goals, hypotheses)
         reasoning_obj['world_model'] = self._build_world_model_context(game_id, current_level, game_state.frame)
         
+        # Two-Streams: Add self-reflection weaving data
+        self_reflection = self._build_self_reflection_context(agent_id, agent_mode, action, game_state)
+        if self_reflection:
+            reasoning_obj['self_reflection'] = self_reflection
+        
         # Add genome config if available
         genome = self.game_config.get('genome')
         if genome:
@@ -3348,6 +3215,9 @@ class GameplayEngine:
             # Truncate world_model and self_model first to save space
             reasoning_obj['world_model'] = {'truncated': True}
             reasoning_obj['self_model'] = {'truncated': True}
+            # Also truncate self_reflection if present
+            if 'self_reflection' in reasoning_obj:
+                reasoning_obj['self_reflection'] = {'truncated': True}
             reasoning_json = json.dumps(reasoning_obj)
             
             # If still too large, truncate reasoning text
@@ -3356,6 +3226,212 @@ class GameplayEngine:
                 reasoning_obj['reasoning'] = reasoning_text[:max(0, max_reasoning_len)] + '...[truncated]'
         
         return reasoning_obj
+    
+    def _build_self_reflection_context(
+        self,
+        agent_id: Optional[str],
+        agent_mode: Optional[str],
+        action: str,
+        game_state: GameState
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build Two-Streams self-reflection context for API reasoning.
+        
+        This is the "consciousness weaving" that shows how the agent balanced
+        private memory vs network wisdom to make this decision.
+        
+        Args:
+            agent_id: Agent making decision
+            agent_mode: Agent's current role
+            action: Action being taken
+            game_state: Current game state
+            
+        Returns:
+            Self-reflection context dictionary or None if agent_id not available
+        """
+        if not agent_id:
+            return None
+        
+        try:
+            # Get agent's Two-Streams parameters
+            agent_data = self.db.execute_query("""
+                SELECT self_network_bias, navigation_state, role_confidence, 
+                       sensation_profile
+                FROM agents WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if not agent_data:
+                return None
+            
+            a = agent_data[0]
+            self_network_bias = a.get('self_network_bias', 0.5) or 0.5
+            navigation_state = a.get('navigation_state', 0.0) or 0.0
+            role_confidence = a.get('role_confidence', 0.5) or 0.5
+            
+            # Parse sensation profile
+            sensation_profile = {}
+            try:
+                sp = a.get('sensation_profile')
+                if sp:
+                    sensation_profile = json.loads(sp) if isinstance(sp, str) else sp
+            except (json.JSONDecodeError, TypeError):
+                pass
+            
+            # Get role fit score
+            role_fit = self.db.execute_query("""
+                SELECT role_fit_score FROM agent_role_performance
+                WHERE agent_id = ? AND role = ?
+            """, (agent_id, agent_mode or 'generalist'))
+            role_fit_score = role_fit[0]['role_fit_score'] if role_fit else 0.5
+            
+            # Calculate internal network inputs
+            emotional_input = (navigation_state + 1.0) / 2.0  # Map -1..1 to 0..1
+            
+            # Semantic input from sensation profile
+            object_sensations = sensation_profile.get('object_sensations', {})
+            if object_sensations:
+                top_sensations = sorted(object_sensations.values(), reverse=True)[:3]
+                semantic_input = (sum(top_sensations) / len(top_sensations) + 1.0) / 2.0 if top_sensations else 0.5
+            else:
+                semantic_input = 0.5
+            
+            identity_input = (role_confidence + role_fit_score) / 2.0
+            
+            # Get private memory strength (how well agent knows this situation)
+            private_memory_strength = self._get_private_memory_strength(agent_id, game_state)
+            
+            # Get network recommendation strength (how confident network is)
+            network_recommendation_strength = self._get_network_recommendation_strength(
+                self.game_config.get('current_game_id', ''),
+                int(game_state.score) + 1,
+                agent_mode or 'generalist'
+            )
+            
+            # Calculate final decision weight using Two-Streams formula
+            alpha = self_network_bias
+            final_decision_weight = (
+                private_memory_strength * alpha + 
+                network_recommendation_strength * (1.0 - alpha)
+            )
+            
+            # Detect conflict
+            conflict_detected = abs(private_memory_strength - network_recommendation_strength) > 0.3
+            
+            # Build emotion label
+            if navigation_state < -0.5:
+                emotion = 'frustrated'
+            elif navigation_state < -0.1:
+                emotion = 'cautious'
+            elif navigation_state < 0.1:
+                emotion = 'neutral'
+            elif navigation_state < 0.5:
+                emotion = 'curious'
+            else:
+                emotion = 'confident'
+            
+            return {
+                # Three internal networks
+                'emotional_network': round(emotional_input, 3),
+                'semantic_network': round(semantic_input, 3),
+                'identity_network': round(identity_input, 3),
+                
+                # Two-Streams weighting
+                'private_memory': round(private_memory_strength, 3),
+                'network_wisdom': round(network_recommendation_strength, 3),
+                'self_trust_bias': round(alpha, 3),
+                'decision_weight': round(final_decision_weight, 3),
+                
+                # Conflict detection
+                'conflict': conflict_detected,
+                
+                # Human-readable summary
+                'emotion': emotion,
+                'narrative': f"{emotion.capitalize()} | bias={alpha:.2f} | {'trusting self' if alpha > 0.6 else 'following network' if alpha < 0.4 else 'balanced'}"
+            }
+            
+        except Exception as e:
+            logger.debug(f"Self-reflection context build failed: {e}")
+            return None
+    
+    def _get_private_memory_strength(self, agent_id: str, game_state: GameState) -> float:
+        """
+        Calculate how strong the agent's private memory signal is.
+        
+        Based on:
+        - How many times agent has played this game type
+        - Success rate on this game type
+        - Recency of experience
+        """
+        try:
+            game_id = self.game_config.get('current_game_id', '')
+            game_type = game_id[:4] if game_id else ''
+            
+            # Get agent's history on this game type
+            history = self.db.execute_query("""
+                SELECT COUNT(*) as games, 
+                       AVG(CASE WHEN final_score > 0 THEN 1.0 ELSE 0.0 END) as success_rate
+                FROM game_results
+                WHERE agent_id = ? AND game_id LIKE ?
+            """, (agent_id, f"{game_type}%"))
+            
+            if not history or not history[0]['games']:
+                return 0.3  # Low confidence if no history
+            
+            games = history[0]['games']
+            success_rate = history[0]['success_rate'] or 0.0
+            
+            # More experience = stronger private memory
+            experience_factor = min(1.0, games / 10.0)  # Cap at 10 games
+            
+            # Combine experience and success
+            return experience_factor * 0.5 + success_rate * 0.5
+            
+        except Exception:
+            return 0.3
+    
+    def _get_network_recommendation_strength(
+        self, 
+        game_id: str, 
+        level_number: int, 
+        agent_role: str
+    ) -> float:
+        """
+        Calculate how strong the network's recommendation is.
+        
+        Based on:
+        - Whether there are sequences for this game/level
+        - Role-specific success rates
+        - Number of agents who contributed
+        """
+        try:
+            if COHORT_WISDOM_AVAILABLE and get_cohort_wisdom:
+                # Use role-cohort wisdom
+                wisdom = get_cohort_wisdom(
+                    self.db, 
+                    self.game_config.get('agent_id', ''),
+                    game_id, 
+                    level_number, 
+                    agent_role
+                )
+                
+                if wisdom and wisdom.get('sample_size', 0) > 0:
+                    return wisdom.get('confidence', 0.5)
+            
+            # Fallback: Check if any sequences exist
+            sequences = self.db.execute_query("""
+                SELECT COUNT(*) as count, AVG(efficiency_score) as avg_eff
+                FROM winning_sequences
+                WHERE game_id = ? AND level_number = ? AND is_active = 1
+            """, (game_id, level_number))
+            
+            if sequences and sequences[0]['count'] > 0:
+                count = sequences[0]['count']
+                return min(1.0, 0.4 + count * 0.1)  # More sequences = higher confidence
+            
+            return 0.3  # Low confidence if no sequences
+            
+        except Exception:
+            return 0.3
 
     def _get_agent_operating_mode(self, agent_id: Optional[str]) -> Optional[str]:
         """

@@ -611,3 +611,157 @@ class SensationEngine:
             "UPDATE agents SET action_biases = ? WHERE agent_id = ?",
             (json.dumps(action_biases), agent_id)
         )
+    
+    # ========================================================================
+    # TWO-STREAMS: SEMANTIC IMPRESSIONS
+    # ========================================================================
+    
+    def form_semantic_impression(
+        self,
+        agent_id: str,
+        object_type: str,
+        association: str,
+        memory_context: str,
+        outcome: Dict[str, Any]
+    ) -> None:
+        """
+        Form a personal semantic impression for an object.
+        
+        Two-Streams Philosophy: Agents develop personal meanings for objects
+        based on their unique experiences. This is part of the "semantic network"
+        that influences action decisions.
+        
+        Args:
+            agent_id: Agent forming the impression
+            object_type: Type of object
+            association: What the object means ('danger', 'opportunity', 'neutral', etc.)
+            memory_context: Why the agent formed this impression
+            outcome: Context from the action that led to this impression
+        """
+        # Get existing mapping or create new one
+        existing = self.db.execute_query("""
+            SELECT mapping_id, impression_strength, learn_count
+            FROM object_sensation_mappings 
+            WHERE agent_id = ? AND object_type = ?
+        """, (agent_id, object_type))
+        
+        personal_meaning = json.dumps({
+            'association': association,
+            'memory': memory_context,
+            'formed_at': datetime.now().isoformat(),
+            'game_context': outcome.get('game_id', '')
+        })
+        
+        if existing:
+            # Update existing mapping with stronger impression
+            mapping = existing[0]
+            new_strength = min(1.0, (mapping['impression_strength'] or 0.5) + 0.1)
+            
+            self.db.execute_query("""
+                UPDATE object_sensation_mappings
+                SET personal_meaning = ?, impression_strength = ?, 
+                    learn_count = learn_count + 1, last_updated = CURRENT_TIMESTAMP
+                WHERE mapping_id = ?
+            """, (personal_meaning, new_strength, mapping['mapping_id']))
+        else:
+            # Create new mapping with initial impression
+            self.db.execute_query("""
+                INSERT INTO object_sensation_mappings
+                (mapping_id, agent_id, generation, object_type, sensation_score,
+                 personal_meaning, impression_strength, success_count, failure_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(uuid.uuid4()), agent_id, outcome.get('generation', 0),
+                object_type, 0.0, personal_meaning, 0.5, 0, 0
+            ))
+    
+    def query_personal_impression(
+        self,
+        agent_id: str,
+        object_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Query agent's personal impression of an object.
+        
+        Returns the semantic meaning the agent has associated with this object,
+        which can be used to override or weight network recommendations.
+        
+        Args:
+            agent_id: Agent to query
+            object_type: Object type to check
+            
+        Returns:
+            Dictionary with impression data or None if no impression exists
+        """
+        result = self.db.execute_query("""
+            SELECT personal_meaning, impression_strength, sensation_score,
+                   success_count, failure_count
+            FROM object_sensation_mappings
+            WHERE agent_id = ? AND object_type = ?
+        """, (agent_id, object_type))
+        
+        if not result or not result[0]['personal_meaning']:
+            return None
+        
+        r = result[0]
+        personal_meaning = safe_json_parse(r['personal_meaning'], {})
+        
+        return {
+            'association': personal_meaning.get('association', 'unknown'),
+            'memory': personal_meaning.get('memory', ''),
+            'impression_strength': r['impression_strength'] or 0.5,
+            'sensation_score': r['sensation_score'] or 0.0,
+            'success_rate': (r['success_count'] or 0) / max(1, (r['success_count'] or 0) + (r['failure_count'] or 0))
+        }
+    
+    def get_impression_action_bias(
+        self,
+        agent_id: str,
+        perceived_objects: List[str]
+    ) -> float:
+        """
+        Calculate aggregate action bias from agent's impressions of perceived objects.
+        
+        Strong negative impressions should bias agent away from actions,
+        strong positive impressions should encourage approach.
+        
+        Args:
+            agent_id: Agent perceiving objects
+            perceived_objects: List of object types perceived
+            
+        Returns:
+            Aggregate bias (-1.0 to 1.0) where negative=avoid, positive=approach
+        """
+        if not perceived_objects:
+            return 0.0
+        
+        total_bias = 0.0
+        weight_sum = 0.0
+        
+        for obj_type in perceived_objects:
+            impression = self.query_personal_impression(agent_id, obj_type)
+            
+            if impression:
+                strength = impression['impression_strength']
+                association = impression['association']
+                
+                # Map association to bias
+                association_map = {
+                    'danger': -1.0,
+                    'obstacle': -0.5,
+                    'neutral': 0.0,
+                    'opportunity': 0.5,
+                    'goal': 1.0,
+                    'success': 0.8
+                }
+                
+                base_bias = association_map.get(association, 0.0)
+                weighted_bias = base_bias * strength
+                
+                total_bias += weighted_bias
+                weight_sum += strength
+        
+        if weight_sum > 0:
+            return total_bias / weight_sum
+        
+        return 0.0

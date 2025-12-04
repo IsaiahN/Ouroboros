@@ -47,6 +47,8 @@ class SafeDatabaseCleaner:
     - Action traces: 100,000 entries
     - Sensation events: 200,000 entries
     - Agent operating modes: 100,000 entries
+    - Decision weaving reports: 50,000 entries (Two-Streams)
+    - Role cohort wisdom: 7 days (re-calculated on demand)
     """
     
     def __init__(self, db_path='core_data.db'):
@@ -59,6 +61,9 @@ class SafeDatabaseCleaner:
         self.action_traces_retention = 500000  # ~5 generations worth, allows sequence rebuild
         self.sensation_events_retention = 200000
         self.operating_modes_retention = 100000
+        # Two-Streams: New retention policies
+        self.weaving_reports_retention = 50000
+        self.cohort_wisdom_retention_days = 7
     
     def cleanup(self, dry_run=True, verbose=True):
         """
@@ -118,6 +123,16 @@ class SafeDatabaseCleaner:
         if verbose:
             print('\n7. Old agent operating modes')
         results['tables_cleaned']['agent_operating_modes'] = self._clean_operating_modes(c, conn, dry_run, verbose)
+        
+        # 8. Two-Streams: Decision weaving reports
+        if verbose:
+            print('\n8. Old decision weaving reports (Two-Streams)')
+        results['tables_cleaned']['decision_weaving_reports'] = self._clean_weaving_reports(c, conn, dry_run, verbose)
+        
+        # 9. Two-Streams: Role cohort wisdom cache
+        if verbose:
+            print('\n9. Old role cohort wisdom cache')
+        results['tables_cleaned']['role_cohort_wisdom'] = self._clean_cohort_wisdom(c, conn, dry_run, verbose)
         
         # Calculate total
         results['total_deleted'] = sum(r.get('deleted', 0) for r in results['tables_cleaned'].values())
@@ -298,6 +313,64 @@ class SafeDatabaseCleaner:
             print(f'   Would delete: {excess:,} rows')
         
         return {'found': excess, 'deleted': 0}
+    
+    def _clean_weaving_reports(self, c, conn, dry_run, verbose):
+        """Keep only the most recent decision weaving reports (Two-Streams)."""
+        try:
+            c.execute('SELECT COUNT(*) FROM decision_weaving_reports')
+            total = c.fetchone()[0]
+        except:
+            if verbose:
+                print('   Table does not exist (skip)')
+            return {'found': 0, 'deleted': 0}
+        
+        excess = max(0, total - self.weaving_reports_retention)
+        
+        if verbose:
+            print(f'   Total: {total:,}, Excess: {excess:,}')
+        
+        if not dry_run and excess > 0:
+            c.execute(f'''
+                DELETE FROM decision_weaving_reports
+                WHERE report_id NOT IN (
+                    SELECT report_id FROM decision_weaving_reports
+                    ORDER BY timestamp DESC
+                    LIMIT {self.weaving_reports_retention}
+                )
+            ''')
+            conn.commit()
+            if verbose:
+                print(f'   Deleted: {excess:,} rows')
+            return {'found': excess, 'deleted': excess}
+        elif excess > 0 and verbose:
+            print(f'   Would delete: {excess:,} rows')
+        
+        return {'found': excess, 'deleted': 0}
+    
+    def _clean_cohort_wisdom(self, c, conn, dry_run, verbose):
+        """Delete old role cohort wisdom cache (re-calculated on demand)."""
+        try:
+            cutoff = (datetime.now() - timedelta(days=self.cohort_wisdom_retention_days)).isoformat()
+            c.execute('SELECT COUNT(*) FROM role_cohort_wisdom WHERE last_updated < ?', (cutoff,))
+            count = c.fetchone()[0]
+        except:
+            if verbose:
+                print('   Table does not exist (skip)')
+            return {'found': 0, 'deleted': 0}
+        
+        if verbose:
+            print(f'   Found: {count:,} old cache entries')
+        
+        if not dry_run and count > 0:
+            c.execute('DELETE FROM role_cohort_wisdom WHERE last_updated < ?', (cutoff,))
+            conn.commit()
+            if verbose:
+                print(f'   Deleted: {count:,} rows')
+            return {'found': count, 'deleted': count}
+        elif count > 0 and verbose:
+            print(f'   Would delete: {count:,} rows')
+        
+        return {'found': count, 'deleted': 0}
     
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""

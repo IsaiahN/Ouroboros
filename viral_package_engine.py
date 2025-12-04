@@ -965,6 +965,214 @@ def display_viral_ecosystem_dashboard(db: DatabaseInterface, generation: int):
     print("="*80)
 
 
+# ============================================================================
+# TWO-STREAMS: ROLE-COHORT WISDOM
+# ============================================================================
+
+def get_cohort_wisdom(
+    db: DatabaseInterface,
+    agent_id: str,
+    game_id: str,
+    level_number: int,
+    agent_role: str
+) -> Dict[str, Any]:
+    """
+    Get collective wisdom from agents in the same role (cohort).
+    
+    Two-Streams Philosophy: Agents should trust recommendations from
+    agents who share their role more than global averages.
+    
+    Args:
+        db: Database interface
+        agent_id: Agent requesting wisdom
+        game_id: Current game
+        level_number: Current level
+        agent_role: Agent's current role (pioneer/optimizer/generalist/exploiter)
+        
+    Returns:
+        Dictionary with:
+        - best_sequence_id: Best sequence for this role on this level
+        - confidence: How confident the cohort is (0-1)
+        - avg_actions: Average actions to win for this cohort
+        - emotional_context: Average frustration/satisfaction for cohort
+        - sample_size: Number of cohort members contributing
+    """
+    wisdom = {
+        'best_sequence_id': None,
+        'confidence': 0.0,
+        'avg_actions': 0.0,
+        'avg_frustration': 0.5,
+        'avg_satisfaction': 0.5,
+        'sample_size': 0
+    }
+    
+    # First, try cached cohort wisdom
+    cached = db.execute_query("""
+        SELECT * FROM role_cohort_wisdom
+        WHERE game_id = ? AND level_number = ? AND role = ?
+    """, (game_id, level_number, agent_role))
+    
+    if cached and cached[0]:
+        c = cached[0]
+        wisdom['best_sequence_id'] = c['best_sequence_id']
+        wisdom['confidence'] = c['cohort_confidence']
+        wisdom['avg_actions'] = c.get('avg_actions_to_win', 0)
+        wisdom['sample_size'] = c['sample_size']
+        return wisdom
+    
+    # If not cached, calculate from role performance data
+    # Query agents with same role who succeeded on this game/level
+    role_column = f"role_success_{agent_role}"
+    
+    # Get best performing sequences for this role
+    sequences = db.execute_query(f"""
+        SELECT 
+            ws.sequence_id,
+            sr.{role_column} as role_success,
+            sr.avg_frustration_on_success,
+            sr.avg_satisfaction_on_success,
+            ws.action_count,
+            ws.efficiency_score
+        FROM winning_sequences ws
+        LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
+        WHERE ws.game_id = ? AND ws.level_number = ? AND ws.is_active = 1
+        ORDER BY sr.{role_column} DESC, ws.efficiency_score DESC
+        LIMIT 5
+    """, (game_id, level_number))
+    
+    if not sequences:
+        return wisdom
+    
+    # Aggregate cohort data
+    total_role_success = 0.0
+    total_frustration = 0.0
+    total_satisfaction = 0.0
+    total_actions = 0.0
+    count = 0
+    
+    for seq in sequences:
+        total_role_success += (seq['role_success'] or 0.5)
+        total_frustration += (seq['avg_frustration_on_success'] or 0.5)
+        total_satisfaction += (seq['avg_satisfaction_on_success'] or 0.5)
+        total_actions += (seq['action_count'] or 0)
+        count += 1
+    
+    if count > 0:
+        wisdom['best_sequence_id'] = sequences[0]['sequence_id']
+        wisdom['confidence'] = total_role_success / count
+        wisdom['avg_actions'] = total_actions / count
+        wisdom['avg_frustration'] = total_frustration / count
+        wisdom['avg_satisfaction'] = total_satisfaction / count
+        wisdom['sample_size'] = count
+        
+        # Cache this wisdom for future queries
+        try:
+            from datetime import datetime
+            import uuid
+            db.execute_query("""
+                INSERT OR REPLACE INTO role_cohort_wisdom
+                (wisdom_id, game_id, level_number, role, avg_success_rate, 
+                 best_sequence_id, cohort_confidence, sample_size, avg_actions_to_win, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                f"cohort_{uuid.uuid4().hex[:12]}",
+                game_id, level_number, agent_role,
+                wisdom['confidence'], wisdom['best_sequence_id'],
+                wisdom['confidence'], wisdom['sample_size'],
+                wisdom['avg_actions'],
+                datetime.now().isoformat()
+            ))
+        except Exception:
+            pass  # Non-critical cache write
+    
+    return wisdom
+
+
+def update_sequence_role_reputation(
+    db: DatabaseInterface,
+    sequence_id: str,
+    agent_role: str,
+    success: bool,
+    frustration_level: float = 0.5,
+    satisfaction_level: float = 0.5
+) -> None:
+    """
+    Update a sequence's reputation for a specific role.
+    
+    Called after an agent uses a sequence, to track per-role success rates.
+    
+    Args:
+        db: Database interface
+        sequence_id: Sequence that was used
+        agent_role: Role of agent who used it
+        success: Whether the sequence led to success
+        frustration_level: Agent's frustration when using sequence
+        satisfaction_level: Agent's satisfaction when using sequence
+    """
+    role_column = f"role_success_{agent_role}"
+    
+    # Get current reputation
+    rep = db.execute_query("""
+        SELECT * FROM sequence_reputation WHERE sequence_id = ?
+    """, (sequence_id,))
+    
+    if not rep:
+        # Create new reputation record
+        try:
+            db.execute_query("""
+                INSERT INTO sequence_reputation 
+                (sequence_id, reliability_score, attempt_count, success_count, failure_count,
+                 role_success_pioneer, role_success_optimizer, role_success_exploiter, 
+                 role_success_generalist, avg_frustration_on_success, avg_satisfaction_on_success)
+                VALUES (?, 0.5, 1, ?, ?, 0.5, 0.5, 0.5, 0.5, ?, ?)
+            """, (
+                sequence_id,
+                1 if success else 0,
+                0 if success else 1,
+                frustration_level if success else 0.5,
+                satisfaction_level if success else 0.5
+            ))
+        except Exception:
+            pass
+        return
+    
+    r = rep[0]
+    
+    # Update role-specific success rate (exponential moving average)
+    current_role_success = r.get(role_column, 0.5) or 0.5
+    new_role_success = current_role_success * 0.9 + (1.0 if success else 0.0) * 0.1
+    
+    # Update emotional context (only on success)
+    if success:
+        current_frustration = r.get('avg_frustration_on_success', 0.5) or 0.5
+        current_satisfaction = r.get('avg_satisfaction_on_success', 0.5) or 0.5
+        new_frustration = current_frustration * 0.9 + frustration_level * 0.1
+        new_satisfaction = current_satisfaction * 0.9 + satisfaction_level * 0.1
+    else:
+        new_frustration = r.get('avg_frustration_on_success', 0.5) or 0.5
+        new_satisfaction = r.get('avg_satisfaction_on_success', 0.5) or 0.5
+    
+    # Update the record
+    db.execute_query(f"""
+        UPDATE sequence_reputation SET
+            {role_column} = ?,
+            attempt_count = attempt_count + 1,
+            success_count = success_count + ?,
+            failure_count = failure_count + ?,
+            avg_frustration_on_success = ?,
+            avg_satisfaction_on_success = ?,
+            last_validation = CURRENT_TIMESTAMP
+        WHERE sequence_id = ?
+    """, (
+        new_role_success,
+        1 if success else 0,
+        0 if success else 1,
+        new_frustration,
+        new_satisfaction,
+        sequence_id
+    ))
+
+
 if __name__ == "__main__":
     # Test the engine
     db = DatabaseInterface()
