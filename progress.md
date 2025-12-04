@@ -2,6 +2,187 @@
 
 ---
 
+## Session: December 4, 2025 (2:15:00 PM - Network Failure Hypothesis Action Integration)
+**Focus**: Enhance action selection to actively use network failure hypotheses for decision-making
+
+### Approach
+The `network_failure_hypotheses` system was already implemented (generates hypotheses on GAME_OVER, stores in database, queries for world_model context). However, the hypotheses were only being **passed through** to the API reasoning - they weren't actively **influencing action selection**.
+
+**Goal**: Parse hypothesis text and translate into action biases that affect which action the agent chooses.
+
+### Problem Identified
+
+**Previous State**:
+- `_generate_failure_hypothesis()` - Creates hypothesis on game failure [OK]
+- `_get_network_failure_hypotheses()` - Queries top hypotheses for game/level [OK]  
+- `_build_world_model_context()` - Includes `failure_insights` in context [OK]
+- `_select_action()` - **Did NOT use hypotheses for action selection** [MISSING]
+
+The hypotheses were being included in the reasoning JSON but agents weren't actually learning from them.
+
+### Implementation (2:15:30 PM - 2:25:00 PM)
+
+#### Step 1: Updated _select_action Docstring
+**File**: `core_gameplay.py` (line 2059)
+**Change**: Added "Network failure hypotheses" to the list of decision factors
+
+#### Step 2: Added Hypothesis Query & Parsing Block
+**File**: `core_gameplay.py` (lines 2216-2295)
+**Location**: After sensation biases, before viral package influence
+
+**New Code Block - Hypothesis Parsing**:
+```python
+# ===================================================================
+# NETWORK FAILURE HYPOTHESES: Learn from others' failures
+# Query what other agents learned when they failed on this game/level
+# Use their insights to bias action selection BEFORE other strategies
+# ===================================================================
+hypothesis_biases = {}  # action_num -> bias (-1.0 to 1.0)
+hypothesis_reasoning = None
+
+failure_hypotheses = self._get_network_failure_hypotheses(current_game_id, current_level)
+
+if failure_hypotheses:
+    for hyp in failure_hypotheses:
+        failure_text = hyp.get('failure', '').lower()
+        strategy_text = hyp.get('strategy', '').lower()
+        confidence = hyp.get('confidence', 0.5)
+        is_validated = hyp.get('validated', False)
+        
+        # Boost confidence for validated hypotheses
+        effective_confidence = confidence * (1.5 if is_validated else 1.0)
+        
+        # === PARSE FAILURE PATTERNS (what to AVOID) ===
+        if 'stuck bottom' in failure_text or 'fell down' in failure_text:
+            hypothesis_biases[2] -= 0.3 * effective_confidence  # Penalize ACTION2 (down)
+        if 'oscillat' in failure_text or 'loop' in failure_text:
+            hypothesis_biases[5] += 0.2 * effective_confidence  # Prefer ACTION5 (wait)
+            hypothesis_biases[6] += 0.2 * effective_confidence  # Prefer ACTION6 (click)
+        
+        # === PARSE WIN STRATEGIES (what to PREFER) ===
+        if 'move up' in strategy_text or 'climb' in strategy_text:
+            hypothesis_biases[1] += 0.3 * effective_confidence  # Boost ACTION1 (up)
+        if 'click' in strategy_text or 'interact' in strategy_text:
+            hypothesis_biases[6] += 0.3 * effective_confidence  # Boost ACTION6 (click)
+```
+
+**Pattern Mappings Implemented**:
+
+| Failure Pattern | Action Effect |
+|-----------------|---------------|
+| "stuck bottom", "fell down", "bottom edge" | Penalize ACTION2 (down) |
+| "stuck top", "ceiling" | Penalize ACTION1 (up) |
+| "stuck left", "left wall" | Penalize ACTION3 (left) |
+| "stuck right", "right wall" | Penalize ACTION4 (right) |
+| "oscillat", "loop", "repeat" | Prefer ACTION5/6 to break pattern |
+| "timeout", "too slow" | Penalize ACTION5 (wait) |
+
+| Strategy Pattern | Action Effect |
+|------------------|---------------|
+| "move up", "climb" | Boost ACTION1 |
+| "move down", "descend" | Boost ACTION2 |
+| "move left" | Boost ACTION3 |
+| "move right" | Boost ACTION4 |
+| "wait", "timing" | Boost ACTION5 |
+| "click", "interact", "activate" | Boost ACTION6 |
+| "avoid obstacle", "dodge" | Boost ACTION3/4 (lateral) |
+
+#### Step 3: Added Hypothesis Bias Application
+**File**: `core_gameplay.py` (lines 2453-2480)
+**Location**: After sensation biases applied, before viral package influence
+
+**Logic**:
+1. If current `base_action` has strong negative hypothesis bias (< -0.3), find better alternative
+2. If current action has positive bias (> 0.3), reinforce it (keep it)
+3. Log hypothesis reasoning for debugging
+
+```python
+if hypothesis_biases:
+    action_num = int(base_action.replace("ACTION", ""))
+    current_hypothesis_bias = hypothesis_biases.get(action_num, 0.0)
+    
+    if current_hypothesis_bias < -0.3:
+        # Find best alternative
+        best_alt, best_bias = max(hypothesis_biases.items(), key=lambda x: x[1])
+        if best_bias > 0:
+            base_action = f"ACTION{best_alt}"
+            hypothesis_reasoning = f"Network hypothesis guidance (switched from A{action_num} to A{best_alt})"
+```
+
+#### Step 4: Added hypothesis_reasoning to Final Reasoning
+**File**: `core_gameplay.py` (line 2532)
+
+```python
+# Build final reasoning from all sources
+reasoning_parts = []
+if is_unbeaten_game:
+    reasoning_parts.append("Unbeaten game - full exploration")
+if hypothesis_reasoning:  # NEW
+    reasoning_parts.append(hypothesis_reasoning)
+if sensation_reasoning:
+    reasoning_parts.append(sensation_reasoning)
+if viral_reasoning:
+    reasoning_parts.append(viral_reasoning)
+```
+
+### Verification (2:25:30 PM)
+
+| Check | Command | Result |
+|-------|---------|--------|
+| Import Test | `python -c "from core_gameplay import GameplayEngine"` | [OK] |
+| Pylance Errors | `get_errors` on core_gameplay.py | No errors |
+
+### How Agents Now Use Hypotheses
+
+**Example Flow**:
+```
+1. Agent plays ls20, stuck on level 3, game ends
+   ↓
+2. _generate_failure_hypothesis() creates:
+   - failure: "Stuck at bottom edge, couldn't escape trap"
+   - strategy: "Move up or right to avoid trap zone"
+   ↓
+3. Future agent plays ls20 L3, calls _select_action()
+   ↓
+4. Queries _get_network_failure_hypotheses() for ls20, L3
+   ↓
+5. Parses: "bottom edge" → penalize A2 (-0.3)
+           "move up" → boost A1 (+0.3)
+           "move right" → boost A4 (+0.3)
+   ↓
+6. If base_action was A2 (down), switches to A1 or A4
+   ↓
+7. Log: "[HYPOTHESIS] Level 3: 1 hypotheses (0 validated)"
+        "[HYPOTHESIS] Switching to ACTION1 (network suggests: bias +0.30)"
+```
+
+### Files Modified
+
+| File | Lines | Description |
+|------|-------|-------------|
+| `core_gameplay.py` | 2059-2080 | Updated docstring with new decision factor |
+| `core_gameplay.py` | 2216-2295 | Added hypothesis query and parsing block |
+| `core_gameplay.py` | 2453-2480 | Added hypothesis bias application |
+| `core_gameplay.py` | 2530-2535 | Added hypothesis_reasoning to final reasoning |
+
+### Current Status
+
+**Network Failure Hypothesis System**: FULLY INTEGRATED
+- Generation: [OK] Creates hypothesis on GAME_OVER
+- Storage: [OK] Saves to `network_failure_hypotheses` table
+- Query: [OK] Retrieves top hypotheses for game/level
+- World Model: [OK] Included in `failure_insights` context
+- **Action Selection**: [OK] NOW actively influences action choice
+
+### Next Steps
+
+1. Run evolution to see hypothesis system in action
+2. Monitor logs for `[HYPOTHESIS]` entries
+3. Check if agents avoid actions that led to previous failures
+4. Track hypothesis validation (upvotes when level beaten)
+
+---
+
 ## Session: December 4, 2025 (1:45:00 PM - Post Two-Streams Bug Fixes)
 **Focus**: Fix import errors and clean up deprecated code after Two-Streams implementation
 
