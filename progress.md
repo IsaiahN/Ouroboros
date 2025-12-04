@@ -2849,7 +2849,141 @@ Added new infrastructure files to planned structure:
 
 ---
 
-**Last Updated**: December 4, 2025 (Evening Session)  
-**Status**: CORE GAMEPLAY REFACTOR PLAN COMPLETE  
-**Current Failure**: None (planning phase complete)  
-**Next Step**: Review plan, then implement Phase 0 pre-refactoring fixes
+## Session: December 4, 2025 (1:30 PM - 1:45 PM) - Two-Streams Consciousness Implementation Plan Review
+**Focus**: Review and validate the two-streams consciousness implementation plan against actual database state
+
+### Approach
+**Objective**: Ensure the two-streams implementation plan is accurate and complete before implementation
+1. **Database Verification**: Check actual database columns against plan assumptions
+2. **Schema Sync**: Regenerate `complete_database_schema.sql` to match actual DB state
+3. **Plan Corrections**: Update plan with verified column status and additional discoveries
+
+### Problem Identified
+
+**Symptom**: The `complete_database_schema.sql` export was out of sync with the actual database. The plan made assumptions about existing columns that needed verification.
+
+**Investigation Method**: Used Python to directly query `PRAGMA table_info()` on actual database tables.
+
+### Verification Results
+
+#### Columns That EXIST (Plan Was Correct)
+| Column | Table | Status |
+|--------|-------|--------|
+| `social_rule_adherence` | agents | [OK] Exists |
+| `navigation_state` | agents | [OK] Exists |
+| `sensation_profile` | agents | [OK] Exists |
+| `role_confidence` | agents | [OK] Exists |
+| `emotional_intelligence_score` | agents | [OK] Exists |
+
+#### Columns That EXIST (Not in Plan - Discovered)
+| Column | Table | Status |
+|--------|-------|--------|
+| `preferred_role` | agents | [OK] Exists |
+| `role_locked` | agents | [OK] Exists |
+| `role_lock_generation` | agents | [OK] Exists |
+| `last_role_switch_gen` | agents | [OK] Exists |
+| `role_switch_cooldown` | agents | [OK] Exists |
+
+#### Columns That Are MISSING (Need ALTER TABLE)
+| Column | Table | Status |
+|--------|-------|--------|
+| `self_network_bias` | agents | [MISSING] |
+| `bias_learning_rate` | agents | [MISSING] |
+| `role_success_pioneer` | sequence_reputation | [MISSING] |
+| `role_success_optimizer` | sequence_reputation | [MISSING] |
+| `role_success_exploiter` | sequence_reputation | [MISSING] |
+| `role_success_generalist` | sequence_reputation | [MISSING] |
+| `avg_frustration_on_success` | sequence_reputation | [MISSING] |
+| `avg_satisfaction_on_success` | sequence_reputation | [MISSING] |
+| `personal_meaning` | object_sensation_mappings | [MISSING] |
+| `impression_strength` | object_sensation_mappings | [MISSING] |
+| `aligned_with_stream` | sensation_learning_events | [MISSING] |
+
+#### Tables That Are MISSING (Need CREATE TABLE)
+| Table | Status |
+|-------|--------|
+| `decision_weaving_reports` | [MISSING] |
+| `role_cohort_wisdom` | [MISSING] |
+
+#### Existing Table Discovered: `agent_role_performance`
+The database already has this table with 13 columns:
+- `id`, `agent_id`, `role`, `games_played`, `total_score`, `total_wins`
+- `total_actions`, `sequences_discovered`, `avg_frustration`, `avg_satisfaction`
+- `role_fit_score`, `consecutive_good_generations`, `last_updated`
+
+**Impact**: This table provides 70% of the infrastructure for role-cohort wisdom! The plan should leverage it.
+
+### Completed Steps
+
+#### 1. Database Schema Sync [OK]
+**Command**: `python schema_auto_maintenance.py`
+**Result**: 
+- Schema exported successfully
+- Tables: 103 → 105 (+2)
+- Columns: 1331 → 1355 (+24)
+- Version: v20251204_131147
+
+The `complete_database_schema.sql` now accurately reflects the actual database state.
+
+#### 2. Updated Two-Streams Implementation Plan [OK]
+**File**: `DOCS/two_streams_implementation_plan.md`
+
+**Changes Made**:
+1. **Added Database Verification Note**: Schema checked against actual `core_data.db` on 2025-12-04
+2. **Updated Schema Assessment Table**: Added `[OK]` and `[MISSING]` status for all columns
+3. **Added Discovered Columns**: Documented the 5 additional role columns that exist in DB
+4. **Added Detailed Missing Column List**: Clear table showing exactly what needs ALTER TABLE
+5. **Documented `agent_role_performance` Table**: 13 existing columns that provide cohort wisdom foundation
+6. **Clarified Weaving Report Design**:
+   - **API-First**: EVERY action sent to ARC API includes full `self_reflection` weaving data
+   - **Local Sampling**: Only 10% of decisions stored in database
+   - **Exceptions**: Always store if `conflict_detected = True` or terminal decision
+7. **Updated WeavingReporter Class**: Added `should_store_locally()` method with sampling logic
+8. **Expanded Cleanup Integration**: Added time-based cleanup (7-day retention) and role_cohort_wisdom rules
+9. **Added Phase 0**: Regenerate schema export step
+10. **Added Implementation Checklist**: Trackable checkboxes for each phase
+11. **Added Post-Implementation Tasks**: Schema sync, inventory update, cleanup verification
+
+### Key Design Decisions
+
+1. **API-First Weaving Reports**: Every action payload to ARC API includes full `self_reflection` data - this is the PRIMARY purpose
+2. **Local Storage Sampling**: Store only 10% of decisions locally to prevent database bloat
+3. **Exception-Based Full Storage**: Conflict decisions and terminal decisions always stored (high-value learning data)
+4. **Leverage Existing Tables**: Use `agent_role_performance` for cohort wisdom instead of building from scratch
+
+### Files Modified This Session
+
+| File | Action | Description |
+|------|--------|-------------|
+| `complete_database_schema.sql` | REGENERATED | Synced with actual database (105 tables, 1355 columns) |
+| `DOCS/two_streams_implementation_plan.md` | MODIFIED | Comprehensive updates based on database verification |
+
+### Current System State
+
+**Schema Export**: SYNCED with actual database
+**Two-Streams Plan**: VERIFIED and UPDATED with accurate column status
+**Ready For**: Phase 0 implementation (schema regeneration already done)
+
+### Current Failure Being Addressed
+
+**None** - Plan verification complete. All assumptions validated against actual database.
+
+### Summary of Plan Changes
+
+| Section | Change |
+|---------|--------|
+| Schema Assessment | Added verification date and [OK]/[MISSING] status |
+| Existing Columns | Documented 5 additional role columns discovered |
+| Missing Columns | Clear 11-column list with ALTER TABLE status |
+| Feature 1 (Cohort Wisdom) | Noted `agent_role_performance` provides 70% foundation |
+| Feature 2 (Weaving Report) | Clarified API-first + local sampling design |
+| Risk Mitigation | Expanded with sampling + time-based cleanup |
+| Implementation Order | Added Phase 0 for schema sync |
+| Notes | Added API-First Design and Schema Sync Required notes |
+
+---
+
+**Last Updated**: December 4, 2025 @ 1:45:32 PM  
+**Status**: TWO-STREAMS PLAN VERIFIED AND UPDATED  
+**Current Failure**: None (plan verification complete)  
+**Next Step**: Implement Phase 0-6 of two-streams consciousness features

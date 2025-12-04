@@ -18,25 +18,53 @@ This plan implements 5 core consciousness features missing from the Ouroboros co
 
 ## Database Schema Assessment
 
-### Already Exists (Reusable)
+> **VERIFIED**: Schema checked against actual `core_data.db` on 2025-12-04
 
-| Column/Table | Location | Current Use | Two-Streams Use |
-|-------------|----------|-------------|-----------------|
-| `social_rule_adherence` | agents | Exploiter sociopath (0.0-1.0) | **Extend** to general self/network bias |
-| `navigation_state` | agents | Emotional state (-1.0 to 1.0) | **Emotional Network** |
-| `sensation_profile` | agents | JSON object sensations | **Semantic Network** (object impressions) |
-| `role_confidence` | agents | Role preference strength | **Identity Network** |
-| `emotional_intelligence_score` | agents | EI metric | Informs bias calculation |
-| `avg_frustration` / `avg_satisfaction` | agent_role_performance | Per-role emotional averages | Role-cohort filtering |
-| `object_sensation_mappings` | table | Agent-object associations | **Foundation for semantic impressions** |
-| `sensation_learning_events` | table | Learning history | Track bias effectiveness |
+### Already Exists (Reusable) - VERIFIED IN DATABASE
+
+| Column/Table | Location | Current Use | Two-Streams Use | DB Status |
+|-------------|----------|-------------|-----------------|------------|
+| `social_rule_adherence` | agents | Exploiter sociopath (0.0-1.0) | **Extend** to general self/network bias | [OK] Exists |
+| `navigation_state` | agents | Emotional state (-1.0 to 1.0) | **Emotional Network** | [OK] Exists |
+| `sensation_profile` | agents | JSON object sensations | **Semantic Network** (object impressions) | [OK] Exists |
+| `role_confidence` | agents | Role preference strength | **Identity Network** | [OK] Exists |
+| `preferred_role` | agents | Agent's preferred role | Role assignment | [OK] Exists |
+| `role_locked` | agents | Whether role is locked | Role stability | [OK] Exists |
+| `role_lock_generation` | agents | When role was locked | Role history | [OK] Exists |
+| `last_role_switch_gen` | agents | Last role switch generation | Cooldown tracking | [OK] Exists |
+| `role_switch_cooldown` | agents | Cooldown period | Prevent role thrashing | [OK] Exists |
+| `emotional_intelligence_score` | agents | EI metric | Informs bias calculation | [OK] Exists |
+| `avg_frustration` / `avg_satisfaction` | agent_role_performance | Per-role emotional averages | Role-cohort filtering | [OK] Exists |
+| `object_sensation_mappings` | table | Agent-object associations | **Foundation for semantic impressions** | [OK] Exists |
+| `sensation_learning_events` | table | Learning history | Track bias effectiveness | [OK] Exists |
+| `agent_meta_learning` | table | Meta-learning stats | Extend for bias meta-learning | [OK] Exists |
+
+> **NOTE**: The `complete_database_schema.sql` export is OUT OF SYNC with actual database.
+> Role columns (`preferred_role`, `role_locked`, `role_confidence`) exist in DB but not in export.
+> Run `schema_auto_maintenance.py` to regenerate after implementation.
 
 ### Minimal Changes Required
 
-| Change Type | Count | Tables Affected |
-|-------------|-------|-----------------|
-| New columns in existing tables | 11 | agents (2), sequence_reputation (6), object_sensation_mappings (2), sensation_learning_events (1) |
-| New tables | 2 | decision_weaving_reports, role_cohort_wisdom |
+| Change Type | Count | Tables Affected | DB Status |
+|-------------|-------|-----------------|------------|
+| New columns in existing tables | 11 | agents (2), sequence_reputation (6), object_sensation_mappings (2), sensation_learning_events (1) | [MISSING] |
+| New tables | 2 | decision_weaving_reports, role_cohort_wisdom | [MISSING] |
+
+### Detailed Missing Column Status (Verified 2025-12-04)
+
+| Column | Table | Status |
+|--------|-------|--------|
+| `self_network_bias` | agents | [MISSING] - Needs ALTER TABLE |
+| `bias_learning_rate` | agents | [MISSING] - Needs ALTER TABLE |
+| `role_success_pioneer` | sequence_reputation | [MISSING] - Needs ALTER TABLE |
+| `role_success_optimizer` | sequence_reputation | [MISSING] - Needs ALTER TABLE |
+| `role_success_exploiter` | sequence_reputation | [MISSING] - Needs ALTER TABLE |
+| `role_success_generalist` | sequence_reputation | [MISSING] - Needs ALTER TABLE |
+| `avg_frustration_on_success` | sequence_reputation | [MISSING] - Needs ALTER TABLE |
+| `avg_satisfaction_on_success` | sequence_reputation | [MISSING] - Needs ALTER TABLE |
+| `personal_meaning` | object_sensation_mappings | [MISSING] - Needs ALTER TABLE |
+| `impression_strength` | object_sensation_mappings | [MISSING] - Needs ALTER TABLE |
+| `aligned_with_stream` | sensation_learning_events | [MISSING] - Needs ALTER TABLE |
 
 ---
 
@@ -46,7 +74,24 @@ This plan implements 5 core consciousness features missing from the Ouroboros co
 - Sequences are retrieved globally without role consideration
 - `social_rule_adherence` exists but only for exploiter sociopath behavior
 - No concept of "what did agents like me think?"
-- **EXISTING**: `agent_role_performance` already tracks per-role stats (can be leveraged)
+
+### Existing Infrastructure (VERIFIED in database)
+
+**`agent_role_performance` table already exists with 13 columns:**
+```
+id, agent_id, role, games_played, total_score, total_wins, 
+total_actions, sequences_discovered, avg_frustration, avg_satisfaction,
+role_fit_score, consecutive_good_generations, last_updated
+```
+
+This table is 70% of what we need for role-cohort wisdom! It already tracks:
+- Per-role `avg_frustration` and `avg_satisfaction`
+- Per-role `role_fit_score` (how well agent fits this role)
+- Per-role game outcomes
+
+**Strategy**: Query `agent_role_performance` directly for cohort wisdom instead of 
+creating complex aggregation. The new `role_cohort_wisdom` table aggregates this 
+at the game/level granularity for faster lookups.
 
 ### Solution Architecture
 
@@ -124,9 +169,20 @@ CREATE TABLE role_cohort_wisdom (
 - **EXISTING**: `agent_self_model.py` tracks controlled objects (extend this)
 - **EXISTING**: `agent_emotional_state` table exists (can leverage)
 
+### Design Philosophy: API-First, Local-Sampled
+
+**CRITICAL**: Every action sent to ARC API MUST include full `self_reflection` weaving data.
+This is the primary purpose - the agent's introspection is visible in every API call.
+
+**Local Database Storage**: Use sampling to prevent bloat:
+- **Sampling Rate**: Store 1 in 10 decisions locally (10%)
+- **Exception**: Always store if `conflict_detected = True` (high-value learning data)
+- **Exception**: Always store level completion / game end decisions
+- **Auto-cleanup**: Add to `safe_cleanup.py` with 7-day retention
+
 ### Solution Architecture
 
-**New Table: Decision Weaving Reports** (simplified from original):
+**New Table: Decision Weaving Reports** (sampled storage, not every action):
 ```sql
 CREATE TABLE decision_weaving_reports (
     report_id TEXT PRIMARY KEY,
@@ -165,7 +221,14 @@ CREATE INDEX idx_weaving_agent_game ON decision_weaving_reports(agent_id, game_i
 1. **New class `WeavingReporter`** in `agent_self_model.py`:
    ```python
    class WeavingReporter:
-       """Generates introspection reports for each major decision."""
+       """Generates introspection reports for each decision.
+       
+       EVERY action gets a weaving report in the API payload.
+       Only SOME are stored locally (sampling + exceptions).
+       """
+       
+       # Sampling configuration
+       LOCAL_STORAGE_SAMPLE_RATE = 0.1  # Store 10% of decisions
        
        def generate_report(self, agent_id: str, decision_context: Dict) -> Dict:
            """
@@ -174,21 +237,44 @@ CREATE INDEX idx_weaving_agent_game ON decision_weaving_reports(agent_id, game_i
            - Network recommendation strength (from role cohort)
            - Self-trust bias (from role + performance)
            - Final weighted decision
+           
+           This is called for EVERY action - always included in API payload.
            """
            
-       def store_report(self, report: Dict) -> str:
-           """Store report in database, return report_id."""
+       def should_store_locally(self, report: Dict) -> bool:
+           """
+           Determine if this report should be stored in local database.
+           
+           Returns True if:
+           - conflict_detected is True (high-value learning data)
+           - Random sample hits (10% of decisions)
+           - Level completion or game end decision
+           """
+           if report.get('conflict_detected', False):
+               return True
+           if report.get('is_terminal_decision', False):  # level/game end
+               return True
+           return random.random() < self.LOCAL_STORAGE_SAMPLE_RATE
+           
+       def store_report(self, report: Dict) -> Optional[str]:
+           """Store report in database if sampling criteria met. Return report_id or None."""
+           if not self.should_store_locally(report):
+               return None
+           # ... store in database ...
            
        def update_outcome(self, report_id: str, outcome: str, aligned_with: str):
-           """Update report with actual outcome after action."""
+           """Update stored report with actual outcome after action."""
        
        def format_for_api_reasoning(self, report: Dict) -> Dict:
-           """Format weaving report for inclusion in API reasoning payload."""
+           """Format weaving report for inclusion in API reasoning payload.
+           
+           This is called for EVERY action - the API always gets full introspection.
+           """
    ```
 
 2. **Integration in `_select_action()` (core_gameplay.py ~line 1250)**:
    ```python
-   # Generate weaving report before decision
+   # Generate weaving report before decision (ALWAYS generated)
    weaving_context = {
        'private_memory': self._query_agent_history(agent_id, game_id),
        'network_wisdom': cohort_insight,
@@ -201,9 +287,11 @@ CREATE INDEX idx_weaving_agent_game ON decision_weaving_reports(agent_id, game_i
    # Use report for decision
    action, reasoning = self._select_action_with_weaving(game_state, report)
    
-   # Store report with action
+   # Report ALWAYS goes to API payload (see _execute_action)
    report['action_taken'] = action
-   report_id = self.weaving_reporter.store_report(report)
+   
+   # Store locally only if sampling criteria met (10% + exceptions)
+   report_id = self.weaving_reporter.store_report(report)  # Returns None if not stored
    ```
 
 3. **API Reasoning Payload Enhancement** (core_gameplay.py in action execution):
@@ -645,14 +733,25 @@ CREATE INDEX IF NOT EXISTS idx_cohort_game_role ON role_cohort_wisdom(game_id, r
 2. Implement `_apply_stream_weighting()` in core_gameplay.py
 3. Use bias in decision-making weighted formula
 
+### Phase 0: Schema Sync (10 minutes)
+1. Run `python schema_auto_maintenance.py` to regenerate `complete_database_schema.sql`
+2. Verify existing role columns are now in export (`preferred_role`, `role_locked`, `role_confidence`)
+
 ### Phase 3: Weaving Report (3-4 hours)
-1. Create `WeavingReporter` class in `agent_self_model.py`
+1. Create `WeavingReporter` class in `agent_self_model.py` with:
+   - `generate_report()` - called for EVERY action
+   - `should_store_locally()` - sampling logic (10% + conflicts + terminals)
+   - `store_report()` - conditional local storage
+   - `format_for_api_reasoning()` - API payload formatting
 2. Generate reports using existing data sources:
    - `emotional_input` = (navigation_state + 1) / 2 (map -1..1 to 0..1)
    - `semantic_input` = avg(sensation_scores from object_sensation_mappings)
    - `identity_input` = (role_confidence + role_fit_score) / 2
-3. Integrate into `_select_action()` in core_gameplay.py
-4. Add outcome tracking after action execution
+3. Integrate into `_select_action()` in core_gameplay.py:
+   - Generate report for every action
+   - Include in API payload via `_format_reasoning_for_api()`
+   - Store locally only if sampling criteria met
+4. Add outcome tracking after action execution (only for stored reports)
 
 ### Phase 4: Role-Cohort Wisdom (2-3 hours)
 1. Implement `get_cohort_wisdom()` in viral_package_engine.py
@@ -671,13 +770,26 @@ CREATE INDEX IF NOT EXISTS idx_cohort_game_role ON role_cohort_wisdom(game_id, r
 
 **Total Estimated Time**: 10-14 hours (down from 17-20)
 
+### Implementation Checklist
+
+- [ ] Phase 0: Regenerate schema export
+- [ ] Phase 1: Run all ALTER TABLE and CREATE TABLE statements
+- [ ] Phase 2: Initialize bias on agent creation, implement weighting formula
+- [ ] Phase 3: WeavingReporter class with API-first, local-sampled design
+- [ ] Phase 4: Role-cohort wisdom queries
+- [ ] Phase 5: Semantic impression methods
+- [ ] Phase 6: Meta-learning bias updates
+- [ ] Post: Update safe_cleanup.py with new tables
+- [ ] Post: Run 2-generation test evolution
+- [ ] Post: Verify weaving data in API payloads
+
 ---
 
 ## Existing Code to Leverage
 
 | Feature | Existing Code | Enhancement Needed |
 |---------|--------------|-------------------|
-| Cohort Wisdom | `agent_role_performance` table | Aggregate into `role_cohort_wisdom` |
+| Cohort Wisdom | `agent_role_performance` table (13 cols) | Aggregate into `role_cohort_wisdom` by game/level |
 | Cohort Wisdom | `sequence_reputation` table | Add 6 role-specific columns |
 | Weaving | `agent_self_model.py` | Add `WeavingReporter` class |
 | Weaving | `agent_emotional_state` table | Use as data source |
@@ -769,17 +881,42 @@ CREATE INDEX IF NOT EXISTS idx_cohort_game_role ON role_cohort_wisdom(game_id, r
 
 1. **Performance**: Weaving reports add queries → batch/cache common queries
 2. **Complexity**: Start with Phase 1-3, validate before 4-6
-3. **Database Size**: Prune old weaving reports after 7 days (add to safe_cleanup.py)
+3. **Database Size**: Multiple protections:
+   - **Sampling**: Only 10% of decisions stored locally (+ conflicts + terminals)
+   - **Auto-cleanup**: 7-day retention via safe_cleanup.py
+   - **Row limit**: Keep max 50,000 reports
 
 ---
 
 ## Cleanup Integration (safe_cleanup.py)
 
-Add to SafeDatabaseCleaner:
+Add to SafeDatabaseCleaner `CLEANUP_CONFIGS`:
 ```python
-# Decision weaving reports - keep 50,000 most recent
-('decision_weaving_reports', 'timestamp', 50000, 'Decision weaving reports'),
+# Decision weaving reports - sampled storage with aggressive cleanup
+# Only ~10% of decisions are stored, but still need pruning
+('decision_weaving_reports', 'timestamp', 50000, 'Decision weaving reports (sampled)'),
+
+# Role cohort wisdom - aggregated data, keep longer
+('role_cohort_wisdom', 'last_updated', 100000, 'Role cohort wisdom aggregates'),
 ```
+
+### Additional Cleanup Rules
+
+In `safe_cleanup.py`, add time-based cleanup for weaving reports:
+```python
+# Delete weaving reports older than 7 days (in addition to row limit)
+TIME_BASED_CLEANUP = [
+    ('decision_weaving_reports', 'timestamp', 7),  # 7 days
+]
+```
+
+---
+
+## Post-Implementation Tasks
+
+1. **Regenerate Schema Export**: Run `python schema_auto_maintenance.py` to sync `complete_database_schema.sql`
+2. **Update CODEBASE_INVENTORY.md**: Document new `WeavingReporter` class
+3. **Verify Cleanup**: Run `python safe_cleanup.py` dry run to confirm new tables recognized
 
 ---
 
@@ -790,3 +927,6 @@ Add to SafeDatabaseCleaner:
 - Enhances existing code (Rule 3, Rule 10)
 - Uses real ARC data (Rule 5, Rule 6)
 - Leverages 90+ existing tables instead of creating unnecessary new ones
+- **API-First Design**: Every action payload includes full `self_reflection` weaving data
+- **Local Sampling**: Only 10% of decisions stored locally to prevent database bloat
+- **Schema Sync Required**: `complete_database_schema.sql` is currently out of sync with actual DB
