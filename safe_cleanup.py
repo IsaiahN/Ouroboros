@@ -64,6 +64,8 @@ class SafeDatabaseCleaner:
         # Two-Streams: New retention policies
         self.weaving_reports_retention = 50000
         self.cohort_wisdom_retention_days = 7
+        # Failure hypotheses: Keep validated + recent unvalidated
+        self.failure_hypotheses_retention = 10000  # Keep top 10k hypotheses
     
     def cleanup(self, dry_run=True, verbose=True):
         """
@@ -133,6 +135,11 @@ class SafeDatabaseCleaner:
         if verbose:
             print('\n9. Old role cohort wisdom cache')
         results['tables_cleaned']['role_cohort_wisdom'] = self._clean_cohort_wisdom(c, conn, dry_run, verbose)
+        
+        # 10. Network failure hypotheses (keep high-value + validated)
+        if verbose:
+            print('\n10. Old/low-value failure hypotheses')
+        results['tables_cleaned']['network_failure_hypotheses'] = self._clean_failure_hypotheses(c, conn, dry_run, verbose)
         
         # Calculate total
         results['total_deleted'] = sum(r.get('deleted', 0) for r in results['tables_cleaned'].values())
@@ -371,6 +378,67 @@ class SafeDatabaseCleaner:
             print(f'   Would delete: {count:,} rows')
         
         return {'found': count, 'deleted': 0}
+    
+    def _clean_failure_hypotheses(self, c, conn, dry_run, verbose):
+        """Delete old/low-value failure hypotheses.
+        
+        Retention policy:
+        - ALWAYS keep: validated_by_win = TRUE (proven correct)
+        - ALWAYS keep: upvotes > downvotes (community approved)
+        - Keep up to retention limit sorted by confidence + recency
+        - Delete: old, low-confidence, unvalidated hypotheses
+        """
+        try:
+            c.execute('SELECT COUNT(*) FROM network_failure_hypotheses')
+            total_count = c.fetchone()[0]
+        except:
+            if verbose:
+                print('   Table does not exist (skip)')
+            return {'found': 0, 'deleted': 0}
+        
+        if total_count <= self.failure_hypotheses_retention:
+            if verbose:
+                print(f'   Found: {total_count:,} hypotheses (under limit of {self.failure_hypotheses_retention:,})')
+            return {'found': 0, 'deleted': 0}
+        
+        # Count how many we'd delete
+        # Keep: validated, upvoted, or top N by confidence
+        c.execute('''
+            SELECT COUNT(*) FROM network_failure_hypotheses
+            WHERE validated_by_win = 0
+            AND upvotes <= downvotes
+            AND hypothesis_id NOT IN (
+                SELECT hypothesis_id FROM network_failure_hypotheses
+                WHERE validated_by_win = 0 AND upvotes <= downvotes
+                ORDER BY confidence DESC, last_referenced DESC
+                LIMIT ?
+            )
+        ''', (self.failure_hypotheses_retention,))
+        to_delete = c.fetchone()[0]
+        
+        if verbose:
+            print(f'   Found: {to_delete:,} low-value hypotheses to remove')
+        
+        if not dry_run and to_delete > 0:
+            c.execute('''
+                DELETE FROM network_failure_hypotheses
+                WHERE validated_by_win = 0
+                AND upvotes <= downvotes
+                AND hypothesis_id NOT IN (
+                    SELECT hypothesis_id FROM network_failure_hypotheses
+                    WHERE validated_by_win = 0 AND upvotes <= downvotes
+                    ORDER BY confidence DESC, last_referenced DESC
+                    LIMIT ?
+                )
+            ''', (self.failure_hypotheses_retention,))
+            conn.commit()
+            if verbose:
+                print(f'   Deleted: {to_delete:,} rows')
+            return {'found': to_delete, 'deleted': to_delete}
+        elif to_delete > 0 and verbose:
+            print(f'   Would delete: {to_delete:,} rows')
+        
+        return {'found': to_delete, 'deleted': 0}
     
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""

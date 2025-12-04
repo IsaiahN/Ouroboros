@@ -1722,6 +1722,10 @@ class GameplayEngine:
                             except Exception as e:
                                 logger.debug(f"Agent self-model tracking error: {e}")
                         
+                        # VALIDATE HYPOTHESES: Mark previous failure hypotheses as validated
+                        # Since we completed this level, any hypotheses about earlier levels were helpful
+                        self._validate_hypothesis_by_win(game_id, int(game_state.score))
+                        
                         # NOTE: World model now updates on every action (see action_succeeded block above)
                         # No need for redundant level completion update
                         
@@ -1994,6 +1998,22 @@ class GameplayEngine:
                             
                             if aware_count > 0:
                                 logger.info(f"  Pariah awareness spread to {aware_count} agents")
+            
+            # FAILURE HYPOTHESIS: Generate hypothesis about why game failed
+            # This feeds into network_hypotheses for future agents' world model
+            if not results['win'] and agent_id:
+                hypothesis_id = self._generate_failure_hypothesis(
+                    game_id=game_id,
+                    agent_id=agent_id,
+                    level_number=current_level,
+                    final_score=game_state.score,
+                    actions_taken=action_count,
+                    game_state=game_state,
+                    generation=self.game_config.get('generation', 0)
+                )
+                if hypothesis_id:
+                    results['failure_hypothesis_id'] = hypothesis_id
+                    logger.info(f"[HYPOTHESIS] Generated failure hypothesis {hypothesis_id[:12]} for level {current_level}")
 
             # ROLE SELF-DETERMINATION: Update agent's role fit score after game
             # This enables agents to self-determine their preferred roles based on performance
@@ -2043,10 +2063,11 @@ class GameplayEngine:
         0. NEW: Learned rules from network (Step 8 - query before all other strategies)
         1. NEW: Hierarchical subgoal planning (multi-step strategy)
         2. PHASE 4.5: Sensation-based navigation (emotional intelligence for actions 1-7)
-        3. PHASE 3: Viral package influence (prefer successful patterns)
-        4. PHASE 3: Pariah avoidance (avoid known failures)
-        5. Meta-learning pattern detection
-        6. Default strategy
+        3. NEW: Network failure hypotheses (learn from others' failures)
+        4. PHASE 3: Viral package influence (prefer successful patterns)
+        5. PHASE 3: Pariah avoidance (avoid known failures)
+        6. Meta-learning pattern detection
+        7. Default strategy
 
         Args:
             game_state: Current game state
@@ -2186,12 +2207,88 @@ class GameplayEngine:
                     
                     if sensation_biases:
                         emotion = self._get_emotion_label(navigation_state)
-                        logger.debug(f"🧠 Agent feeling {emotion} (state: {navigation_state:.2f})")
+                        logger.debug(f"[SENSATION] Agent feeling {emotion} (state: {navigation_state:.2f})")
                         logger.debug(f"   Action biases: {sensation_biases}")
                         logger.debug(f"   Perceived objects: {self._last_perceived_objects}")
                     
                 except Exception as e:
                     logger.debug(f"Phase 4.5 sensation error: {e}")
+        
+        # ===================================================================
+        # NETWORK FAILURE HYPOTHESES: Learn from others' failures
+        # Query what other agents learned when they failed on this game/level
+        # Use their insights to bias action selection BEFORE other strategies
+        # ===================================================================
+        hypothesis_biases = {}  # action_num -> bias (-1.0 to 1.0)
+        hypothesis_reasoning = None
+        current_level = int(game_state.score) + 1
+        current_game_id = self.session_manager.current_game_id
+        
+        if current_game_id and agent_id:
+            try:
+                failure_hypotheses = self._get_network_failure_hypotheses(current_game_id, current_level)
+                
+                if failure_hypotheses:
+                    # Parse hypotheses to extract action biases
+                    for hyp in failure_hypotheses:
+                        failure_text = (hyp.get('failure') or '').lower()
+                        strategy_text = (hyp.get('strategy') or '').lower()
+                        confidence = hyp.get('confidence', 0.5)
+                        is_validated = hyp.get('validated', False)
+                        
+                        # Boost confidence for validated hypotheses
+                        effective_confidence = confidence * (1.5 if is_validated else 1.0)
+                        
+                        # === PARSE FAILURE PATTERNS (what to AVOID) ===
+                        # Directional failures -> penalize those actions
+                        if any(word in failure_text for word in ['stuck bottom', 'trapped bottom', 'fell down', 'bottom edge']):
+                            hypothesis_biases[2] = hypothesis_biases.get(2, 0) - 0.3 * effective_confidence  # ACTION2 = down
+                        if any(word in failure_text for word in ['stuck top', 'trapped top', 'top edge', 'ceiling']):
+                            hypothesis_biases[1] = hypothesis_biases.get(1, 0) - 0.3 * effective_confidence  # ACTION1 = up
+                        if any(word in failure_text for word in ['stuck left', 'trapped left', 'left edge', 'left wall']):
+                            hypothesis_biases[3] = hypothesis_biases.get(3, 0) - 0.3 * effective_confidence  # ACTION3 = left
+                        if any(word in failure_text for word in ['stuck right', 'trapped right', 'right edge', 'right wall']):
+                            hypothesis_biases[4] = hypothesis_biases.get(4, 0) - 0.3 * effective_confidence  # ACTION4 = right
+                        if any(word in failure_text for word in ['oscillat', 'loop', 'repeat', 'same action']):
+                            # Oscillation detected - prefer ACTION5 (wait) or ACTION6 (click) to break pattern
+                            hypothesis_biases[5] = hypothesis_biases.get(5, 0) + 0.2 * effective_confidence
+                            hypothesis_biases[6] = hypothesis_biases.get(6, 0) + 0.2 * effective_confidence
+                        if any(word in failure_text for word in ['timeout', 'ran out', 'too slow', 'inefficient']):
+                            # Timeout -> penalize wait action
+                            hypothesis_biases[5] = hypothesis_biases.get(5, 0) - 0.3 * effective_confidence
+                        
+                        # === PARSE WIN STRATEGIES (what to PREFER) ===
+                        if any(word in strategy_text for word in ['move up', 'go up', 'navigate up', 'climb']):
+                            hypothesis_biases[1] = hypothesis_biases.get(1, 0) + 0.3 * effective_confidence
+                        if any(word in strategy_text for word in ['move down', 'go down', 'descend', 'drop']):
+                            hypothesis_biases[2] = hypothesis_biases.get(2, 0) + 0.3 * effective_confidence
+                        if any(word in strategy_text for word in ['move left', 'go left']):
+                            hypothesis_biases[3] = hypothesis_biases.get(3, 0) + 0.3 * effective_confidence
+                        if any(word in strategy_text for word in ['move right', 'go right']):
+                            hypothesis_biases[4] = hypothesis_biases.get(4, 0) + 0.3 * effective_confidence
+                        if any(word in strategy_text for word in ['wait', 'pause', 'timing']):
+                            hypothesis_biases[5] = hypothesis_biases.get(5, 0) + 0.2 * effective_confidence
+                        if any(word in strategy_text for word in ['click', 'select', 'interact', 'activate']):
+                            hypothesis_biases[6] = hypothesis_biases.get(6, 0) + 0.3 * effective_confidence
+                        if any(word in strategy_text for word in ['collect', 'gather', 'pick up']):
+                            hypothesis_biases[6] = hypothesis_biases.get(6, 0) + 0.2 * effective_confidence
+                        if any(word in strategy_text for word in ['avoid obstacle', 'dodge', 'evade']):
+                            # General avoidance - slightly prefer lateral movement
+                            hypothesis_biases[3] = hypothesis_biases.get(3, 0) + 0.1 * effective_confidence
+                            hypothesis_biases[4] = hypothesis_biases.get(4, 0) + 0.1 * effective_confidence
+                    
+                    # Log if we found useful biases
+                    if hypothesis_biases:
+                        validated_count = sum(1 for h in failure_hypotheses if h.get('validated'))
+                        logger.info(f"[HYPOTHESIS] Level {current_level}: {len(failure_hypotheses)} hypotheses ({validated_count} validated)")
+                        # Show top biases
+                        sorted_biases = sorted(hypothesis_biases.items(), key=lambda x: abs(x[1]), reverse=True)[:3]
+                        bias_summary = ', '.join([f"A{a}:{b:+.2f}" for a, b in sorted_biases])
+                        logger.debug(f"[HYPOTHESIS] Action biases: {bias_summary}")
+                        hypothesis_reasoning = f"Network hypotheses ({len(failure_hypotheses)} insights, {validated_count} validated)"
+                        
+            except Exception as e:
+                logger.debug(f"Failure hypothesis query error: {e}")
         
         # PHASE 3: Get viral package and pariah influence
         action_weights = {}
@@ -2229,7 +2326,7 @@ class GameplayEngine:
                 pattern_result = self._meta_learn_pattern_from_frame(frame)
                 
                 if pattern_result and pattern_result.get('confidence', 0) > 0.5:
-                    logger.info(f"🧠 Meta-learner detected pattern: {pattern_result['pattern_type']}")
+                    logger.info(f"[META] Meta-learner detected pattern: {pattern_result['pattern_type']}")
                     logger.info(f"   Rule: {pattern_result['rule']['type']}, Confidence: {pattern_result['confidence']:.2f}")
                     
                     actions = pattern_result.get('actions', [])
@@ -2350,6 +2447,38 @@ class GameplayEngine:
         else:
             sensation_reasoning = None
         
+        # ===================================================================
+        # APPLY HYPOTHESIS BIASES: Adjust base_action based on network insights
+        # Hypothesis biases modify action selection AFTER sensation but BEFORE viral
+        # ===================================================================
+        if hypothesis_biases:
+            action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
+            current_hypothesis_bias = hypothesis_biases.get(action_num, 0.0)
+            
+            # If current action has strong negative hypothesis bias, find alternative
+            if current_hypothesis_bias < -0.3:
+                logger.info(f"[HYPOTHESIS] Avoiding {base_action} (network warns: bias {current_hypothesis_bias:.2f})")
+                
+                # Find best alternative based on hypothesis biases
+                best_alt = None
+                best_bias = current_hypothesis_bias
+                for alt_action, alt_bias in hypothesis_biases.items():
+                    if alt_bias > best_bias:
+                        best_alt = alt_action
+                        best_bias = alt_bias
+                
+                if best_alt and best_bias > 0:
+                    logger.info(f"[HYPOTHESIS] Switching to ACTION{best_alt} (network suggests: bias {best_bias:.2f})")
+                    base_action = f"ACTION{best_alt}"
+                    hypothesis_reasoning = f"Network hypothesis guidance (switched from A{action_num} to A{best_alt})"
+                else:
+                    hypothesis_reasoning = f"Network warns against A{action_num} (bias: {current_hypothesis_bias:.2f})"
+            
+            elif current_hypothesis_bias > 0.3:
+                # Current action has positive hypothesis support - reinforce it
+                logger.debug(f"[HYPOTHESIS] Reinforcing {base_action} (network supports: bias {current_hypothesis_bias:.2f})")
+                hypothesis_reasoning = f"Network hypothesis supports (bias: {current_hypothesis_bias:.2f})"
+        
         # PHASE 3: Apply viral package / pariah influence to action selection
         viral_reasoning = None  # Initialize before conditional blocks
         if action_weights or action_penalties:
@@ -2399,6 +2528,8 @@ class GameplayEngine:
         reasoning_parts = []
         if is_unbeaten_game:
             reasoning_parts.append("Unbeaten game - full exploration")
+        if hypothesis_reasoning:
+            reasoning_parts.append(hypothesis_reasoning)
         if sensation_reasoning:
             reasoning_parts.append(sensation_reasoning)
         if viral_reasoning:
@@ -3137,6 +3268,14 @@ class GameplayEngine:
         except Exception as e:
             logger.debug(f"Network hypotheses query failed: {e}")
         
+        # Get FAILURE HYPOTHESES from network (what to avoid, what might help)
+        try:
+            failure_hypotheses = self._get_network_failure_hypotheses(game_id, level)
+            if failure_hypotheses:
+                context['failure_insights'] = failure_hypotheses
+        except Exception as e:
+            logger.debug(f"Failure hypotheses query failed: {e}")
+        
         return context
 
     # ========================================================================
@@ -3432,6 +3571,227 @@ class GameplayEngine:
             
         except Exception:
             return 0.3
+    
+    def _generate_failure_hypothesis(
+        self,
+        game_id: str,
+        agent_id: str,
+        level_number: int,
+        final_score: float,
+        actions_taken: int,
+        game_state: GameState,
+        generation: int = 0
+    ) -> Optional[str]:
+        """
+        Generate a hypothesis about why the game failed and what's needed to win.
+        
+        This creates network-level learning from failures. Future agents will see
+        these hypotheses in their world_model reasoning context.
+        
+        Args:
+            game_id: Game that was played
+            agent_id: Agent that played
+            level_number: Level where agent got stuck
+            final_score: Final score achieved
+            actions_taken: Total actions taken
+            game_state: Final game state
+            generation: Current generation
+            
+        Returns:
+            hypothesis_id if created, None otherwise
+        """
+        try:
+            import uuid
+            hypothesis_id = str(uuid.uuid4())
+            game_type = game_id[:4] if game_id else 'unknown'
+            
+            # Get recent action pattern (last 10 actions)
+            session_id = self.session_manager.current_session_id
+            recent_actions = self.db.execute_query("""
+                SELECT action_number, score_change, frame_changed
+                FROM action_traces
+                WHERE session_id = ? AND game_id = ?
+                ORDER BY timestamp DESC
+                LIMIT 10
+            """, (session_id, game_id))
+            
+            # Analyze failure patterns
+            last_actions = [a['action_number'] for a in recent_actions] if recent_actions else []
+            stuck_pattern = None
+            
+            # Detect oscillation (same actions repeating)
+            if len(last_actions) >= 4:
+                if last_actions[:4] == last_actions[:4][::-1] or len(set(last_actions[:4])) <= 2:
+                    stuck_pattern = 'oscillation'
+            
+            # Detect no-progress (no score changes)
+            no_progress_count = sum(1 for a in recent_actions if a.get('score_change', 0) == 0) if recent_actions else 0
+            if no_progress_count >= 8:
+                stuck_pattern = 'stuck_no_progress'
+            
+            # Detect no frame change (truly stuck)
+            no_frame_change = sum(1 for a in recent_actions if not a.get('frame_changed', False)) if recent_actions else 0
+            if no_frame_change >= 8:
+                stuck_pattern = 'frozen_state'
+            
+            # Generate failure reason based on analysis
+            if stuck_pattern == 'oscillation':
+                failure_reason = f"Got stuck in oscillation pattern on level {level_number}. Actions cycling without progress."
+            elif stuck_pattern == 'stuck_no_progress':
+                failure_reason = f"Exhausted {actions_taken} actions on level {level_number} without score increase. May need different approach."
+            elif stuck_pattern == 'frozen_state':
+                failure_reason = f"Game state frozen on level {level_number}. Possibly reached dead end or unwinnable state."
+            elif final_score == 0:
+                failure_reason = f"Failed to complete any levels. Level 1 may require specific sequence or strategy."
+            else:
+                failure_reason = f"Completed {int(final_score)} levels but failed on level {level_number}. New challenge type encountered."
+            
+            # Generate win strategy hypothesis
+            # Based on what might help future agents
+            win_strategies = []
+            
+            if stuck_pattern == 'oscillation':
+                win_strategies.append("Avoid repeating the same 2-3 actions. Try longer sequences.")
+                win_strategies.append("Consider ACTION6 (click) on unexplored objects.")
+            
+            if level_number > 1:
+                win_strategies.append(f"Levels 1-{int(final_score)} are solvable. Focus exploration on level {level_number}.")
+            
+            if actions_taken > 500:
+                win_strategies.append("High action count suggests need for more efficient pathing.")
+            
+            if final_score == 0:
+                win_strategies.append("May need to find the correct starting move or object to interact with.")
+            
+            # Default strategy if none generated
+            if not win_strategies:
+                win_strategies.append(f"Explore different action patterns on level {level_number}.")
+            
+            win_strategy = " ".join(win_strategies[:3])  # Limit length
+            
+            # Store in database
+            self.db.execute_query("""
+                INSERT INTO network_failure_hypotheses (
+                    hypothesis_id, game_id, game_type, level_number, agent_id, generation,
+                    failure_reason, win_strategy, final_score, actions_taken,
+                    stuck_at_frame_pattern, last_action_sequence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                hypothesis_id, game_id, game_type, level_number, agent_id, generation,
+                failure_reason, win_strategy, final_score, actions_taken,
+                stuck_pattern,
+                json.dumps(last_actions[:10]) if last_actions else None
+            ))
+            
+            return hypothesis_id
+            
+        except Exception as e:
+            logger.debug(f"Failed to generate failure hypothesis: {e}")
+            return None
+    
+    def _get_network_failure_hypotheses(
+        self,
+        game_id: str,
+        level_number: int,
+        limit: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Get aggregated failure hypotheses from the network for this game/level.
+        
+        Returns the most useful hypotheses (highest confidence, most validated)
+        to include in the world model reasoning context.
+        
+        Args:
+            game_id: Current game
+            level_number: Current level
+            limit: Max hypotheses to return
+            
+        Returns:
+            List of hypothesis dicts with failure_reason, win_strategy, confidence
+        """
+        try:
+            game_type = game_id[:4] if game_id else ''
+            
+            # Get top hypotheses for this game type and level
+            # Prefer: validated_by_win > high upvotes > recent
+            hypotheses = self.db.execute_query("""
+                SELECT 
+                    failure_reason,
+                    win_strategy,
+                    confidence,
+                    upvotes,
+                    downvotes,
+                    validated_by_win,
+                    level_number as hypothesis_level
+                FROM network_failure_hypotheses
+                WHERE game_type = ? 
+                  AND level_number <= ?
+                  AND (upvotes - downvotes) >= -2
+                ORDER BY 
+                    validated_by_win DESC,
+                    (upvotes - downvotes) DESC,
+                    confidence DESC,
+                    created_at DESC
+                LIMIT ?
+            """, (game_type, level_number, limit))
+            
+            if not hypotheses:
+                return []
+            
+            result = []
+            for h in hypotheses:
+                # Calculate effective confidence
+                vote_score = (h['upvotes'] or 0) - (h['downvotes'] or 0)
+                if h.get('validated_by_win'):
+                    effective_confidence = min(1.0, (h['confidence'] or 0.5) + 0.3)
+                elif vote_score > 0:
+                    effective_confidence = min(1.0, (h['confidence'] or 0.5) + vote_score * 0.05)
+                else:
+                    effective_confidence = max(0.1, (h['confidence'] or 0.5) + vote_score * 0.1)
+                
+                result.append({
+                    'level': h['hypothesis_level'],
+                    'failure': h['failure_reason'][:100],  # Truncate for JSON size
+                    'strategy': h['win_strategy'][:150],
+                    'confidence': round(effective_confidence, 2),
+                    'validated': bool(h.get('validated_by_win'))
+                })
+            
+            # Update last_referenced for these hypotheses
+            self.db.execute_query("""
+                UPDATE network_failure_hypotheses
+                SET last_referenced = CURRENT_TIMESTAMP
+                WHERE game_type = ? AND level_number <= ?
+            """, (game_type, level_number))
+            
+            return result
+            
+        except Exception as e:
+            logger.debug(f"Failed to get network failure hypotheses: {e}")
+            return []
+    
+    def _validate_hypothesis_by_win(self, game_id: str, level_number: int) -> None:
+        """
+        Mark hypotheses as validated when an agent wins past the level they referenced.
+        
+        Called after a successful level completion to upvote relevant hypotheses.
+        """
+        try:
+            game_type = game_id[:4] if game_id else ''
+            
+            # Upvote and validate hypotheses for levels we've now beaten
+            self.db.execute_query("""
+                UPDATE network_failure_hypotheses
+                SET validated_by_win = TRUE,
+                    upvotes = upvotes + 1,
+                    confidence = MIN(1.0, confidence + 0.1)
+                WHERE game_type = ? 
+                  AND level_number < ?
+                  AND validated_by_win = FALSE
+            """, (game_type, level_number))
+            
+        except Exception as e:
+            logger.debug(f"Failed to validate hypotheses: {e}")
 
     def _get_agent_operating_mode(self, agent_id: Optional[str]) -> Optional[str]:
         """
