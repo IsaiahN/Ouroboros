@@ -791,6 +791,36 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Rule extraction failed (non-critical): {e}")
 
+        # Step 7: Save world model state at game end (CPU-efficient - once per game)
+        # Persists learned world knowledge for future games of same type
+        if self.symbolic_engine and game_state.frame:
+            try:
+                # Final update with end-of-game frame
+                self.symbolic_engine.update(
+                    action=0,  # End-of-game update
+                    new_frame=np.array(game_state.frame)
+                )
+                
+                # Save world model insights to database for future games
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                world_state = {
+                    'game_type': game_type,
+                    'final_score': game_state.score,
+                    'levels_completed': loop_state.level_completions,
+                    'agent_identified': self.symbolic_engine.learning_mode == False if hasattr(self.symbolic_engine, 'learning_mode') else None,
+                    'goal_achieved': self.symbolic_engine.goal_achieved if hasattr(self.symbolic_engine, 'goal_achieved') else False
+                }
+                
+                # Store in world_model_states table
+                self.db.execute_query("""
+                    INSERT INTO world_model_states (game_id, game_type, state_data, created_at)
+                    VALUES (?, ?, ?, datetime('now'))
+                """, (game_id, game_type, json.dumps(world_state)))
+                
+                logger.debug(f"[WORLD-MODEL] Saved end-of-game state for {game_type}")
+            except Exception as e:
+                logger.debug(f"World model save failed (non-critical): {e}")
+        
         # Viral Packages & Pariahs
         if agent_id:
             await self._handle_viral_evolution(results, game_state, game_id, agent_id)
@@ -1631,6 +1661,18 @@ class GameplayEngine:
                             except Exception as e:
                                 logger.debug(f"Agent self-model tracking error: {e}")
                         
+                        # Step 7: Update world model on level completion (CPU-efficient)
+                        # Only update on milestones, not every action
+                        if self.symbolic_engine and game_state.frame:
+                            try:
+                                self.symbolic_engine.update(
+                                    action=0,  # Milestone update, no specific action
+                                    new_frame=np.array(game_state.frame)
+                                )
+                                logger.debug(f"[WORLD-MODEL] Updated on level {current_level} completion")
+                            except Exception as e:
+                                logger.debug(f"World model level update failed: {e}")
+                        
                         # Move to next level
                         previous_score = game_state.score  # Update for next level detection
                         current_level += 1
@@ -2071,6 +2113,7 @@ class GameplayEngine:
         """Select the next action to take with reasoning.
         
         Uses:
+        0. NEW: Learned rules from network (Step 8 - query before all other strategies)
         1. NEW: Hierarchical subgoal planning (multi-step strategy)
         2. PHASE 4.5: Sensation-based navigation (emotional intelligence for actions 1-7)
         3. PHASE 3: Viral package influence (prefer successful patterns)
@@ -2085,6 +2128,31 @@ class GameplayEngine:
             Tuple of (action, reasoning) where reasoning explains why this action was chosen
         """
         agent_id = self.game_config.get('agent_id')
+        
+        # === Step 8: Query learned rules BEFORE action selection ===
+        # This allows agents to use network-learned knowledge from previous wins
+        # Database read is cheap - runs on every action selection
+        if self.rule_engine and game_state.frame:
+            try:
+                applicable_rules = self.rule_engine.get_applicable_rules(
+                    current_frame=game_state.frame,
+                    agent_id=agent_id,
+                    min_confidence=0.7
+                )
+                if applicable_rules:
+                    best_rule, confidence = applicable_rules[0]
+                    action_template = best_rule.get('action_template', {})
+                    if isinstance(action_template, str):
+                        action_template = json.loads(action_template)
+                    suggested_action = action_template.get('action') or action_template.get('suggested_action')
+                    
+                    if suggested_action:
+                        rule_id = best_rule.get('rule_id', 'unknown')[:8]
+                        reasoning = f"Following learned rule '{rule_id}' (confidence: {confidence:.2f})"
+                        logger.info(f"[RULE] {reasoning}: ACTION{suggested_action}")
+                        return f"ACTION{suggested_action}", reasoning
+            except Exception as e:
+                logger.debug(f"Rule query failed (falling back to other strategies): {e}")
         
         # === NEW: Check for active subgoal plan ===
         if agent_id and hasattr(self, 'subgoal_planner') and self.subgoal_planner:
