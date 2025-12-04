@@ -43,7 +43,7 @@ try:
 except ImportError:
     ABSTRACTION_AVAILABLE = False
     SequenceAbstraction = None
-    def is_abstraction_enabled():
+    def is_abstraction_enabled() -> bool:
         return False
 
 logger = logging.getLogger(__name__)
@@ -71,12 +71,12 @@ class GameplayEngine:
         self.agent_self_model = AgentSelfModel(db_path)  # Self-model: Track controlled objects
         
         # Inject subgoal activator into action handler for real-time guidance
-        self.action_handler.subgoal_activator = self.subgoal_activator
+        self.action_handler.subgoal_activator = self.subgoal_activator  # type: ignore[attr-defined]
         
         # Abstraction engine for pattern-based sequence matching
         if ABSTRACTION_AVAILABLE and is_abstraction_enabled():
             try:
-                self.abstraction_engine = SequenceAbstraction(db_path)
+                self.abstraction_engine = SequenceAbstraction(db_path)  # type: ignore[misc]
                 logger.info("Abstraction engine initialized")
             except Exception as e:
                 self.abstraction_engine = None
@@ -180,8 +180,8 @@ class GameplayEngine:
             # For optimizers, set target level in arc_client for tagging
             if agent_mode == 'optimizer':
                 target_level = self.game_config.get('optimizer_target_level', 1)
-                if hasattr(self.session_manager, 'client'):
-                    self.session_manager.client._optimizer_target_level = target_level
+                if hasattr(self.session_manager, 'client') and self.session_manager.client:
+                    self.session_manager.client._optimizer_target_level = target_level  # type: ignore[attr-defined]
         
         # Create game with agent info in tags
         game_data = await self.session_manager.create_game(
@@ -196,23 +196,30 @@ class GameplayEngine:
         self.game_config['max_action_history'] = 1000  # Prevent memory leaks in long games
         
         # Set game context in action handler for subgoal planning (Tier 1: +30%)
-        self.action_handler._current_game_id = game_id
-        self.action_handler._current_level = 1
-        self.action_handler._current_frame = game_state.frame
+        self.action_handler._current_game_id = game_id  # type: ignore[attr-defined]
+        self.action_handler._current_level = 1  # type: ignore[attr-defined]
+        self.action_handler._current_frame = game_state.frame  # type: ignore[attr-defined]
+        
+        # CRITICAL FIX: Initialize last_frame with the starting frame
+        # This ensures frame_before is captured for the FIRST action of the game.
+        # Without this, the first action's frame_before = None, causing winning sequences
+        # to have empty initial_frame, breaking sequence replay matching.
+        self.action_handler.last_frame = game_state.frame.copy() if game_state.frame else None
+        self.action_handler.last_score = game_state.score  # Also initialize score
         
         # Trigger subgoal generation at game start (Tier 1: +30%)
         if self.subgoal_activator.should_generate_subgoals(
             game_id=game_id,
             level_number=1,
             action_count=0,
-            score=game_state.score,
+            score=int(game_state.score),
             game_state=game_state.state
         ):
             subgoals = self.subgoal_activator.generate_subgoals(
                 game_id=game_id,
                 level_number=1,
                 frame_data=game_state.frame,
-                current_score=game_state.score
+                current_score=int(game_state.score)
             )
             if subgoals:
                 logger.info(f"[SUBGOAL] Generated {len(subgoals)} subgoals for {game_id} L1")
@@ -365,6 +372,7 @@ class GameplayEngine:
                 if replay_result:
                     game_state = replay_result['game_state']
                     replay_success = replay_result['success']
+                    assert known_sequence is not None  # If we have replay_result, known_sequence was used
                     
                     if replay_success and game_state.state == "WIN":
                         # Full win from replay! Finish and return
@@ -680,8 +688,8 @@ class GameplayEngine:
                         if agent_id and hasattr(self, 'agent_self_model'):
                             try:
                                 # Build action/frame history for this level
-                                action_history = self.session_manager.action_history[-level_action_count:] if hasattr(self.session_manager, 'action_history') else []
-                                frame_history = self.session_manager.frame_history[-level_action_count:] if hasattr(self.session_manager, 'frame_history') else []
+                                action_history = self.session_manager.action_history[-level_action_count:] if hasattr(self.session_manager, 'action_history') else []  # type: ignore[attr-defined]
+                                frame_history = self.session_manager.frame_history[-level_action_count:] if hasattr(self.session_manager, 'frame_history') else []  # type: ignore[attr-defined]
                                 
                                 if action_history and frame_history:
                                     controlled, confidence = self.agent_self_model.identify_controlled_objects(
@@ -1352,6 +1360,7 @@ class GameplayEngine:
         # their own gameplay as agents on this level from previous games"
         # ===================================================================
         network_suggested_action = None
+        base_action: str = "ACTION1"  # Default, will be overwritten
         current_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
         
         if current_game_id and agent_id:
@@ -2334,6 +2343,23 @@ class GameplayEngine:
                 LIMIT 1
             """, (game_id, level_number))
             
+            # ================================================================
+            # DUPLICATE PREVENTION FIX (2024-12-03)
+            # ================================================================
+            # Check if this EXACT action sequence already exists (same actions)
+            # This prevents saving identical sequences that differ only in metadata
+            # ================================================================
+            action_sequence_json = json.dumps(actions)
+            duplicate_check = self.db.execute_query("""
+                SELECT sequence_id FROM winning_sequences
+                WHERE game_id = ? AND level_number = ? AND action_sequence = ?
+                LIMIT 1
+            """, (game_id, level_number, action_sequence_json))
+            
+            if duplicate_check:
+                logger.debug(f"Duplicate sequence exists ({duplicate_check[0]['sequence_id'][:12]}), skipping save")
+                return duplicate_check[0]['sequence_id']  # Return existing ID
+            
             # Only store if this is MORE EFFICIENT than existing, or if no existing sequence
             should_store = False
             sequence_id = None
@@ -2345,7 +2371,7 @@ class GameplayEngine:
                 # First win for this level - always store
                 should_store = True
                 sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
-                logger.info(f"🆕 First winning sequence for {game_id} level {level_number}")
+                logger.info(f"[NEW] First winning sequence for {game_id} level {level_number}")
             else:
                 existing_seq = existing[0]
                 existing_actions = existing_seq['total_actions']
@@ -2353,31 +2379,17 @@ class GameplayEngine:
                 existing_agent = existing_seq.get('agent_id', 'unknown')
                 
                 # ANTI-GAMING: Require improvement to store another sequence
-                # Lowered thresholds to encourage incremental progress
+                # Stricter thresholds to prevent spam (TIGHTENED 2024-12-03)
                 # - If same agent: Must improve by 5+ actions OR 10% efficiency
                 # - If different agent: Must improve by 3+ actions OR 5% efficiency
-                # - DIVERSITY BONUS: If < 3 sequences for this game-level, always store
-                # This prevents spam while allowing meaningful improvements
-                
-                # Check sequence count for this game-level
-                seq_count = self.db.execute_query("""
-                    SELECT COUNT(*) as cnt FROM winning_sequences
-                    WHERE game_id = ? AND level_number = ? AND is_active = 1
-                """, (game_id, level_number))[0]['cnt']
+                # - REMOVED: Diversity bonus was causing massive duplication
                 
                 is_same_agent = (current_agent_id == existing_agent)
                 min_action_improvement = 5 if is_same_agent else 3
                 min_efficiency_multiplier = 1.10 if is_same_agent else 1.05
                 
-                # DIVERSITY BONUS: Always store if < 3 sequences exist
-                diversity_bonus = (seq_count < 3)
-                
-                # Store if we improved (fewer actions OR better efficiency) OR diversity bonus
-                if diversity_bonus:
-                    should_store = True
-                    sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
-                    logger.info(f" DIVERSITY BONUS: Storing sequence for under-represented game-level (only {seq_count} exist)")
-                elif len(actions) <= existing_actions - min_action_improvement:
+                # Store if we improved (fewer actions OR better efficiency)
+                if len(actions) <= existing_actions - min_action_improvement:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
                     logger.info(f" Optimized sequence: {existing_actions} → {len(actions)} actions "
@@ -2408,18 +2420,7 @@ class GameplayEngine:
                     if agent_data:
                         generation = agent_data[0]['generation']
                 
-                # ================================================================
-                # CRITICAL FIX #1: Optimizer Penultimate Checkpoint Bug
-                # ================================================================
-                # PROBLEM: Optimizers save partial sequences without final actions
-                # that guarantee level completion. This causes agents to get stuck.
-                #
-                # SOLUTION: If current agent is an Optimizer and we have checkpoint 
-                # data for this level, automatically append the final_actions before
-                # saving. This ensures all optimizer sequences are complete.
-                # ================================================================
-               
-                # Check if current agent is operating in Optimizer mode
+                # Get agent operating mode for tracking
                 agent_mode = self._get_agent_operating_mode(agent_id)
                 # Get scorecard_id from game_results for tracking
                 scorecard_id = None
@@ -2760,11 +2761,6 @@ class GameplayEngine:
             logger.debug(f"Error retrieving cumulative sequence for {game_type}: {e}")
             
         return None
-    # REMOVED: Duplicate _analyze_optimizer_checkpoint method
-    # Using the more complete version above (line ~2121) which includes:
-    # - Common pattern analysis across multiple sequences
-    # - Optimal subroutine compression
-    # - More sophisticated checkpoint identification
 
     def _get_best_sequence_for_game(self, game_id: str, level_number: int = 1, 
                                    current_frame=None) -> Optional[Dict]:
@@ -3225,7 +3221,8 @@ class GameplayEngine:
         """
         try:
             sequence_id = sequence['sequence_id']
-            logger.info(f" Attempting to replay sequence {sequence_id} for {game_id} level {sequence['level_number']}")
+            level_number = sequence.get('level_number', 1)
+            logger.info(f" Attempting to replay sequence {sequence_id} for {game_id} level {level_number}")
             
             if not self.session_manager.is_running:
                 await self.session_manager.start_session(game_id=game_id)
@@ -3400,29 +3397,63 @@ class GameplayEngine:
             
             # QUICK VALIDATION: Flag bad sequences immediately (don't wait for pruning)
             # This prevents wasting resources on obviously broken sequences
+            # Implemented inline per Rule 10 (integrate into existing files)
             try:
-                from quick_sequence_validator import QuickSequenceValidator
-                quick_validator = QuickSequenceValidator(self.db)
-                
                 # Detect frame mismatch (first action failed = likely frame corruption)
                 frame_mismatch = (actions_completed == 0 and not success and 
                                  failure_reason and 'frame' in failure_reason.lower())
                 
-                result = quick_validator.record_replay_result(
-                    sequence_id=sequence_id,
-                    success=success,
-                    failure_reason=failure_reason,
-                    frame_mismatch=frame_mismatch,
-                    actions_completed=actions_completed,
-                    total_actions=total_actions
-                )
+                # Get current failure stats
+                current_stats = self.db.execute_query("""
+                    SELECT consecutive_failures, quick_flagged 
+                    FROM winning_sequences 
+                    WHERE sequence_id = ?
+                """, (sequence_id,))
                 
-                if result['action'] == 'deactivated':
-                    logger.warning(f"⚡ QUICK DEACTIVATE: {sequence_id[:12]} - {result['reason']}")
-                elif result['action'] == 'flagged':
-                    logger.info(f"[WARN] QUICK FLAG: {sequence_id[:12]} - {result['reason']} ({result['consecutive_failures']} consecutive failures)")
-            except ImportError:
-                pass  # Quick validator not available
+                if current_stats:
+                    current_failures = current_stats[0].get('consecutive_failures', 0) or 0
+                    already_flagged = current_stats[0].get('quick_flagged', 0) or 0
+                    
+                    if success:
+                        # Reset consecutive failures on success
+                        self.db.execute_query("""
+                            UPDATE winning_sequences 
+                            SET consecutive_failures = 0 
+                            WHERE sequence_id = ?
+                        """, (sequence_id,))
+                    else:
+                        # Increment consecutive failures
+                        new_failures = current_failures + 1
+                        
+                        # Deactivate if frame mismatch (immediate) or 5+ consecutive failures
+                        if frame_mismatch or new_failures >= 5:
+                            flag_reason = 'frame_mismatch' if frame_mismatch else f'{new_failures}_consecutive_failures'
+                            self.db.execute_query("""
+                                UPDATE winning_sequences 
+                                SET is_active = 0, 
+                                    quick_flagged = 1,
+                                    consecutive_failures = ?,
+                                    flag_reason = ?
+                                WHERE sequence_id = ?
+                            """, (new_failures, flag_reason, sequence_id))
+                            logger.warning(f"[QUICK DEACTIVATE] {sequence_id[:12]} - {flag_reason}")
+                        elif new_failures >= 3 and not already_flagged:
+                            # Flag for review at 3+ failures
+                            self.db.execute_query("""
+                                UPDATE winning_sequences 
+                                SET quick_flagged = 1,
+                                    consecutive_failures = ?,
+                                    flag_reason = ?
+                                WHERE sequence_id = ?
+                            """, (new_failures, f'{new_failures}_failures_review', sequence_id))
+                            logger.info(f"[WARN] QUICK FLAG: {sequence_id[:12]} - {new_failures} consecutive failures")
+                        else:
+                            # Just increment failures
+                            self.db.execute_query("""
+                                UPDATE winning_sequences 
+                                SET consecutive_failures = ?
+                                WHERE sequence_id = ?
+                            """, (new_failures, sequence_id))
             except Exception as qv_error:
                 logger.debug(f"Quick validation error (non-critical): {qv_error}")
             

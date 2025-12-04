@@ -24,10 +24,13 @@ logger = logging.getLogger(__name__)
 class SchemaAutoMaintenance:
     """Automatic database schema export and versioning."""
     
+    SCHEMA_FILE_PATH = "complete_database_schema.sql"
+    
     def __init__(self, db_path: str = "core_data.db"):
         self.db = DatabaseInterface(db_path)
         self.db_path = db_path
         self._ensure_schema_versions_table()
+        self._ensure_schema_file_exists()
     
     def _ensure_schema_versions_table(self):
         """Create schema_versions table if it doesn't exist."""
@@ -43,6 +46,22 @@ class SchemaAutoMaintenance:
             )
         """)
         logger.info("Schema versions table initialized")
+    
+    def _ensure_schema_file_exists(self):
+        """Auto-create complete_database_schema.sql if it doesn't exist.
+        
+        Per Master Ruleset: Database Schema Auto-Update System should auto-create
+        the schema file with a fresh database schema dump if not found.
+        """
+        if not os.path.exists(self.SCHEMA_FILE_PATH):
+            logger.info(f"Schema file '{self.SCHEMA_FILE_PATH}' not found - creating fresh dump")
+            success = self.regenerate_schema_file(self.SCHEMA_FILE_PATH)
+            if success:
+                logger.info(f"[OK] Auto-created '{self.SCHEMA_FILE_PATH}' with current database schema")
+            else:
+                logger.error(f"[FAIL] Failed to auto-create '{self.SCHEMA_FILE_PATH}'")
+        else:
+            logger.debug(f"Schema file '{self.SCHEMA_FILE_PATH}' exists")
     
     def export_current_schema(self) -> str:
         """Export current database schema as SQL."""
@@ -146,8 +165,15 @@ class SchemaAutoMaintenance:
         
         return changes if changes else None
     
-    def regenerate_schema_file(self, output_path: str = "complete_database_schema.sql") -> bool:
-        """Regenerate schema file and log version."""
+    def regenerate_schema_file(self, output_path: str = None) -> bool:
+        """Regenerate schema file and log version.
+        
+        Args:
+            output_path: Path to write schema file. Defaults to SCHEMA_FILE_PATH.
+        """
+        if output_path is None:
+            output_path = self.SCHEMA_FILE_PATH
+            
         try:
             # Export schema
             schema_sql = self.export_current_schema()
