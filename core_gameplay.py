@@ -1660,7 +1660,7 @@ class GameplayEngine:
                                 if hasattr(self, '_recent_action_traces'):
                                     self._recent_action_traces.append({
                                         'action_type': action,
-                                        'frame_before': previous_frame_data,
+                                        'frame_before': self.action_handler.last_frame,
                                         'frame_after': game_state.frame
                                     })
                                     # Keep last 10 actions for control detection
