@@ -658,6 +658,33 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Agent self-model tracking error: {e}")
         
+        # TWO-STREAMS: Form semantic impressions on level SUCCESS
+        # This builds positive associations with objects present when levels are won
+        if agent_id and hasattr(self, '_last_perceived_objects') and self._last_perceived_objects:
+            try:
+                # Get navigation state from database
+                nav_result = self.db.execute_query(
+                    "SELECT navigation_state FROM agents WHERE agent_id = ?", (agent_id,)
+                )
+                navigation_state = nav_result[0]['navigation_state'] if nav_result else 0.0
+                
+                for obj_type in self._last_perceived_objects[:3]:  # Limit to top 3 for level wins
+                    self.sensation_engine.form_semantic_impression(
+                        agent_id=agent_id,
+                        object_type=obj_type,
+                        association='goal',  # Level win = positive association
+                        memory_context=f'Won level {loop_state.current_level} with this object present',
+                        outcome={
+                            'game_id': game_id,
+                            'generation': self.game_config.get('generation', 0),
+                            'success': True,
+                            'navigation_state': navigation_state
+                        }
+                    )
+                logger.debug(f"[SEMANTIC] Level win - formed impressions for {len(self._last_perceived_objects[:3])} objects")
+            except Exception as e:
+                logger.debug(f"Level semantic impression failed (non-critical): {e}")
+        
         # Move to next level
         loop_state.previous_score = game_state.score
         loop_state.current_level += 1
@@ -838,6 +865,68 @@ class GameplayEngine:
         # Viral Packages & Pariahs
         if agent_id:
             await self._handle_viral_evolution(results, game_state, game_id, agent_id)
+        
+        # TWO-STREAMS: Update meta-bias after game completion
+        # Adjusts agent's self_network_bias based on whether trusting self or network led to success
+        if agent_id:
+            try:
+                from agent_operating_mode_system import AgentOperatingModeSystem
+                mode_system = AgentOperatingModeSystem(self.db)
+                
+                # Determine outcome
+                outcome_success = results['win'] or game_state.score > 0
+                
+                # Determine which stream was followed (heuristic based on agent mode)
+                # Pioneers tend to trust self, Optimizers trust network
+                agent_mode = self._get_agent_operating_mode(agent_id)
+                if agent_mode == 'pioneer':
+                    decision_aligned_with = 'private'
+                elif agent_mode in ['optimizer', 'exploiter']:
+                    decision_aligned_with = 'network'
+                else:
+                    decision_aligned_with = 'balanced'
+                
+                # Update meta-bias based on outcome
+                mode_system.update_meta_bias(
+                    agent_id=agent_id,
+                    decision_aligned_with=decision_aligned_with,
+                    outcome_success=outcome_success
+                )
+                logger.debug(f"[META-BIAS] Updated bias for {agent_id[:8]} after {'success' if outcome_success else 'failure'}")
+            except Exception as e:
+                logger.debug(f"Meta-bias update failed (non-critical): {e}")
+        
+        # TWO-STREAMS: Form semantic impressions for perceived objects based on game outcome
+        # This builds personal object associations that persist across games
+        if agent_id and hasattr(self, '_last_perceived_objects') and self._last_perceived_objects:
+            try:
+                outcome = 'success' if results['win'] else 'failure'
+                association = 'goal' if results['win'] else 'danger'
+                
+                # Get navigation state from database
+                nav_result = self.db.execute_query(
+                    "SELECT navigation_state FROM agents WHERE agent_id = ?", (agent_id,)
+                )
+                navigation_state = nav_result[0]['navigation_state'] if nav_result else 0.0
+                
+                for obj_type in self._last_perceived_objects[:5]:  # Limit to 5 objects
+                    self.sensation_engine.form_semantic_impression(
+                        agent_id=agent_id,
+                        object_type=obj_type,
+                        association=association,
+                        memory_context=f'Game {outcome} with score {game_state.score}',
+                        outcome={
+                            'game_id': game_id,
+                            'generation': self.game_config.get('generation', 0),
+                            'success': results['win'],
+                            'navigation_state': navigation_state
+                        }
+                    )
+                
+                if self._last_perceived_objects:
+                    logger.debug(f"[SEMANTIC] Formed impressions for {len(self._last_perceived_objects[:5])} objects after {outcome}")
+            except Exception as e:
+                logger.debug(f"Semantic impression formation failed (non-critical): {e}")
 
         logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
                    f"Actions: {loop_state.action_count}, Levels Completed: {loop_state.level_completions}/{loop_state.current_level}")
@@ -2232,6 +2321,27 @@ class GameplayEngine:
                     
                     # Store perceived objects for learning
                     self._last_perceived_objects = sensation_context.get('perceived_objects', [])
+                    
+                    # TWO-STREAMS: Query personal semantic impressions for perceived objects
+                    # Strong personal impressions can override network wisdom (Stream A dominance)
+                    personal_impression_bias = 0.0
+                    for obj_type in self._last_perceived_objects:
+                        try:
+                            impression = self.sensation_engine.query_personal_impression(agent_id, obj_type)
+                            if impression and impression.get('impression_strength', 0) > 0.7:
+                                # Strong personal impression - bias toward self-trust
+                                association = impression.get('association', 'neutral')
+                                if association == 'danger':
+                                    personal_impression_bias += 0.15  # Trust self about danger
+                                elif association == 'goal':
+                                    personal_impression_bias += 0.10  # Trust self about goals
+                                logger.debug(f"[SEMANTIC] Strong impression for {obj_type}: {association} (strength: {impression.get('impression_strength', 0):.2f})")
+                        except Exception:
+                            pass
+                    
+                    # Adjust navigation state based on personal impressions
+                    if personal_impression_bias > 0:
+                        navigation_state = max(-1.0, min(1.0, navigation_state + personal_impression_bias))
                     
                     if sensation_biases:
                         emotion = self._get_emotion_label(navigation_state)
@@ -4725,14 +4835,23 @@ class GameplayEngine:
             # 2. UNTESTED: total_validation_attempts = 0 (never tried, might work)
             # 3. FAILED: failed_validations > 0 but successful_validations = 0 (tried and failed)
             # Within each tier, prefer shorter sequences (more efficient)
-            sequences = self.db.execute_query("""
+            # 
+            # TWO-STREAMS: Role-specific success rates boost sequences that worked for similar agents
+            # agent_mode determines which role_success_* column to prioritize
+            role_success_column = f"role_success_{agent_mode}" if agent_mode in ['pioneer', 'optimizer', 'exploiter', 'generalist'] else 'reliability_score'
+            
+            sequences = self.db.execute_query(f"""
                 SELECT ws.*, 
                        COALESCE(sr.reliability_score, 0.5) as reliability,
                        COALESCE(sr.success_rate, 0.5) as community_success_rate,
                        COALESCE(sr.agent_diversity, 0) as validators,
                        COALESCE(sr.successful_validations, 0) as validation_count,
                        COALESCE(sr.total_validation_attempts, 0) as total_attempts,
-                       COALESCE(sr.trending, 'stable') as trend
+                       COALESCE(sr.trending, 'stable') as trend,
+                       COALESCE(sr.role_success_pioneer, 0.5) as role_success_pioneer,
+                       COALESCE(sr.role_success_optimizer, 0.5) as role_success_optimizer,
+                       COALESCE(sr.role_success_exploiter, 0.5) as role_success_exploiter,
+                       COALESCE(sr.role_success_generalist, 0.5) as role_success_generalist
                 FROM winning_sequences ws
                 LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
                 WHERE ws.game_id LIKE ? 
@@ -4745,6 +4864,7 @@ class GameplayEngine:
                         WHEN COALESCE(sr.total_validation_attempts, 0) = 0 THEN 1  -- Untested
                         ELSE 2  -- Failed validations
                     END,
+                    COALESCE(sr.{role_success_column}, 0.5) DESC,  -- TWO-STREAMS: Role-specific boost
                     ws.total_actions ASC,
                     ws.total_score DESC
                 LIMIT 10
@@ -5274,6 +5394,19 @@ class GameplayEngine:
             
             # Update sequence reputation
             self._update_sequence_reputation(sequence_id)
+            
+            # TWO-STREAMS: Update role-specific sequence reputation
+            # Track which roles succeed/fail with each sequence for cohort wisdom
+            if COHORT_WISDOM_AVAILABLE and update_sequence_role_reputation:
+                try:
+                    agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
+                    if agent_mode:
+                        update_sequence_role_reputation(
+                            self.db, sequence_id, agent_mode, success
+                        )
+                        logger.debug(f"[COHORT] Updated role reputation for {agent_mode}: {sequence_id[:12]} success={success}")
+                except Exception as e:
+                    logger.debug(f"Role reputation update failed (non-critical): {e}")
             
             # QUICK VALIDATION: Flag bad sequences immediately (don't wait for pruning)
             # This prevents wasting resources on obviously broken sequences

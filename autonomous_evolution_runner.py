@@ -87,7 +87,6 @@ class AutonomousEvolutionRunner:
         initial_population_size: int = 10,
         games_per_generation: int = 20,
         max_generations: int = 50,
-        target_win_rate: float = 0.50,
         evolution_interval_minutes: int = 60,
         health_check_interval: int = 10,
         agi_mode: bool = False,  # Enable diversity-focused evolution
@@ -102,7 +101,6 @@ class AutonomousEvolutionRunner:
             initial_population_size: Starting number of agents
             games_per_generation: Games to run per generation
             max_generations: Maximum generations to evolve
-            target_win_rate: Stop when this win rate achieved
             evolution_interval_minutes: Minutes between evolution cycles
             health_check_interval: Games between health checks
             agi_mode: Enable diversity-focused generalization and anti-overfitting
@@ -167,7 +165,6 @@ class AutonomousEvolutionRunner:
         self.initial_population_size = initial_population_size
         self.games_per_generation = games_per_generation
         self.max_generations = max_generations
-        self.target_win_rate = target_win_rate
         self.evolution_interval = timedelta(minutes=evolution_interval_minutes)
         self.health_check_interval = health_check_interval
         self.agi_mode = agi_mode  # Diversity mode flag
@@ -440,7 +437,6 @@ class AutonomousEvolutionRunner:
         print(f"Initial Population: {self.initial_population_size} agents")
         print(f"Games per Generation: {self.games_per_generation}")
         print(f"Max Generations: {self.max_generations}")
-        print(f"Target Win Rate: {self.target_win_rate:.1%}")
         print(f"Evolution Interval: {self.evolution_interval.total_seconds()/60:.0f} minutes")
         print()
         
@@ -1418,11 +1414,6 @@ class AutonomousEvolutionRunner:
                 print(f"[WARN]  Reached max generations ({self.max_generations})")
                 return False
             
-            # Use comprehensive success rate for target check
-            if avg_success_rate >= self.target_win_rate:
-                print(f"[?] Reached target success rate ({self.target_win_rate:.1%})!")
-                return False
-            
             # Evolve new generation using EvolutionaryEngine
             print(f"\n[DNA] Evolving Generation {self.current_generation + 1}...")
             
@@ -1994,11 +1985,7 @@ class AutonomousEvolutionRunner:
                 print(f"[PHASE 5]  Horizontal transfer error: {e}")
             
             if not success:
-                # Check if we hit targets (comprehensive success)
-                if eval_results['win_rate'] >= self.target_win_rate:
-                    print(f"\n[?] TARGET ACHIEVED! Win Rate: {eval_results['win_rate']:.1%}")
-                    return False
-                
+                # Check if we hit max generations
                 if self.current_generation >= self.max_generations:
                     print(f"\n[?]  Max generations reached")
                     return False

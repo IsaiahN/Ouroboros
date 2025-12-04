@@ -58,44 +58,39 @@ def main():
             'games_per_generation': 1,
             'evolution_interval_minutes': 1,
             'max_generations': 1,
-            'target_win_rate': 0.50,
             'skip_cleanup': True  # Skip slow database cleanup in test mode
         }
     elif args.fast:
         print(">> FAST MODE - Quick iterations")
         config = {
             'initial_population_size': 8,
-            'games_per_generation': 5,  # REDUCED: 10 → 5 for faster cycles
+            'games_per_generation': 5,  # REDUCED: 10 -> 5 for faster cycles
             'evolution_interval_minutes': 30,
-            'max_generations': 30,
-            'target_win_rate': 0.50
+            'max_generations': 30
         }
     elif args.thorough:
         print(">> THOROUGH MODE - Deep evaluation")
         config = {
             'initial_population_size': 15,
-            'games_per_generation': 20,  # REDUCED: 50 → 20 for reasonable times
+            'games_per_generation': 20,  # REDUCED: 50 -> 20 for reasonable times
             'evolution_interval_minutes': 90,
-            'max_generations': 20,
-            'target_win_rate': 0.50
+            'max_generations': 20
         }
     elif args.quick:
         print(">> QUICK TEST - 5 generations")
         config = {
             'initial_population_size': 5,
-            'games_per_generation': 5,  # REDUCED: 10 → 5
+            'games_per_generation': 5,  # REDUCED: 10 -> 5
             'evolution_interval_minutes': 15,
-            'max_generations': 5,
-            'target_win_rate': 0.50
+            'max_generations': 5
         }
     else:
         print(">> STANDARD MODE - Balanced evolution")
         config = {
             'initial_population_size': 10,
-            'games_per_generation': 10,  # REDUCED: 20 → 10 for reasonable times
+            'games_per_generation': 10,  # REDUCED: 20 -> 10 for reasonable times
             'evolution_interval_minutes': 60,
-            'max_generations': 50,
-            'target_win_rate': 0.50
+            'max_generations': 50
         }
     
     # Override max_generations if specified (useful when resuming)
@@ -115,7 +110,6 @@ def main():
     print(f"  Games per Generation: {config['games_per_generation']}")
     print(f"  Evolution Interval: {config['evolution_interval_minutes']} minutes")
     print(f"  Max Generations: {config['max_generations']}")
-    print(f"  Target Win Rate: {config['target_win_rate']:.0%}")
     if args.diversity:
         print(f"  Diversity Mode: ENABLED (generalization focus)")
     if args.specialist:

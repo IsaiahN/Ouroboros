@@ -105,7 +105,6 @@ Configuration:
   Games per Generation: 10
   Evolution Interval: 60 minutes
   Max Generations: 50
-  Target Win Rate: 50%
 ```
 
 **Requirements:**
