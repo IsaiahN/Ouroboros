@@ -393,10 +393,6 @@ def import_sequences(sequences: List[SequenceInfo], dry_run: bool = True) -> int
                 
             except Exception as e:
                 print(f"  [WARN]  Failed to import {seq.game_id} L{seq.level_number}: {e}")
-                imported += 1
-                
-            except Exception as e:
-                print(f"  [WARN]  Failed to import {seq.game_id} L{seq.level_number}: {e}")
         
         conn.commit()
         print(f"\n[OK] Imported {imported} sequences")

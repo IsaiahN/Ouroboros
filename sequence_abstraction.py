@@ -302,6 +302,59 @@ class SequenceAbstraction:
             logger.error(f"Error extracting concept: {e}")
             return None
 
+    def get_conceptual_hints(self, game_type: str, level_number: int = 1) -> Optional[Dict]:
+        """
+        Get conceptual hints for exploration when all sequences fail.
+        Returns action patterns and invariants that worked across sequences.
+        
+        Used by 3-try fallback system to guide exploration after sequence failures.
+        
+        Args:
+            game_type: Game type prefix (e.g., 'vc33')
+            level_number: Level to get hints for
+            
+        Returns:
+            Dict with 'hints' (action suggestions) and 'avoid' (known failures)
+        """
+        try:
+            # Extract concepts from existing sequences
+            concept = self.extract_multi_sequence_concept(game_type, level_number, min_sequences=2)
+            
+            if not concept:
+                return None
+            
+            hints = []
+            avoid = []
+            
+            # Convert invariants to hints
+            action_names = {1: "right", 2: "down", 3: "left", 4: "up", 5: "select", 6: "submit", 7: "reset"}
+            
+            if concept.get('invariant_positions'):
+                for inv in concept['invariant_positions'][:5]:
+                    action_num = inv.get('action', 0)
+                    action_name = action_names.get(action_num, f"ACTION{action_num}")
+                    coord_info = ""
+                    if inv.get('coordinates') and inv['coordinates'].get('is_fixed'):
+                        c = inv['coordinates']
+                        coord_info = f" at ({c['x_mean']:.0f},{c['y_mean']:.0f})"
+                    hints.append(f"Try {action_name}{coord_info} early in sequence")
+            
+            # Check for common starting patterns
+            if concept.get('template'):
+                template = concept['template'][:5]
+                hints.append(f"Common pattern: {' -> '.join(template)}")
+            
+            return {
+                'hints': hints,
+                'avoid': avoid,
+                'confidence': concept.get('confidence', 0.0),
+                'source': 'multi_sequence_concept'
+            }
+            
+        except Exception as e:
+            logger.debug(f"Error getting conceptual hints: {e}")
+            return None
+
 
 # Abstraction levels
 ABSTRACTION_LEVELS = {

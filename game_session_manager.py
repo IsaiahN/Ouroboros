@@ -171,6 +171,71 @@ class GameSessionManager:
         logger.info(f"Created game: {game_id} with actions: {game_data.get('available_actions', [])}")
 
         return game_data
+
+    async def reset_game(self) -> Dict[str, Any]:
+        """Reset the ENTIRE GAME back to level 1 with a fresh session.
+        
+        Per ARC API: RESET without guid = brand-new game from level 1.
+        Used by 3-try sequence system since sequences may target different levels.
+        
+        Returns:
+            Game state data after full game reset (starting from level 1)
+        """
+        if not self.is_running:
+            raise RuntimeError("No active session")
+        
+        if not self.client:
+            raise RuntimeError("No client available for game reset")
+        
+        if not self.current_game_id:
+            raise RuntimeError("No current game to reset")
+            
+        # Call the client's reset_game method (no guid = fresh game)
+        game_state = await self.client.reset_game(self.current_game_id)
+        
+        logger.info(f"[GAME RESET] Full game reset. New guid: {game_state.guid[:8] if game_state.guid else 'N/A'}, Score: {game_state.score}")
+        
+        # Convert GameState to dict for consistency with create_game return type
+        return {
+            'game_id': game_state.game_id,
+            'guid': game_state.guid,
+            'frame': game_state.frame,
+            'state': game_state.state,
+            'score': game_state.score,
+            'win_score': game_state.win_score,
+            'available_actions': game_state.available_actions
+        }
+
+    async def reset_level(self) -> Dict[str, Any]:
+        """Reset the current level to its initial frame state.
+        
+        Per ARC API: RESET with guid = reset current level only.
+        Used when retrying the SAME level with a fresh initial frame.
+        
+        Returns:
+            Game state data after level reset
+        """
+        if not self.is_running:
+            raise RuntimeError("No active session")
+        
+        if not self.client:
+            raise RuntimeError("No client available for level reset")
+            
+        # Call the client's reset_level method
+        game_state = await self.client.reset_level()
+        
+        logger.info(f"[LEVEL RESET] Level reset via session manager. Score: {game_state.score}")
+        
+        # Convert GameState to dict for consistency with create_game return type
+        return {
+            'game_id': game_state.game_id,
+            'guid': game_state.guid,
+            'frame': game_state.frame,
+            'state': game_state.state,
+            'score': game_state.score,
+            'win_score': game_state.win_score,
+            'available_actions': game_state.available_actions
+        }
     
     # ========================================================================
     # PHASE 2: PER-AGENT ACTION BUDGET ENFORCEMENT

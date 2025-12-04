@@ -240,19 +240,19 @@ class GameplayEngine:
                 try:
                     logger.info(f"[SEQUENCE REPLAY DEBUG] Checking for sequences for game {game_id}, agent_mode={agent_mode}")
                     
-                    # NEW: Use cumulative sequence approach (user's insight)
-                    # Get the SINGLE BEST sequence that completes the most levels
-                    # This is more efficient than level-by-level lookup
-                    # Replays ONCE to reach the highest known level (frontier)
-                    known_sequence = self._get_best_cumulative_sequence(game_id)
+                    # 3-TRY FALLBACK SYSTEM: Get top 3 sequences ranked by priority
+                    # Try each in order, flag failures, fall back to exploration if all fail
+                    ranked_sequences = self._get_ranked_cumulative_sequences(game_id, limit=3)
                     
-                    if known_sequence:
-                        logger.info(f"[SEQUENCE REPLAY DEBUG] Found sequence {known_sequence.get('sequence_id', 'UNKNOWN')}: "
-                                  f"{known_sequence['total_actions']} actions, completes {int(known_sequence['total_score'])} levels")
+                    if ranked_sequences:
+                        logger.info(f"[3-TRY SYSTEM] Found {len(ranked_sequences)} candidate sequences for {game_id}")
                     else:
                         logger.warning(f"[SEQUENCE REPLAY DEBUG] No sequences found for game {game_id}")
                         if agent_mode == 'exploiter':
                             logger.error(f"[EXPLOITER FAILURE] Agent in exploiter mode but no sequences available for {game_id} - cannot proceed")
+                    
+                    # Try to use the best available sequence (will be set by 3-try loop below)
+                    known_sequence = ranked_sequences[0] if ranked_sequences else None
                     
                     if known_sequence:
                         levels_completed_by_seq = int(known_sequence['total_score'])
@@ -309,133 +309,268 @@ class GameplayEngine:
                 logger.info(f" OPTIMIZER: Will use sequence and try to optimize (target: {target_actions} actions)")
                 # Fall through to use the sequence like other agents
             
-            # If we have a known sequence, replay it ONCE to reach frontier
-            # This is the cumulative approach - replay best sequence once, not level-by-level
-            if known_sequence:
-                # Check if this is a PROVEN sequence (>50% validation success)
-                sequence_id = known_sequence['sequence_id']
-                validation_check = self.db.execute_query("""
-                    SELECT successful_validations, total_validation_attempts,
-                           CAST(successful_validations AS FLOAT) / NULLIF(total_validation_attempts, 0) as success_rate
-                    FROM sequence_reputation
-                    WHERE sequence_id = ?
-                """, (sequence_id,))
-                
-                is_proven = False
-                if validation_check and validation_check[0]['total_validation_attempts'] >= 3:
-                    success_rate = validation_check[0]['success_rate'] or 0.0
-                    is_proven = success_rate > 0.5
-                    if is_proven:
-                        logger.info(f" PROVEN sequence detected: {success_rate:.1%} success rate ({validation_check[0]['successful_validations']}/{validation_check[0]['total_validation_attempts']})")
-                
-                # OPTIMIZER/EXPLOITER PARIAH ANALYSIS: Check if worth challenging on unbeaten level
-                agent_mode = self.game_config.get('agent_operating_mode', 'generalist')
-                current_network_level = self._get_network_max_level(game_id)
-                sequence_level = int(known_sequence.get('total_score', 0))  # Score = level reached
-                
-                should_challenge_pariah = True  # Default: use the sequence
-                
-                if agent_mode in ['optimizer', 'exploiter'] and sequence_level >= current_network_level:
-                    # Optimizer/Exploiter on frontier - check if pariah is worth challenging
-                    pariah_worth = self._analyze_pariah_worthiness(known_sequence, game_id)
-                    if not pariah_worth['worth_challenging']:
-                        logger.info(f"[SKIP]  {agent_mode.upper()} skipping pariah: {pariah_worth['reason']}")
-                        should_challenge_pariah = False
-                        known_sequence = None  # Skip sequence, fall back to exploration
-                    else:
-                        logger.info(f"  {agent_mode.upper()} challenging pariah: {pariah_worth['reason']}")
-                
-                if should_challenge_pariah and known_sequence:
-                    logger.info(f" Replaying BEST cumulative sequence (score {known_sequence['total_score']}, {known_sequence['total_actions']} actions)")
-                    logger.info(f"[SEQUENCE REPLAY DEBUG] About to call _replay_sequence_inline for sequence {known_sequence.get('sequence_id', 'UNKNOWN')})")
+            # ================================================================
+            # 3-TRY FALLBACK SYSTEM WITH FULL GAME RESET
+            # Try up to 3 sequences in priority order. If one fails:
+            # 1. Flag it as failing
+            # 2. RESET THE ENTIRE GAME (sequences may target different levels)
+            # 3. Try the next sequence from level 1
+            # 4. After 3 failures, use multi-stage matching pipeline
+            # 5. If pipeline fails, fall back to exploration with abstraction guidance
+            # ================================================================
+            replay_result = None
+            replay_success = False
+            successful_sequence = None
+            all_sequences_failed = False
+            abstraction_guidance = None  # Will store abstraction if all sequences fail
+            multi_stage_sequence = None  # Will store result from multi-stage pipeline
+            
+            if ranked_sequences:
+                for try_num, candidate_sequence in enumerate(ranked_sequences[:3], start=1):
+                    sequence_id = candidate_sequence['sequence_id']
+                    logger.info(f"[3-TRY] Attempt {try_num}/3: Trying sequence {sequence_id[:12]} "
+                               f"(score {candidate_sequence['total_score']}, {candidate_sequence['total_actions']} actions)")
+                    
+                    # Check reputation before trying
+                    validation_check = self.db.execute_query("""
+                        SELECT successful_validations, total_validation_attempts,
+                               CAST(successful_validations AS FLOAT) / NULLIF(total_validation_attempts, 0) as success_rate
+                        FROM sequence_reputation
+                        WHERE sequence_id = ?
+                    """, (sequence_id,))
+                    
+                    if validation_check and validation_check[0]['total_validation_attempts'] >= 3:
+                        sr = validation_check[0]['success_rate'] or 0.0
+                        if sr > 0.5:
+                            logger.info(f"  [PROVEN] {sr:.1%} success rate")
+                        elif sr < 0.3:
+                            logger.warning(f"  [WARN] Low success rate: {sr:.1%}")
+                    
+                    # PARIAH ANALYSIS (for optimizer/exploiter)
+                    agent_mode = self.game_config.get('agent_operating_mode', 'generalist')
+                    should_try = True
+                    
+                    if agent_mode in ['optimizer', 'exploiter']:
+                        current_network_level = self._get_network_max_level(game_id)
+                        sequence_level = int(candidate_sequence.get('total_score', 0))
+                        if sequence_level >= current_network_level:
+                            pariah_worth = self._analyze_pariah_worthiness(candidate_sequence, game_id)
+                            if not pariah_worth['worth_challenging']:
+                                logger.info(f"  [SKIP] Pariah not worth challenging: {pariah_worth['reason']}")
+                                should_try = False
+                    
+                    if not should_try:
+                        continue
+                    
+                    # Try replaying this sequence
                     try:
                         replay_result = await self._replay_sequence_inline(
                             game_state, 
-                            known_sequence
+                            candidate_sequence
                         )
+                        
+                        if replay_result and replay_result.get('success'):
+                            # SUCCESS! This sequence worked
+                            replay_success = True
+                            successful_sequence = candidate_sequence
+                            known_sequence = candidate_sequence  # Update for later use
+                            game_state = replay_result['game_state']
+                            logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
+                            
+                            # Reset consecutive failures on success
+                            self.db.execute_query("""
+                                UPDATE winning_sequences SET consecutive_failures = 0 WHERE sequence_id = ?
+                            """, (sequence_id,))
+                            break  # Exit the loop - we found a working sequence
+                        else:
+                            # FAILURE - flag this sequence
+                            failure_reason = f"replay_failed_attempt_{try_num}"
+                            if replay_result:
+                                game_state = replay_result['game_state']  # Update state even on failure
+                                failure_reason = f"reached_score_{game_state.score}_not_target"
+                            self._flag_sequence_failure(sequence_id, failure_reason)
+                            logger.warning(f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}")
+                            
+                            # FULL GAME RESET before trying next sequence
+                            # Each sequence may target different levels, so we reset to level 1
+                            if try_num < min(3, len(ranked_sequences)):
+                                try:
+                                    logger.info(f"[3-TRY] Resetting GAME for attempt {try_num + 1}...")
+                                    reset_data = await self.session_manager.reset_game()
+                                    game_state = GameState.from_dict(reset_data)
+                                    logger.info(f"[3-TRY] Game reset complete. New guid, Score: {game_state.score}")
+                                except Exception as reset_error:
+                                    logger.warning(f"[3-TRY] Game reset failed: {reset_error} - continuing anyway")
+                            
                     except ValueError as e:
                         if "frame corruption" in str(e).lower():
-                            logger.error(f"[FAIL] FRAME CORRUPTION during sequence replay - aborting game")
-                            await self.session_manager.finish_game("GAME_OVER", 0.0, 0, 0)
-                            return {
-                                'game_id': game_id,
-                                'final_state': 'GAME_OVER',
-                                'final_score': 0.0,
-                                'actions_taken': 0,
-                                'win': False,
-                                'method': 'aborted_frame_corruption'
-                            }
-                        raise  # Re-raise other ValueErrors
-                logger.info(f"[SEQUENCE REPLAY DEBUG] Replay completed, result={replay_result is not None}, success={replay_result.get('success', False) if replay_result else 'N/A'}")
+                            # Frame corruption - flag and reset game before next try
+                            self._flag_sequence_failure(sequence_id, "frame_corruption")
+                            logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
+                            
+                            # Full game reset for next attempt
+                            if try_num < min(3, len(ranked_sequences)):
+                                try:
+                                    reset_data = await self.session_manager.reset_game()
+                                    game_state = GameState.from_dict(reset_data)
+                                except Exception:
+                                    pass
+                            continue  # Try next sequence
+                        raise
+                    except Exception as e:
+                        self._flag_sequence_failure(sequence_id, f"exception: {str(e)[:50]}")
+                        logger.error(f"[3-TRY] Exception on attempt {try_num}: {e}")
+                        
+                        # Full game reset for next attempt
+                        if try_num < min(3, len(ranked_sequences)):
+                            try:
+                                reset_data = await self.session_manager.reset_game()
+                                game_state = GameState.from_dict(reset_data)
+                            except Exception:
+                                pass
+                        continue
                 
-                # Update game_state from replay result
-                if replay_result:
-                    game_state = replay_result['game_state']
-                    replay_success = replay_result['success']
-                    assert known_sequence is not None  # If we have replay_result, known_sequence was used
+                # After loop: check if all attempts failed
+                if not replay_success:
+                    all_sequences_failed = True
+                    logger.warning(f"[3-TRY] All {min(3, len(ranked_sequences))} ranked sequence attempts failed")
                     
-                    if replay_success and game_state.state == "WIN":
-                        # Full win from replay! Finish and return
-                        level_completions = int(game_state.score)  # Each level = 1 point
-                        actions_taken = len(json.loads(known_sequence['action_sequence']))
-                        await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
-                        
-                        # PHASE 2: Deduct actions from agent's budget
-                        if agent_id:
-                            self.session_manager.deduct_actions_used(agent_id, game_id)
-                        
-                        # PHASE 2.5: Knowledge Recombination (AUTOMATIC)
-                        recombinations = []
-                        if agent_id:
-                            recombinations = self._explore_sequence_recombination(
-                                agent_id, game_id, level_completions
+                    # STAGE 2: Try multi-stage matching pipeline as fallback
+                    # This uses looser matching strategies (prefix, suffix, subsequence, conceptual)
+                    if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
+                        try:
+                            logger.info(f"[MULTI-STAGE] Trying multi-stage matching pipeline...")
+                            
+                            # Reset level one more time for fresh start
+                            try:
+                                reset_data = await self.session_manager.reset_level()
+                                game_state = GameState.from_dict(reset_data)
+                            except Exception:
+                                pass
+                            
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            current_actions = self.game_config.get('current_actions', [])
+                            agent_config = {
+                                'risk_tolerance': self.game_config.get('risk_tolerance', 0.5),
+                                'abstraction_threshold': self.game_config.get('abstraction_threshold', 0.7)
+                            }
+                            
+                            sequence_actions, stage_used, metadata = self.matching_pipeline.get_sequence_with_fallback(
+                                game_id=game_id,
+                                level_number=1,  # Start from level 1
+                                current_actions=current_actions,
+                                agent_config=agent_config
                             )
-                        
-                        logger.info(f" COMPLETE WIN via cumulative sequence replay!")
+                            
+                            if sequence_actions and stage_used != 'random':
+                                logger.info(f"[MULTI-STAGE] {stage_used.upper()} match found: {len(sequence_actions)} actions, "
+                                           f"confidence {metadata.get('confidence', 0):.2f}")
+                                # Store for use in exploration phase
+                                multi_stage_sequence = {
+                                    'actions': sequence_actions,
+                                    'stage': stage_used,
+                                    'confidence': metadata.get('confidence', 0)
+                                }
+                            else:
+                                logger.info(f"[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+                                
+                        except Exception as e:
+                            logger.debug(f"Multi-stage pipeline error: {e}")
+                    
+                    # STAGE 3: Get abstraction guidance for pure exploration
+                    if not multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                        try:
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            abstraction_guidance = self.abstraction_engine.get_conceptual_hints(game_type)  # type: ignore[attr-defined]
+                            if abstraction_guidance:
+                                logger.info(f"[ABSTRACTION] Using conceptual hints: {abstraction_guidance.get('hints', [])[:3]}")
+                        except Exception as e:
+                            logger.debug(f"Abstraction guidance error: {e}")
+            
+            # Handle replay results (success, partial success, or all failed)
+            if replay_success and successful_sequence:
+                known_sequence = successful_sequence
+                
+                if game_state.state == "WIN":
+                    # Full win from replay! Finish and return
+                    level_completions = int(game_state.score)  # Each level = 1 point
+                    actions_taken = len(json.loads(known_sequence['action_sequence']))
+                    await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
+                    
+                    # PHASE 2: Deduct actions from agent's budget
+                    if agent_id:
+                        self.session_manager.deduct_actions_used(agent_id, game_id)
+                    
+                    # PHASE 2.5: Knowledge Recombination (AUTOMATIC)
+                    recombinations = []
+                    if agent_id:
+                        recombinations = self._explore_sequence_recombination(
+                            agent_id, game_id, level_completions
+                        )
+                    
+                    logger.info(f" COMPLETE WIN via cumulative sequence replay!")
+                    return {
+                        'game_id': game_id,
+                        'final_state': game_state.state,
+                        'final_score': game_state.score,
+                        'actions_taken': actions_taken,
+                        'win': True,
+                        'method': 'cumulative_sequence_replay',
+                        'sequence_id': known_sequence['sequence_id'],
+                        'recombinations_created': len(recombinations)
+                    }
+                else:
+                    # Replay succeeded but didn't win completely
+                    # We're now at the frontier (highest known level)
+                    frontier_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
+                    logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
+                    
+                    # ROLE-SPECIFIC FRONTIER BEHAVIOR
+                    # EXPLOITER: STOP here - exploiters ONLY use proven sequences, never explore
+                    if agent_mode == 'exploiter':
+                        logger.info(f" EXPLOITER: Stopping at frontier (Level {frontier_level}) - exploiters only use proven sequences")
+                        await self.session_manager.finish_game(game_state.state, game_state.score, int(game_state.score), len(json.loads(known_sequence['action_sequence'])))
                         return {
                             'game_id': game_id,
                             'final_state': game_state.state,
                             'final_score': game_state.score,
-                            'actions_taken': actions_taken,
-                            'win': True,
-                            'method': 'cumulative_sequence_replay',
-                            'sequence_id': known_sequence['sequence_id'],
-                            'recombinations_created': len(recombinations)
+                            'actions_taken': len(json.loads(known_sequence['action_sequence'])),
+                            'win': game_state.state == 'WIN',
+                            'method': 'exploiter_sequence_replay',
+                            'sequence_id': known_sequence['sequence_id']
                         }
-                    elif replay_success:
-                        # Replay succeeded but didn't win completely
-                        # We're now at the frontier (highest known level)
-                        frontier_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
-                        logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
-                        
-                        # ROLE-SPECIFIC FRONTIER BEHAVIOR
-                        # EXPLOITER: STOP here - exploiters ONLY use proven sequences, never explore
-                        if agent_mode == 'exploiter':
-                            logger.info(f" EXPLOITER: Stopping at frontier (Level {frontier_level}) - exploiters only use proven sequences")
-                            await self.session_manager.finish_game(game_state.state, game_state.score, int(game_state.score), len(json.loads(known_sequence['action_sequence'])))
-                            return {
-                                'game_id': game_id,
-                                'final_state': game_state.state,
-                                'final_score': game_state.score,
-                                'actions_taken': len(json.loads(known_sequence['action_sequence'])),
-                                'win': game_state.state == 'WIN',
-                                'method': 'exploiter_sequence_replay',
-                                'sequence_id': known_sequence['sequence_id']
-                            }
-                        
-                        # CRITICAL FIX: Force game state to NOT_FINISHED for PIONEERS and GENERALISTS
-                        # Some games (like ls20) incorrectly report WIN/GAME_OVER after partial completion
-                        # Pioneers and Generalists should continue playing until action budget exhausted
-                        if game_state.state != "NOT_FINISHED":
-                            logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED for continuation")
-                            game_state.state = "NOT_FINISHED"
-                        
-                        # PIONEER/GENERALIST/OPTIMIZER: Continue playing until action budget exhausted
-                        logger.info(f" {agent_mode.upper()}: At frontier (Level {frontier_level}), continuing until action budget exhausted")
-                        # Continue to game loop below
-                    else:
-                        logger.info(f" Cumulative sequence replay failed, falling back to exploration")
-                        # Continue with normal exploration below
+                    
+                    # CRITICAL FIX: Force game state to NOT_FINISHED for PIONEERS and GENERALISTS
+                    # Some games (like ls20) incorrectly report WIN/GAME_OVER after partial completion
+                    # Pioneers and Generalists should continue playing until action budget exhausted
+                    if game_state.state != "NOT_FINISHED":
+                        logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED for continuation")
+                        game_state.state = "NOT_FINISHED"
+                    
+                    # PIONEER/GENERALIST/OPTIMIZER: Continue playing until action budget exhausted
+                    mode_name = (agent_mode or 'generalist').upper()
+                    logger.info(f" {mode_name}: At frontier (Level {frontier_level}), continuing until action budget exhausted")
+                    # Continue to game loop below
+            
+            elif all_sequences_failed:
+                # All 3 ranked sequences failed - check fallback options
+                if multi_stage_sequence:
+                    # Multi-stage pipeline found a match (prefix/suffix/subsequence/conceptual)
+                    logger.info(f"[EXPLORATION FALLBACK] Using multi-stage {multi_stage_sequence['stage'].upper()} match "
+                               f"({len(multi_stage_sequence['actions'])} actions, confidence {multi_stage_sequence['confidence']:.2f})")
+                    self.game_config['multi_stage_guidance'] = multi_stage_sequence
+                elif abstraction_guidance:
+                    # Use abstraction hints for guided exploration
+                    logger.info(f"[EXPLORATION FALLBACK] Using abstraction hints for guided exploration")
+                    self.game_config['abstraction_hints'] = abstraction_guidance
+                else:
+                    logger.info(f"[EXPLORATION FALLBACK] Pure exploration mode (no guidance available)")
+                # Continue to game loop for exploration
+            
+            elif not ranked_sequences:
+                # No sequences available at all - pure exploration
+                logger.info(f"[EXPLORATION] No sequences available, pure exploration mode")
+                # Continue to game loop for exploration
 
             action_count = 0
             level_action_count = 0  # Track actions per level
@@ -2344,20 +2479,21 @@ class GameplayEngine:
             """, (game_id, level_number))
             
             # ================================================================
-            # DUPLICATE PREVENTION FIX (2024-12-03)
+            # DUPLICATE PREVENTION FIX (2024-12-03, UPDATED 2024-12-04)
             # ================================================================
-            # Check if this EXACT action sequence already exists (same actions)
+            # Check if this EXACT action sequence already exists (same actions AND same count)
             # This prevents saving identical sequences that differ only in metadata
+            # But allows different-length sequences that happen to share a prefix
             # ================================================================
             action_sequence_json = json.dumps(actions)
             duplicate_check = self.db.execute_query("""
-                SELECT sequence_id FROM winning_sequences
-                WHERE game_id = ? AND level_number = ? AND action_sequence = ?
+                SELECT sequence_id, total_actions FROM winning_sequences
+                WHERE game_id = ? AND level_number = ? AND action_sequence = ? AND total_actions = ?
                 LIMIT 1
-            """, (game_id, level_number, action_sequence_json))
+            """, (game_id, level_number, action_sequence_json, len(actions)))
             
             if duplicate_check:
-                logger.debug(f"Duplicate sequence exists ({duplicate_check[0]['sequence_id'][:12]}), skipping save")
+                logger.debug(f"Duplicate sequence exists ({duplicate_check[0]['sequence_id'][:12]}, {duplicate_check[0]['total_actions']} actions), skipping save")
                 return duplicate_check[0]['sequence_id']  # Return existing ID
             
             # Only store if this is MORE EFFICIENT than existing, or if no existing sequence
@@ -2379,17 +2515,29 @@ class GameplayEngine:
                 existing_agent = existing_seq.get('agent_id', 'unknown')
                 
                 # ANTI-GAMING: Require improvement to store another sequence
-                # Stricter thresholds to prevent spam (TIGHTENED 2024-12-03)
+                # Thresholds to prevent spam while allowing diversity (UPDATED 2024-12-04)
                 # - If same agent: Must improve by 5+ actions OR 10% efficiency
                 # - If different agent: Must improve by 3+ actions OR 5% efficiency
-                # - REMOVED: Diversity bonus was causing massive duplication
+                # - DIVERSITY BONUS: If <= 3 active sequences, allow storage to ensure coverage
                 
                 is_same_agent = (current_agent_id == existing_agent)
                 min_action_improvement = 5 if is_same_agent else 3
                 min_efficiency_multiplier = 1.10 if is_same_agent else 1.05
                 
+                # Check sequence count for diversity bonus (per game type, not game_id)
+                game_type_prefix = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                seq_count = self.db.execute_query("""
+                    SELECT COUNT(*) as cnt FROM winning_sequences
+                    WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
+                """, (f"{game_type_prefix}%", level_number))[0]['cnt']
+                
+                # DIVERSITY BONUS: Allow if <= 10 active sequences for this game TYPE
+                if seq_count <= 10:
+                    should_store = True
+                    sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
+                    logger.info(f"[DIVERSITY] Storing sequence for under-represented game-level (only {seq_count} active)")
                 # Store if we improved (fewer actions OR better efficiency)
-                if len(actions) <= existing_actions - min_action_improvement:
+                elif len(actions) <= existing_actions - min_action_improvement:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
                     logger.info(f" Optimized sequence: {existing_actions} → {len(actions)} actions "
@@ -2483,23 +2631,34 @@ class GameplayEngine:
                            f"tags: {pattern_tags}, pattern: {pattern_signature.get('transformation_type', 'unknown')}")
                 
                 # AUTO-CLEANUP: If we now have 4+ sequences for this game-level, deactivate worst one
+                # PRIORITY ORDER (UPDATED 2024-12-04):
+                # 1. success_rate_when_reused (proven working > unproven)
+                # 2. times_referenced (heavily used > unused)
+                # 3. total_actions ASC (fewer actions = more efficient)
+                # 4. total_score DESC (higher score = further progress)
                 current_sequences = self.db.execute_query("""
-                    SELECT sequence_id, total_actions, total_score, efficiency_score
+                    SELECT sequence_id, total_actions, total_score, efficiency_score,
+                           COALESCE(success_rate_when_reused, 0) as success_rate,
+                           COALESCE(times_referenced, 0) as refs
                     FROM winning_sequences
                     WHERE game_id = ? AND level_number = ? AND is_active = 1
-                    ORDER BY total_score DESC, total_actions ASC
+                    ORDER BY 
+                        COALESCE(success_rate_when_reused, 0) DESC,
+                        COALESCE(times_referenced, 0) DESC,
+                        total_actions ASC,
+                        total_score DESC
                 """, (game_id, level_number))
                 
                 if len(current_sequences) > 3:
-                    # Deactivate the worst sequence (last in sorted list)
+                    # Deactivate the worst sequence (last in sorted list = lowest priority)
                     worst_seq = current_sequences[-1]
                     self.db.execute_query("""
                         UPDATE winning_sequences
-                        SET is_active = 0
+                        SET is_active = 0, flag_reason = 'auto_cleanup_low_priority'
                         WHERE sequence_id = ?
                     """, (worst_seq['sequence_id'],))
-                    logger.info(f" Auto-deactivated redundant sequence {worst_seq['sequence_id'][:8]} "
-                              f"({worst_seq['total_actions']} actions, keeping top 3)")
+                    logger.info(f"[CLEANUP] Auto-deactivated low-priority sequence {worst_seq['sequence_id'][:8]} "
+                              f"({worst_seq['total_actions']} actions, success={worst_seq['success_rate']:.2f}, refs={worst_seq['refs']}, keeping top 3)")
             
             return sequence_id
             
@@ -2762,6 +2921,102 @@ class GameplayEngine:
             
         return None
 
+    def _get_ranked_cumulative_sequences(self, game_id: str, limit: int = 3) -> List[Dict]:
+        """
+        Get TOP N cumulative sequences for a game, ranked by priority.
+        Used for 3-try fallback system: try best sequence, if fails try 2nd, then 3rd.
+        
+        Priority order:
+        1. PROVEN sequences (successful_validations > 0) with highest score
+        2. UNTESTED sequences with highest score  
+        3. Among ties, prefer fewer actions (more efficient)
+        
+        Args:
+            game_id: Game to check
+            limit: Max sequences to return (default 3)
+            
+        Returns:
+            List of sequence dicts, ranked by priority (may be empty)
+        """
+        if not self.game_config.get('enable_pattern_learning', True):
+            return []
+            
+        try:
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            sequences = self.db.execute_query("""
+                SELECT ws.*, 
+                       COALESCE(sr.reliability_score, 0.5) as reliability,
+                       COALESCE(sr.success_rate, 0.5) as community_success_rate,
+                       COALESCE(sr.successful_validations, 0) as validation_count,
+                       COALESCE(sr.total_validation_attempts, 0) as total_attempts,
+                       COALESCE(sr.trending, 'stable') as trend
+                FROM winning_sequences ws
+                LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
+                WHERE ws.game_id LIKE ? 
+                  AND ws.is_active = 1
+                ORDER BY 
+                    ws.total_score DESC,
+                    CASE 
+                        WHEN COALESCE(sr.successful_validations, 0) > 0 THEN 0
+                        WHEN COALESCE(sr.total_validation_attempts, 0) = 0 THEN 1
+                        ELSE 2
+                    END,
+                    ws.total_actions ASC
+                LIMIT ?
+            """, (f"{game_type}-%", limit))
+            
+            if sequences:
+                logger.info(f"[RANKED SEQ] Found {len(sequences)} candidate sequences for {game_type}")
+                for i, seq in enumerate(sequences):
+                    logger.debug(f"  #{i+1}: {seq['sequence_id'][:12]} - score {seq['total_score']}, "
+                               f"{seq['total_actions']} actions, reliability {seq['reliability']:.2f}")
+            return sequences or []
+            
+        except Exception as e:
+            logger.debug(f"Error retrieving ranked sequences for {game_id}: {e}")
+            return []
+
+    def _flag_sequence_failure(self, sequence_id: str, failure_reason: str) -> None:
+        """
+        Flag a sequence as failing during replay attempt.
+        Increments consecutive_failures and may deactivate if threshold reached.
+        
+        Args:
+            sequence_id: Sequence that failed
+            failure_reason: Why it failed
+        """
+        try:
+            # Get current failure count
+            current = self.db.execute_query("""
+                SELECT consecutive_failures, quick_flagged 
+                FROM winning_sequences WHERE sequence_id = ?
+            """, (sequence_id,))
+            
+            if current:
+                failures = (current[0].get('consecutive_failures') or 0) + 1
+                
+                # Deactivate after 3 consecutive failures (more aggressive for 3-try system)
+                if failures >= 3:
+                    self.db.execute_query("""
+                        UPDATE winning_sequences 
+                        SET is_active = 0, quick_flagged = 1, 
+                            consecutive_failures = ?, flag_reason = ?
+                        WHERE sequence_id = ?
+                    """, (failures, f"3try_deactivate: {failure_reason}", sequence_id))
+                    logger.warning(f"[DEACTIVATE] {sequence_id[:12]} after {failures} consecutive failures: {failure_reason}")
+                else:
+                    # Just increment failure count
+                    self.db.execute_query("""
+                        UPDATE winning_sequences 
+                        SET consecutive_failures = ?, flag_reason = ?
+                        WHERE sequence_id = ?
+                    """, (failures, failure_reason, sequence_id))
+                    logger.info(f"[FLAG] {sequence_id[:12]} failure #{failures}: {failure_reason}")
+                    
+        except Exception as e:
+            logger.debug(f"Error flagging sequence failure: {e}")
+
     def _get_best_sequence_for_game(self, game_id: str, level_number: int = 1, 
                                    current_frame=None) -> Optional[Dict]:
         """
@@ -2943,7 +3198,7 @@ class GameplayEngine:
         """
         try:
             sequence_id = sequence['sequence_id']
-            level_number = sequence.get('level_number', 1)
+            level_number = sequence.get('level_number') or 1
             logger.info(f" Replaying sequence {sequence_id} inline (level {level_number})")
             
             # Track that this agent is using a sequence for this level
@@ -3143,7 +3398,9 @@ class GameplayEngine:
             #   - Score 2 = completed levels 1+2, now on level 3
             # - A sequence for level N is valid if agent reaches level N
             #   which means score >= (N-1) since score N-1 means level N-1 completed = ON level N
-            target_level = sequence.get('level_number', 1)
+            # NOTE: target_level comes from DB's level_number column (the level this sequence completes)
+            # Using 'or 1' handles both missing key AND None value (belt + suspenders)
+            target_level = sequence.get('level_number') or 1
             current_level = int(game_state.score) + 1  # Score 0 = level 1, Score 1 = level 2, etc.
             
             # Success = reached target level OR better (including WIN)
@@ -3221,7 +3478,7 @@ class GameplayEngine:
         """
         try:
             sequence_id = sequence['sequence_id']
-            level_number = sequence.get('level_number', 1)
+            level_number = sequence.get('level_number') or 1
             logger.info(f" Attempting to replay sequence {sequence_id} for {game_id} level {level_number}")
             
             if not self.session_manager.is_running:
@@ -3302,7 +3559,7 @@ class GameplayEngine:
             
             # Check if replay was successful using level-based validation
             # (Same logic as _try_inline_replay_sequence)
-            target_level = sequence.get('level_number', 1)
+            target_level = sequence.get('level_number') or 1
             current_level = int(game_state.score) + 1  # Score 0 = level 1, etc.
             
             replay_success = (game_state.state == "WIN" or 

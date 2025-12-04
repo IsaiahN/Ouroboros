@@ -470,6 +470,54 @@ class ARCClient:
 
         return GameState.from_dict(response)
 
+    async def reset_level(self, game_id: Optional[str] = None, card_id: Optional[str] = None,
+                         guid: Optional[str] = None) -> GameState:
+        """Reset the CURRENT LEVEL (not the whole game) to initial frame state.
+        
+        Per ARC API documentation:
+        - With guid provided: Resets current level if actions were taken
+        - This allows retrying a level with a fresh initial frame
+        
+        Args:
+            game_id: Game ID. If not provided, uses current game.
+            card_id: Scorecard ID. If not provided, uses current scorecard.
+            guid: Game GUID. REQUIRED for level reset (must be provided).
+            
+        Returns:
+            GameState: The initial game state of the current level after reset.
+        """
+        if not self.session:
+            raise ARCError("Session already closed, cannot reset level")
+        
+        # Use current values if not provided
+        if not game_id:
+            game_id = self.current_game_id
+        if not card_id:
+            card_id = self.current_scorecard_id
+        if not guid:
+            guid = self.current_guid
+            
+        if not all([game_id, card_id, guid]):
+            raise ValueError("reset_level requires game_id, card_id, AND guid to reset current level")
+
+        payload = {
+            "game_id": game_id,
+            "card_id": card_id,
+            "guid": guid  # CRITICAL: With guid = level reset, without guid = new game
+        }
+        
+        logger.info(f"[LEVEL RESET] Resetting level for game {game_id}, guid {guid[:8]}...")
+
+        response = await self._make_request("POST", RESET_ENDPOINT, json=payload)
+
+        # Update game state (guid should remain the same for level reset)
+        self.current_game_id = response.get("game_id")
+        self.current_guid = response.get("guid")
+        
+        logger.info(f"[LEVEL RESET] Level reset complete. Score: {response.get('score')}, State: {response.get('state')}")
+
+        return GameState.from_dict(response)
+
     async def send_action(self, action: str, game_id: Optional[str] = None, card_id: Optional[str] = None,
                          guid: Optional[str] = None, x: Optional[int] = None, y: Optional[int] = None, **kwargs) -> GameState:
         """Send an action to the game.
