@@ -11,6 +11,14 @@ Enhanced with pattern learning (Rule 10: integrated, not new files):
 - Captures winning sequences
 - Discovers and reuses patterns
 - Learns from every game
+
+Refactored for maintainability (December 2025):
+- Extracted logical sections into helper methods
+- _handle_3_try_fallback() - The 3-try sequence system
+- _handle_sequence_replay_result() - Processing replay success/failure
+- _run_game_loop() - The main action loop
+- _handle_level_completion() - Level completion logic
+- _finalize_game() - End-of-game cleanup and results
 """
 
 import asyncio
@@ -20,6 +28,7 @@ import uuid
 import numpy as np
 from typing import Dict, Any, List, Optional, Callable, Tuple
 from collections import Counter
+from dataclasses import dataclass, field
 import random
 from datetime import datetime
 
@@ -47,6 +56,42 @@ except ImportError:
         return False
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GameLoopState:
+    """Mutable state tracked during the game loop.
+    
+    Extracted to reduce variable passing and improve readability.
+    """
+    action_count: int = 0
+    level_action_count: int = 0
+    previous_score: float = 0.0
+    level_completions: int = 0
+    current_level: int = 1
+    level_start_action: int = 0
+    level_api_resets: int = 0
+    consecutive_no_frame_change: int = 0
+    consecutive_api_errors: int = 0
+    api_error_backoff: int = 0
+    start_time: datetime = field(default_factory=datetime.now)
+    
+    # Constants
+    MAX_API_RESETS_PER_LEVEL: int = 2
+    API_RESET_THRESHOLD: int = 1000
+    STUCK_STATE_THRESHOLD: int = 100
+    MAX_CONSECUTIVE_API_ERRORS: int = 5
+
+
+@dataclass 
+class SequenceFallbackResult:
+    """Result from the 3-try sequence fallback system."""
+    success: bool = False
+    game_state: Any = None  # GameState, but typed as Any to avoid Optional issues
+    successful_sequence: Any = None  # Dict or None
+    all_failed: bool = False
+    multi_stage_sequence: Any = None  # Dict or None
+    abstraction_guidance: Any = None  # Dict or None
 
 
 class GameplayEngine:
@@ -121,6 +166,609 @@ class GameplayEngine:
         """
         self.game_config.update(config)
         logger.info(f"Updated game config: {config}")
+
+    # =========================================================================
+    # REFACTORED HELPER METHODS (December 2025)
+    # Extracted from play_single_game to reduce complexity
+    # =========================================================================
+
+    async def _handle_3_try_fallback(
+        self,
+        game_state: 'GameState',
+        ranked_sequences: List[Dict],
+        game_id: str,
+        agent_mode: Optional[str]
+    ) -> SequenceFallbackResult:
+        """Execute the 3-try sequence fallback system.
+        
+        Try up to 3 sequences in priority order. If one fails:
+        1. Flag it as failing
+        2. RESET THE ENTIRE GAME (sequences may target different levels)
+        3. Try the next sequence from level 1
+        4. After 3 failures, use multi-stage matching pipeline
+        5. If pipeline fails, get abstraction guidance for exploration
+        
+        Args:
+            game_state: Current game state
+            ranked_sequences: List of sequences to try, ranked by priority
+            game_id: Current game ID
+            agent_mode: Agent operating mode (pioneer, optimizer, etc.)
+            
+        Returns:
+            SequenceFallbackResult with success status and updated state
+        """
+        result = SequenceFallbackResult()
+        result.game_state = game_state
+        
+        if not ranked_sequences:
+            result.all_failed = True
+            return result
+            
+        for try_num, candidate_sequence in enumerate(ranked_sequences[:3], start=1):
+            sequence_id = candidate_sequence['sequence_id']
+            logger.info(f"[3-TRY] Attempt {try_num}/3: Trying sequence {sequence_id[:12]} "
+                       f"(score {candidate_sequence['total_score']}, {candidate_sequence['total_actions']} actions)")
+            
+            # Check reputation before trying
+            validation_check = self.db.execute_query("""
+                SELECT successful_validations, total_validation_attempts,
+                       CAST(successful_validations AS FLOAT) / NULLIF(total_validation_attempts, 0) as success_rate
+                FROM sequence_reputation
+                WHERE sequence_id = ?
+            """, (sequence_id,))
+            
+            if validation_check and validation_check[0]['total_validation_attempts'] >= 3:
+                sr = validation_check[0]['success_rate'] or 0.0
+                if sr > 0.5:
+                    logger.info(f"  [PROVEN] {sr:.1%} success rate")
+                elif sr < 0.3:
+                    logger.warning(f"  [WARN] Low success rate: {sr:.1%}")
+            
+            # PARIAH ANALYSIS (for optimizer/exploiter)
+            should_try = True
+            if agent_mode in ['optimizer', 'exploiter']:
+                current_network_level = self._get_network_max_level(game_id)
+                sequence_level = int(candidate_sequence.get('total_score', 0))
+                if sequence_level >= current_network_level:
+                    pariah_worth = self._analyze_pariah_worthiness(candidate_sequence, game_id)
+                    if not pariah_worth['worth_challenging']:
+                        logger.info(f"  [SKIP] Pariah not worth challenging: {pariah_worth['reason']}")
+                        should_try = False
+            
+            if not should_try:
+                continue
+            
+            # Try replaying this sequence
+            try:
+                # game_state should always be set at this point
+                assert result.game_state is not None, "game_state must be set before replay"
+                
+                replay_result = await self._replay_sequence_inline(
+                    result.game_state, 
+                    candidate_sequence
+                )
+                
+                if replay_result and replay_result.get('success'):
+                    # SUCCESS! This sequence worked
+                    result.success = True
+                    result.successful_sequence = candidate_sequence
+                    result.game_state = replay_result['game_state']
+                    logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
+                    
+                    # Reset consecutive failures on success
+                    self.db.execute_query("""
+                        UPDATE winning_sequences SET consecutive_failures = 0 WHERE sequence_id = ?
+                    """, (sequence_id,))
+                    return result  # Exit early - we found a working sequence
+                else:
+                    # FAILURE - flag this sequence
+                    failure_reason = f"replay_failed_attempt_{try_num}"
+                    if replay_result and replay_result.get('game_state'):
+                        result.game_state = replay_result['game_state']
+                        failure_reason = f"reached_score_{result.game_state.score}_not_target"
+                    self._flag_sequence_failure(sequence_id, failure_reason)
+                    logger.warning(f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}")
+                    
+                    # FULL GAME RESET before trying next sequence
+                    if try_num < min(3, len(ranked_sequences)):
+                        try:
+                            logger.info(f"[3-TRY] Resetting GAME for attempt {try_num + 1}...")
+                            reset_data = await self.session_manager.reset_game()
+                            result.game_state = GameState.from_dict(reset_data)
+                            logger.info(f"[3-TRY] Game reset complete. New guid, Score: {result.game_state.score}")
+                        except Exception as reset_error:
+                            logger.warning(f"[3-TRY] Game reset failed: {reset_error} - continuing anyway")
+                        
+            except ValueError as e:
+                if "frame corruption" in str(e).lower():
+                    self._flag_sequence_failure(sequence_id, "frame_corruption")
+                    logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
+                    
+                    if try_num < min(3, len(ranked_sequences)):
+                        try:
+                            reset_data = await self.session_manager.reset_game()
+                            result.game_state = GameState.from_dict(reset_data)
+                        except Exception:
+                            pass
+                    continue
+                raise
+            except Exception as e:
+                self._flag_sequence_failure(sequence_id, f"exception: {str(e)[:50]}")
+                logger.error(f"[3-TRY] Exception on attempt {try_num}: {e}")
+                
+                if try_num < min(3, len(ranked_sequences)):
+                    try:
+                        reset_data = await self.session_manager.reset_game()
+                        result.game_state = GameState.from_dict(reset_data)
+                    except Exception:
+                        pass
+                continue
+        
+        # All attempts failed - try multi-stage matching pipeline
+        result.all_failed = True
+        logger.warning(f"[3-TRY] All {min(3, len(ranked_sequences))} ranked sequence attempts failed")
+        
+        # STAGE 2: Multi-stage matching pipeline
+        if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
+            try:
+                logger.info(f"[MULTI-STAGE] Trying multi-stage matching pipeline...")
+                
+                try:
+                    reset_data = await self.session_manager.reset_level()
+                    result.game_state = GameState.from_dict(reset_data)
+                except Exception:
+                    pass
+                
+                current_actions = self.game_config.get('current_actions', [])
+                agent_config = {
+                    'risk_tolerance': self.game_config.get('risk_tolerance', 0.5),
+                    'abstraction_threshold': self.game_config.get('abstraction_threshold', 0.7)
+                }
+                
+                sequence_actions, stage_used, metadata = self.matching_pipeline.get_sequence_with_fallback(
+                    game_id=game_id,
+                    level_number=1,
+                    current_actions=current_actions,
+                    agent_config=agent_config
+                )
+                
+                if sequence_actions and stage_used != 'random':
+                    logger.info(f"[MULTI-STAGE] {stage_used.upper()} match found: {len(sequence_actions)} actions, "
+                               f"confidence {metadata.get('confidence', 0):.2f}")
+                    result.multi_stage_sequence = {
+                        'actions': sequence_actions,
+                        'stage': stage_used,
+                        'confidence': metadata.get('confidence', 0)
+                    }
+                else:
+                    logger.info(f"[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+                    
+            except Exception as e:
+                logger.debug(f"Multi-stage pipeline error: {e}")
+        
+        # STAGE 3: Get abstraction guidance for pure exploration
+        if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+            try:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                result.abstraction_guidance = self.abstraction_engine.get_conceptual_hints(game_type)  # type: ignore[attr-defined]
+                if result.abstraction_guidance:
+                    logger.info(f"[ABSTRACTION] Using conceptual hints: {result.abstraction_guidance.get('hints', [])[:3]}")
+            except Exception as e:
+                logger.debug(f"Abstraction guidance error: {e}")
+        
+        return result
+
+    async def _handle_sequence_replay_result(
+        self,
+        fallback_result: SequenceFallbackResult,
+        game_id: str,
+        agent_id: Optional[str],
+        agent_mode: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Handle the result of sequence replay attempts.
+        
+        Returns early result dict if game should end, None to continue to game loop.
+        
+        Args:
+            fallback_result: Result from _handle_3_try_fallback
+            game_id: Current game ID
+            agent_id: Agent ID
+            agent_mode: Agent operating mode
+            
+        Returns:
+            Dict with game results if game is done, None if should continue to loop
+        """
+        game_state = fallback_result.game_state
+        known_sequence = fallback_result.successful_sequence
+        
+        if fallback_result.success and known_sequence:
+            # game_state is guaranteed to exist if success is True
+            assert game_state is not None, "game_state must exist on success"
+            
+            if game_state.state == "WIN":
+                # Full win from replay! Finish and return
+                level_completions = int(game_state.score)
+                actions_taken = len(json.loads(known_sequence['action_sequence']))
+                await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
+                
+                if agent_id:
+                    self.session_manager.deduct_actions_used(agent_id, game_id)
+                
+                recombinations = []
+                if agent_id:
+                    recombinations = self._explore_sequence_recombination(agent_id, game_id, level_completions)
+                
+                logger.info(f" COMPLETE WIN via cumulative sequence replay!")
+                return {
+                    'game_id': game_id,
+                    'final_state': game_state.state,
+                    'final_score': game_state.score,
+                    'actions_taken': actions_taken,
+                    'win': True,
+                    'method': 'cumulative_sequence_replay',
+                    'sequence_id': known_sequence['sequence_id'],
+                    'recombinations_created': len(recombinations)
+                }
+            else:
+                # Replay succeeded but didn't win completely - at frontier
+                frontier_level = int(game_state.score) + 1
+                logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
+                
+                # EXPLOITER: STOP here
+                if agent_mode == 'exploiter':
+                    logger.info(f" EXPLOITER: Stopping at frontier (Level {frontier_level})")
+                    await self.session_manager.finish_game(
+                        game_state.state, game_state.score, 
+                        int(game_state.score), len(json.loads(known_sequence['action_sequence']))
+                    )
+                    return {
+                        'game_id': game_id,
+                        'final_state': game_state.state,
+                        'final_score': game_state.score,
+                        'actions_taken': len(json.loads(known_sequence['action_sequence'])),
+                        'win': game_state.state == 'WIN',
+                        'method': 'exploiter_sequence_replay',
+                        'sequence_id': known_sequence['sequence_id']
+                    }
+                
+                # Force game state to NOT_FINISHED for continuation
+                if game_state.state != "NOT_FINISHED":
+                    logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED")
+                    game_state.state = "NOT_FINISHED"
+                
+                mode_name = (agent_mode or 'generalist').upper()
+                logger.info(f" {mode_name}: At frontier (Level {frontier_level}), continuing until action budget exhausted")
+                
+        elif fallback_result.all_failed:
+            # All sequences failed - set up fallback options
+            if fallback_result.multi_stage_sequence:
+                logger.info(f"[EXPLORATION FALLBACK] Using multi-stage {fallback_result.multi_stage_sequence['stage'].upper()} match")
+                self.game_config['multi_stage_guidance'] = fallback_result.multi_stage_sequence
+            elif fallback_result.abstraction_guidance:
+                logger.info(f"[EXPLORATION FALLBACK] Using abstraction hints for guided exploration")
+                self.game_config['abstraction_hints'] = fallback_result.abstraction_guidance
+            else:
+                logger.info(f"[EXPLORATION FALLBACK] Pure exploration mode (no guidance available)")
+        
+        return None  # Continue to game loop
+
+    async def _run_single_action(
+        self,
+        game_state: 'GameState',
+        loop_state: GameLoopState,
+        action_callback: Optional[Callable],
+        agent_id: Optional[str],
+        game_id: str
+    ) -> Tuple['GameState', bool, Optional[str]]:
+        """Execute a single action in the game loop.
+        
+        Args:
+            game_state: Current game state
+            loop_state: Mutable loop state
+            action_callback: Optional custom action callback
+            agent_id: Agent ID
+            game_id: Game ID
+            
+        Returns:
+            Tuple of (updated game_state, action_succeeded, action_taken)
+        """
+        action = None
+        action_succeeded = False
+        
+        # API error backoff
+        if loop_state.api_error_backoff > 0:
+            logger.info(f"[TIME] API error backoff: waiting {loop_state.api_error_backoff}s before next action")
+            await asyncio.sleep(loop_state.api_error_backoff)
+            loop_state.api_error_backoff = 0
+        
+        try:
+            if action_callback:
+                action_result = await action_callback(game_state, self.action_handler)
+                if isinstance(action_result, GameState):
+                    game_state = action_result
+                elif isinstance(action_result, str):
+                    action = action_result
+                    game_state = await self._execute_action(action, game_state, "", loop_state.current_level)
+                else:
+                    raise ValueError(f"Invalid action callback result: {action_result}")
+            else:
+                action, reasoning = await self._select_action(game_state)
+                game_state = await self._execute_action(action, game_state, reasoning, loop_state.current_level)
+            
+            loop_state.consecutive_api_errors = 0
+            action_succeeded = True
+            
+        except Exception as action_error:
+            error_msg = str(action_error).lower()
+            is_api_error = any(indicator in error_msg for indicator in [
+                '400', 'bad_request', 'bad request',
+                '500', 'internal server error', 'non-json response',
+                'server disconnected', 'connection', 'timeout'
+            ])
+            
+            if is_api_error:
+                loop_state.consecutive_api_errors += 1
+                logger.warning(f"[WARN] API error #{loop_state.consecutive_api_errors}: {action_error}")
+                
+                is_session_dead = any(indicator in error_msg for indicator in ['400', 'bad_request', 'bad request'])
+                if is_session_dead:
+                    logger.error(f"[STOP] Game session terminated (400 BAD_REQUEST)")
+                    raise RuntimeError("Session dead")
+                
+                if loop_state.consecutive_api_errors >= loop_state.MAX_CONSECUTIVE_API_ERRORS:
+                    logger.error(f"[STOP] Too many consecutive API errors ({loop_state.consecutive_api_errors})")
+                    raise RuntimeError("Too many API errors")
+                
+                loop_state.api_error_backoff = min(2 ** (loop_state.consecutive_api_errors - 1), 16)
+                logger.info(f"   -> Will wait {loop_state.api_error_backoff}s before retry")
+            else:
+                raise
+        
+        return game_state, action_succeeded, action
+
+    async def _handle_level_completion(
+        self,
+        game_state: 'GameState',
+        loop_state: GameLoopState,
+        game_id: str,
+        agent_id: Optional[str],
+        agent_mode: Optional[str]
+    ) -> None:
+        """Handle level completion logic including sequence capture.
+        
+        Args:
+            game_state: Current game state
+            loop_state: Mutable loop state
+            game_id: Game ID
+            agent_id: Agent ID
+            agent_mode: Agent operating mode
+        """
+        loop_state.level_completions += 1
+        logger.info(f" Level {loop_state.current_level} completed! Score: {loop_state.previous_score} -> {game_state.score}")
+        logger.info(f" Level {loop_state.current_level} stats: {loop_state.level_action_count} actions, {loop_state.level_api_resets} API resets used")
+        
+        loop_state.level_api_resets = 0
+        
+        # Pattern Learning: Capture sequence on level completion
+        if self.game_config.get('enable_pattern_learning', True):
+            level_for_storage = int(game_state.score)
+            
+            if level_for_storage == 1:
+                capture_reason = "level_1_win"
+            else:
+                capture_reason = f"partial_progress_{level_for_storage}_levels"
+            
+            sequence_id = self._capture_winning_sequence(
+                game_id, 
+                game_state.score, 
+                level_number=level_for_storage,
+                reason=capture_reason,
+                level_completions=loop_state.level_completions
+            )
+            if sequence_id:
+                if level_for_storage > 1:
+                    logger.info(f"[PKG] Captured CUMULATIVE sequence for levels 1-{level_for_storage}: {sequence_id}")
+                else:
+                    logger.info(f" Captured level {level_for_storage} winning sequence: {sequence_id}")
+        
+        # Agent Self-Model: Track controlled objects
+        if agent_id and hasattr(self, 'agent_self_model'):
+            try:
+                action_history = self.session_manager.action_history[-loop_state.level_action_count:] if hasattr(self.session_manager, 'action_history') else []  # type: ignore[attr-defined]
+                frame_history = self.session_manager.frame_history[-loop_state.level_action_count:] if hasattr(self.session_manager, 'frame_history') else []  # type: ignore[attr-defined]
+                
+                if action_history and frame_history:
+                    controlled, confidence = self.agent_self_model.identify_controlled_objects(
+                        game_id, loop_state.current_level, action_history, frame_history
+                    )
+                    if controlled and confidence > 0.3:
+                        self.agent_self_model.store_control_map(
+                            agent_id, game_id, loop_state.current_level, controlled, confidence
+                        )
+            except Exception as e:
+                logger.debug(f"Agent self-model tracking error: {e}")
+        
+        # Move to next level
+        loop_state.previous_score = game_state.score
+        loop_state.current_level += 1
+        loop_state.level_action_count = 0
+        loop_state.level_start_action = loop_state.action_count
+        loop_state.consecutive_no_frame_change = 0
+
+    async def _finalize_game(
+        self,
+        game_state: 'GameState',
+        loop_state: GameLoopState,
+        game_id: str,
+        agent_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """Finalize game and return results.
+        
+        Args:
+            game_state: Final game state
+            loop_state: Loop state with counters
+            game_id: Game ID
+            agent_id: Agent ID
+            
+        Returns:
+            Game results dictionary
+        """
+        end_time = datetime.now()
+        duration = (end_time - loop_state.start_time).total_seconds()
+
+        results = {
+            'game_id': game_id,
+            'final_state': game_state.state,
+            'final_score': game_state.score,
+            'actions_taken': loop_state.action_count,
+            'duration_seconds': duration,
+            'win': game_state.state == "WIN",
+            'level_completions': loop_state.level_completions,
+            'levels_attempted': loop_state.current_level,
+            'start_time': loop_state.start_time,
+            'end_time': end_time
+        }
+
+        # Track agent performance
+        if agent_id:
+            self._track_agent_performance(
+                agent_id=agent_id,
+                game_id=game_id,
+                final_score=game_state.score,
+                actions_taken=loop_state.action_count,
+                level_completions=loop_state.level_completions,
+                win=(game_state.state == "WIN"),
+                duration_seconds=duration
+            )
+        
+        # Diversity tracking
+        if self.game_config.get('diversity_mode'):
+            self._track_game_diversity(game_id, game_state.score, loop_state.action_count)
+
+        # Finish game in session manager
+        await self.session_manager.finish_game(game_state.state, game_state.score, loop_state.level_completions, loop_state.action_count)
+        
+        # Deduct actions from budget
+        if agent_id:
+            self.session_manager.deduct_actions_used(agent_id, game_id)
+
+        # Pattern Learning: Capture final sequence
+        if self.game_config.get('enable_pattern_learning', True):
+            if game_state.state == "WIN" and loop_state.level_completions > 0:
+                sequence_id = self._capture_winning_sequence(
+                    game_id, game_state.score,
+                    level_number=loop_state.current_level,
+                    reason="full_game_win",
+                    level_completions=loop_state.level_completions
+                )
+                if sequence_id:
+                    results['learned_sequence_id'] = sequence_id
+                    logger.info(f" Captured full game winning sequence: {sequence_id}")
+            elif game_state.score > 0 and loop_state.level_completions > 0:
+                levels_completed_for_capture = int(game_state.score)
+                sequence_id = self._capture_winning_sequence(
+                    game_id, game_state.score,
+                    level_number=levels_completed_for_capture,
+                    reason=f"partial_progress_{levels_completed_for_capture}_levels",
+                    level_completions=loop_state.level_completions
+                )
+                if sequence_id:
+                    results['learned_sequence_id'] = sequence_id
+                    logger.info(f" Captured partial progress sequence: {sequence_id}")
+
+        # Knowledge Recombination
+        if agent_id:
+            recombinations = self._explore_sequence_recombination(agent_id, game_id, loop_state.current_level)
+            if recombinations:
+                results['recombinations_created'] = len(recombinations)
+
+        # Viral Packages & Pariahs
+        if agent_id:
+            await self._handle_viral_evolution(results, game_state, game_id, agent_id)
+
+        logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
+                   f"Actions: {loop_state.action_count}, Levels Completed: {loop_state.level_completions}/{loop_state.current_level}")
+        return results
+
+    async def _handle_viral_evolution(
+        self,
+        results: Dict[str, Any],
+        game_state: 'GameState',
+        game_id: str,
+        agent_id: str
+    ) -> None:
+        """Handle viral package creation and pariah tracking.
+        
+        Args:
+            results: Results dict to update
+            game_state: Final game state
+            game_id: Game ID
+            agent_id: Agent ID
+        """
+        generation = self.game_config.get('generation', 0)
+        
+        from viral_package_engine import ViralPackageEngine
+        viral_engine = ViralPackageEngine(self.db)
+        
+        if results['win'] and results.get('learned_sequence_id'):
+            package_id = viral_engine.create_viral_package_from_sequence(
+                results['learned_sequence_id'], agent_id, generation
+            )
+            if package_id:
+                results['viral_package_created'] = package_id
+                logger.info(f"[VIRAL] Created viral package {package_id[:12]}")
+                
+                nearby_agents = self.db.execute_query("""
+                    SELECT agent_id FROM agents 
+                    WHERE is_active = TRUE AND agent_id != ?
+                    ORDER BY RANDOM() LIMIT 3
+                """, (agent_id,))
+                
+                spread_count = 0
+                for target in nearby_agents:
+                    if viral_engine.spread_viral_package(package_id, agent_id, target['agent_id'], generation):
+                        spread_count += 1
+                if spread_count > 0:
+                    logger.info(f"[VIRAL] Viral package spread to {spread_count} agents")
+        
+        elif not results['win'] and game_state.score < 1.0:
+            action_traces = self.db.execute_query("""
+                SELECT action_number, coordinates
+                FROM action_traces
+                WHERE game_id = ? AND session_id = ?
+                ORDER BY timestamp ASC
+            """, (game_id, self.session_manager.current_session_id))
+            
+            if action_traces:
+                failed_actions = [t['action_number'] for t in action_traces]
+                failed_coords = []
+                for t in action_traces:
+                    if t.get('coordinates'):
+                        try:
+                            coord = json.loads(t['coordinates'])
+                            failed_coords.append(tuple(coord))
+                        except:
+                            pass
+                
+                pariah_id = viral_engine.create_pariah_from_failure(
+                    game_id, agent_id, failed_actions, failed_coords, game_state.score, generation
+                )
+                
+                if pariah_id:
+                    results['pariah_created'] = pariah_id
+                    
+                    nearby_agents = self.db.execute_query("""
+                        SELECT agent_id FROM agents 
+                        WHERE is_active = TRUE AND agent_id != ?
+                        ORDER BY RANDOM() LIMIT 3
+                    """, (agent_id,))
+                    
+                    for target in nearby_agents:
+                        viral_engine.spread_pariah_awareness(pariah_id, agent_id, target['agent_id'], generation)
+
+    # =========================================================================
+    # END OF REFACTORED HELPER METHODS
+    # =========================================================================
 
     async def play_single_game(self, game_id: str,
                               action_callback: Optional[Callable] = None,

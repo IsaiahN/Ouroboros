@@ -136,7 +136,8 @@ class ARCRLVRFramework:
             score_improvement_rate = (end_score - start_score) / len(score_progression)
 
         # Consistency metrics (for agents with game history)
-        consistency_score = self._calculate_agent_consistency(arc_rewards.get('agent_id'))
+        agent_id = arc_rewards.get('agent_id', '')
+        consistency_score = self._calculate_agent_consistency(agent_id) if agent_id else 0.0
 
         # NEW: Path efficiency (for wins, how efficient was the path?)
         path_efficiency = 0.0

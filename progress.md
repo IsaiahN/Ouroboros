@@ -1685,7 +1685,223 @@ python -c "import core_gameplay; import game_session_manager; print('[OK] All mo
 
 ---
 
-**Last Updated**: December 4, 2025 (Afternoon Session)  
-**Status**: 3-TRY FALLBACK SYSTEM IMPLEMENTED  
-**Current Failure**: None (ready for testing)  
-**Next Step**: Run evolution to validate 3-try system behavior
+## Session: December 4, 2025 (Evening - Core Gameplay Refactoring Plan)
+**Focus**: Create comprehensive refactoring plan for 5,942-line core_gameplay.py monolith
+
+### Approach
+**Objective**: Document a complete refactoring plan before making any structural changes
+1. **Documentation First**: Create detailed plan with all decisions, dependencies, and implementation order
+2. **No Database Changes**: User explicitly requested no database schema changes during refactor - mark as "blue sky" for future
+3. **Comprehensive Coverage**: Include all infrastructure concerns (testing, logging, rollback, migration)
+4. **Review Feedback**: Assess external feedback document and integrate useful items
+
+### Completed Steps
+
+#### 1. File Organization [OK]
+**Moved files to proper directories**:
+- Test files → `tests/` folder
+- Developer utility files → `manual_tools/` folder
+
+**Updated whitelists**:
+- `cleanup_temp_files.py`: Added `CODEBASE_INVENTORY.md` to KEEP_FILES
+- Updated SKIP_DIRS to include `/tests/` and `/manual_tools/`
+
+**Updated inventories**:
+- `CODEBASE_INVENTORY.md`: Fixed counts (61 root, 29 manual_tools, 6 tests)
+
+#### 2. Mastery Mode Removal [OK]
+**Problem**: Failed experiment that needed complete removal
+
+**Files Deleted**:
+- `manual_tools/mastery_mode.py`
+- `manual_tools/emergency_cleanup_mastery.py`
+
+**References Removed From**:
+- `autonomous_evolution_runner.py` (emergency_cleanup_mastery import)
+- `manual_tools/README.md` (file references)
+
+#### 3. Core Gameplay Refactor Plan Created [OK]
+**File**: `DOCS/core_gameplay_refactor_plan.md`
+**Size**: ~4,500 lines (comprehensive documentation)
+
+**Contents**:
+- Phase 0: Pre-Refactoring Fixes (3 critical items)
+- Codebase Audit Summary (used files, orphaned files, missing features)
+- Executive Summary
+- Proposed Architecture (modular breakdown)
+- Method Classification (all 73 methods categorized)
+- Implementation Order (phased approach)
+
+#### 4. Added Feature Appendices (E, F, G) [OK]
+
+**Appendix E: Viral Package Auto-Propagation System**
+- E.1 Current State Analysis
+- E.2 Auto-Detection via Quorum Sensing
+- E.3 Auto-Propagation Mechanism
+- E.4 Implementation in viral_evolution.py
+
+**Appendix F: Sequence Logic Documentation System**
+- F.1 Current State (ad-hoc, no central docs)
+- F.2 Proposed Documentation Structure
+- F.3 Auto-Documentation Generation
+- F.4 Sequence README Format
+
+**Appendix G: System Health Dashboard**
+- G.1 Critical Alert Display (sequence failures, 60-sec tolerance)
+- G.2 Fault Priority and Ordering (4 priority levels)
+- G.3 Alert Communication (database storage, web polling)
+- G.4 Time Range Selectors (1h, 6h, 24h, 7d, custom)
+- G.5 Top 42 Metrics for Dashboard
+- G.6 Communication with User (email integration)
+
+#### 5. Reviewed Refactor Feedback [OK]
+**File Reviewed**: `refactor-feedback.md`
+
+**Items Accepted (added as Appendix H)**:
+- H.1 Dependency Injection patterns
+- H.2 Transaction boundaries
+- H.3 Configuration management
+- H.4 Import organization
+- H.5 State machine formalization
+- H.6 Metrics collection hooks
+- H.7 Error context tracking
+- H.8 Testing infrastructure (factory fixtures, mocks, e2e)
+
+**Items Rejected** (over-engineered):
+- Memory leak detection (Python GC handles this)
+- Git PR tracking integration
+- Auto-rollback via git (feature flags simpler)
+- Profiling dashboard (premature optimization)
+
+#### 6. Updated File Organization in Appendix D [OK]
+Added new infrastructure files to planned structure:
+- `tests/conftest.py` - Shared pytest fixtures
+- `tests/test_sequence_system.py` - Sequence unit tests
+- `tests/test_integration.py` - Cross-module integration tests
+- `tests/test_e2e.py` - End-to-end workflow tests
+- `tests/factories.py` - Test data factories
+
+#### 7. Added Additional Considerations (Appendix I) [OK]
+**User Requirement**: No database changes during refactor
+
+**I.1 Logging Strategy**
+- Module-level loggers per file
+- Session-based tracing via correlation IDs
+- DatabaseLogHandler per Rule #2
+
+**I.2 Async/Await Consistency**
+- API module: async (arc_api_client, game_session_manager)
+- Business logic: sync (sequence, viral, analysis modules)
+- Bridge: GameLoopRunner.run_sync() wrapper
+
+**I.3 Rollback Plan**
+- Feature flag: `USE_REFACTORED_GAMEPLAY` in environment
+- Phased rollout: One module at a time
+- Parallel execution: Shadow mode comparison
+
+**I.4 Performance Baseline**
+- Capture script before refactor
+- Target: <5% regression per module
+- Metrics: sequence retrieval <50ms, action selection <20ms, frame comparison <100ms
+
+**I.5 Edge Case Ownership Matrix**
+- 8 edge cases mapped to responsible modules
+- Clear ownership prevents gaps during refactor
+
+#### 8. Added Blue Sky Database Recommendations (Appendix J) [OK]
+**User Requirement**: Database changes are FUTURE only, not part of current refactor
+
+**J.1 system_alerts Table**
+- For health dashboard alert storage
+- Schema: alert_id, severity, category, message, timestamp, resolved, etc.
+
+**J.2 gameplay_errors Table**
+- Structured error tracking
+- Schema: error_id, session_id, error_type, context, stack_trace, etc.
+
+**J.3 viral_package_carriers Table**
+- Track which agents carry which viral packages
+- For quorum sensing optimization
+
+**J.4 metrics_snapshots Table**
+- Periodic metric captures
+- For dashboard time-range queries
+
+**J.5 agent_pariah_awareness Table**
+- Track which agents know which pariahs
+- For network-wide failure avoidance
+
+### Current Appendix Structure
+
+| Appendix | Title | Status |
+|----------|-------|--------|
+| A | Method Classification | Complete |
+| B | Critical Missing Implementations | Complete |
+| C | Implementation Order | Complete |
+| D | File Organization Summary | Complete (updated with test files) |
+| E | Viral Package Auto-Propagation System | Complete |
+| F | Sequence Logic Documentation System | Complete |
+| G | System Health Dashboard | Complete (G.1-G.6) |
+| H | Refactoring Infrastructure | Complete (H.1-H.8) |
+| I | Additional Considerations | Complete (I.1-I.5) |
+| J | Blue Sky Recommendations | Complete (J.1-J.5) |
+
+### Key Decisions Made
+
+1. **No Database Changes During Refactor**: All schema changes deferred to Appendix J as "blue sky"
+2. **Feature Flag Rollback**: Use `USE_REFACTORED_GAMEPLAY` instead of git-based rollback
+3. **Async/Sync Separation**: API layer async, business logic sync, with bridge wrapper
+4. **Testing Strategy**: pytest with factories, mocks, and fixture injection
+5. **Logging**: Module-level loggers with correlation IDs, all to database per Rule #2
+
+### Files Created/Modified This Session
+
+| File | Action | Description |
+|------|--------|-------------|
+| `DOCS/core_gameplay_refactor_plan.md` | MODIFIED | Added Appendices E-J (~2,500 lines) |
+| `cleanup_temp_files.py` | MODIFIED | Updated whitelist |
+| `CODEBASE_INVENTORY.md` | MODIFIED | Fixed file counts |
+| `manual_tools/mastery_mode.py` | DELETED | Failed experiment |
+| `manual_tools/emergency_cleanup_mastery.py` | DELETED | Related cleanup |
+| `autonomous_evolution_runner.py` | MODIFIED | Removed mastery reference |
+| `manual_tools/README.md` | MODIFIED | Removed mastery references |
+
+### Current System State
+
+**Refactor Plan**: COMPLETE
+- All 10 appendices documented (A-J)
+- No database changes in immediate plan
+- Blue sky recommendations separated
+- Ready for Phase 0 implementation
+
+**Mastery Mode**: REMOVED
+- All files deleted
+- All references cleaned up
+
+**File Organization**: COMPLETE
+- Tests in `/tests/`
+- Manual tools in `/manual_tools/`
+- Whitelists updated
+
+### Current Failure Being Addressed
+
+**None** - Planning phase complete. No active failures.
+
+**Ready For**: Phase 0 implementation when user is ready:
+- 0.1 Full game sequence storage (50 lines)
+- 0.2 Optimizer end subsequence (30 lines)
+- 0.3 Agent revival integration (20 lines)
+
+### Next Steps
+
+1. **Review Complete Plan**: User should review `DOCS/core_gameplay_refactor_plan.md`
+2. **Implement Phase 0**: Start with 3 critical pre-refactoring fixes
+3. **Run Evolution**: Verify Phase 0 fixes work in production
+4. **Begin Phase 1**: Start modular extraction per plan
+
+---
+
+**Last Updated**: December 4, 2025 (Evening Session)  
+**Status**: CORE GAMEPLAY REFACTOR PLAN COMPLETE  
+**Current Failure**: None (planning phase complete)  
+**Next Step**: Review plan, then implement Phase 0 pre-refactoring fixes

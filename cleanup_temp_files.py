@@ -44,8 +44,9 @@ TEMP_PATTERNS = [
 ]
 
 # Files to KEEP (whitelist - never delete these)
+# NOTE: Files in /tests and /manual_tools are protected by SKIP_DIRS
 KEEP_FILES = {
-    # TIER 1: Core System Files (imported 5+ times)
+    # TIER 1: Core System Files (imported by core_gameplay.py or autonomous_evolution_runner.py)
     "database_interface.py",
     "core_gameplay.py",
     "autonomous_evolution_runner.py",
@@ -58,7 +59,6 @@ KEEP_FILES = {
     "horizontal_transfer_engine.py",
     "viral_package_engine.py",
     "rule_induction_engine.py",
-    "visual_reasoning_engine.py",
     "network_intelligence_engine.py",
     "regulatory_signal_engine.py",
     "collective_reasoning_engine.py",
@@ -74,7 +74,7 @@ KEEP_FILES = {
     "agent_self_model.py",
     "arc_rlvr_framework.py",
     
-    # TIER 2: Active Utilities (referenced by other files)
+    # TIER 2: Active Utilities (referenced by core files)
     "breakthrough_budget_allocator.py",
     "breakthrough_detector.py",
     "multi_stage_matching_pipeline.py",
@@ -84,15 +84,13 @@ KEEP_FILES = {
     "revive_agents.py",
     "evolution_with_vampires.py",
     "agent_factory.py",
+    "agent_lifecycle_manager.py",
     "game_scheduler.py",
-    "historical_data_cleanup.py",
     "visual_analyzer.py",
     "object_detector.py",
     "optimization_threshold_system.py",
-    "specialist_coordinator.py",
     "somatic_profile_system.py",
     "game_diversity_preservation.py",
-    "emotional_gameplay_mixin.py",
     "meta_learning_curriculum.py",
     "prestige_vampire_detector.py",
     "abstraction_config.py",
@@ -100,41 +98,26 @@ KEEP_FILES = {
     "adaptive_action_limits.py",
     "api_reset_strategy.py",
     "run_evolution.py",
-    "run_validation_cycle.py",
     "schema_auto_maintenance.py",
     "ouroboros_coordinator.py",
     "evolution_game_scheduler.py",
     "enhanced_database_interface.py",
-    "action_analyzer.py",
-    
-    # TIER 3: Manual Utilities
-    "check_db.py",
-    "dump_logs.py",
-    "inspect_db.py",
-    "inspect_failed_game.py",
-    "list_sequences.py",
-    "list_tables.py",
-    "reproduce_0_actions.py",
-    "review_scorecards.py",
-    "get_replay_url.py",
-    "assess_results.py",
-    "audit_prestige_system.py",
-    "monitor_game_results.py",
-    "monitor_sequence_validation.py",
-    
-    # System utilities
+    "disk_space_monitor.py",
+    "safe_cleanup.py",
     "cleanup_temp_files.py",
-    "readiness_check.py",
-    "real_progress_check.py",
-    "system_status_report.py",
+    
+    # TIER 3: Experimental/Future (kept in root but not integrated)
+    "symbolic_reasoning_engine.py",
+    "visual_reasoning_engine.py",
+    "emotional_gameplay_mixin.py",
+    "specialist_coordinator.py",
     
     # Package init
     "__init__.py",
     
     # Documentation (keep)
     "README.md",
-    "COMPLETE_ADAPTIVE_SCALING.py",
-    "HARDCODED_LIMITS_AUDIT.py",
+    "CODEBASE_INVENTORY.md",
 }
 
 # Directories to skip (but we'll delete __pycache__ folders entirely)
@@ -142,10 +125,14 @@ SKIP_DIRS = {
     ".git",
     ".vscode",
     "venv",
-    "env"
+    "env",
+    "tests",           # Unit test files - never delete
+    "manual_tools",    # Manual utility scripts - never delete
+    "migrations",      # Database migrations - never delete
+    "DOCS",            # Documentation - never delete
+    "experimental",    # Future feature experiments - never delete
 }
 
-# Note: DOCS is NOT in SKIP_DIRS because we want to clean *_Summary.* files from there
 # Note: __pycache__ is NOT in SKIP_DIRS because we want to DELETE those folders entirely
 
 def should_delete(filepath: Path) -> bool:

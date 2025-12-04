@@ -1504,7 +1504,7 @@ class AutonomousEvolutionRunner:
                 if not safe:
                     print(f"[CRITICAL] {message}")
                     print(f"[CRITICAL] STOPPING EVOLUTION: Disk space critical!")
-                    print(f"[CRITICAL] Run emergency_cleanup_mastery.py or historical_data_cleanup.py")
+                    print(f"[CRITICAL] Run historical_data_cleanup.py or safe_cleanup.py")
                     return False  # Stop evolution
                 else:
                     print(f"[OK] {message}")
