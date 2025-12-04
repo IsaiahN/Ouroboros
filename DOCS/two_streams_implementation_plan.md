@@ -23,9 +23,9 @@ This plan implements 5 core consciousness features missing from the Ouroboros co
 | Column/Table | Location | Current Use | Two-Streams Use |
 |-------------|----------|-------------|-----------------|
 | `social_rule_adherence` | agents | Exploiter sociopath (0.0-1.0) | **Extend** to general self/network bias |
-| `navigation_state` | agents | Emotional state (-1.0 to 1.0) | **Emotional Network** (Layer 2) |
-| `sensation_profile` | agents | JSON object sensations | **Bodily Network** (Layer 1) |
-| `role_confidence` | agents | Role preference strength | **Identity Network** (Layer 4) |
+| `navigation_state` | agents | Emotional state (-1.0 to 1.0) | **Emotional Network** |
+| `sensation_profile` | agents | JSON object sensations | **Semantic Network** (object impressions) |
+| `role_confidence` | agents | Role preference strength | **Identity Network** |
 | `emotional_intelligence_score` | agents | EI metric | Informs bias calculation |
 | `avg_frustration` / `avg_satisfaction` | agent_role_performance | Per-role emotional averages | Role-cohort filtering |
 | `object_sensation_mappings` | table | Agent-object associations | **Foundation for semantic impressions** |
@@ -142,11 +142,10 @@ CREATE TABLE decision_weaving_reports (
     self_trust_bias REAL NOT NULL,  -- Current alpha value
     final_decision_weight REAL NOT NULL,  -- Combined weighted score
     
-    -- Four internal networks (using existing data sources)
-    bodily_input REAL DEFAULT 0.0,  -- From action_budget remaining
+    -- Three internal networks (using existing data sources)
     emotional_input REAL DEFAULT 0.0,  -- From navigation_state
-    semantic_input REAL DEFAULT 0.0,  -- From sensation_profile
-    identity_input REAL DEFAULT 0.0,  -- From role_confidence
+    semantic_input REAL DEFAULT 0.0,  -- From sensation_profile / object_sensation_mappings
+    identity_input REAL DEFAULT 0.0,  -- From role_confidence + role_fit_score
     
     -- Context
     conflict_detected BOOLEAN DEFAULT FALSE,  -- Streams disagreed
@@ -193,7 +192,6 @@ CREATE INDEX idx_weaving_agent_game ON decision_weaving_reports(agent_id, game_i
    weaving_context = {
        'private_memory': self._query_agent_history(agent_id, game_id),
        'network_wisdom': cohort_insight,
-       'bodily_state': energy_level,  # From action budget
        'emotional_state': navigation_state,
        'semantic_beliefs': self._get_game_beliefs(agent_id, game_id),
        'identity_state': role_fit_score
@@ -235,10 +233,9 @@ CREATE INDEX idx_weaving_agent_game ON decision_weaving_reports(agent_id, game_i
            "final_decision_weight": 0.772,  # 0.73*0.65 + 0.85*0.35
            "formula": "private*bias + network*(1-bias)",
            "internal_networks": {
-               "bodily": 0.82,      # action_budget_remaining / total
-               "emotional": 0.15,   # navigation_state
-               "semantic": 0.45,    # avg sensation scores
-               "identity": 0.70     # role_confidence
+               "emotional": 0.15,   # navigation_state (-1 to 1 mapped to 0-1)
+               "semantic": 0.45,    # avg sensation scores from object impressions
+               "identity": 0.70     # role_confidence + role_fit_score
            },
            "conflict_detected": False,
            "decision_confidence": 0.77
@@ -285,7 +282,6 @@ CREATE INDEX idx_weaving_agent_game ON decision_weaving_reports(agent_id, game_i
                "final_decision_weight": weaving_report.get('final_decision_weight', 0.5),
                "formula": "private*bias + network*(1-bias)",
                "internal_networks": {
-                   "bodily": weaving_report.get('bodily_input', 0.5),
                    "emotional": weaving_report.get('emotional_input', 0.5),
                    "semantic": weaving_report.get('semantic_input', 0.5),
                    "identity": weaving_report.get('identity_input', 0.5)
@@ -324,8 +320,6 @@ After implementation, every action sent to the ARC API will include self-reflect
     "final_decision_weight": 0.772,
     "formula": "0.73 * 0.65 + 0.85 * 0.35 = 0.772",
     "internal_networks": {
-      "bodily": 0.82,
-      "bodily_source": "action_budget: 328/400 remaining",
       "emotional": 0.15,
       "emotional_source": "navigation_state: slightly frustrated",
       "semantic": 0.45,
@@ -373,7 +367,6 @@ My bias (trust self): 0.65 (pioneer role default + meta-learning adjustment)
 Final decision weight: 0.73 * 0.65 + 0.85 * 0.35 = 0.772
 
 Internal Networks:
-  - Bodily:    0.82 (82% action budget remaining - feeling energetic)
   - Emotional: 0.15 (slightly frustrated - navigation_state low)
   - Semantic:  0.45 (mixed impressions - some objects feel dangerous)
   - Identity:  0.70 (confident in pioneer role)
@@ -607,7 +600,6 @@ CREATE TABLE IF NOT EXISTS decision_weaving_reports (
     network_wisdom_strength REAL NOT NULL,
     self_trust_bias REAL NOT NULL,
     final_decision_weight REAL NOT NULL,
-    bodily_input REAL DEFAULT 0.0,
     emotional_input REAL DEFAULT 0.0,
     semantic_input REAL DEFAULT 0.0,
     identity_input REAL DEFAULT 0.0,
@@ -656,10 +648,9 @@ CREATE INDEX IF NOT EXISTS idx_cohort_game_role ON role_cohort_wisdom(game_id, r
 ### Phase 3: Weaving Report (3-4 hours)
 1. Create `WeavingReporter` class in `agent_self_model.py`
 2. Generate reports using existing data sources:
-   - `bodily_input` = action_budget_remaining / action_allowance_total
-   - `emotional_input` = navigation_state
+   - `emotional_input` = (navigation_state + 1) / 2 (map -1..1 to 0..1)
    - `semantic_input` = avg(sensation_scores from object_sensation_mappings)
-   - `identity_input` = role_confidence
+   - `identity_input` = (role_confidence + role_fit_score) / 2
 3. Integrate into `_select_action()` in core_gameplay.py
 4. Add outcome tracking after action execution
 
@@ -726,7 +717,7 @@ CREATE INDEX IF NOT EXISTS idx_cohort_game_role ON role_cohort_wisdom(game_id, r
                                       ▼
                             ┌───────────────┐
                             │WEAVING REPORT │
-                            │ - 4 networks  │
+                            │ - 3 networks  │
                             │ - conflict?   │
                             │ - confidence  │
                             └───────────────┘
