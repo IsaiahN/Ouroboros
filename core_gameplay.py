@@ -44,6 +44,21 @@ from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
 from agent_self_model import AgentSelfModel
 
+# Rule induction and symbolic reasoning imports
+try:
+    from rule_induction_engine import RuleInductionEngine
+    RULE_INDUCTION_AVAILABLE = True
+except ImportError:
+    RULE_INDUCTION_AVAILABLE = False
+    RuleInductionEngine = None
+
+try:
+    from symbolic_reasoning_engine import SymbolicReasoningEngine
+    SYMBOLIC_REASONING_AVAILABLE = True
+except ImportError:
+    SYMBOLIC_REASONING_AVAILABLE = False
+    SymbolicReasoningEngine = None
+
 # Abstraction engine imports
 try:
     from sequence_abstraction import SequenceAbstraction
@@ -118,6 +133,20 @@ class GameplayEngine:
         # Inject subgoal activator into action handler for real-time guidance
         self.action_handler.subgoal_activator = self.subgoal_activator  # type: ignore[attr-defined]
         
+        # Rule Induction Engine - Extract transferable rules from wins
+        if RULE_INDUCTION_AVAILABLE:
+            try:
+                self.rule_engine = RuleInductionEngine(self.db)  # type: ignore[misc]
+                logger.info("Rule induction engine initialized")
+            except Exception as e:
+                self.rule_engine = None
+                logger.warning(f"Failed to initialize rule induction engine: {e}")
+        else:
+            self.rule_engine = None
+        
+        # Symbolic Reasoning Engine - World model (lazy init per game)
+        self.symbolic_engine = None  # Initialized per game in play_single_game
+        
         # Abstraction engine for pattern-based sequence matching
         if ABSTRACTION_AVAILABLE and is_abstraction_enabled():
             try:
@@ -165,6 +194,13 @@ class GameplayEngine:
             **config: Configuration parameters to update
         """
         self.game_config.update(config)
+        
+        # Pass generation to session_manager client for scorecard tags
+        if 'current_generation' in config:
+            if hasattr(self, 'session_manager') and self.session_manager:
+                if hasattr(self.session_manager, 'client') and self.session_manager.client:
+                    self.session_manager.client._current_generation = config['current_generation']
+        
         logger.info(f"Updated game config: {config}")
 
     # =========================================================================
@@ -571,20 +607,40 @@ class GameplayEngine:
                 else:
                     logger.info(f" Captured level {level_for_storage} winning sequence: {sequence_id}")
         
-        # Agent Self-Model: Track controlled objects
+        # Agent Self-Model: Track controlled objects from action traces
         if agent_id and hasattr(self, 'agent_self_model'):
             try:
-                action_history = self.session_manager.action_history[-loop_state.level_action_count:] if hasattr(self.session_manager, 'action_history') else []  # type: ignore[attr-defined]
-                frame_history = self.session_manager.frame_history[-loop_state.level_action_count:] if hasattr(self.session_manager, 'frame_history') else []  # type: ignore[attr-defined]
+                # Query action traces for this session/game/level
+                session_id = self.session_manager.current_session_id
+                traces = self.db.execute_query("""
+                    SELECT action_number, frame_before, frame_after
+                    FROM action_traces
+                    WHERE session_id = ? AND game_id = ? AND level_number = ?
+                    ORDER BY action_number
+                """, (session_id, game_id, loop_state.current_level))
                 
-                if action_history and frame_history:
-                    controlled, confidence = self.agent_self_model.identify_controlled_objects(
-                        game_id, loop_state.current_level, action_history, frame_history
-                    )
-                    if controlled and confidence > 0.3:
-                        self.agent_self_model.store_control_map(
-                            agent_id, game_id, loop_state.current_level, controlled, confidence
+                if traces and len(traces) >= 2:
+                    # Build action/frame history from traces
+                    action_history = [{'action_type': f"action_{t['action_number']}"} for t in traces]
+                    frame_history = []
+                    for t in traces:
+                        if t.get('frame_before'):
+                            fb = json.loads(t['frame_before']) if isinstance(t['frame_before'], str) else t['frame_before']
+                            frame_history.append({'grid': fb})
+                    # Add final frame_after
+                    if traces[-1].get('frame_after'):
+                        fa = json.loads(traces[-1]['frame_after']) if isinstance(traces[-1]['frame_after'], str) else traces[-1]['frame_after']
+                        frame_history.append({'grid': fa})
+                    
+                    if len(frame_history) >= 2:
+                        controlled, confidence = self.agent_self_model.identify_controlled_objects(
+                            game_id, loop_state.current_level, action_history, frame_history
                         )
+                        if controlled and confidence > 0.3:
+                            self.agent_self_model.store_control_map(
+                                agent_id, game_id, loop_state.current_level, controlled, confidence
+                            )
+                            logger.info(f"[SELF-MODEL] Agent {agent_id[:8]} identified {len(controlled)} controlled objects on {game_id} L{loop_state.current_level} (conf: {confidence:.2f})")
             except Exception as e:
                 logger.debug(f"Agent self-model tracking error: {e}")
         
@@ -681,6 +737,59 @@ class GameplayEngine:
             recombinations = self._explore_sequence_recombination(agent_id, game_id, loop_state.current_level)
             if recombinations:
                 results['recombinations_created'] = len(recombinations)
+
+        # Rule Induction: Extract transferable rules from wins
+        # This enables the network to learn abstract strategies that generalize
+        if self.rule_engine and game_state.state == "WIN":
+            try:
+                # Build game session data for rule extraction
+                session_id = self.session_manager.current_session_id
+                
+                # Get action traces for this session
+                action_traces = self.db.execute_query("""
+                    SELECT action_number, frame_before, frame_after, coordinates
+                    FROM action_traces
+                    WHERE session_id = ? AND game_id = ?
+                    ORDER BY action_number
+                """, (session_id, game_id))
+                
+                if action_traces and len(action_traces) > 0:
+                    # Build initial frame from first action's frame_before
+                    initial_frame = None
+                    if action_traces[0].get('frame_before'):
+                        fb = action_traces[0]['frame_before']
+                        initial_frame = json.loads(fb) if isinstance(fb, str) else fb
+                    
+                    # Build action sequence
+                    action_sequence = []
+                    frame_states = [initial_frame] if initial_frame else []
+                    
+                    for trace in action_traces:
+                        action_sequence.append({
+                            'action_type': trace['action_number'],
+                            'coordinate_x': json.loads(trace['coordinates']).get('x') if trace.get('coordinates') else None,
+                            'coordinate_y': json.loads(trace['coordinates']).get('y') if trace.get('coordinates') else None
+                        })
+                        if trace.get('frame_after'):
+                            fa = trace['frame_after']
+                            frame_states.append(json.loads(fa) if isinstance(fa, str) else fa)
+                    
+                    game_session_data = {
+                        'game_id': game_id,
+                        'agent_id': agent_id,
+                        'initial_frame': initial_frame,
+                        'action_sequence': action_sequence,
+                        'frame_states': frame_states,
+                        'won': True,
+                        'score_achieved': game_state.score
+                    }
+                    
+                    extracted_rule = self.rule_engine.extract_rule_from_game_session(game_session_data)
+                    if extracted_rule:
+                        results['extracted_rule_id'] = extracted_rule['rule_id']
+                        logger.info(f"[RULE] Extracted transferable rule {extracted_rule['rule_id'][:12]} from win")
+            except Exception as e:
+                logger.debug(f"Rule extraction failed (non-critical): {e}")
 
         # Viral Packages & Pariahs
         if agent_id:
@@ -839,9 +948,26 @@ class GameplayEngine:
         )
         game_state = GameState.from_dict(game_data)
         
+        # Store game_id for later use in reasoning context
+        self.game_config['current_game_id'] = game_id
+        
         # Initialize action history for abstraction engine (with memory leak protection)
         self.game_config['current_actions'] = []
         self.game_config['max_action_history'] = 1000  # Prevent memory leaks in long games
+        
+        # Initialize Symbolic Reasoning Engine for world model
+        # This provides obstacle detection, goal tracking, and agent position
+        if SYMBOLIC_REASONING_AVAILABLE and game_state.frame:
+            try:
+                game_type = game_id[:4] if game_id else "unknown"
+                self.symbolic_engine = SymbolicReasoningEngine(game_type, level=1)  # type: ignore[misc]
+                self.symbolic_engine.initialize(
+                    np.array(game_state.frame) if game_state.frame else np.array([])
+                )
+                logger.info(f"[WORLD-MODEL] Symbolic engine initialized for {game_type}")
+            except Exception as e:
+                self.symbolic_engine = None
+                logger.debug(f"Symbolic engine init failed (non-critical): {e}")
         
         # Set game context in action handler for subgoal planning (Tier 1: +30%)
         self.action_handler._current_game_id = game_id  # type: ignore[attr-defined]
@@ -1468,20 +1594,40 @@ class GameplayEngine:
                                     logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
                         
                         # Agent Self-Model: Track controlled objects on level completion
+                        # Query action_traces for frame_before/frame_after to build correlation
                         if agent_id and hasattr(self, 'agent_self_model'):
                             try:
-                                # Build action/frame history for this level
-                                action_history = self.session_manager.action_history[-level_action_count:] if hasattr(self.session_manager, 'action_history') else []  # type: ignore[attr-defined]
-                                frame_history = self.session_manager.frame_history[-level_action_count:] if hasattr(self.session_manager, 'frame_history') else []  # type: ignore[attr-defined]
+                                # Query action traces for this session/game/level
+                                session_id = self.session_manager.current_session_id
+                                traces = self.db.execute_query("""
+                                    SELECT action_number, frame_before, frame_after
+                                    FROM action_traces
+                                    WHERE session_id = ? AND game_id = ? AND level_number = ?
+                                    ORDER BY action_number
+                                """, (session_id, game_id, current_level))
                                 
-                                if action_history and frame_history:
-                                    controlled, confidence = self.agent_self_model.identify_controlled_objects(
-                                        game_id, current_level, action_history, frame_history
-                                    )
-                                    if controlled and confidence > 0.3:
-                                        self.agent_self_model.store_control_map(
-                                            agent_id, game_id, current_level, controlled, confidence
+                                if traces and len(traces) >= 2:
+                                    # Build action/frame history from traces
+                                    action_history = [{'action_type': f"action_{t['action_number']}"} for t in traces]
+                                    frame_history = []
+                                    for t in traces:
+                                        if t.get('frame_before'):
+                                            fb = json.loads(t['frame_before']) if isinstance(t['frame_before'], str) else t['frame_before']
+                                            frame_history.append({'grid': fb})
+                                    # Add final frame_after
+                                    if traces[-1].get('frame_after'):
+                                        fa = json.loads(traces[-1]['frame_after']) if isinstance(traces[-1]['frame_after'], str) else traces[-1]['frame_after']
+                                        frame_history.append({'grid': fa})
+                                    
+                                    if len(frame_history) >= 2:
+                                        controlled, confidence = self.agent_self_model.identify_controlled_objects(
+                                            game_id, current_level, action_history, frame_history
                                         )
+                                        if controlled and confidence > 0.3:
+                                            self.agent_self_model.store_control_map(
+                                                agent_id, game_id, current_level, controlled, confidence
+                                            )
+                                            logger.info(f"[SELF-MODEL] Agent {agent_id[:8]} identified {len(controlled)} controlled objects on {game_id} L{current_level} (conf: {confidence:.2f})")
                             except Exception as e:
                                 logger.debug(f"Agent self-model tracking error: {e}")
                         
@@ -2873,7 +3019,7 @@ class GameplayEngine:
         
         # Log self-awareness
         if awareness['games_played'] > 0:
-            logger.info(f"🧠 Agent {agent_id} self-awareness: "
+            logger.info(f"[AWARE] Agent {agent_id} self-awareness: "
                        f"Win rate {awareness['win_rate']:.1%}, "
                        f"Avg score {awareness['avg_score']:.2f}, "
                        f"Strategy: {awareness['strategy_adjustment']}, "
@@ -2882,17 +3028,134 @@ class GameplayEngine:
         return base_config
 
     # ========================================================================
+    # SELF-MODEL & WORLD-MODEL CONTEXT HELPERS
+    # ========================================================================
+    
+    def _build_self_model_context(self, agent_id: Optional[str], game_id: str, level: int) -> Dict[str, Any]:
+        """Build self-model context for reasoning JSON.
+        
+        Retrieves what the agent knows about which objects it controls.
+        
+        Args:
+            agent_id: Agent identifier
+            game_id: Current game ID
+            level: Current level number
+            
+        Returns:
+            Self-model context dictionary
+        """
+        context = {
+            'objects_agent_controls': [],
+            'control_confidence': 0.0,
+            'object_dependencies': []  # Future: track object relationships
+        }
+        
+        if not agent_id:
+            return context
+        
+        try:
+            # Get controlled objects from agent_self_model
+            controlled = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
+            if controlled:
+                context['objects_agent_controls'] = controlled[:10]  # Limit for JSON size
+                
+                # Get confidence from DB
+                result = self.db.execute_query("""
+                    SELECT confidence FROM agent_object_control
+                    WHERE agent_id = ? AND game_id = ? AND level_number = ?
+                """, (agent_id, game_id, level))
+                if result:
+                    context['control_confidence'] = result[0]['confidence']
+        except Exception as e:
+            logger.debug(f"Self-model context build failed: {e}")
+        
+        return context
+    
+    def _build_world_model_context(self, game_id: str, level: int, frame: Optional[List]) -> Dict[str, Any]:
+        """Build world model context for reasoning JSON.
+        
+        Uses SymbolicReasoningEngine to identify obstacles, goals, and agent position.
+        Also queries network hypotheses from learned_rules.
+        
+        Args:
+            game_id: Current game ID
+            level: Current level number
+            frame: Current game frame
+            
+        Returns:
+            World model context dictionary
+        """
+        context = {
+            'obstacles': [],
+            'goals': [],
+            'agent_position': None,
+            'network_hypotheses': []
+        }
+        
+        # Get world state from SymbolicReasoningEngine (if initialized)
+        if self.symbolic_engine and hasattr(self.symbolic_engine, 'world_model') and self.symbolic_engine.world_model:
+            try:
+                state = self.symbolic_engine.world_model.state
+                
+                # Get obstacles (limit to 5 for JSON size)
+                obstacles = state.get_obstacles()
+                context['obstacles'] = [
+                    {'position': list(o.position), 'color': o.color}
+                    for o in obstacles[:5]
+                ]
+                
+                # Get goals
+                goals = state.get_goals()
+                context['goals'] = [
+                    {'position': list(g.position), 'color': g.color}
+                    for g in goals[:5]
+                ]
+                
+                # Get agent position
+                agent = state.get_agent()
+                if agent:
+                    context['agent_position'] = list(agent.position)
+            except Exception as e:
+                logger.debug(f"World model state extraction failed: {e}")
+        
+        # Get network hypotheses from learned_rules table
+        try:
+            game_type = game_id[:4] if game_id else ""
+            rules = self.db.execute_query("""
+                SELECT rule_id, confidence, success_count, failure_count
+                FROM learned_rules
+                WHERE (applicable_games LIKE ? OR source_game_id LIKE ?)
+                  AND confidence > 0.5
+                ORDER BY confidence DESC, success_count DESC
+                LIMIT 3
+            """, (f'%{game_type}%', f'{game_type}%'))
+            
+            if rules:
+                context['network_hypotheses'] = [
+                    {
+                        'rule_id': r['rule_id'][:12],
+                        'confidence': round(r['confidence'], 2),
+                        'success_rate': round(r['success_count'] / max(1, r['success_count'] + r['failure_count']), 2)
+                    }
+                    for r in rules
+                ]
+        except Exception as e:
+            logger.debug(f"Network hypotheses query failed: {e}")
+        
+        return context
+
+    # ========================================================================
     # AGENT OPERATING MODE HELPERS
     # ========================================================================
     
     def _format_reasoning_for_api(self, action: str, reasoning_text: str, 
                                   game_state: GameState, current_level: int) -> Dict[str, Any]:
         """
-        Format reasoning as JSON object for ARC API (≤16 KB).
+        Format reasoning as JSON object for ARC API (<=16 KB).
         
         Converts human-readable reasoning text into structured JSON metadata
         for transmission to ARC API. Includes agent context, game state,
-        and decision factors.
+        self-model, and world-model information.
         
         Args:
             action: Action being taken (e.g., "ACTION6")
@@ -2901,9 +3164,10 @@ class GameplayEngine:
             current_level: Current level number
             
         Returns:
-            Dictionary with reasoning metadata (JSON-serializable, ≤16 KB)
+            Dictionary with reasoning metadata (JSON-serializable, <=16 KB)
         """
         agent_id = self.game_config.get('agent_id')
+        game_id = self.game_config.get('current_game_id', '')
         agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
         
         reasoning_obj = {
@@ -2920,6 +3184,17 @@ class GameplayEngine:
         if agent_mode:
             reasoning_obj['agent_mode'] = agent_mode
         
+        # Add generation if available
+        generation = self.game_config.get('current_generation')
+        if generation is not None:
+            reasoning_obj['generation'] = generation
+        
+        # Add self-model context (what objects agent controls)
+        reasoning_obj['self_model'] = self._build_self_model_context(agent_id, game_id, current_level)
+        
+        # Add world-model context (obstacles, goals, hypotheses)
+        reasoning_obj['world_model'] = self._build_world_model_context(game_id, current_level, game_state.frame)
+        
         # Add genome config if available
         genome = self.game_config.get('genome')
         if genome:
@@ -2934,13 +3209,18 @@ class GameplayEngine:
         reasoning_obj['strategy'] = self.game_config.get('strategy', 'balanced')
         reasoning_obj['learning_mode'] = self.game_config.get('learning_mode', 'smart_exploration')
         
-        # Ensure JSON is ≤16 KB
+        # Ensure JSON is <=16 KB
         reasoning_json = json.dumps(reasoning_obj)
         if len(reasoning_json) > 16384:  # 16 KB limit
-            # Truncate reasoning text if too large
-            max_reasoning_len = len(reasoning_text) - (len(reasoning_json) - 16384) - 100
-            reasoning_obj['reasoning'] = reasoning_text[:max_reasoning_len] + '...[truncated]'
+            # Truncate world_model and self_model first to save space
+            reasoning_obj['world_model'] = {'truncated': True}
+            reasoning_obj['self_model'] = {'truncated': True}
             reasoning_json = json.dumps(reasoning_obj)
+            
+            # If still too large, truncate reasoning text
+            if len(reasoning_json) > 16384:
+                max_reasoning_len = len(reasoning_text) - (len(reasoning_json) - 16384) - 100
+                reasoning_obj['reasoning'] = reasoning_text[:max(0, max_reasoning_len)] + '...[truncated]'
         
         return reasoning_obj
 

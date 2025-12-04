@@ -1103,7 +1103,9 @@ class AutonomousEvolutionRunner:
                             specialist_mode=self.specialist_mode,
                             # Agent role settings (NEW)
                             agent_operating_mode=agent_mode,
-                            optimizer_target_level=optimizer_target_level
+                            optimizer_target_level=optimizer_target_level,
+                            # Generation tracking for scorecard tags
+                            current_generation=self.current_generation
                         )
                         
                         # Play game - REAL ARC API CALL

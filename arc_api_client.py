@@ -129,6 +129,7 @@ class ARCClient:
         self.current_guid = None
         self.current_card_id = None
         self.current_scorecard_id = None
+        self._current_generation: Optional[int] = None  # Set by evolution runner for scorecard tags
 
         # Headers for API requests
         self.headers = {
@@ -312,6 +313,11 @@ class ARCClient:
         import subprocess
 
         tags = ["BitterLesson"]
+        
+        # Add generation number if set (for tracking evolution progress)
+        current_generation = getattr(self, '_current_generation', None)
+        if current_generation is not None:
+            tags.append(f"gen_{current_generation}")
 
         # Add Git information
         git_available = False
