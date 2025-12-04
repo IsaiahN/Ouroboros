@@ -79,6 +79,9 @@ class ActionHandler:
         self.level_max_actions = 100  # Max actions per level (from config)
         self.spam_allowed_early = 10  # Allow up to 10 similar clicks early in level
         self.spam_allowed_late = 3   # Reduce to 3 similar clicks late in level
+        
+        # Escape mode coordinates (set by GameplayEngine when escaping stuck state)
+        self._escape_click_coords: Optional[tuple] = None
 
     def set_agent_mode(self, mode: Optional[str], current_level: int = 1, network_max_level: int = 0):
         """Set the current agent operating mode for mode-specific behavior.

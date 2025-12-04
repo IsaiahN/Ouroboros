@@ -1494,7 +1494,14 @@ class GameplayEngine:
             
             # STUCK STATE DETECTION (for games like ls20 that finish but don't report it)
             consecutive_no_frame_change = 0  # Track actions with no frame change
-            STUCK_STATE_THRESHOLD = 100  # If 100 consecutive actions have no frame change and no score increase, game is likely stuck/finished (only applies to pioneers at frontier)
+            STUCK_STATE_THRESHOLD = 100  # If 100 consecutive actions have no frame change and no score increase, game is likely stuck/finished
+            
+            # STUCK STATE ESCAPE: Before giving up, try intelligent escape actions
+            # Increased from 5 to 10 since we now use intelligent action selection
+            # that considers network hypotheses, sensation state, self-model, and pariah avoidance
+            ESCAPE_ATTEMPTS_MAX = 10  # Try 10 different intelligent escape actions before giving up
+            escape_attempts = 0  # Track escape attempts
+            in_escape_mode = False  # Flag for escape mode
 
             # API ERROR TRACKING (to prevent spam when API is having issues)
             consecutive_api_errors = 0  # Track consecutive API errors
@@ -1698,16 +1705,15 @@ class GameplayEngine:
                     # Check for significant score increase (level completion)
                     score_increase = game_state.score - previous_score
                     
-                    # STUCK STATE DETECTION: Only for FRONTIER exploration (pioneers on highest known level)
-                    # Not needed for known levels - those should use sequences or optimizer strategies
-                    # This prevents false positives during sequence replay while helping pioneers detect truly stuck games
+                    # STUCK STATE DETECTION: Apply to ALL agents (not just pioneers at frontier)
+                    # BUG FIX (2025-12-04): Previously only pioneers on frontier levels got stuck detection.
+                    # This caused Optimizers, Generalists, and Exploiters to burn through action budgets
+                    # when stuck, with no escape attempts. Now ALL agents get stuck detection.
                     frame_changed = False
                     
-                    # Check if this level is at the frontier (no known sequences)
+                    # Check if this level is at the frontier (for logging purposes only)
                     is_frontier_level = False
-                    if agent_mode == 'pioneer' and self.game_config.get('enable_pattern_learning', True):
-                        # Quick check if any ACTIVE sequences exist for this level
-                        # (Inactive sequences are trash - don't count them as "covered")
+                    if self.game_config.get('enable_pattern_learning', True):
                         game_type = game_id.split('-')[0] if '-' in game_id else game_id
                         frontier_check = self.db.execute_query("""
                             SELECT COUNT(*) as seq_count
@@ -1716,8 +1722,9 @@ class GameplayEngine:
                         """, (f"{game_type}-%", current_level))
                         is_frontier_level = (not frontier_check or frontier_check[0]['seq_count'] == 0)
                     
-                    # Only apply stuck state detection at the frontier
-                    if is_frontier_level and hasattr(self.action_handler, 'visual_analyzer') and game_state.frame:
+                    # Apply stuck state detection to ALL agents
+                    # The escape mechanism will help break out of dead ends regardless of role
+                    if hasattr(self.action_handler, 'visual_analyzer') and game_state.frame:
                         frame_changed = self.action_handler.visual_analyzer.update_frame_change_tracking(
                             game_state.frame,
                             game_state.score
@@ -1727,22 +1734,116 @@ class GameplayEngine:
                             consecutive_no_frame_change += 1
                             
                             if consecutive_no_frame_change >= STUCK_STATE_THRESHOLD:
-                                logger.warning(
-                                    f" FRONTIER STUCK STATE: {consecutive_no_frame_change} consecutive actions with "
-                                    f"no frame change and no score increase on FRONTIER level {current_level}."
-                                )
-                                logger.info(
-                                    f"   Current score: {game_state.score:.1f}, Actions taken: {action_count}, "
-                                    f"Level {current_level} actions: {level_action_count}"
-                                )
-                                logger.info(f"   Terminating pioneer exploration to avoid wasting actions")
-                                break  # Exit game loop
+                                # ================================================================
+                                # STUCK STATE ESCAPE: Try different actions before giving up
+                                # Instead of immediately breaking, try escape actions first
+                                # ================================================================
+                                if not in_escape_mode:
+                                    # First time hitting threshold - enter escape mode
+                                    in_escape_mode = True
+                                    escape_attempts = 0
+                                    frontier_tag = " (frontier)" if is_frontier_level else ""
+                                    logger.warning(
+                                        f"[ESCAPE] STUCK STATE detected{frontier_tag}: {consecutive_no_frame_change} consecutive actions with "
+                                        f"no frame change. Agent mode: {agent_mode or 'unknown'}. Entering escape mode - will try {ESCAPE_ATTEMPTS_MAX} different actions."
+                                    )
+                                    logger.info(
+                                        f"   Current score: {game_state.score:.1f}, Actions taken: {action_count}, "
+                                        f"Level {current_level} actions: {level_action_count}"
+                                    )
+                                
+                                if escape_attempts < ESCAPE_ATTEMPTS_MAX:
+                                    # INTELLIGENT ESCAPE: Use agent's knowledge systems
+                                    # instead of just cycling through [5, 6, 7, 1, 2, 3, 4]
+                                    escape_attempts += 1
+                                    
+                                    # Get recent actions to avoid repeating (avoid oscillation)
+                                    recent_actions = []
+                                    if hasattr(self, '_recent_action_traces'):
+                                        recent_actions = [
+                                            int(t.get('action_type', '0').replace('ACTION', '').replace('action_', ''))
+                                            for t in self._recent_action_traces[-10:]
+                                            if t.get('action_type')
+                                        ]
+                                    
+                                    # Use intelligent escape action selection
+                                    escape_action, escape_reasoning = self._get_intelligent_escape_action(
+                                        agent_id=agent_id,
+                                        game_id=game_id,
+                                        level=current_level,
+                                        game_state=game_state,
+                                        escape_attempt=escape_attempts,
+                                        recent_actions=recent_actions
+                                    )
+                                    
+                                    logger.info(f"[ESCAPE] Attempt {escape_attempts}/{ESCAPE_ATTEMPTS_MAX}: {escape_reasoning}")
+                                    
+                                    # Force this escape action instead of normal selection
+                                    # Store for next iteration - the action selection will check this
+                                    self._forced_escape_action = escape_action
+                                    
+                                    # Reset the counter to give this action a chance
+                                    consecutive_no_frame_change = STUCK_STATE_THRESHOLD - 10  # Allow 10 more tries
+                                else:
+                                    # Exhausted escape attempts - truly stuck
+                                    # For pioneers: break immediately to save actions
+                                    # For others: reset and try again (they have sequences to follow)
+                                    logger.warning(
+                                        f"[ESCAPE] All {ESCAPE_ATTEMPTS_MAX} escape attempts failed. Game truly stuck on level {current_level}."
+                                    )
+                                    if agent_mode == 'pioneer' and is_frontier_level:
+                                        logger.info(f"   Terminating pioneer exploration to avoid wasting actions")
+                                        break  # Exit game loop for pioneers at frontier
+                                    else:
+                                        # Non-pioneers: reset escape mode and continue
+                                        # Maybe the sequence will recover, or they'll hit a different path
+                                        logger.info(f"   {agent_mode or 'Agent'}: Resetting escape mode, continuing exploration")
+                                        in_escape_mode = False
+                                        escape_attempts = 0
+                                        consecutive_no_frame_change = 0  # Full reset
                         else:
                             # Reset counter if we had a frame change or score increase
                             consecutive_no_frame_change = 0
-                    elif not is_frontier_level:
-                        # Not at frontier, don't track stuck state (sequences should handle this)
-                        consecutive_no_frame_change = 0
+                            if in_escape_mode:
+                                # Escape worked! Exit escape mode and enter SELF-DIRECTED mode
+                                # The agent is now "off-script" - any sequence it was following is invalid
+                                # It needs to explore on its own, trusting its own judgment
+                                logger.info(f"[ESCAPE] Escape successful! Frame changed or score increased.")
+                                logger.info(f"[ESCAPE] Entering SELF-DIRECTED exploration mode (off-script)")
+                                in_escape_mode = False
+                                escape_attempts = 0
+                                if hasattr(self, '_forced_escape_action'):
+                                    del self._forced_escape_action
+                                
+                                # Set self-directed mode flag - this tells action selection
+                                # to trust the agent's own judgment more than network wisdom
+                                self._self_directed_mode = True
+                                self._self_directed_start_action = action_count
+                                
+                                # Temporarily boost self-trust for this session
+                                # The agent broke out on its own - it should explore on its own
+                                if agent_id:
+                                    try:
+                                        # Get current bias
+                                        bias_result = self.db.execute_query(
+                                            "SELECT self_network_bias FROM agents WHERE agent_id = ?",
+                                            (agent_id,)
+                                        )
+                                        if bias_result:
+                                            current_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
+                                            # Boost toward self-trust (0.7-0.9 range)
+                                            boosted_bias = min(0.9, current_bias + 0.25)
+                                            self._original_self_bias = current_bias  # Store to restore later
+                                            self.db.execute_query(
+                                                "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
+                                                (boosted_bias, agent_id)
+                                            )
+                                            logger.info(f"[SELF-DIRECTED] Boosted self-trust: {current_bias:.2f} -> {boosted_bias:.2f}")
+                                    except Exception as e:
+                                        logger.debug(f"Failed to boost self-trust: {e}")
+                    # NOTE: Removed the "elif not is_frontier_level" block that was resetting
+                    # consecutive_no_frame_change = 0. This was causing non-frontier levels to
+                    # never trigger escape mode. Now ALL levels can detect stuck state.
                     
                     # Track score improvements (no destructive resets - removed to preserve pattern learning)
                     
@@ -1758,6 +1859,42 @@ class GameplayEngine:
                         
                         # Reset level-specific counters for next level
                         level_api_resets = 0  # Fresh reset budget for new level
+                        
+                        # SMART SELF-DIRECTED MODE EXIT on level completion
+                        # Check if network has wisdom for the NEXT level before exiting
+                        if getattr(self, '_self_directed_mode', False):
+                            next_level = int(game_state.score) + 1  # Score 2.0 means we just beat L2, next is L3
+                            
+                            # Check if network has sequences for the next level
+                            has_next_level_sequence = False
+                            try:
+                                game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                                seq_check = self.db.execute_query("""
+                                    SELECT COUNT(*) as seq_count
+                                    FROM winning_sequences
+                                    WHERE game_id LIKE ? AND level_number >= ? AND is_active = 1
+                                """, (f"{game_type}-%", next_level))
+                                has_next_level_sequence = seq_check and seq_check[0]['seq_count'] > 0
+                            except Exception:
+                                pass
+                            
+                            if has_next_level_sequence:
+                                # Network has wisdom for next level - exit self-directed mode
+                                logger.info(f"[SELF-DIRECTED] Level {int(game_state.score)} completed! Network has sequences for L{next_level}+, switching to network guidance")
+                                self._self_directed_mode = False
+                                # Restore original self-network bias if we boosted it
+                                if agent_id and hasattr(self, '_original_self_bias'):
+                                    try:
+                                        self.db.execute_query(
+                                            "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
+                                            (self._original_self_bias, agent_id)
+                                        )
+                                        del self._original_self_bias
+                                    except Exception:
+                                        pass
+                            else:
+                                # No network wisdom for next level - stay in self-directed mode
+                                logger.info(f"[SELF-DIRECTED] Level {int(game_state.score)} completed! No network sequences for L{next_level}, continuing self-directed exploration")
                         
                         # Pattern Learning: Capture sequence on level completion
                         # BUGFIX: Don't check game_state.state - some games report WIN prematurely
@@ -1796,10 +1933,17 @@ class GameplayEngine:
                                 level_completions=level_completions  # Pass actual completions
                             )
                             if sequence_id:
+                                # Check if this was a self-directed discovery
+                                was_self_directed = getattr(self, '_self_directed_mode', False) or hasattr(self, '_original_self_bias')
+                                discovery_tag = " [SELF-DIRECTED DISCOVERY]" if was_self_directed else ""
+                                
                                 if level_for_storage > 1:
-                                    logger.info(f"[PKG] Captured CUMULATIVE sequence for levels 1-{level_for_storage} (score={game_state.score}): {sequence_id}")
+                                    logger.info(f"[PKG] Captured CUMULATIVE sequence for levels 1-{level_for_storage} (score={game_state.score}): {sequence_id}{discovery_tag}")
                                 else:
-                                    logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}")
+                                    logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}{discovery_tag}")
+                                
+                                if was_self_directed:
+                                    logger.info(f"[SELF-DIRECTED] Breakthrough sequence saved! Future agents won't need to break out - they'll have the escape path.")
                         
                         # Agent Self-Model: Track controlled objects on level completion
                         # Query action_traces for frame_before/frame_after to build correlation
@@ -2194,10 +2338,47 @@ class GameplayEngine:
         """
         agent_id = self.game_config.get('agent_id')
         
+        # === ESCAPE MODE: Force escape action if stuck ===
+        # When stuck detection triggers escape mode, override normal action selection
+        if hasattr(self, '_forced_escape_action'):
+            escape_action = self._forced_escape_action
+            del self._forced_escape_action  # Clear for next iteration
+            
+            # For ACTION6 (click), get exploratory coordinates
+            if escape_action == 6 and game_state.frame:
+                try:
+                    # Use visual analyzer to find a random unexplored target
+                    if hasattr(self.action_handler, 'visual_analyzer'):
+                        x, y = self.action_handler.visual_analyzer.get_exploratory_coordinates(
+                            game_state.frame, 
+                            radius=20  # Wide exploration radius
+                        )
+                        # Store coordinates for the action handler
+                        self.action_handler._escape_click_coords = (x, y)
+                        logger.info(f"[ESCAPE] ACTION6 escape at exploratory coordinates ({x}, {y})")
+                except Exception as e:
+                    logger.debug(f"Escape coordinate error: {e}")
+            
+            reasoning = f"ESCAPE MODE: Trying ACTION{escape_action} to break out of frozen state"
+            logger.info(f"[ESCAPE] {reasoning}")
+            return f"ACTION{escape_action}", reasoning
+        
+        # === SELF-DIRECTED MODE: Agent broke out of stuck state, now exploring on its own ===
+        # Skip network-guided early returns (rules, subgoal plans) and rely on own judgment
+        # This mode lasts until level completion or ~200 actions of exploration
+        is_self_directed = getattr(self, '_self_directed_mode', False)
+        if is_self_directed:
+            start_action = getattr(self, '_self_directed_start_action', 0)
+            # Track how long we've been self-directed
+            # (We don't have action_count here, but we can estimate from game_state or just stay in mode)
+            # For now, just log and skip the deterministic early-returns
+            logger.debug(f"[SELF-DIRECTED] Agent exploring on its own (off-script)")
+        
         # === Step 8: Query learned rules BEFORE action selection ===
         # This allows agents to use network-learned knowledge from previous wins
         # Database read is cheap - runs on every action selection
-        if self.rule_engine and game_state.frame:
+        # SELF-DIRECTED: Skip deterministic rule following - use rules as soft guidance only
+        if self.rule_engine and game_state.frame and not is_self_directed:
             try:
                 applicable_rules = self.rule_engine.get_applicable_rules(
                     current_frame=game_state.frame,
@@ -2220,7 +2401,8 @@ class GameplayEngine:
                 logger.debug(f"Rule query failed (falling back to other strategies): {e}")
         
         # === NEW: Check for active subgoal plan ===
-        if agent_id and hasattr(self, 'subgoal_planner') and self.subgoal_planner:
+        # SELF-DIRECTED: Skip subgoal plans - agent is off-script now
+        if agent_id and hasattr(self, 'subgoal_planner') and self.subgoal_planner and not is_self_directed:
             try:
                 current_game_id = self.session_manager.current_game_id
                 session_id = self.session_manager.current_session_id
@@ -3336,6 +3518,184 @@ class GameplayEngine:
         
         return action_map
     
+    def _get_intelligent_escape_action(
+        self, 
+        agent_id: Optional[str], 
+        game_id: str, 
+        level: int, 
+        game_state: 'GameState',
+        escape_attempt: int,
+        recent_actions: List[int]
+    ) -> Tuple[int, str]:
+        """
+        Get an intelligent escape action using agent's knowledge systems.
+        
+        Instead of just cycling through [5, 6, 7, 1, 2, 3, 4], this method uses:
+        1. Network failure hypotheses - What other agents learned about this level
+        2. Sensation/navigation state - Agent's emotional context
+        3. Self-model - Agent's understanding of what it controls
+        4. Self-network bias - Whether to trust self or network
+        5. Pariah avoidance - Actions that led to failure
+        
+        Args:
+            agent_id: Agent identifier
+            game_id: Current game ID  
+            level: Current level number
+            game_state: Current game state
+            escape_attempt: Which escape attempt this is (1-N)
+            recent_actions: List of recent action numbers to avoid repeating
+            
+        Returns:
+            Tuple of (action_number, reasoning_string)
+        """
+        action_scores = {i: 1.0 for i in range(1, 8)}  # Default score 1.0 for all actions
+        reasoning_parts = []
+        
+        try:
+            # === 1. PENALIZE RECENT ACTIONS (avoid oscillation) ===
+            if recent_actions:
+                for i, action in enumerate(recent_actions[:5]):  # Last 5 actions
+                    if action in action_scores:
+                        # More recent = stronger penalty
+                        penalty = 0.4 * (1.0 - i * 0.15)  # 0.4, 0.34, 0.28, 0.22, 0.16
+                        action_scores[action] -= penalty
+                reasoning_parts.append(f"Avoiding recent: {recent_actions[:3]}")
+            
+            # === 2. NETWORK FAILURE HYPOTHESES ===
+            try:
+                hypotheses = self._get_network_failure_hypotheses(game_id, level, limit=5)
+                if hypotheses:
+                    for hyp in hypotheses:
+                        failure_text = (hyp.get('failure') or '').lower()
+                        strategy_text = (hyp.get('strategy') or '').lower()
+                        confidence = hyp.get('confidence', 0.5)
+                        
+                        # Penalize actions mentioned in failures
+                        if 'down' in failure_text or 'bottom' in failure_text or 'fell' in failure_text:
+                            action_scores[2] -= 0.3 * confidence
+                        if 'up' in failure_text or 'top' in failure_text or 'ceiling' in failure_text:
+                            action_scores[1] -= 0.3 * confidence
+                        if 'left' in failure_text:
+                            action_scores[3] -= 0.3 * confidence
+                        if 'right' in failure_text:
+                            action_scores[4] -= 0.3 * confidence
+                        if 'oscillat' in failure_text or 'loop' in failure_text:
+                            action_scores[6] += 0.3 * confidence  # Click might break loop
+                        
+                        # Boost actions mentioned in strategies
+                        if 'click' in strategy_text or 'interact' in strategy_text:
+                            action_scores[6] += 0.25 * confidence
+                        if 'wait' in strategy_text or 'timing' in strategy_text:
+                            action_scores[5] += 0.2 * confidence
+                    
+                    reasoning_parts.append(f"Hypotheses: {len(hypotheses)}")
+            except Exception:
+                pass
+            
+            # === 3. SENSATION/NAVIGATION STATE ===
+            if agent_id and self.sensation_engine:
+                try:
+                    nav_result = self.db.execute_query(
+                        "SELECT navigation_state, action_biases FROM agents WHERE agent_id = ?",
+                        (agent_id,)
+                    )
+                    if nav_result:
+                        nav_state = nav_result[0].get('navigation_state', 0.0) or 0.0
+                        action_biases_str = nav_result[0].get('action_biases', '{}') or '{}'
+                        try:
+                            action_biases = json.loads(action_biases_str)
+                            for action_str, bias in action_biases.items():
+                                action_num = int(action_str) if action_str.isdigit() else None
+                                if action_num and action_num in action_scores:
+                                    action_scores[action_num] += bias * 0.3
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                        
+                        # Navigation state affects exploration style
+                        # Negative (frustrated) -> try ACTION6 (click) or ACTION5 (wait)
+                        # Positive (confident) -> try directional actions
+                        if nav_state < -0.3:
+                            action_scores[6] += 0.2  # Click might find something
+                            action_scores[5] += 0.15  # Wait might help
+                            reasoning_parts.append(f"Frustrated (nav={nav_state:.2f})")
+                        elif nav_state > 0.3:
+                            # Boost unexplored directions
+                            action_scores[1] += 0.1
+                            action_scores[2] += 0.1
+                            action_scores[3] += 0.1
+                            action_scores[4] += 0.1
+                            reasoning_parts.append(f"Confident (nav={nav_state:.2f})")
+                except Exception:
+                    pass
+            
+            # === 4. SELF-NETWORK BIAS ===
+            if agent_id:
+                try:
+                    bias_result = self.db.execute_query(
+                        "SELECT self_network_bias FROM agents WHERE agent_id = ?",
+                        (agent_id,)
+                    )
+                    if bias_result:
+                        self_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
+                        
+                        # High self-bias -> trust own instincts (randomize more)
+                        # Low self-bias -> trust network hypotheses more (already applied above)
+                        if self_bias > 0.6:
+                            # More self-directed: add some random variance
+                            import random
+                            for action in range(1, 8):
+                                action_scores[action] += random.uniform(-0.15, 0.25)
+                            reasoning_parts.append(f"Self-directed (bias={self_bias:.2f})")
+                except Exception:
+                    pass
+            
+            # === 5. PARIAH AVOIDANCE ===
+            try:
+                from viral_package_engine import ViralPackageEngine
+                viral_engine = ViralPackageEngine(self.db)
+                pariah_penalties = viral_engine.get_pariah_action_penalties(agent_id) if agent_id else {}
+                for action_str, penalty in pariah_penalties.items():
+                    action_num = int(action_str) if str(action_str).isdigit() else None
+                    if action_num and action_num in action_scores:
+                        action_scores[action_num] -= penalty * 0.5
+                if pariah_penalties:
+                    reasoning_parts.append(f"Pariah avoid: {len(pariah_penalties)}")
+            except Exception:
+                pass
+            
+            # === 6. ESCAPE ATTEMPT PROGRESSION ===
+            # Later attempts should try more "unusual" actions
+            if escape_attempt >= 3:
+                # Boost ACTION6 (click) and ACTION7 (submit) for later attempts
+                action_scores[6] += 0.2
+                action_scores[7] += 0.15
+                reasoning_parts.append("Late escape: try unusual")
+            
+            # === SELECT BEST ACTION ===
+            # Sort by score, pick the best (with small random tiebreaker)
+            import random
+            sorted_actions = sorted(
+                action_scores.items(), 
+                key=lambda x: (x[1] + random.uniform(0, 0.05)), 
+                reverse=True
+            )
+            best_action = sorted_actions[0][0]
+            best_score = sorted_actions[0][1]
+            
+            reasoning = f"INTELLIGENT ESCAPE #{escape_attempt}: ACTION{best_action} (score={best_score:.2f})"
+            if reasoning_parts:
+                reasoning += f" [{'; '.join(reasoning_parts)}]"
+            
+            logger.info(f"[ESCAPE] {reasoning}")
+            return best_action, reasoning
+            
+        except Exception as e:
+            # Fallback to simple escape sequence if intelligent selection fails
+            logger.debug(f"Intelligent escape failed, using fallback: {e}")
+            fallback_actions = [5, 6, 7, 1, 2, 3, 4]
+            fallback_action = fallback_actions[(escape_attempt - 1) % len(fallback_actions)]
+            return fallback_action, f"ESCAPE #{escape_attempt}: ACTION{fallback_action} (fallback)"
+    
     def _build_self_model_context(self, agent_id: Optional[str], game_id: str, level: int) -> Dict[str, Any]:
         """Build self-model context for reasoning JSON.
         
@@ -3519,6 +3879,18 @@ class GameplayEngine:
         generation = self.game_config.get('current_generation')
         if generation is not None:
             reasoning_obj['generation'] = generation
+        
+        # Add SELF-DIRECTED MODE context if active
+        # This tells the API/LLM that the agent broke out of a stuck state
+        # and is now exploring on its own, not following network sequences
+        if getattr(self, '_self_directed_mode', False):
+            reasoning_obj['exploration_mode'] = 'self_directed'
+            reasoning_obj['exploration_context'] = {
+                'reason': 'Broke out of stuck state, now exploring independently',
+                'trust_self': True,
+                'network_sequences_invalid': True,
+                'start_action': getattr(self, '_self_directed_start_action', 0)
+            }
         
         # Add self-model context (what objects agent controls)
         reasoning_obj['self_model'] = self._build_self_model_context(agent_id, game_id, current_level)
