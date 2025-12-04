@@ -42,6 +42,7 @@ class GameSessionManager:
         self.is_running = False
         self.is_shutting_down = False  # NEW: Track shutdown state
         self.shutdown_handlers = []
+        self._current_generation: Optional[int] = None  # Track generation for scorecard tags
 
         # Statistics
         self.session_stats = {
@@ -138,6 +139,10 @@ class GameSessionManager:
             # Close existing session before recreating
             await self.client.__aexit__(None, None, None)
             self.client = ARCClient(api_key=self.api_key)
+        
+        # Propagate generation number to client for scorecard tags
+        if self._current_generation is not None:
+            self.client._current_generation = self._current_generation
 
         # Ensure client session is active
         if not self.client.session:

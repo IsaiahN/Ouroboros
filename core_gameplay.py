@@ -195,11 +195,16 @@ class GameplayEngine:
         """
         self.game_config.update(config)
         
-        # Pass generation to session_manager client for scorecard tags
+        # Store generation in game_config AND session_manager for scorecard tags
+        # This ensures generation is available when ARCClient is created later
         if 'current_generation' in config:
+            gen = config['current_generation']
             if hasattr(self, 'session_manager') and self.session_manager:
+                # Store on session_manager (will propagate to client when created)
+                self.session_manager._current_generation = gen
+                # Also set on existing client if available
                 if hasattr(self.session_manager, 'client') and self.session_manager.client:
-                    self.session_manager.client._current_generation = config['current_generation']
+                    self.session_manager.client._current_generation = gen
         
         logger.info(f"Updated game config: {config}")
 
@@ -1416,11 +1421,14 @@ class GameplayEngine:
                     # Break immediately - the finally block will save results
                     break
                 
-                # CRITICAL: If game reports WIN/GAME_OVER but we have actions left, keep trying
-                # Some games report completion prematurely (e.g., ls20 after level 1)
-                if game_state.state != "NOT_FINISHED":
-                    logger.warning(f"[WARN] Game reports '{game_state.state}' but actions remain ({action_count}/{self.game_config['max_total_actions']}) - forcing continuation")
-                    game_state.state = "NOT_FINISHED"
+                # CRITICAL: If game reports WIN or GAME_OVER, respect the API's verdict
+                # The API is the source of truth - never force continuation
+                if game_state.state == "WIN":
+                    logger.info(f"[WIN] Game won! Final score: {game_state.score}")
+                    break
+                elif game_state.state == "GAME_OVER":
+                    logger.info(f"[GAME_OVER] Game ended by API. Score: {game_state.score}")
+                    break
 
                 try:
                     # Update action handler with level progress for dynamic spam tolerance
@@ -1512,6 +1520,35 @@ class GameplayEngine:
                     if action_succeeded:
                         action_count += 1
                         level_action_count += 1
+                        
+                        # Update world model and self-model after EVERY exploration action
+                        # NOTE: This only runs for exploration, not sequence replay
+                        # (Sequence replay has its own loop in _replay_sequence_inline)
+                        if self.symbolic_engine and game_state.frame:
+                            try:
+                                self.symbolic_engine.update(
+                                    action=action if isinstance(action, int) else 0,
+                                    new_frame=np.array(game_state.frame)
+                                )
+                            except Exception as e:
+                                logger.debug(f"World model action update failed: {e}")
+                        
+                        # Self-model: Track controlled objects on every exploration action
+                        if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+                            try:
+                                # Get recent action traces for this session
+                                session_id = self.session_manager.current_session_id
+                                if session_id:
+                                    controlled, confidence = self.agent_self_model.detect_controlled_objects(
+                                        session_id, window_size=10
+                                    )
+                                    # Only store if we have high confidence identification
+                                    if controlled and confidence > 0.5:
+                                        self.agent_self_model.store_control_map(
+                                            agent_id, game_id, current_level, controlled, confidence
+                                        )
+                            except Exception as e:
+                                logger.debug(f"Self-model action update failed: {e}")
                     
                     # Phase 4.5: Learn from action outcome for sensation system
                     if agent_id and self.game_config.get('enable_sensation_navigation', True):
@@ -1661,17 +1698,8 @@ class GameplayEngine:
                             except Exception as e:
                                 logger.debug(f"Agent self-model tracking error: {e}")
                         
-                        # Step 7: Update world model on level completion (CPU-efficient)
-                        # Only update on milestones, not every action
-                        if self.symbolic_engine and game_state.frame:
-                            try:
-                                self.symbolic_engine.update(
-                                    action=0,  # Milestone update, no specific action
-                                    new_frame=np.array(game_state.frame)
-                                )
-                                logger.debug(f"[WORLD-MODEL] Updated on level {current_level} completion")
-                            except Exception as e:
-                                logger.debug(f"World model level update failed: {e}")
+                        # NOTE: World model now updates on every action (see action_succeeded block above)
+                        # No need for redundant level completion update
                         
                         # Move to next level
                         previous_score = game_state.score  # Update for next level detection
