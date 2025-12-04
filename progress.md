@@ -2,6 +2,106 @@
 
 ---
 
+## Session: December 4, 2025 (Morning)
+**Focus**: Critical Bug Fixes, Frustration Detector Redesign, Documentation Updates
+
+### Approach
+**Objective**: Fix blocking errors before running evolution test, improve system intelligence
+1. **Fix First, Run Later**: Address all blocking errors before running evolution
+2. **Analyze Before Changing**: Gather data to understand if systems are helping or harming
+3. **Per-Game Intelligence**: Change network-wide signals to game-specific where it makes sense
+4. **Document Mode-Specific Behavior**: Add graceful shutdown and mode-specific procedures to refactor plan
+
+### Completed Steps
+
+#### 1. GameState.get() Error Fix [OK]
+**Problem**: Frame recovery was failing with error:
+```
+'GameState' object has no attribute 'get'
+```
+**Root Cause**: In `action_handler.py` line ~197, `send_action()` returns a `GameState` object, but code was calling `GameState.from_dict(result)` on it, which tried to call `.get()` on the GameState.
+
+**Solution**: Changed code to use the result directly since it's already a GameState:
+```python
+# Before (broken):
+result = await self.session_manager.client.send_action(f"ACTION{recovery_action}")
+if result:
+    new_state = GameState.from_dict(result)  # WRONG - result is already GameState
+
+# After (fixed):
+new_state = await self.session_manager.client.send_action(f"ACTION{recovery_action}")
+if new_state:
+    frame = new_state.frame  # Correct - use GameState directly
+```
+
+**File Modified**: `action_handler.py`
+
+#### 2. Frustration Detector Analysis [OK]
+**Problem**: Frustration quorum was triggering constantly (96% of agents frustrated)
+**Analysis Results**:
+- 6,365 quorum events recorded (way too many!)
+- 165/1,395 agents currently marked as frustrated
+- Average 38.6 games without progress for frustrated agents
+- Signals emitted: `frustration_cascade` (6,365), `exploration_need` (6,592)
+
+**Finding**: The frustration detector was checking frustration NETWORK-WIDE, which makes no sense. Agents working on completely different games were being counted together, causing perpetual "desperation mode."
+
+#### 3. Frustration Detector Redesign [OK]
+**Problem**: Network-wide quorum is meaningless - should be per-game
+**Solution**: Completely redesigned `check_frustration_quorum()` to be **per-game**:
+
+**Before (broken)**:
+- Checked: "Are 30% of ALL agents frustrated?"
+- Result: Constant triggering, perpetual desperation mode
+
+**After (fixed)**:
+- Checks: "Are 50% of agents working on THIS SPECIFIC GAME frustrated?"
+- Groups agents by `stuck_on_game_id`
+- Requires >= 2 agents on same game to trigger
+- Signals are game-specific (e.g., `frustration_cascade:ft09-abc123`)
+- Shorter duration (5 generations vs 10)
+- Lower magnitude (0.10 vs 0.15)
+
+**File Modified**: `frustration_detector.py`
+
+#### 4. Refactor Plan Documentation Update [OK]
+**Problem**: Refactor plan missing graceful shutdown and mode-specific procedures
+**Solution**: Added **Appendix K** to `DOCS/core_gameplay_refactor_plan.md`:
+
+- **K.1 Graceful Shutdown Protocol** - Flow diagram, rules for when to save sequences
+- **K.2 Agent Mode Effects on Sequence Storage** - Which modes store when
+- **K.3 Sequence Retrieval by Agent Mode** - Different strategies per mode
+- **K.4 Mode Transitions During Gameplay** - Pioneer -> Generalist on beaten levels
+- **K.5 Error Recovery by Mode** - Different recovery strategies per agent type
+- **K.6 Shutdown Cleanup Tasks** - Ordered cleanup procedures
+
+**File Modified**: `DOCS/core_gameplay_refactor_plan.md`
+
+### Files Modified This Session
+| File | Change |
+|------|--------|
+| `action_handler.py` | Fixed GameState.get() error in frame recovery |
+| `frustration_detector.py` | Redesigned quorum to be per-game instead of network-wide |
+| `DOCS/core_gameplay_refactor_plan.md` | Added Appendix K (graceful shutdown, mode-specific procedures) |
+
+### Current System State
+
+**What's Fixed**:
+- [x] Frame recovery no longer crashes with GameState.get() error
+- [x] Frustration quorum is now per-game (meaningful signal)
+- [x] Mode-specific behavior documented in refactor plan
+
+**Current Status**: Ready for evolution test run
+
+### Next Steps
+1. Run evolution test: `python run_evolution.py --fast --max-generations 2`
+2. Monitor for any new errors in terminal
+3. Verify frame recovery works correctly
+4. Check that frustration quorum no longer triggers constantly
+5. Assess gameplay progression and sequence storage
+
+---
+
 ## Session: December 3, 2025 (Morning - 9:00-9:30 AM)
 **Focus**: System Assessment, Documentation Update, Agent Self Model Integration, Unicode Emoji Removal
 
@@ -93,7 +193,7 @@ See `remove_emojis.py` execution output for complete list
 
 ---
 
-## 🎯 STRATEGIC APPROACH
+## [TARGET] STRATEGIC APPROACH
 
 ### Core Philosophy
 The Ouroboros system is designed as a **network-centric evolutionary AI** where:

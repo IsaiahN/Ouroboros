@@ -194,10 +194,9 @@ class ActionHandler:
             
             try:
                 # Send the recovery action through session_manager.client (the API client)
-                result = await self.session_manager.client.send_action(f"ACTION{recovery_action}")
-                if result:
-                    # GameState is already imported at top from arc_api_client
-                    new_state = GameState.from_dict(result)
+                # NOTE: send_action() already returns a GameState object, NOT a dict
+                new_state = await self.session_manager.client.send_action(f"ACTION{recovery_action}")
+                if new_state:
                     frame = new_state.frame
                     
                     if frame and len(frame) >= 10 and frame[0] and len(frame[0]) >= 10:

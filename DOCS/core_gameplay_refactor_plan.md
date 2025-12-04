@@ -4455,6 +4455,221 @@ def capture_baseline(db: DatabaseInterface) -> dict:
 
 ---
 
+## Appendix K: Graceful Shutdown & Mode-Specific Procedures
+
+### K.1 Graceful Shutdown Protocol
+
+**Trigger**: User presses Ctrl+C (3x), error threshold reached, or programmatic shutdown request.
+
+**Shutdown Flow**:
+
+```mermaid
+flowchart TD
+    A[Shutdown Triggered] --> B{Current Game Active?}
+    B -->|Yes| C[Set shutdown_requested = True]
+    B -->|No| D[Close Session Immediately]
+    C --> E[Game Loop Checks Flag]
+    E --> F{Breakthrough in Progress?}
+    F -->|Yes| G[Complete Current Level]
+    F -->|No| H[Exit After Current Action]
+    G --> I[Save Sequence if Score > 0]
+    H --> J{Score > 0?}
+    J -->|Yes| I
+    J -->|No| K[Discard Session]
+    I --> L[Close Scorecard]
+    K --> L
+    L --> D
+    D --> M[Flush Database WAL]
+    M --> N[Deactivate Stale Game Sessions]
+    N --> O[Exit Clean]
+```
+
+**Critical Rule**: NEVER save sequences during shutdown if `level_completions == 0` in THIS session.
+
+```python
+# In core_gameplay.py _capture_winning_sequence():
+if level_completions < 1:
+    logger.warning(f"[SHUTDOWN] Skipping sequence save - no levels completed this session")
+    return None
+```
+
+**Sequence Validation on Shutdown**:
+
+| Condition | Action |
+|-----------|--------|
+| `score > 0 AND level_completions >= 1` | Save sequence normally |
+| `score > 0 AND level_completions == 0` | DO NOT SAVE - was replaying existing sequence |
+| `score == 0` | Discard - no progress made |
+| Ctrl+C pressed mid-action | Wait for action to complete, then exit |
+| API error during shutdown | Force exit after 5 second timeout |
+
+### K.2 Agent Mode Effects on Sequence Storage
+
+Different agent modes have different rules for when sequences are stored:
+
+| Agent Mode | Stores on Level Complete? | Stores Full Game? | Special Rules |
+|------------|--------------------------|-------------------|---------------|
+| **Pioneer** | YES - frontier discoveries | YES | Never stores for already-beaten levels |
+| **Optimizer** | YES - improved paths | NO | Must auto-append end subsequence |
+| **Generalist** | YES - validation | YES | Standard storage, no special rules |
+| **Exploiter** | NO - only replays | NO | Never stores - pure replay mode |
+
+```python
+# In core_gameplay.py - sequence storage decision tree:
+def _should_store_sequence(self, agent_mode: str, level_number: int, 
+                           is_beaten_level: bool, source: str) -> bool:
+    """
+    Determine if sequence should be stored based on agent mode.
+    
+    Args:
+        agent_mode: 'pioneer', 'optimizer', 'generalist', 'exploiter'
+        level_number: Level that was completed
+        is_beaten_level: Has ANY agent beaten this level before?
+        source: 'level_completion', 'full_game_win', 'optimization'
+    """
+    if agent_mode == 'exploiter':
+        return False  # Exploiters NEVER store
+    
+    if agent_mode == 'pioneer' and is_beaten_level:
+        return False  # Pioneers don't overwrite beaten levels
+    
+    if agent_mode == 'optimizer' and source == 'full_game_win':
+        return False  # Optimizers don't claim full game credit
+    
+    return True  # Default: store
+```
+
+### K.3 Sequence Retrieval by Agent Mode
+
+| Agent Mode | Retrieval Strategy | Fallback |
+|------------|-------------------|----------|
+| **Pioneer** | ONLY for beaten levels (to reach frontier fast) | Explore at frontier |
+| **Optimizer** | ALL sequences for target game/level | Must have proven ending |
+| **Generalist** | Best cumulative sequence | Multi-stage pipeline |
+| **Exploiter** | Highest-rated sequence only | Abort if none available |
+
+```python
+# In core_gameplay.py - sequence retrieval by mode:
+def _get_sequences_for_mode(self, agent_mode: str, game_id: str, 
+                            current_level: int) -> List[Dict]:
+    """Get sequences appropriate for agent mode."""
+    
+    if agent_mode == 'exploiter':
+        # Only get proven, high-success sequences
+        return self._get_proven_sequences(game_id, min_success_rate=0.8)
+    
+    if agent_mode == 'pioneer':
+        # Get sequences for BEATEN levels only (to speedrun to frontier)
+        frontier_level = self._get_network_max_level(game_id) + 1
+        if current_level < frontier_level:
+            return self._get_ranked_cumulative_sequences(game_id)
+        return []  # At frontier - no sequences, pure exploration
+    
+    if agent_mode == 'optimizer':
+        # Get sequences for specific level being optimized
+        return self._get_level_sequences(game_id, current_level)
+    
+    # Generalist - use standard retrieval
+    return self._get_ranked_cumulative_sequences(game_id)
+```
+
+### K.4 Mode Transitions During Gameplay
+
+Agents can be in different modes for different levels within the same game:
+
+```
+Pioneer on Game "ft09":
+- Level 1 (beaten by network): Act as GENERALIST - replay sequence
+- Level 2 (beaten by network): Act as GENERALIST - replay sequence  
+- Level 3 (FRONTIER - unbeaten): Act as PIONEER - pure exploration
+
+Optimizer on Game "ft09":
+- Level 1 (optimizing): OPTIMIZER mode - try to beat existing
+- Level 2: Not assigned, skip to target
+- Level 3: FORBIDDEN - optimizers cannot touch frontier
+```
+
+**Implementation**:
+```python
+# In action_handler.py set_agent_mode():
+def set_agent_mode(self, mode: str, current_level: int, network_max_level: int):
+    """
+    Set agent mode with level-awareness.
+    
+    Pioneers transition to generalist behavior on beaten levels.
+    Optimizers are restricted to their assigned levels.
+    """
+    self.base_mode = mode
+    self.current_level = current_level
+    self.network_max_level = network_max_level
+    
+    # Effective mode may differ from base mode
+    if mode == 'pioneer' and current_level <= network_max_level:
+        self.effective_mode = 'generalist'  # Replay on beaten levels
+    elif mode == 'optimizer' and current_level > network_max_level:
+        self.effective_mode = 'forbidden'  # Cannot touch frontier
+    else:
+        self.effective_mode = mode
+```
+
+### K.5 Error Recovery by Mode
+
+| Error Type | Pioneer Recovery | Optimizer Recovery | Generalist Recovery | Exploiter Recovery |
+|------------|------------------|-------------------|--------------------|--------------------|
+| Sequence Replay Fails | Switch to exploration | Try next sequence, then abort | Multi-stage pipeline | Abort game |
+| API Timeout | Retry 3x, then abort | Retry 3x, checkpoint | Retry 3x, then abort | Abort immediately |
+| Frame Corruption | Attempt recovery, continue | Abort (need clean state) | Attempt recovery | Abort immediately |
+| Budget Exhausted | Save partial progress | Save optimized portion | Save if score > 0 | No save needed |
+| Ctrl+C Shutdown | Complete level if close | Complete action only | Complete level if close | Exit immediately |
+
+### K.6 Shutdown Cleanup Tasks
+
+After graceful shutdown, the following cleanup occurs:
+
+```python
+async def _graceful_shutdown_cleanup(self):
+    """
+    Cleanup tasks performed after graceful shutdown.
+    
+    Order matters - do NOT reorder without understanding dependencies.
+    """
+    # 1. Finalize any open game sessions
+    if self.session_manager.current_game_id:
+        await self.session_manager.finish_game(
+            state="SHUTDOWN",
+            score=self.current_score,
+            level_completions=self.level_completions,
+            actions_taken=self.action_count
+        )
+    
+    # 2. Close scorecard (prevents auto-close timeout issues)
+    if self.session_manager.current_scorecard_id:
+        await self.session_manager.close_scorecard()
+    
+    # 3. Flush database write-ahead log
+    self.db.execute_query("PRAGMA wal_checkpoint(TRUNCATE)")
+    
+    # 4. Mark interrupted sessions in database
+    self.db.execute_query("""
+        UPDATE game_results 
+        SET notes = notes || ' [INTERRUPTED BY SHUTDOWN]'
+        WHERE session_id = ? AND final_state = 'NOT_FINISHED'
+    """, (self.session_manager.current_session_id,))
+    
+    # 5. Purge zero-score interrupted games (junk data)
+    self.db.execute_query("""
+        DELETE FROM game_results
+        WHERE session_id = ? 
+        AND final_score = 0 
+        AND level_completions = 0
+        AND notes LIKE '%INTERRUPTED%'
+    """, (self.session_manager.current_session_id,))
+    
+    logger.info("[SHUTDOWN] Cleanup complete - exiting cleanly")
+```
+
+---
+
 ## Appendix J: Blue Sky Recommendations (Future Database Changes)
 
 > **NOTE**: These require database schema changes and should be implemented AFTER the core refactoring is stable. Do NOT implement during initial refactoring.

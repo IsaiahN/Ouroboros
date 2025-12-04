@@ -290,47 +290,73 @@ class FrustrationDetector:
     
     def check_frustration_quorum(self, generation: int) -> Optional[str]:
         """
-        Check if frustration quorum has been reached (≥30% agents frustrated).
-        If reached, emit desperation signal through regulatory system.
+        Check if frustration quorum has been reached for any SPECIFIC GAME.
+        
+        Quorum is PER-GAME, not network-wide. It only makes sense to trigger
+        desperation mode when multiple agents are stuck on the SAME game,
+        not when agents working on different games are frustrated.
+        
+        Triggers when >= 50% of agents working on a specific game are frustrated.
         
         Returns:
-            quorum_event_id if quorum reached, None otherwise
+            quorum_event_id if quorum reached for any game, None otherwise
         """
         try:
-            # Get frustration statistics
-            stats = self.db.execute_query("""
+            # Get per-game frustration statistics
+            # Only consider games where at least 2 agents are working
+            per_game_stats = self.db.execute_query("""
                 SELECT 
-                    COUNT(*) as total_agents,
-                    SUM(CASE WHEN is_frustrated = 1 THEN 1 ELSE 0 END) as frustrated_agents,
+                    stuck_on_game_id as game_id,
+                    COUNT(*) as agents_on_game,
+                    SUM(CASE WHEN is_frustrated = 1 THEN 1 ELSE 0 END) as frustrated_on_game,
                     AVG(frustration_level) as avg_frustration
                 FROM agent_frustration_states
-                WHERE generation = ?
+                WHERE generation = ? 
+                  AND stuck_on_game_id IS NOT NULL
+                GROUP BY stuck_on_game_id
+                HAVING agents_on_game >= 2
             """, (generation,))
             
-            if not stats or stats[0]['total_agents'] == 0:
+            if not per_game_stats:
                 return None
             
-            stat = stats[0]
-            total = stat['total_agents']
-            frustrated = stat['frustrated_agents']
-            frustration_ratio = frustrated / total if total > 0 else 0.0
+            # Check each game for quorum
+            quorum_games = []
+            for stat in per_game_stats:
+                game_id = stat['game_id']
+                total = stat['agents_on_game']
+                frustrated = stat['frustrated_on_game']
+                frustration_ratio = frustrated / total if total > 0 else 0.0
+                
+                # Per-game quorum: 50% of agents on THIS game frustrated
+                if frustration_ratio >= 0.50 and frustrated >= 2:
+                    quorum_games.append({
+                        'game_id': game_id,
+                        'total': total,
+                        'frustrated': frustrated,
+                        'ratio': frustration_ratio,
+                        'avg_frustration': stat['avg_frustration']
+                    })
             
-            quorum_reached = frustration_ratio >= self.quorum_threshold
+            if not quorum_games:
+                return None
             
-            # Record quorum check
+            # Record quorum event for the most frustrated game
+            most_frustrated_game = max(quorum_games, key=lambda g: g['ratio'])
             event_id = f"frust_quorum_{uuid.uuid4().hex[:12]}"
             
-            desperation_signal_id = None
-            signal_strength = None
+            # Emit desperation signal for the specific game
+            desperation_signal_id, signal_strength = self._emit_desperation_signal(
+                generation, 
+                most_frustrated_game['ratio'],
+                game_id=most_frustrated_game['game_id']
+            )
             
-            if quorum_reached:
-                # Emit desperation signal through regulatory system
-                desperation_signal_id, signal_strength = self._emit_desperation_signal(generation, frustration_ratio)
-                
-                self.logger.warning(
-                    f"🚨 FRUSTRATION QUORUM REACHED: {frustrated}/{total} agents frustrated "
-                    f"({frustration_ratio*100:.1f}%) - Desperation mode activated!"
-                )
+            self.logger.warning(
+                f"[!] GAME-SPECIFIC FRUSTRATION QUORUM: {most_frustrated_game['frustrated']}/"
+                f"{most_frustrated_game['total']} agents frustrated on game "
+                f"{most_frustrated_game['game_id']} ({most_frustrated_game['ratio']*100:.1f}%)"
+            )
             
             self.db.execute_query("""
                 INSERT INTO frustration_quorum_events (
@@ -339,20 +365,30 @@ class FrustrationDetector:
                     signal_strength
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                event_id, generation, total, frustrated,
-                frustration_ratio, quorum_reached, desperation_signal_id,
+                event_id, generation, most_frustrated_game['total'], 
+                most_frustrated_game['frustrated'],
+                most_frustrated_game['ratio'], True, desperation_signal_id,
                 signal_strength
             ))
             
-            return event_id if quorum_reached else None
+            return event_id
             
         except Exception as e:
             self.logger.error(f"Error checking frustration quorum: {e}")
             return None
     
-    def _emit_desperation_signal(self, generation: int, frustration_ratio: float) -> Tuple[str, float]:
+    def _emit_desperation_signal(self, generation: int, frustration_ratio: float,
+                                  game_id: Optional[str] = None) -> Tuple[str, float]:
         """
         Emit high-priority desperation signal through regulatory system.
+        
+        Now game-specific: signals are targeted to specific games where
+        multiple agents are stuck, not broadcast network-wide.
+        
+        Args:
+            generation: Current generation
+            frustration_ratio: Ratio of frustrated agents on this game
+            game_id: The specific game causing frustration (optional)
         
         Returns:
             (signal_id, signal_strength)
@@ -360,10 +396,13 @@ class FrustrationDetector:
         try:
             signal_id = f"sig_desperation_{uuid.uuid4().hex[:12]}"
             
-            # Scale signal strength by severity
-            signal_strength = self.desperation_signal_strength * (1.0 + frustration_ratio)
+            # Scale signal strength by severity (lower than before since game-specific)
+            signal_strength = self.desperation_signal_strength * (0.5 + frustration_ratio * 0.5)
             
             # Insert signal directly into regulatory signals table
+            # Include game_id in signal_type for game-specific targeting
+            signal_type = f'frustration_cascade:{game_id}' if game_id else 'frustration_cascade'
+            
             self.db.execute_query("""
                 INSERT INTO network_regulatory_signals (
                     signal_id, generation, signal_type, signal_source_agent,
@@ -372,13 +411,15 @@ class FrustrationDetector:
                     is_active
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                signal_id, generation, 'frustration_cascade', None,
+                signal_id, generation, signal_type, None,
                 signal_strength, signal_strength, 'mutation_rate',
-                'increase', 0.15, generation + 10, True
+                'increase', 0.10, generation + 5, True  # Shorter duration, smaller magnitude
             ))
             
-            # Also emit exploration boost signal
+            # Also emit exploration boost signal for this game
             exploration_signal_id = f"sig_explore_boost_{uuid.uuid4().hex[:12]}"
+            explore_signal_type = f'exploration_need:{game_id}' if game_id else 'exploration_need'
+            
             self.db.execute_query("""
                 INSERT INTO network_regulatory_signals (
                     signal_id, generation, signal_type, signal_source_agent,
@@ -387,12 +428,13 @@ class FrustrationDetector:
                     is_active
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                exploration_signal_id, generation, 'exploration_need', None,
+                exploration_signal_id, generation, explore_signal_type, None,
                 signal_strength * 0.8, signal_strength * 0.8, 'exploration_ratio',
-                'increase', 0.25, generation + 10, True
+                'increase', 0.15, generation + 5, True  # Shorter duration, smaller magnitude
             ))
             
-            self.logger.info(f"Emitted desperation signals: {signal_id}, {exploration_signal_id}")
+            game_info = f" for game {game_id}" if game_id else ""
+            self.logger.info(f"Emitted game-specific desperation signals{game_info}: {signal_id[:16]}")
             
             return signal_id, signal_strength
             
