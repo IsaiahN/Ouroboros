@@ -6942,6 +6942,100 @@ class GameplayEngine:
             
             if replay_success:
                 logger.info(f"[OK] Inline replay successful for {sequence_id}! Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
+                
+                # ================================================================
+                # LEARNING HOOKS ON SEQUENCE REPLAY SUCCESS
+                # ================================================================
+                # Even during sequence replay, we should:
+                # 1. Create/reinforce viral packages (if not already exists for this sequence)
+                # 2. Extract rules (if not already exists for this pattern)
+                # 3. Track agent self-model
+                # 
+                # DEDUPLICATION: The engines now have skip_if_exists=True by default,
+                # so replaying the same sequence 1000x won't create 1000 viral packages.
+                # Different sequences for the same level WILL create different packages.
+                # ================================================================
+                
+                # Viral Package: Create/get existing for this sequence
+                if agent_id and agent_id != 'unknown':
+                    try:
+                        from viral_package_engine import ViralPackageEngine
+                        viral_engine = ViralPackageEngine(self.db)
+                        generation = self.game_config.get('generation', 0)
+                        
+                        # skip_if_exists=True means this returns existing package_id if already created
+                        package_id = viral_engine.create_viral_package_from_sequence(
+                            sequence_id, agent_id, generation, skip_if_exists=True
+                        )
+                        if package_id:
+                            logger.debug(f"[VIRAL] Replay success - viral package exists/created: {package_id[:12]}")
+                    except Exception as e:
+                        logger.debug(f"Viral package during replay failed (non-critical): {e}")
+                
+                # Rule Induction: Extract rules from successful replay (if not duplicate)
+                if self.rule_engine and agent_id and agent_id != 'unknown':
+                    try:
+                        # Build game session data for rule extraction
+                        # Use the sequence's initial frame and actions
+                        initial_frame = json.loads(sequence.get('initial_frame', '[]'))
+                        action_sequence = json.loads(sequence.get('action_sequence', '[]'))
+                        
+                        if initial_frame and action_sequence:
+                            game_session_data = {
+                                'game_id': sequence['game_id'],
+                                'agent_id': agent_id,
+                                'level_number': target_level,
+                                'initial_frame': initial_frame,
+                                'action_sequence': [{'action_type': a} for a in action_sequence],
+                                'frame_states': [],  # We don't have full frame history during replay
+                                'won': True,
+                                'score_achieved': game_state.score,
+                                'is_replay_validation': True  # Flag that this is from replay
+                            }
+                            
+                            # skip_if_exists=True means duplicate patterns increment count instead of creating new
+                            extracted_rule = self.rule_engine.extract_rule_from_game_session(
+                                game_session_data, skip_if_exists=True
+                            )
+                            if extracted_rule:
+                                if extracted_rule.get('deduplicated'):
+                                    logger.debug(f"[RULE] Replay validation - existing rule reinforced: {extracted_rule['rule_id'][:12]}")
+                                else:
+                                    logger.debug(f"[RULE] Replay validation - new rule extracted: {extracted_rule['rule_id'][:12]}")
+                    except Exception as e:
+                        logger.debug(f"Rule extraction during replay failed (non-critical): {e}")
+                
+                # Agent Self-Model: Track object control on successful replay
+                if agent_id and agent_id != 'unknown' and hasattr(self, 'agent_self_model'):
+                    try:
+                        # Query action traces for this replay session
+                        traces = self.db.execute_query("""
+                            SELECT action_number, frame_before, frame_after
+                            FROM action_traces
+                            WHERE session_id = ? AND game_id = ?
+                            ORDER BY timestamp DESC LIMIT 50
+                        """, (session_id, sequence['game_id']))
+                        
+                        if traces and len(traces) >= 2:
+                            action_history = [{'action_type': f"action_{t['action_number']}"} for t in traces]
+                            frame_history = []
+                            for t in traces:
+                                if t.get('frame_before'):
+                                    fb = json.loads(t['frame_before']) if isinstance(t['frame_before'], str) else t['frame_before']
+                                    frame_history.append({'grid': fb})
+                            
+                            if len(frame_history) >= 2:
+                                controlled, confidence = self.agent_self_model.identify_controlled_objects(
+                                    sequence['game_id'], target_level, action_history, frame_history
+                                )
+                                if controlled and confidence > 0.3:
+                                    self.agent_self_model.store_control_map(
+                                        agent_id, sequence['game_id'], target_level, controlled, confidence
+                                    )
+                                    logger.debug(f"[SELF-MODEL] Replay - identified {len(controlled)} controlled objects")
+                    except Exception as e:
+                        logger.debug(f"Self-model tracking during replay failed (non-critical): {e}")
+                
             else:
                 logger.warning(f"[FAIL] Inline replay failed for {sequence_id}. "
                              f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")

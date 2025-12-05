@@ -35,9 +35,14 @@ class RuleInductionEngine:
         self.visual_engine = VisualReasoningEngine(database_interface)
         self.engine_id = f"rule_induction_{uuid.uuid4().hex[:8]}"
     
-    def extract_rule_from_game_session(self, game_session_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def extract_rule_from_game_session(self, game_session_data: Dict[str, Any], 
+                                        skip_if_exists: bool = True) -> Optional[Dict[str, Any]]:
         """
         Extract transferable rule from successful game attempt
+        
+        DEDUPLICATION: By default, skips creating a new rule if one already
+        exists for this game + level + similar action pattern. Different
+        strategies for the same level will still each get their own rules.
         
         Args:
             game_session_data: Complete game session with:
@@ -47,6 +52,7 @@ class RuleInductionEngine:
                 - frame_states (after each action)
                 - won (boolean)
                 - score_achieved
+            skip_if_exists: If True, return existing rule instead of creating duplicate
                 
         Returns:
             Rule dictionary or None if no rule can be extracted
@@ -57,6 +63,43 @@ class RuleInductionEngine:
         
         if not game_session_data.get('initial_frame') or not game_session_data.get('action_sequence'):
             return None
+        
+        # DEDUPLICATION CHECK: Don't create duplicate rules for same game/level/pattern
+        if skip_if_exists:
+            game_id = game_session_data['game_id']
+            level_number = game_session_data.get('level_number', 1)
+            action_sequence = game_session_data['action_sequence']
+            
+            # Create a simple hash of the action sequence for matching
+            # Different sequences = different rules (preserves diversity)
+            action_hash = hash(str(action_sequence)) % 1000000
+            
+            existing = self.db.execute_query("""
+                SELECT rule_id, success_count FROM learned_rules 
+                WHERE source_game_id LIKE ? 
+                ORDER BY success_count DESC LIMIT 5
+            """, (f"{game_id.split('-')[0]}%",))
+            
+            if existing:
+                # Check if any existing rule has a similar action template
+                for rule in existing:
+                    rule_data = self.db.execute_query(
+                        "SELECT action_template FROM learned_rules WHERE rule_id = ?",
+                        (rule['rule_id'],)
+                    )
+                    if rule_data:
+                        try:
+                            existing_template = json.loads(rule_data[0]['action_template'])
+                            existing_hash = hash(str(existing_template.get('action_sequence', []))) % 1000000
+                            if existing_hash == action_hash:
+                                # Similar rule exists - increment success count instead of creating new
+                                self.db.execute_query(
+                                    "UPDATE learned_rules SET success_count = success_count + 1 WHERE rule_id = ?",
+                                    (rule['rule_id'],)
+                                )
+                                return {'rule_id': rule['rule_id'], 'deduplicated': True}
+                        except (json.JSONDecodeError, TypeError):
+                            pass
         
         try:
             # 1. Analyze initial visual state

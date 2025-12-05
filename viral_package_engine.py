@@ -50,21 +50,38 @@ class ViralPackageEngine:
     def create_viral_package_from_sequence(self, 
                                           sequence_id: str,
                                           agent_id: str,
-                                          generation: int) -> Optional[str]:
+                                          generation: int,
+                                          skip_if_exists: bool = True) -> Optional[str]:
         """
         Create a viral package from a winning sequence.
         
         This extracts the successful pattern and packages it as a "virus"
         that can spread to other agents.
         
+        DEDUPLICATION: By default, skips creating a new package if one already
+        exists for this sequence_id. Different sequences for the same level
+        will still each get their own viral package (diversity preserved).
+        
         Args:
             sequence_id: ID of winning sequence to package
             agent_id: Agent who discovered this
             generation: Current generation
+            skip_if_exists: If True, return existing package_id instead of creating duplicate
             
         Returns:
-            package_id if created, None if failed
+            package_id if created/exists, None if failed
         """
+        # DEDUPLICATION CHECK: Don't create duplicate viral packages for same sequence
+        if skip_if_exists:
+            existing = self.db.execute_query(
+                "SELECT package_id FROM viral_information_packages WHERE source_sequence_id = ? AND is_active = 1",
+                (sequence_id,)
+            )
+            if existing:
+                # Package already exists for this sequence - return existing ID
+                # This prevents pollution from 1000x replays of the same sequence
+                return existing[0]['package_id']
+        
         # Get sequence data
         sequence = self.db.execute_query(
             "SELECT * FROM winning_sequences WHERE sequence_id = ?",
