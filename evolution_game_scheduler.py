@@ -36,7 +36,8 @@ class EvolutionGameScheduler:
         self,
         agents: List[Dict],
         total_games_to_play: int,
-        available_game_ids: Optional[List[str]] = None
+        available_game_ids: Optional[List[str]] = None,
+        ensure_game_type_coverage: bool = False
     ) -> Dict[str, List[str]]:
         """
         Assign games to agents, ensuring no duplicate game types running simultaneously.
@@ -45,6 +46,9 @@ class EvolutionGameScheduler:
             agents: List of agent dicts with 'agent_id' and 'mode'
             total_games_to_play: Total number of games to play this generation
             available_game_ids: List of all possible games (if None, queries from DB)
+            ensure_game_type_coverage: If True, ensures one game from each unique game type
+                                       before random assignment (good when total_games_to_play
+                                       equals the number of game types)
             
         Returns:
             Dict mapping agent_id -> list of game_ids to play
@@ -55,6 +59,52 @@ class EvolutionGameScheduler:
         if not available_game_ids:
             print("[WARN]  No games available in database!")
             return {}
+        
+        # ENSURE GAME TYPE COVERAGE: When enabled, make sure each unique game type is played
+        if ensure_game_type_coverage:
+            # Group games by type (prefix before '-')
+            games_by_type: Dict[str, List[str]] = {}
+            for game_id in available_game_ids:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                if game_type not in games_by_type:
+                    games_by_type[game_type] = []
+                games_by_type[game_type].append(game_id)
+            
+            unique_types = len(games_by_type)
+            
+            # If we have fewer/equal games to play than unique types, guarantee one per type
+            if total_games_to_play <= unique_types:
+                # Pick one random game from each type
+                import random
+                coverage_games = []
+                for game_type, type_games in games_by_type.items():
+                    coverage_games.append(random.choice(type_games))
+                
+                # Shuffle and take only what we need
+                random.shuffle(coverage_games)
+                available_game_ids = coverage_games[:total_games_to_play]
+                print(f"[COVERAGE] Ensured {len(available_game_ids)} unique game types: {[g.split('-')[0] for g in available_game_ids]}")
+            else:
+                # More games than types: include one of each type, then fill rest randomly
+                import random
+                coverage_games = []
+                remaining_games = []
+                
+                for game_type, type_games in games_by_type.items():
+                    # One guaranteed from each type
+                    selected = random.choice(type_games)
+                    coverage_games.append(selected)
+                    # Rest go to remaining pool
+                    remaining_games.extend([g for g in type_games if g != selected])
+                
+                # Fill remaining slots randomly
+                extra_needed = total_games_to_play - len(coverage_games)
+                if extra_needed > 0 and remaining_games:
+                    random.shuffle(remaining_games)
+                    coverage_games.extend(remaining_games[:extra_needed])
+                
+                available_game_ids = coverage_games
+                print(f"[COVERAGE] Ensured {unique_types} game types covered + {extra_needed} extra games")
         
         # Calculate games per agent
         if total_games_to_play <= len(agents):

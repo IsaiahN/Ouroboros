@@ -66,7 +66,8 @@ def main():
             'initial_population_size': 8,
             'games_per_generation': 6,  # All 6 currently available games
             'evolution_interval_minutes': 30,
-            'max_generations': 30
+            'max_generations': 30,
+            'ensure_game_type_coverage': True  # Force one game per unique type
         }
     elif args.thorough:
         print(">> THOROUGH MODE - Deep evaluation")
@@ -114,6 +115,8 @@ def main():
         print(f"  Diversity Mode: ENABLED (generalization focus)")
     if args.specialist:
         print(f"  Specialist Mode: ENABLED (deep mastery focus)")
+    if config.get('ensure_game_type_coverage'):
+        print(f"  Game Type Coverage: ENABLED (one game per type guaranteed)")
     print(f"{'='*60}\n")
     
     # Add diversity mode to config if requested

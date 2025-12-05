@@ -91,7 +91,8 @@ class AutonomousEvolutionRunner:
         health_check_interval: int = 10,
         agi_mode: bool = False,  # Enable diversity-focused evolution
         specialist_mode: bool = False,  # NEW: Enable specialist-focused evolution
-        skip_cleanup: bool = False  # Skip database cleanup on startup (for test mode)
+        skip_cleanup: bool = False,  # Skip database cleanup on startup (for test mode)
+        ensure_game_type_coverage: bool = False  # Force one game per unique game type
     ):
         """
         Initialize autonomous runner.
@@ -105,6 +106,7 @@ class AutonomousEvolutionRunner:
             health_check_interval: Games between health checks
             agi_mode: Enable diversity-focused generalization and anti-overfitting
             specialist_mode: Enable specialist-focused deep mastery (NEW)
+            ensure_game_type_coverage: Force one game per unique game type (good when games_per_gen = num_types)
         """
         self.db = DatabaseInterface(db_path)
         self.coordinator = OuroborosCoordinator(self.db)
@@ -170,6 +172,7 @@ class AutonomousEvolutionRunner:
         self.agi_mode = agi_mode  # Diversity mode flag
         self.specialist_mode = specialist_mode  # NEW: Specialist mode flag
         self.skip_cleanup = skip_cleanup  # Skip database cleanup on startup
+        self.ensure_game_type_coverage = ensure_game_type_coverage  # Force one game per type
         
         self.current_generation = 0
         self.total_games_played = 0
@@ -979,7 +982,8 @@ class AutonomousEvolutionRunner:
                 game_assignments = self.game_scheduler.assign_games_to_agents(
                     agents=agents_with_modes,
                     total_games_to_play=num_games,
-                    available_game_ids=game_ids
+                    available_game_ids=game_ids,
+                    ensure_game_type_coverage=self.ensure_game_type_coverage
                 )
                 
                 if not game_assignments:
