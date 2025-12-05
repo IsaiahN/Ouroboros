@@ -64,7 +64,7 @@ def main():
         print(">> FAST MODE - Quick iterations")
         config = {
             'initial_population_size': 8,
-            'games_per_generation': 5,  # REDUCED: 10 -> 5 for faster cycles
+            'games_per_generation': 6,  # All 6 currently available games
             'evolution_interval_minutes': 30,
             'max_generations': 30
         }
