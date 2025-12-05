@@ -4,6 +4,10 @@ Following Rule 3: Clean integration with existing codebase
 Rule 7: All agents use real ARC actions through existing ActionHandler
 Phase 4.5: Enhanced with sensation-based navigation for emotional intelligence
 """
+import os
+import sys
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+sys.dont_write_bytecode = True
 
 import json
 import uuid
