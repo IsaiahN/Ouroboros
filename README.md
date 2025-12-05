@@ -124,3 +124,4 @@ The system includes autonomous maintenance to ensure long-term stability:
 -   **Shutdown**: Press `Ctrl+C` ONCE for graceful shutdown (saves state & closes scorecard(s)).
 
 ---
+<img width="1325" height="545" alt="image" src="https://github.com/user-attachments/assets/f8b00168-0c93-4161-bc3d-88faa1689ce7" />
