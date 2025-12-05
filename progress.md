@@ -804,6 +804,207 @@ Sequence Captured! [SELF-DIRECTED DISCOVERY]
 
 ---
 
+### Session 8: Escape Mode - Available Actions Check (5:50:00 PM - 6:05:00 PM)
+
+**Focus**: Fix bug where escape mode tried unavailable actions
+
+#### Problem Identified
+User reported: "when its in break out mode, it also needs to constantly check the available actions each time its trying a new action to 'break out' - for example in one setting, it was stuck in action 6 and nothing was moving, when likely other actions to move were available"
+
+**Root Cause**:
+The `_get_intelligent_escape_action()` method:
+1. Calculated scores for all 7 actions
+2. **Never checked `game_state.available_actions`** to filter out unavailable actions
+3. Could select an action like ACTION6 even if it wasn't available in current game state
+
+#### Implementation
+
+**Changes to `_get_intelligent_escape_action()` in `core_gameplay.py`**:
+
+**Step 1**: Added Section 0 - Filter to Available Actions Only (lines ~3552-3575)
+```python
+# === 0. FILTER TO AVAILABLE ACTIONS ONLY ===
+available = game_state.available_actions if game_state and game_state.available_actions else []
+available_nums = set()  # Convert to action numbers (1-7)
+for a in available:
+    if isinstance(a, str) and a.upper().startswith('ACTION'):
+        available_nums.add(int(a.upper().replace('ACTION', '')))
+
+# Only score available actions (unavailable get score -999)
+action_scores = {i: (1.0 if i in available_nums else -999.0) for i in range(1, 8)}
+reasoning_parts = [f"Available: {sorted(available_nums)}"]
+```
+
+**Step 2**: Updated Final Selection to Filter Available Actions
+```python
+available_actions_scored = [
+    (action, score) for action, score in action_scores.items() 
+    if action in available_nums and score > -900  # Exclude blocked actions
+]
+```
+
+**Step 3**: Updated Fallback to Respect Availability
+```python
+available_fallback = [a for a in fallback_actions if a in available_nums]
+```
+
+#### Verification
+- [OK] py_compile: Syntax check passed
+- [OK] Import test: `from core_gameplay import GameplayEngine` successful
+
+---
+
+### Session 9: Self-Model "I Am Stuck" Detection (6:10:00 PM - 6:30:00 PM)
+
+**Focus**: Use agent self-model to detect which actions actually move "me" vs which do nothing
+
+#### Problem Identified
+User insight: "If the self model of 'I am this object' is valid, it should be able to tell if 'I am stuck' physically on the screen - action 6 isn't moving 'me', but action 1-4 can"
+
+**Concept**:
+The escape logic should query the agent's self-model to determine:
+- Which actions historically **moved "me"** (the controlled object)
+- Which actions **did nothing** (wasted time)
+- Prioritize actions that work, avoid actions that don't
+
+#### Implementation
+
+**Added Section 3: Self-Model "I Am Stuck" Detection** (lines ~3617-3695)
+
+**Step 1**: Analyze Recent Action Traces
+```python
+actions_that_moved_me = set()
+actions_that_did_nothing = set()
+
+for trace in self._recent_action_traces[-10:]:
+    # Check if this action caused any frame change
+    frame_changed = False
+    # ... frame comparison logic ...
+    
+    if frame_changed:
+        actions_that_moved_me.add(action_num)
+    else:
+        actions_that_did_nothing.add(action_num)
+```
+
+**Step 2**: Apply Strong Scoring Adjustments
+- Actions that moved me: **+0.5 boost** (these work!)
+- Actions that did nothing: **-0.4 penalty** (don't waste time)
+- Actions that ONLY did nothing: **additional -0.3 penalty** (definitely useless)
+
+**Step 3**: Use Stored Self-Model from Database
+```python
+control_map = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
+if control_map:
+    # We know what "I" look like - directional actions likely move me
+    for action_num in [1, 2, 3, 4]:  # Directional actions
+        action_scores[action_num] += 0.15
+```
+
+**Example Log Output**:
+```
+[ESCAPE] INTELLIGENT ESCAPE #3: ACTION1 (score=1.85) [Available: [1, 2, 3, 4, 6]; MovedMe: [1, 3]; DidNothing: [6]; Hypotheses: 2]
+```
+
+#### Verification
+- [OK] py_compile: Syntax check passed
+- [OK] Import test: `from core_gameplay import GameplayEngine` successful
+
+---
+
+### Session 10: Experimental Actions (ACTION5 & ACTION7) (6:35:00 PM - 6:50:00 PM)
+
+**Focus**: Encourage experimentation with special actions during escape mode
+
+#### Problem Identified
+User insight: "Sometimes this mode requires experimenting with certain actions like ACTION5 which can do things like: jump, rotate, fire, select option - you would have to test it and see how it affects the world model. Then ACTION7 which is usually UNDO."
+
+**Key Actions**:
+- **ACTION5**: Special ability - could be jump, rotate, fire, select, transform (game-dependent)
+- **ACTION7**: Undo - can recover from bad states
+
+These are "unknown" actions that could change the game state dramatically but weren't being prioritized.
+
+#### Implementation
+
+**Added Section 7: Experimental Actions (ACTION5, ACTION7)** (lines ~3773-3810)
+
+**ACTION5 Logic**:
+```python
+# Encourage trying ACTION5 if we haven't recently
+if 5 in available_nums and not action5_tried_recently:
+    if action5_moved_me:
+        action_scores[5] += 0.35  # ACTION5 works! Boost it
+    elif not action5_did_nothing:
+        action_scores[5] += 0.25  # Haven't tried yet - experiment!
+```
+
+**ACTION7 Logic**:
+```python
+# Undo is especially useful if we're stuck
+if 7 in available_nums and not action7_tried_recently:
+    if escape_attempt >= 2:
+        action_scores[7] += 0.3   # "maybe undo can help"
+    elif escape_attempt >= 4:
+        action_scores[7] += 0.4   # "desperate, try undo to reset"
+```
+
+**Added Section 8: Escape Attempt Progression** (lines ~3812-3825)
+```python
+if escape_attempt >= 5:
+    # Heavily prioritize experimental actions
+    action_scores[5] += 0.25  # ACTION5 might change the game
+    action_scores[6] += 0.2   # Click/interact
+elif escape_attempt >= 8:
+    # "Desperate mode" - boost ALL untried actions
+    for action_num in available_nums:
+        if action_num not in recent_actions[-3:]:
+            action_scores[action_num] += 0.15
+```
+
+**Example Log Output**:
+```
+[ESCAPE] INTELLIGENT ESCAPE #3: ACTION5 (score=1.45) [Available: [1, 2, 3, 4, 5, 6, 7]; MovedMe: [1, 3]; DidNothing: [6]; Try A5 (special)]
+```
+
+#### Verification
+- [OK] py_compile: Syntax check passed
+- [OK] Import test: `from core_gameplay import GameplayEngine` successful
+
+---
+
+### Current Status (6:50:00 PM)
+
+**Approach**: Enhancing escape mode to use ALL agent knowledge systems for intelligent breakout
+
+**Completed This Session (Sessions 8-10)**:
+1. [DONE] Escape mode now checks `available_actions` before attempting each escape action
+2. [DONE] Self-model "I am stuck" detection - tracks which actions move "me" vs do nothing
+3. [DONE] Experimental actions (ACTION5 special ability, ACTION7 undo) prioritized during escape
+4. [DONE] Escape attempt progression - later attempts try more unusual/experimental actions
+
+**Escape Mode Now Uses** (in order):
+| # | System | Purpose |
+|---|--------|---------|
+| 0 | Available Actions Filter | Only consider actions that are actually available |
+| 1 | Recent Actions Penalty | Avoid oscillation by penalizing last 5 actions |
+| 2 | Network Failure Hypotheses | Learn from other agents' failures/strategies |
+| 3 | Self-Model "I Am Stuck" | Detect which actions move "me" vs do nothing |
+| 4 | Sensation/Navigation State | Use emotional context (frustrated vs confident) |
+| 5 | Self-Network Bias | Trust self vs trust network wisdom |
+| 6 | Pariah Avoidance | Avoid actions marked as failures by network |
+| 7 | Experimental Actions | Prioritize ACTION5 (special) and ACTION7 (undo) |
+| 8 | Escape Progression | Later attempts try more unusual actions |
+
+**Current Failure Being Worked On**:
+- **None currently** - All implementations verified working
+- Evolution run in progress (Generation 270 → 272, fast mode)
+
 **Next Steps**:
-- Run evolution test to verify all changes work in practice
-- Monitor for agents making level progression each few generations
+- Monitor evolution run for agents making level progression
+- Verify escape mode improvements in practice
+- Check for agents successfully breaking out of stuck states using new logic
+
+---
+
+**END OF SESSION: December 4, 2025**

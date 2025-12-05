@@ -3548,8 +3548,30 @@ class GameplayEngine:
         Returns:
             Tuple of (action_number, reasoning_string)
         """
-        action_scores = {i: 1.0 for i in range(1, 8)}  # Default score 1.0 for all actions
-        reasoning_parts = []
+        # === 0. FILTER TO AVAILABLE ACTIONS ONLY ===
+        # Critical: Only consider actions that are actually available in current state
+        available = game_state.available_actions if game_state and game_state.available_actions else []
+        if not available:
+            # Fallback if no available actions info - assume all except ACTION7 (submit)
+            available = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION6']
+        
+        # Convert to action numbers (1-7)
+        available_nums = set()
+        for a in available:
+            if isinstance(a, str) and a.upper().startswith('ACTION'):
+                try:
+                    available_nums.add(int(a.upper().replace('ACTION', '')))
+                except ValueError:
+                    pass
+            elif isinstance(a, int):
+                available_nums.add(a)
+        
+        if not available_nums:
+            available_nums = {1, 2, 3, 4, 5, 6}  # Default fallback
+        
+        # Only score available actions (unavailable get score -999)
+        action_scores = {i: (1.0 if i in available_nums else -999.0) for i in range(1, 8)}
+        reasoning_parts = [f"Available: {sorted(available_nums)}"]
         
         try:
             # === 1. PENALIZE RECENT ACTIONS (avoid oscillation) ===
@@ -3592,7 +3614,93 @@ class GameplayEngine:
             except Exception:
                 pass
             
-            # === 3. SENSATION/NAVIGATION STATE ===
+            # === 3. SELF-MODEL: "I AM STUCK" DETECTION ===
+            # Check which actions actually moved "me" vs which did nothing
+            # This is the core "I am this object" self-awareness
+            try:
+                actions_that_moved_me = set()
+                actions_that_did_nothing = set()
+                
+                if hasattr(self, '_recent_action_traces') and self._recent_action_traces:
+                    for trace in self._recent_action_traces[-10:]:
+                        action_type = trace.get('action_type', '')
+                        frame_before = trace.get('frame_before')
+                        frame_after = trace.get('frame_after')
+                        
+                        # Extract action number
+                        action_num = None
+                        if isinstance(action_type, str) and action_type.upper().startswith('ACTION'):
+                            try:
+                                action_num = int(action_type.upper().replace('ACTION', ''))
+                            except ValueError:
+                                pass
+                        elif isinstance(action_type, int):
+                            action_num = action_type
+                        
+                        if action_num is None:
+                            continue
+                        
+                        # Check if this action caused any frame change
+                        frame_changed = False
+                        if frame_before and frame_after:
+                            # Compare frames for any change
+                            if isinstance(frame_before, list) and isinstance(frame_after, list):
+                                for y in range(min(len(frame_before), len(frame_after))):
+                                    if not isinstance(frame_before[y], (list, tuple)):
+                                        continue
+                                    if not isinstance(frame_after[y], (list, tuple)):
+                                        continue
+                                    for x in range(min(len(frame_before[y]), len(frame_after[y]))):
+                                        if frame_before[y][x] != frame_after[y][x]:
+                                            frame_changed = True
+                                            break
+                                    if frame_changed:
+                                        break
+                        
+                        if frame_changed:
+                            actions_that_moved_me.add(action_num)
+                        else:
+                            actions_that_did_nothing.add(action_num)
+                    
+                    # CRITICAL INSIGHT: If we're in escape mode, "I" am stuck
+                    # Strongly boost actions that historically moved me
+                    # Strongly penalize actions that did nothing (like ACTION6 if it never moves me)
+                    if actions_that_moved_me:
+                        for action_num in actions_that_moved_me:
+                            if action_num in action_scores and action_num in available_nums:
+                                action_scores[action_num] += 0.5  # Strong boost
+                        reasoning_parts.append(f"MovedMe: {sorted(actions_that_moved_me)}")
+                    
+                    if actions_that_did_nothing:
+                        for action_num in actions_that_did_nothing:
+                            if action_num in action_scores:
+                                action_scores[action_num] -= 0.4  # Strong penalty
+                        # Only add to reasoning if we found stuck-inducing actions
+                        stuck_actions = actions_that_did_nothing - actions_that_moved_me
+                        if stuck_actions:
+                            reasoning_parts.append(f"DidNothing: {sorted(stuck_actions)}")
+                    
+                    # If an action is ONLY in "did nothing" category, heavily penalize
+                    # This is the "ACTION6 is useless for movement" detection
+                    pure_stuck_actions = actions_that_did_nothing - actions_that_moved_me
+                    for action_num in pure_stuck_actions:
+                        if action_num in action_scores:
+                            action_scores[action_num] -= 0.3  # Additional penalty for pure non-movers
+                
+                # Also check stored self-model from database
+                if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+                    control_map = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
+                    if control_map:
+                        # We know what "I" look like - directional actions likely move me
+                        for action_num in [1, 2, 3, 4]:  # Directional actions
+                            if action_num in action_scores and action_num in available_nums:
+                                action_scores[action_num] += 0.15
+                        reasoning_parts.append(f"SelfModel: {len(control_map)} objects")
+                        
+            except Exception as e:
+                logger.debug(f"Self-model escape check failed: {e}")
+            
+            # === 4. SENSATION/NAVIGATION STATE ===
             if agent_id and self.sensation_engine:
                 try:
                     nav_result = self.db.execute_query(
@@ -3628,7 +3736,7 @@ class GameplayEngine:
                 except Exception:
                     pass
             
-            # === 4. SELF-NETWORK BIAS ===
+            # === 5. SELF-NETWORK BIAS ===
             if agent_id:
                 try:
                     bias_result = self.db.execute_query(
@@ -3649,7 +3757,7 @@ class GameplayEngine:
                 except Exception:
                     pass
             
-            # === 5. PARIAH AVOIDANCE ===
+            # === 6. PARIAH AVOIDANCE ===
             try:
                 from viral_package_engine import ViralPackageEngine
                 viral_engine = ViralPackageEngine(self.db)
@@ -3663,19 +3771,79 @@ class GameplayEngine:
             except Exception:
                 pass
             
-            # === 6. ESCAPE ATTEMPT PROGRESSION ===
-            # Later attempts should try more "unusual" actions
-            if escape_attempt >= 3:
-                # Boost ACTION6 (click) and ACTION7 (submit) for later attempts
-                action_scores[6] += 0.2
-                action_scores[7] += 0.15
-                reasoning_parts.append("Late escape: try unusual")
+            # === 7. EXPERIMENTAL ACTIONS (ACTION5, ACTION7) ===
+            # ACTION5 = Special ability (jump, rotate, fire, select, transform)
+            # ACTION7 = Undo (can recover from bad states)
+            # These are "unknown" actions that could change game state dramatically
+            # Track whether we've tried them recently to encourage experimentation
             
-            # === SELECT BEST ACTION ===
-            # Sort by score, pick the best (with small random tiebreaker)
+            action5_tried_recently = False
+            action7_tried_recently = False
+            
+            if recent_actions:
+                action5_tried_recently = 5 in recent_actions[-5:]
+                action7_tried_recently = 7 in recent_actions[-5:]
+            
+            # Encourage trying ACTION5 if we haven't recently
+            # It might: rotate object, jump, fire, select different object, transform
+            if 5 in available_nums and not action5_tried_recently:
+                # Check if ACTION5 has ever moved "me" in this session
+                action5_moved_me = 5 in actions_that_moved_me if 'actions_that_moved_me' in dir() else False
+                action5_did_nothing = 5 in actions_that_did_nothing if 'actions_that_did_nothing' in dir() else False
+                
+                if action5_moved_me:
+                    # ACTION5 works! Boost it
+                    action_scores[5] += 0.35
+                    reasoning_parts.append("A5 works!")
+                elif not action5_did_nothing:
+                    # Haven't tried ACTION5 yet - experiment!
+                    action_scores[5] += 0.25
+                    reasoning_parts.append("Try A5 (special)")
+                # If ACTION5 did nothing, it keeps its penalty from section 3
+            
+            # Encourage trying ACTION7 (UNDO) if stuck
+            # Undo can help recover from bad positions
+            if 7 in available_nums and not action7_tried_recently:
+                # Undo is especially useful if we're stuck and nothing is working
+                if escape_attempt >= 2:
+                    action_scores[7] += 0.3
+                    reasoning_parts.append("Try A7 (undo)")
+                elif escape_attempt >= 4:
+                    # Really stuck - undo might help reset to a better state
+                    action_scores[7] += 0.4
+                    reasoning_parts.append("A7 undo (desperate)")
+            
+            # === 8. ESCAPE ATTEMPT PROGRESSION ===
+            # Later attempts should try more "unusual" actions (if available)
+            if escape_attempt >= 5:
+                # After 5 attempts, heavily prioritize experimental actions
+                if 5 in available_nums:
+                    action_scores[5] += 0.25  # ACTION5 might change the game
+                if 6 in available_nums:
+                    action_scores[6] += 0.2   # Click/interact
+                reasoning_parts.append("Late escape: experiment")
+            elif escape_attempt >= 8:
+                # Very late - try everything we haven't
+                for action_num in available_nums:
+                    if action_num not in recent_actions[-3:]:
+                        action_scores[action_num] += 0.15
+                reasoning_parts.append("Desperate: try all untried")
+            
+            # === SELECT BEST ACTION (MUST BE AVAILABLE) ===
+            # Filter to only available actions, then sort by score
             import random
+            available_actions_scored = [
+                (action, score) for action, score in action_scores.items() 
+                if action in available_nums and score > -900  # Exclude blocked actions
+            ]
+            
+            if not available_actions_scored:
+                # No available actions - this shouldn't happen, but fallback
+                logger.warning(f"[ESCAPE] No available actions found! Available: {available_nums}")
+                return 1, f"ESCAPE #{escape_attempt}: ACTION1 (no available actions)"
+            
             sorted_actions = sorted(
-                action_scores.items(), 
+                available_actions_scored, 
                 key=lambda x: (x[1] + random.uniform(0, 0.05)), 
                 reverse=True
             )
@@ -3691,10 +3859,17 @@ class GameplayEngine:
             
         except Exception as e:
             # Fallback to simple escape sequence if intelligent selection fails
+            # BUT still respect available actions
             logger.debug(f"Intelligent escape failed, using fallback: {e}")
             fallback_actions = [5, 6, 7, 1, 2, 3, 4]
-            fallback_action = fallback_actions[(escape_attempt - 1) % len(fallback_actions)]
-            return fallback_action, f"ESCAPE #{escape_attempt}: ACTION{fallback_action} (fallback)"
+            
+            # Filter fallback to available actions
+            available_fallback = [a for a in fallback_actions if a in available_nums] if available_nums else fallback_actions
+            if not available_fallback:
+                available_fallback = [1]  # Ultimate fallback
+            
+            fallback_action = available_fallback[(escape_attempt - 1) % len(available_fallback)]
+            return fallback_action, f"ESCAPE #{escape_attempt}: ACTION{fallback_action} (fallback, available: {sorted(available_nums)})"
     
     def _build_self_model_context(self, agent_id: Optional[str], game_id: str, level: int) -> Dict[str, Any]:
         """Build self-model context for reasoning JSON.
