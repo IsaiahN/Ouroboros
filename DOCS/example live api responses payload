@@ -1,0 +1,610 @@
+example 1: 
+
+Frame 255
+{
+  "action": "ACTION5",
+  "reasoning": "Network hypotheses (3 insights, 0 validated)",
+  "level": 2,
+  "score": 1,
+  "timestamp": "2025-12-04T23:08:28.242148",
+  "agent_id": "offspring_5575133e",
+  "agent_mode": "pioneer",
+  "generation": 271,
+  "self_model": {
+    "objects_agent_controls": [
+      "x:0,y:0",
+      "x:1,y:0",
+      "x:2,y:0",
+      "x:3,y:0",
+      "x:4,y:0",
+      "x:5,y:0",
+      "x:6,y:0",
+      "x:7,y:0",
+      "x:8,y:0",
+      "x:9,y:0"
+    ],
+    "control_confidence": 1,
+    "object_dependencies": [],
+    "network_control_hypotheses": [
+      {
+        "id": "oc_sp80_L2_534d9326",
+        "controlled": [
+          "x:0,y:0",
+          "x:0,y:1",
+          "x:0,y:10",
+          "x:0,y:11",
+          "x:0,y:12"
+        ],
+        "reliability": 1,
+        "validated_by_win": 0
+      },
+      {
+        "id": "oc_sp80_L2_356bf247",
+        "controlled": [
+          "x:0,y:0",
+          "x:0,y:1",
+          "x:0,y:10",
+          "x:0,y:11",
+          "x:0,y:12"
+        ],
+        "reliability": 1,
+        "validated_by_win": 0
+      },
+      {
+        "id": "oc_sp80_L2_bd1c5f59",
+        "controlled": [
+          "x:0,y:0",
+          "x:0,y:1",
+          "x:0,y:10",
+          "x:0,y:11",
+          "x:0,y:12"
+        ],
+        "reliability": 0.71,
+        "validated_by_win": 0
+      }
+    ]
+  },
+  "world_model": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-0 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-0 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-0 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "self_reflection": {
+    "emotional_network": 0.5,
+    "semantic_network": 0.5,
+    "identity_network": 0.289,
+    "private_memory": 0.3,
+    "network_wisdom": 0.3,
+    "self_trust_bias": 0.9,
+    "decision_weight": 0.3,
+    "conflict": false,
+    "emotion": "neutral",
+    "narrative": "Neutral | bias=0.90 | trusting self"
+  },
+  "emergent_reasoning": {
+    "q1_change_vs_fixed": {
+      "actions_that_changed_state": [],
+      "actions_with_no_effect": [
+        1,
+        3,
+        4,
+        5,
+        6
+      ],
+      "invariant_positions": 4096,
+      "variable_positions": 0,
+      "confidence": 0.8999999999999999,
+      "insight": "No actions observed to change state yet"
+    },
+    "q2_reward_punishment": {
+      "dangerous_objects": [],
+      "rewarding_objects": [],
+      "neutral_objects": [],
+      "emotional_state": "neutral",
+      "navigation_state": 0,
+      "confidence": 0.3,
+      "insight": "No strong impressions yet. Feeling neutral."
+    },
+    "q3_salient_target": {
+      "most_salient": "rare_color_4",
+      "salience_score": 0.88,
+      "salience_reason": "Rare color (only 0.6% of frame)",
+      "planned_interaction": "Consider ACTION6 at position (2, 29)",
+      "ranked_targets": [
+        {
+          "type": "rare_color_4",
+          "salience": 0.88
+        },
+        {
+          "type": "center_region",
+          "salience": 0.7
+        },
+        {
+          "type": "rare_color_8",
+          "salience": 0.45
+        }
+      ],
+      "confidence": 0.8828125,
+      "insight": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))"
+    },
+    "q4_working_theory": {
+      "working_hypothesis": "ACTION6 tends to help on this level",
+      "hypothesis_source": "network_failure_hypotheses",
+      "evidence_for": 4,
+      "evidence_against": 0,
+      "transferable": true,
+      "action_recommendations": {
+        "ACTION6": "recommended"
+      },
+      "confidence": 1,
+      "insight": "Theory: ACTION6 tends to help on this level (from network_failure_hypotheses, confidence: 1.0)"
+    },
+    "q7_familiarity": {
+      "current_level": 2,
+      "network_max_level": 1,
+      "is_frontier": true,
+      "familiarity": "frontier",
+      "insight": "Level 2 is FRONTIER (novel)"
+    },
+    "q5_goal_variables": {
+      "actions_with_score_increase": [],
+      "actions_causing_game_over": [],
+      "score_increasing_patterns": [],
+      "terminal_patterns": [],
+      "goal_insight": "No recent score changes or game-overs detected",
+      "confidence": 0.3
+    }
+  },
+  "strategy": "balanced",
+  "learning_mode": "smart_exploration"
+}
+
+
+
+Example 2: 
+Frame 135
+{
+  "action": "ACTION6",
+  "reasoning": "Network hypothesis supports (bias: 0.45)",
+  "level": 2,
+  "score": 1,
+  "timestamp": "2025-12-04T23:10:43.453305",
+  "agent_id": "offspring_6478fc5b",
+  "agent_mode": "pioneer",
+  "generation": 271,
+  "self_model": {
+    "objects_agent_controls": [
+      "x:0,y:0",
+      "x:1,y:0",
+      "x:2,y:0",
+      "x:3,y:0",
+      "x:4,y:0",
+      "x:5,y:0",
+      "x:6,y:0",
+      "x:7,y:0",
+      "x:8,y:0",
+      "x:9,y:0"
+    ],
+    "control_confidence": 0.5777777777777777,
+    "object_dependencies": [],
+    "network_control_hypotheses": [
+      {
+        "id": "oc_ft09_L2_d42c4043",
+        "controlled": [
+          "x:0,y:0",
+          "x:0,y:1",
+          "x:0,y:2",
+          "x:0,y:3",
+          "x:0,y:4"
+        ],
+        "reliability": 1,
+        "validated_by_win": 0
+      },
+      {
+        "id": "oc_ft09_L2_d19117fc",
+        "controlled": [
+          "x:0,y:0",
+          "x:0,y:1",
+          "x:0,y:2",
+          "x:0,y:3",
+          "x:0,y:4"
+        ],
+        "reliability": 0.75,
+        "validated_by_win": 0
+      }
+    ]
+  },
+  "world_model": {
+    "obstacles": [
+      {
+        "position": [
+          31,
+          0
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          3,
+          31
+        ],
+        "color": 3
+      },
+      {
+        "position": [
+          31,
+          63
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          32,
+          34
+        ],
+        "color": 4
+      },
+      {
+        "position": [
+          9,
+          59
+        ],
+        "color": 9
+      }
+    ],
+    "goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-0 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-0 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-0 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "self_reflection": {
+    "emotional_network": 0.5,
+    "semantic_network": 0.5,
+    "identity_network": 0.288,
+    "private_memory": 0.3,
+    "network_wisdom": 0.3,
+    "self_trust_bias": 0.5,
+    "decision_weight": 0.3,
+    "conflict": false,
+    "emotion": "neutral",
+    "narrative": "Neutral | bias=0.50 | balanced"
+  },
+  "emergent_reasoning": {
+    "q1_change_vs_fixed": {
+      "actions_that_changed_state": [],
+      "actions_with_no_effect": [
+        6
+      ],
+      "invariant_positions": 4096,
+      "variable_positions": 0,
+      "confidence": 0.8999999999999999,
+      "insight": "No actions observed to change state yet"
+    },
+    "q2_reward_punishment": {
+      "dangerous_objects": [],
+      "rewarding_objects": [],
+      "neutral_objects": [],
+      "emotional_state": "neutral",
+      "navigation_state": 0,
+      "confidence": 0.3,
+      "insight": "No strong impressions yet. Feeling neutral."
+    },
+    "q3_salient_target": {
+      "most_salient": "rare_color_14",
+      "salience_score": 0.94,
+      "salience_reason": "Rare color (only 0.3% of frame)",
+      "planned_interaction": "Consider ACTION6 at position (31, 2)",
+      "ranked_targets": [
+        {
+          "type": "rare_color_14",
+          "salience": 0.94
+        },
+        {
+          "type": "rare_color_2",
+          "salience": 0.77
+        },
+        {
+          "type": "center_region",
+          "salience": 0.7
+        }
+      ],
+      "confidence": 0.9,
+      "insight": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))"
+    },
+    "q4_working_theory": {
+      "working_hypothesis": "ACTION6 tends to help on this level",
+      "hypothesis_source": "network_failure_hypotheses",
+      "evidence_for": 4,
+      "evidence_against": 0,
+      "transferable": true,
+      "action_recommendations": {
+        "ACTION6": "recommended"
+      },
+      "confidence": 1,
+      "insight": "Theory: ACTION6 tends to help on this level (from network_failure_hypotheses, confidence: 1.0)"
+    },
+    "q7_familiarity": {
+      "current_level": 2,
+      "network_max_level": 2,
+      "is_frontier": false,
+      "familiarity": "familiar",
+      "insight": "Level 2 is familiar (network reached L2)"
+    },
+    "q5_goal_variables": {
+      "actions_with_score_increase": [],
+      "actions_causing_game_over": [],
+      "score_increasing_patterns": [],
+      "terminal_patterns": [],
+      "goal_insight": "No recent score changes or game-overs detected",
+      "confidence": 0.3
+    }
+  },
+  "strategy": "balanced",
+  "learning_mode": "smart_exploration",
+  "coordinate": {
+    "x": 15,
+    "y": 44
+  },
+  "visual_reason": "Pseudo-button pathfinding: Combination point between oscillating targets"
+}
+
+example 4: 
+Frame 418
+{
+  "action": "ACTION6",
+  "reasoning": "Neutral state (nav: -0.00) - avoiding negative bias (bias: -1.00)",
+  "level": 4,
+  "score": 2,
+  "timestamp": "2025-12-04T23:18:19.537556",
+  "agent_id": "offspring_19ebaf88",
+  "agent_mode": "generalist",
+  "generation": 271,
+  "self_model": {
+    "objects_agent_controls": [],
+    "control_confidence": 0,
+    "object_dependencies": [],
+    "network_control_hypotheses": []
+  },
+  "world_model": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          22,
+          35
+        ],
+        "color": 2
+      },
+      {
+        "position": [
+          29,
+          25
+        ],
+        "color": 5
+      },
+      {
+        "position": [
+          53,
+          25
+        ],
+        "color": 5
+      },
+      {
+        "position": [
+          47,
+          43
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "agent_position": [
+      4,
+      7
+    ],
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "level": 3,
+        "failure": "Game state frozen on level 3. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-2 are solvable. Focus exploration on level 3.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "level": 3,
+        "failure": "Game state frozen on level 3. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-2 are solvable. Focus exploration on level 3.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "level": 4,
+        "failure": "Game state frozen on level 4. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-2 are solvable. Focus exploration on level 4.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "self_reflection": {
+    "emotional_network": 0.5,
+    "semantic_network": 0.5,
+    "identity_network": 0.275,
+    "private_memory": 0.3,
+    "network_wisdom": 0.3,
+    "self_trust_bias": 0.5,
+    "decision_weight": 0.3,
+    "conflict": false,
+    "emotion": "neutral",
+    "narrative": "Neutral | bias=0.50 | balanced"
+  },
+  "emergent_reasoning": {
+    "q1_change_vs_fixed": {
+      "actions_that_changed_state": [],
+      "actions_with_no_effect": [
+        6
+      ],
+      "invariant_positions": 4096,
+      "variable_positions": 0,
+      "confidence": 0.8999999999999999,
+      "insight": "No actions observed to change state yet"
+    },
+    "q2_reward_punishment": {
+      "dangerous_objects": [],
+      "rewarding_objects": [],
+      "neutral_objects": [
+        "multi_color_pattern",
+        "complex_color_pattern",
+        "dense_pattern",
+        "large_grid"
+      ],
+      "emotional_state": "neutral",
+      "navigation_state": 0,
+      "confidence": 0.3,
+      "insight": "No strong impressions yet. Feeling neutral."
+    },
+    "q3_salient_target": {
+      "most_salient": "rare_color_11",
+      "salience_score": 1,
+      "salience_reason": "Rare color (only 0.0% of frame)",
+      "planned_interaction": "Consider ACTION6 at position (4, 19)",
+      "ranked_targets": [
+        {
+          "type": "rare_color_11",
+          "salience": 1
+        },
+        {
+          "type": "rare_color_8",
+          "salience": 0.84
+        },
+        {
+          "type": "rare_color_9",
+          "salience": 0.84
+        }
+      ],
+      "confidence": 0.9,
+      "insight": "Most salient: rare_color_11 (Rare color (only 0.0% of frame))"
+    },
+    "q4_working_theory": {
+      "working_hypothesis": "Exploring 4 objects on level 3",
+      "hypothesis_source": "in_game_observation",
+      "evidence_for": 0,
+      "evidence_against": 0,
+      "transferable": false,
+      "action_recommendations": {},
+      "confidence": 0.3,
+      "insight": "Exploring: Exploring 4 objects on level 3"
+    },
+    "q7_familiarity": {
+      "current_level": 3,
+      "network_max_level": 3,
+      "is_frontier": false,
+      "familiarity": "familiar",
+      "insight": "Level 3 is familiar (network reached L3)"
+    },
+    "q5_goal_variables": {
+      "actions_with_score_increase": [],
+      "actions_causing_game_over": [],
+      "score_increasing_patterns": [],
+      "terminal_patterns": [],
+      "goal_insight": "No recent score changes or game-overs detected",
+      "confidence": 0.3
+    }
+  },
+  "strategy": "balanced",
+  "learning_mode": "smart_exploration",
+  "coordinate": {
+    "x": 19,
+    "y": 4
+  },
+  "visual_reason": "Rare color 11 (1 pixels)"
+}

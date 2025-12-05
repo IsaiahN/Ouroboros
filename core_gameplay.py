@@ -2628,6 +2628,7 @@ class GameplayEngine:
         # Build the cognitive loop that surfaces in API payload reasoning
         # This enables agents to "think out loud" with structured intelligence
         # ===================================================================
+        emergent_reasoning = None
         try:
             emergent_reasoning = self._build_emergent_reasoning_context(
                 agent_id=agent_id,
@@ -2654,6 +2655,144 @@ class GameplayEngine:
         except Exception as e:
             logger.debug(f"Emergent reasoning build error: {e}")
             self._last_emergent_reasoning = None
+        
+        # ===================================================================
+        # DM-1 to DM-6: DECISION-MAKING INTEGRATIONS
+        # Use the emergent reasoning data to influence action selection
+        # ===================================================================
+        dm_biases = {}  # action_num -> bias adjustment
+        dm_reasoning = None
+        
+        if emergent_reasoning and agent_id:
+            try:
+                # ---------------------------------------------------------
+                # DM-1: Q5 Goal Variables -> Boost/Penalize Actions
+                # If an action recently caused score increase, boost it
+                # If an action caused game-over, penalize it
+                # ---------------------------------------------------------
+                q5_data = emergent_reasoning.get('q5_goal_variables', {})
+                score_actions = q5_data.get('actions_with_score_increase', [])
+                gameover_actions = q5_data.get('actions_causing_game_over', [])
+                
+                for action in score_actions:
+                    dm_biases[action] = dm_biases.get(action, 0) + 0.35  # Strong boost for score-increasing
+                for action in gameover_actions:
+                    dm_biases[action] = dm_biases.get(action, 0) - 0.4   # Strong penalty for game-over
+                
+                if score_actions:
+                    logger.debug(f"[DM-1] Q5 boost for score-increasing actions: {score_actions}")
+                
+                # ---------------------------------------------------------
+                # DM-2: Q2 Reward/Punishment -> Bias Clicking
+                # If rewarding objects exist, prefer ACTION6 (click)
+                # If dangerous objects exist, avoid clicking in their areas
+                # ---------------------------------------------------------
+                q2_data = emergent_reasoning.get('q2_reward_punishment', {})
+                rewarding = q2_data.get('rewarding_objects', [])
+                dangerous = q2_data.get('dangerous_objects', [])
+                
+                if rewarding:
+                    dm_biases[6] = dm_biases.get(6, 0) + 0.2 * len(rewarding[:3])  # Boost click
+                    logger.debug(f"[DM-2] Q2 boosting ACTION6 for {len(rewarding)} rewarding objects")
+                if dangerous:
+                    dm_biases[6] = dm_biases.get(6, 0) - 0.15 * len(dangerous[:3])  # Reduce click if dangerous
+                
+                # ---------------------------------------------------------
+                # DM-4: Inferred Goals -> Navigate Toward
+                # If goals are detected, bias navigation toward them
+                # ---------------------------------------------------------
+                world_model = emergent_reasoning.get('world_model', {})
+                goals = world_model.get('goals', []) or world_model.get('inferred_goals', [])
+                agent_pos = world_model.get('agent_position')
+                
+                if goals and agent_pos:
+                    # Find closest goal
+                    closest_goal = None
+                    min_dist = float('inf')
+                    for goal in goals:
+                        pos = goal.get('position', [0, 0])
+                        dist = abs(pos[0] - agent_pos[0]) + abs(pos[1] - agent_pos[1])
+                        if dist < min_dist:
+                            min_dist = dist
+                            closest_goal = goal
+                    
+                    if closest_goal:
+                        goal_pos = closest_goal.get('position', [0, 0])
+                        dx = goal_pos[0] - agent_pos[0]
+                        dy = goal_pos[1] - agent_pos[1]
+                        
+                        # Bias toward goal direction
+                        if dy < 0:  # Goal is above -> ACTION1 (up)
+                            dm_biases[1] = dm_biases.get(1, 0) + 0.25
+                        elif dy > 0:  # Goal is below -> ACTION2 (down)
+                            dm_biases[2] = dm_biases.get(2, 0) + 0.25
+                        if dx < 0:  # Goal is left -> ACTION3 (left)
+                            dm_biases[3] = dm_biases.get(3, 0) + 0.25
+                        elif dx > 0:  # Goal is right -> ACTION4 (right)
+                            dm_biases[4] = dm_biases.get(4, 0) + 0.25
+                        
+                        logger.debug(f"[DM-4] Navigating toward goal at {goal_pos}, agent at {agent_pos}")
+                        dm_reasoning = f"Goal-directed: moving toward {closest_goal.get('color', 'unknown')}"
+                
+            except Exception as e:
+                logger.debug(f"DM integration error: {e}")
+        
+        # ---------------------------------------------------------
+        # DM-5: Stream Arbitration -> Frustrated adds variance, 
+        #       High semantic amplifies biases
+        # DM-6: Conflict Resolution -> Override if conflict detected
+        # ---------------------------------------------------------
+        stream_arbitration_applied = False
+        if agent_id:
+            try:
+                self_reflection = self._build_self_reflection_context(
+                    agent_id=agent_id,
+                    agent_mode=agent_mode,
+                    action="pending",  # Not yet selected
+                    game_state=game_state
+                )
+                
+                if self_reflection:
+                    emotion = self_reflection.get('emotion', 'neutral')
+                    emotional_network = self_reflection.get('emotional_network', 0.5)
+                    semantic_network = self_reflection.get('semantic_network', 0.5)
+                    conflict = self_reflection.get('conflict', False)
+                    self_trust_bias = self_reflection.get('self_trust_bias', 0.5)
+                    
+                    # DM-5: Frustrated agents add exploration variance
+                    if emotion == 'frustrated' or emotional_network < 0.3:
+                        # Add random variance to break out of patterns
+                        import random
+                        variance_action = random.randint(1, 7)
+                        dm_biases[variance_action] = dm_biases.get(variance_action, 0) + 0.3
+                        logger.debug(f"[DM-5] Frustrated agent adding variance: ACTION{variance_action}")
+                        stream_arbitration_applied = True
+                    
+                    # DM-5: High semantic amplifies existing biases
+                    if semantic_network > 0.7:
+                        # Amplify all positive biases by 50%
+                        for action, bias in list(dm_biases.items()):
+                            if bias > 0:
+                                dm_biases[action] = bias * 1.5
+                        logger.debug(f"[DM-5] High semantic network amplifying biases")
+                        stream_arbitration_applied = True
+                    
+                    # DM-6: Conflict Resolution
+                    if conflict:
+                        # When conflict detected, use self_trust_bias to decide
+                        if self_trust_bias > 0.6:
+                            # Trust self: use private memory biases more
+                            logger.info(f"[DM-6] Conflict detected - trusting self (bias={self_trust_bias:.2f})")
+                            # This will be reflected in the existing self-directed logic
+                        else:
+                            # Trust network: clear personal biases, follow network more
+                            logger.info(f"[DM-6] Conflict detected - following network (bias={self_trust_bias:.2f})")
+                            # Reduce dm_biases influence
+                            for action in dm_biases:
+                                dm_biases[action] = dm_biases[action] * 0.5
+                        
+            except Exception as e:
+                logger.debug(f"Stream arbitration error: {e}")
         
         # PHASE 3: Get viral package and pariah influence
         action_weights = {}
@@ -2844,6 +2983,37 @@ class GameplayEngine:
                 logger.debug(f"[HYPOTHESIS] Reinforcing {base_action} (network supports: bias {current_hypothesis_bias:.2f})")
                 hypothesis_reasoning = f"Network hypothesis supports (bias: {current_hypothesis_bias:.2f})"
         
+        # ===================================================================
+        # APPLY DM BIASES: Decision-making integrations from emergent reasoning
+        # DM biases apply AFTER hypothesis but integrate with final selection
+        # ===================================================================
+        if dm_biases:
+            action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
+            current_dm_bias = dm_biases.get(action_num, 0.0)
+            
+            # If current action has strong negative DM bias, find alternative
+            if current_dm_bias < -0.3:
+                logger.info(f"[DM] Avoiding {base_action} (DM warns: bias {current_dm_bias:.2f})")
+                
+                # Find best alternative based on DM biases
+                best_alt = None
+                best_bias = current_dm_bias
+                for alt_action, alt_bias in dm_biases.items():
+                    if alt_bias > best_bias:
+                        best_alt = alt_action
+                        best_bias = alt_bias
+                
+                if best_alt and best_bias > 0:
+                    logger.info(f"[DM] Switching to ACTION{best_alt} (DM suggests: bias {best_bias:.2f})")
+                    base_action = f"ACTION{best_alt}"
+                    dm_reasoning = f"DM integration (Q5/Q2/Goals) switched to A{best_alt}"
+            
+            elif current_dm_bias > 0.3:
+                # Current action has positive DM support - reinforce
+                logger.debug(f"[DM] Reinforcing {base_action} (DM supports: bias {current_dm_bias:.2f})")
+                if not dm_reasoning:
+                    dm_reasoning = f"DM reinforcement (bias: {current_dm_bias:.2f})"
+        
         # PHASE 3: Apply viral package / pariah influence to action selection
         viral_reasoning = None  # Initialize before conditional blocks
         if action_weights or action_penalties:
@@ -2895,6 +3065,8 @@ class GameplayEngine:
             reasoning_parts.append("Unbeaten game - full exploration")
         if hypothesis_reasoning:
             reasoning_parts.append(hypothesis_reasoning)
+        if dm_reasoning:
+            reasoning_parts.append(dm_reasoning)
         if sensation_reasoning:
             reasoning_parts.append(sensation_reasoning)
         if viral_reasoning:
@@ -3916,25 +4088,34 @@ class GameplayEngine:
             fallback_action = available_fallback[(escape_attempt - 1) % len(available_fallback)]
             return fallback_action, f"ESCAPE #{escape_attempt}: ACTION{fallback_action} (fallback, available: {sorted(available_nums)})"
     
-    def _build_self_model_context(self, agent_id: Optional[str], game_id: str, level: int) -> Dict[str, Any]:
+    def _build_self_model_context(
+        self, 
+        agent_id: Optional[str], 
+        game_id: str, 
+        level: int,
+        frame: Optional[List] = None
+    ) -> Dict[str, Any]:
         """Build self-model context for reasoning JSON.
         
         Retrieves what the agent knows about which objects it controls.
         Also queries network-validated control hypotheses for bootstrapping.
+        Task 3 enhancement: Now aggregates raw coordinates into meaningful object IDs.
         
         Args:
             agent_id: Agent identifier
             game_id: Current game ID
             level: Current level number
+            frame: Current game frame for object aggregation
             
         Returns:
             Self-model context dictionary
         """
         context = {
-            'objects_agent_controls': [],
+            'objects_agent_controls': [],      # Raw coordinates (legacy)
+            'aggregated_controlled': [],       # Task 3: Meaningful object IDs
             'control_confidence': 0.0,
             'object_dependencies': [],
-            'network_control_hypotheses': []  # Cross-agent validated hypotheses
+            'network_control_hypotheses': []   # Cross-agent validated hypotheses
         }
         
         if not agent_id:
@@ -3945,6 +4126,10 @@ class GameplayEngine:
             controlled = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
             if controlled:
                 context['objects_agent_controls'] = controlled[:10]  # Limit for JSON size
+                
+                # Task 3: Aggregate coordinates to meaningful object IDs
+                if frame is not None:
+                    context['aggregated_controlled'] = self._aggregate_controlled_objects(controlled, frame)
                 
                 # Get confidence from DB
                 result = self.db.execute_query("""
@@ -3974,11 +4159,137 @@ class GameplayEngine:
         
         return context
     
+    def _aggregate_controlled_objects(
+        self, 
+        raw_coords: List[str], 
+        frame: Optional[List]
+    ) -> List[Dict[str, Any]]:
+        """
+        Task 3: Convert raw coordinate strings to meaningful object identifiers.
+        
+        Takes coordinates like "x:5,y:3" and looks up the color at that position
+        to create object IDs like "color_4_at_5_3" which are more meaningful
+        for reasoning and decision-making.
+        
+        Args:
+            raw_coords: List of coordinate strings like ["x:5,y:3", "x:6,y:3"]
+            frame: Current game frame (2D grid of color values)
+            
+        Returns:
+            List of aggregated object info with color and position
+        """
+        if not raw_coords or not frame:
+            return []
+        
+        aggregated = []
+        color_counts = {}  # Track how many objects of each color we control
+        
+        try:
+            frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+            
+            for coord_str in raw_coords[:10]:  # Limit to 10 for JSON size
+                try:
+                    # Parse "x:5,y:3" format
+                    parts = coord_str.split(',')
+                    x = int(parts[0].replace('x:', ''))
+                    y = int(parts[1].replace('y:', ''))
+                    
+                    # Get color at this position
+                    if 0 <= y < frame_arr.shape[0] and 0 <= x < frame_arr.shape[1]:
+                        color = int(frame_arr[y, x])
+                        
+                        # Track color frequency
+                        if color not in color_counts:
+                            color_counts[color] = 0
+                        color_counts[color] += 1
+                        
+                        # Create meaningful object ID
+                        object_id = f"color_{color}_obj_{color_counts[color]}"
+                        
+                        aggregated.append({
+                            'object_id': object_id,
+                            'color': color,
+                            'position': [x, y],
+                            'raw_coord': coord_str
+                        })
+                except (ValueError, IndexError):
+                    continue
+            
+            # Sort by color (group same-colored objects together)
+            aggregated.sort(key=lambda x: (x['color'], x['position'][0], x['position'][1]))
+            
+        except Exception as e:
+            logger.debug(f"Control object aggregation failed: {e}")
+        
+        return aggregated
+    
+    def _infer_goals_from_frame(self, frame: Optional[List]) -> List[Dict[str, Any]]:
+        """
+        Task 4: Infer goal objects from frame by detecting rare colors.
+        
+        In ARC puzzles, goals are often indicated by rare colors that appear
+        in specific positions. This method detects potential goal objects
+        when the world model doesn't provide explicit goals.
+        
+        Args:
+            frame: Current game frame (2D grid of color values)
+            
+        Returns:
+            List of potential goal objects with position and color
+        """
+        if not frame:
+            return []
+        
+        goals = []
+        
+        try:
+            frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+            
+            if frame_arr.size == 0:
+                return []
+            
+            # Find rare colors (potential goals)
+            unique_colors, color_counts = np.unique(frame_arr, return_counts=True)
+            total_pixels = frame_arr.size
+            
+            for color, count in zip(unique_colors, color_counts):
+                if color == 0:  # Skip background
+                    continue
+                
+                frequency = count / total_pixels
+                
+                # Rare colors (< 5% of frame) are potential goals
+                if frequency < 0.05 and count <= 10:  # Also limit absolute count
+                    # Find center position of this color
+                    positions = np.where(frame_arr == color)
+                    if len(positions[0]) > 0:
+                        center_y = int(np.mean(positions[0]))
+                        center_x = int(np.mean(positions[1]))
+                        
+                        goals.append({
+                            'color': int(color),
+                            'position': [center_x, center_y],
+                            'pixel_count': int(count),
+                            'frequency': round(frequency, 4),
+                            'reason': f'Rare color ({frequency:.1%} of frame, {count} pixels)'
+                        })
+            
+            # Sort by frequency (rarest first = most likely goal)
+            goals.sort(key=lambda x: x['frequency'])
+            
+            # Return top 5 potential goals
+            return goals[:5]
+            
+        except Exception as e:
+            logger.debug(f"Goal inference failed: {e}")
+            return []
+    
     def _build_world_model_context(self, game_id: str, level: int, frame: Optional[List]) -> Dict[str, Any]:
         """Build world model context for reasoning JSON.
         
         Uses SymbolicReasoningEngine to identify obstacles, goals, and agent position.
         Also queries network hypotheses from learned_rules.
+        Task 4 enhancement: Now infers goals from rare colors when world model is empty.
         
         Args:
             game_id: Current game ID
@@ -3991,6 +4302,7 @@ class GameplayEngine:
         context = {
             'obstacles': [],
             'goals': [],
+            'inferred_goals': [],    # Task 4: Goals inferred from rare colors
             'agent_position': None,
             'network_hypotheses': []
         }
@@ -4020,6 +4332,10 @@ class GameplayEngine:
                     context['agent_position'] = list(agent.position)
             except Exception as e:
                 logger.debug(f"World model state extraction failed: {e}")
+        
+        # Task 4: If no goals from world model, infer from frame
+        if not context['goals'] and frame:
+            context['inferred_goals'] = self._infer_goals_from_frame(frame)
         
         # Get network hypotheses from learned_rules table
         try:
@@ -4751,7 +5067,10 @@ class GameplayEngine:
             }
         
         # Add self-model context (what objects agent controls)
-        reasoning_obj['self_model'] = self._build_self_model_context(agent_id, game_id, current_level)
+        # Task 3: Now passes frame for aggregation of controlled objects
+        reasoning_obj['self_model'] = self._build_self_model_context(
+            agent_id, game_id, current_level, frame=game_state.frame
+        )
         
         # Add world-model context (obstacles, goals, hypotheses)
         reasoning_obj['world_model'] = self._build_world_model_context(game_id, current_level, game_state.frame)
@@ -4858,18 +5177,65 @@ class GameplayEngine:
             """, (agent_id, agent_mode or 'generalist'))
             role_fit_score = role_fit[0]['role_fit_score'] if role_fit else 0.5
             
-            # Calculate internal network inputs
-            emotional_input = (navigation_state + 1.0) / 2.0  # Map -1..1 to 0..1
+            # =================================================================
+            # TASK 5 FIX: Calculate emotional_input from CURRENT game state
+            # Instead of using stale DB values, incorporate live game data
+            # =================================================================
             
-            # Semantic input from sensation profile
-            object_sensations = sensation_profile.get('object_sensations', {})
-            if object_sensations:
-                top_sensations = sorted(object_sensations.values(), reverse=True)[:3]
-                semantic_input = (sum(top_sensations) / len(top_sensations) + 1.0) / 2.0 if top_sensations else 0.5
-            else:
-                semantic_input = 0.5
+            # Emotional input: Blend DB navigation_state with current game momentum
+            score_progress = min(1.0, game_state.score / 10.0) if game_state.score > 0 else 0.0
+            # Combine DB state (historical) with current progress (live)
+            emotional_input = (
+                ((navigation_state + 1.0) / 2.0) * 0.6 +  # 60% from DB state
+                score_progress * 0.4                       # 40% from current score
+            )
             
-            identity_input = (role_confidence + role_fit_score) / 2.0
+            # =================================================================
+            # TASK 5 FIX: Calculate semantic_input from CURRENT perceived objects
+            # Use _last_perceived_objects if available instead of stale DB profile
+            # =================================================================
+            semantic_input = 0.5  # Default
+            
+            # First try current perceived objects (most live)
+            if hasattr(self, '_last_perceived_objects') and self._last_perceived_objects:
+                # Query impressions for currently visible objects
+                impression_strengths = []
+                for obj_type in self._last_perceived_objects[:5]:
+                    try:
+                        impression = self.sensation_engine.query_personal_impression(agent_id, obj_type)
+                        if impression:
+                            strength = impression.get('impression_strength', 0.5)
+                            impression_strengths.append(strength)
+                    except Exception:
+                        pass
+                
+                if impression_strengths:
+                    avg_strength = sum(impression_strengths) / len(impression_strengths)
+                    semantic_input = avg_strength  # Direct use, already 0-1 scale
+            
+            # Fall back to DB sensation profile if no current objects
+            if semantic_input == 0.5:
+                object_sensations = sensation_profile.get('object_sensations', {})
+                if object_sensations:
+                    top_sensations = sorted(object_sensations.values(), reverse=True)[:3]
+                    semantic_input = (sum(top_sensations) / len(top_sensations) + 1.0) / 2.0 if top_sensations else 0.5
+            
+            # =================================================================
+            # TASK 5 FIX: Calculate identity_input from CURRENT role performance
+            # Blend static confidence with dynamic role success
+            # =================================================================
+            
+            # Get recent success rate for current role
+            recent_role_success = self.db.execute_query("""
+                SELECT AVG(CASE WHEN final_score > 0 THEN 1.0 ELSE 0.0 END) as success_rate
+                FROM game_results
+                WHERE agent_id = ? 
+                  AND timestamp > datetime('now', '-1 hour')
+            """, (agent_id,))
+            recent_success = recent_role_success[0]['success_rate'] if recent_role_success and recent_role_success[0]['success_rate'] else 0.5
+            
+            # Blend role confidence, fit score, and recent performance
+            identity_input = (role_confidence * 0.3 + role_fit_score * 0.3 + recent_success * 0.4)
             
             # Get private memory strength (how well agent knows this situation)
             private_memory_strength = self._get_private_memory_strength(agent_id, game_state)
@@ -4891,20 +5257,20 @@ class GameplayEngine:
             # Detect conflict
             conflict_detected = abs(private_memory_strength - network_recommendation_strength) > 0.3
             
-            # Build emotion label
-            if navigation_state < -0.5:
+            # Build emotion label from actual emotional_input value
+            if emotional_input < 0.25:
                 emotion = 'frustrated'
-            elif navigation_state < -0.1:
+            elif emotional_input < 0.4:
                 emotion = 'cautious'
-            elif navigation_state < 0.1:
+            elif emotional_input < 0.6:
                 emotion = 'neutral'
-            elif navigation_state < 0.5:
+            elif emotional_input < 0.75:
                 emotion = 'curious'
             else:
                 emotion = 'confident'
             
             return {
-                # Three internal networks
+                # Three internal networks (now using live data)
                 'emotional_network': round(emotional_input, 3),
                 'semantic_network': round(semantic_input, 3),
                 'identity_network': round(identity_input, 3),
