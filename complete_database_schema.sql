@@ -75,6 +75,7 @@ CREATE TABLE action_traces (
     score_change REAL DEFAULT 0.0,
     response_data TEXT, -- JSON API response
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, level_number INTEGER DEFAULT 1,
+    resulted_in_game_over BOOLEAN DEFAULT FALSE, -- Q5: tracks terminal failure states
     FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
 );
 

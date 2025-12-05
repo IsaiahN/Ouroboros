@@ -1544,6 +1544,9 @@ class GameplayEngine:
                     if game_state.score == 0:
                         # True failure - no progress made
                         logger.info(f"[GAME_OVER] Game ended with zero score")
+                        # Q5: Mark last action as causing game-over for learning
+                        if hasattr(self, '_recent_action_traces') and self._recent_action_traces:
+                            self._recent_action_traces[-1]['outcome_type'] = 'game_over'
                         break
                     else:
                         # Possible premature GAME_OVER - some games do this after levels
@@ -1658,10 +1661,20 @@ class GameplayEngine:
                             try:
                                 # Build action trace for recent actions in this session
                                 if hasattr(self, '_recent_action_traces'):
+                                    # Q5 enhancement: track score changes and outcome types
+                                    score_change = game_state.score - previous_score
+                                    outcome_type = 'neutral'
+                                    if score_change > 0:
+                                        outcome_type = 'score_increase'
+                                    elif game_state.state == 'GAME_OVER' and game_state.score == 0:
+                                        outcome_type = 'game_over'
+                                    
                                     self._recent_action_traces.append({
                                         'action_type': action,
                                         'frame_before': self.action_handler.last_frame,
-                                        'frame_after': game_state.frame
+                                        'frame_after': game_state.frame,
+                                        'score_change': score_change,  # Q5: score delta
+                                        'outcome_type': outcome_type   # Q5: neutral/score_increase/game_over
                                     })
                                     # Keep last 10 actions for control detection
                                     self._recent_action_traces = self._recent_action_traces[-10:]
@@ -2609,6 +2622,38 @@ class GameplayEngine:
                         
             except Exception as e:
                 logger.debug(f"Failure hypothesis query error: {e}")
+        
+        # ===================================================================
+        # EMERGENT REASONING: Four Core Questions (Q1-Q4)
+        # Build the cognitive loop that surfaces in API payload reasoning
+        # This enables agents to "think out loud" with structured intelligence
+        # ===================================================================
+        try:
+            emergent_reasoning = self._build_emergent_reasoning_context(
+                agent_id=agent_id,
+                game_state=game_state,
+                hypothesis_biases=hypothesis_biases,
+                sensation_biases=sensation_biases if 'sensation_biases' in dir() else {},
+                navigation_state=navigation_state
+            )
+            # Store for API payload formatting
+            self._last_emergent_reasoning = emergent_reasoning
+            
+            # Q3 Targeted Experimentation: For pioneers, use salience to guide action
+            # This implements "What happens if I interact with the most salient variable?"
+            if emergent_reasoning and is_self_directed:
+                q3_data = emergent_reasoning.get('Q3_salience', {})
+                recommended_action = q3_data.get('recommended_action')
+                if recommended_action and q3_data.get('top_salient'):
+                    # Pioneer in self-directed mode: try the salient action
+                    salient_obj = q3_data['top_salient'][0] if q3_data['top_salient'] else 'unknown'
+                    reasoning = f"Q3 Targeted Experiment: Testing interaction with salient object '{salient_obj}' via ACTION{recommended_action}"
+                    logger.info(f"[EMERGENT-Q3] {reasoning}")
+                    return f"ACTION{recommended_action}", reasoning
+                    
+        except Exception as e:
+            logger.debug(f"Emergent reasoning build error: {e}")
+            self._last_emergent_reasoning = None
         
         # PHASE 3: Get viral package and pariah influence
         action_weights = {}
@@ -4011,6 +4056,644 @@ class GameplayEngine:
         return context
 
     # ========================================================================
+    # EMERGENT REASONING: THE FOUR CORE QUESTIONS + EXTENSIONS
+    # Compressed reasoning framework for intelligent exploration
+    # Q1: What is changing vs. what is fixed?
+    # Q2: What punishes me and what rewards me?
+    # Q3: What happens if I interact with the most salient variable?
+    # Q4: What rule explains this across contexts?
+    # Q5: What actions cause score changes or game-over? (goal variables)
+    # Q7: Am I at the frontier? (ARC3 familiarity - novel vs beaten level)
+    # ========================================================================
+    
+    def _build_emergent_reasoning_context(
+        self,
+        agent_id: Optional[str],
+        game_state: GameState,
+        hypothesis_biases: Dict[int, float],
+        sensation_biases: Dict[int, float],
+        navigation_state: float
+    ) -> Dict[str, Any]:
+        """
+        Build the Four Core Questions reasoning context for API payload.
+        
+        This surfaces the agent's emergent reasoning process:
+        - Q1: What is changing vs. what is fixed? (Pattern detection + invariance)
+        - Q2: What punishes me and what rewards me? (Value grounding)
+        - Q3: What is the most salient variable? (Targeted experimentation)
+        - Q4: What rule explains this across contexts? (Abstraction + transfer)
+        
+        Args:
+            agent_id: Agent making decision
+            game_state: Current game state
+            hypothesis_biases: Action biases from network hypotheses
+            sensation_biases: Action biases from sensation engine
+            navigation_state: Current emotional state (-1 to 1)
+            
+        Returns:
+            Dictionary with Four Questions context
+        """
+        context = {
+            'q1_change_vs_fixed': {},
+            'q2_reward_punishment': {},
+            'q3_salient_target': {},
+            'q4_working_theory': {}
+        }
+        
+        game_id = self.session_manager.current_game_id or ''
+        current_level = int(game_state.score) + 1
+        
+        # ===================================================================
+        # Q1: WHAT IS CHANGING VS. WHAT IS FIXED?
+        # Uses _recent_action_traces to detect what moved vs what stayed static
+        # ===================================================================
+        try:
+            q1_context = self._analyze_change_vs_invariance(game_state)
+            context['q1_change_vs_fixed'] = q1_context
+        except Exception as e:
+            logger.debug(f"Q1 analysis failed: {e}")
+            context['q1_change_vs_fixed'] = {'error': str(e)[:50]}
+        
+        # ===================================================================
+        # Q2: WHAT PUNISHES ME AND WHAT REWARDS ME?
+        # Uses sensation engine data and personal impressions
+        # ===================================================================
+        try:
+            q2_context = self._analyze_reward_punishment(agent_id, navigation_state)
+            context['q2_reward_punishment'] = q2_context
+        except Exception as e:
+            logger.debug(f"Q2 analysis failed: {e}")
+            context['q2_reward_punishment'] = {'error': str(e)[:50]}
+        
+        # ===================================================================
+        # Q3: WHAT IS THE MOST SALIENT VARIABLE?
+        # Ranks objects by salience = f(rarity, structure, consistency)
+        # ===================================================================
+        try:
+            q3_context = self._analyze_salience(game_state, agent_id)
+            context['q3_salient_target'] = q3_context
+        except Exception as e:
+            logger.debug(f"Q3 analysis failed: {e}")
+            context['q3_salient_target'] = {'error': str(e)[:50]}
+        
+        # ===================================================================
+        # Q4: WHAT RULE EXPLAINS THIS ACROSS CONTEXTS?
+        # Uses hypothesis_biases, network wisdom, and working theories
+        # ===================================================================
+        try:
+            q4_context = self._analyze_cross_context_rules(
+                game_id, current_level, hypothesis_biases, agent_id
+            )
+            context['q4_working_theory'] = q4_context
+        except Exception as e:
+            logger.debug(f"Q4 analysis failed: {e}")
+            context['q4_working_theory'] = {'error': str(e)[:50]}
+        
+        # ===================================================================
+        # Q7: AM I AT THE FRONTIER? (ARC3-specific familiarity)
+        # Uses existing _get_network_max_level() to detect novel vs familiar
+        # ===================================================================
+        try:
+            network_max = self._get_network_max_level(game_id)
+            is_frontier = current_level > network_max
+            context['q7_familiarity'] = {
+                'current_level': current_level,
+                'network_max_level': network_max,
+                'is_frontier': is_frontier,
+                'familiarity': 'frontier' if is_frontier else 'familiar',
+                'insight': f"Level {current_level} is {'FRONTIER (novel)' if is_frontier else f'familiar (network reached L{network_max})'}"
+            }
+        except Exception as e:
+            logger.debug(f"Q7 analysis failed: {e}")
+            context['q7_familiarity'] = {'is_frontier': True, 'error': str(e)[:50]}
+        
+        # ===================================================================
+        # Q5: WHAT ACTIONS CAUSE SCORE CHANGES OR GAME-OVER?
+        # Uses enhanced _recent_action_traces with score_change and outcome_type
+        # ===================================================================
+        try:
+            q5_context = self._analyze_goal_variables(game_id, current_level)
+            context['q5_goal_variables'] = q5_context
+        except Exception as e:
+            logger.debug(f"Q5 analysis failed: {e}")
+            context['q5_goal_variables'] = {'error': str(e)[:50]}
+        
+        return context
+    
+    def _analyze_goal_variables(self, game_id: str, current_level: int) -> Dict[str, Any]:
+        """
+        Q5: What actions cause score changes or game-over?
+        
+        Analyzes recent action traces to identify:
+        - Actions correlated with score increases (positive feedback)
+        - Actions correlated with game-over (negative feedback / terminal states)
+        - Patterns in action sequences leading to rewards
+        
+        Returns:
+            Q5 context dictionary with goal variable analysis
+        """
+        result = {
+            'actions_with_score_increase': [],
+            'actions_causing_game_over': [],
+            'score_increasing_patterns': [],
+            'terminal_patterns': [],
+            'goal_insight': None,
+            'confidence': 0.3
+        }
+        
+        if not hasattr(self, '_recent_action_traces') or not self._recent_action_traces:
+            return result
+        
+        # Analyze recent traces for score and outcome patterns
+        score_actions = []
+        game_over_actions = []
+        
+        for trace in self._recent_action_traces[-10:]:
+            action_type = trace.get('action_type', '')
+            score_change = trace.get('score_change', 0)
+            outcome_type = trace.get('outcome_type', 'neutral')
+            
+            # Extract action number
+            action_num = None
+            if isinstance(action_type, str) and action_type.upper().startswith('ACTION'):
+                try:
+                    action_num = int(action_type.upper().replace('ACTION', ''))
+                except ValueError:
+                    pass
+            elif isinstance(action_type, int):
+                action_num = action_type
+            
+            if action_num:
+                if score_change > 0 or outcome_type == 'score_increase':
+                    score_actions.append(action_num)
+                if outcome_type == 'game_over':
+                    game_over_actions.append(action_num)
+        
+        result['actions_with_score_increase'] = list(set(score_actions))
+        result['actions_causing_game_over'] = list(set(game_over_actions))
+        
+        # Generate insight
+        if score_actions:
+            result['goal_insight'] = f"ACTION{score_actions[-1]} recently caused score increase"
+            result['confidence'] = 0.7
+        elif game_over_actions:
+            result['goal_insight'] = f"ACTION{game_over_actions[-1]} led to game-over - avoid this pattern"
+            result['confidence'] = 0.6
+        else:
+            result['goal_insight'] = "No recent score changes or game-overs detected"
+        
+        return result
+    
+    def _analyze_change_vs_invariance(self, game_state: GameState) -> Dict[str, Any]:
+        """
+        Q1: What is changing vs. what is fixed?
+        
+        Analyzes recent action traces to determine:
+        - Which actions caused frame changes (variables/levers)
+        - Which actions had no effect (constraints/invariants)
+        - What objects never change across frames (environmental constants)
+        
+        Returns:
+            Q1 context dictionary
+        """
+        result = {
+            'actions_that_changed_state': [],
+            'actions_with_no_effect': [],
+            'invariant_positions': [],
+            'variable_positions': [],
+            'confidence': 0.3  # Default low confidence
+        }
+        
+        if not hasattr(self, '_recent_action_traces') or not self._recent_action_traces:
+            return result
+        
+        actions_moved = set()
+        actions_static = set()
+        changed_positions = set()
+        all_positions_checked = set()
+        
+        for trace in self._recent_action_traces[-10:]:
+            action_type = trace.get('action_type', '')
+            frame_before = trace.get('frame_before')
+            frame_after = trace.get('frame_after')
+            
+            # Extract action number
+            action_num = None
+            if isinstance(action_type, str) and action_type.upper().startswith('ACTION'):
+                try:
+                    action_num = int(action_type.upper().replace('ACTION', ''))
+                except ValueError:
+                    pass
+            elif isinstance(action_type, int):
+                action_num = action_type
+            
+            if action_num is None:
+                continue
+            
+            # Compare frames to detect changes
+            frame_changed = False
+            if frame_before and frame_after:
+                if isinstance(frame_before, list) and isinstance(frame_after, list):
+                    for y in range(min(len(frame_before), len(frame_after))):
+                        if not isinstance(frame_before[y], (list, tuple)):
+                            continue
+                        if not isinstance(frame_after[y], (list, tuple)):
+                            continue
+                        for x in range(min(len(frame_before[y]), len(frame_after[y]))):
+                            all_positions_checked.add((y, x))
+                            if frame_before[y][x] != frame_after[y][x]:
+                                frame_changed = True
+                                changed_positions.add((y, x))
+            
+            if frame_changed:
+                actions_moved.add(action_num)
+            else:
+                actions_static.add(action_num)
+        
+        # Build result
+        result['actions_that_changed_state'] = sorted(list(actions_moved))
+        result['actions_with_no_effect'] = sorted(list(actions_static - actions_moved))
+        
+        # Invariant positions = positions that were checked but never changed
+        invariant_positions = all_positions_checked - changed_positions
+        result['invariant_positions'] = len(invariant_positions)
+        result['variable_positions'] = len(changed_positions)
+        
+        # Calculate confidence based on sample size
+        sample_size = len(self._recent_action_traces)
+        result['confidence'] = min(0.9, 0.3 + (sample_size * 0.06))
+        
+        # Generate human-readable insight
+        if actions_moved and actions_static:
+            result['insight'] = f"Actions {sorted(actions_moved)} cause changes; {sorted(actions_static - actions_moved)} have no effect"
+        elif actions_moved:
+            result['insight'] = f"Actions {sorted(actions_moved)} cause state changes"
+        else:
+            result['insight'] = "No actions observed to change state yet"
+        
+        return result
+    
+    def _analyze_reward_punishment(
+        self, 
+        agent_id: Optional[str], 
+        navigation_state: float
+    ) -> Dict[str, Any]:
+        """
+        Q2: What punishes me and what rewards me?
+        
+        Analyzes sensation data and personal impressions to determine:
+        - Which objects are associated with danger/punishment
+        - Which objects are associated with goals/rewards
+        - Current emotional valence (frustrated vs confident)
+        
+        Returns:
+            Q2 context dictionary
+        """
+        result = {
+            'dangerous_objects': [],
+            'rewarding_objects': [],
+            'neutral_objects': [],
+            'emotional_state': 'neutral',
+            'navigation_state': round(navigation_state, 2),
+            'confidence': 0.5
+        }
+        
+        # Get emotion label
+        if navigation_state > 0.5:
+            result['emotional_state'] = 'confident'
+        elif navigation_state > 0.1:
+            result['emotional_state'] = 'curious'
+        elif navigation_state > -0.1:
+            result['emotional_state'] = 'neutral'
+        elif navigation_state > -0.5:
+            result['emotional_state'] = 'cautious'
+        else:
+            result['emotional_state'] = 'frustrated'
+        
+        # Get perceived objects and their impressions
+        perceived_objects = getattr(self, '_last_perceived_objects', [])
+        
+        if agent_id and perceived_objects:
+            for obj_type in perceived_objects[:10]:  # Limit for API size
+                try:
+                    impression = self.sensation_engine.query_personal_impression(agent_id, obj_type)
+                    if impression:
+                        association = impression.get('association', 'neutral')
+                        strength = impression.get('impression_strength', 0.5)
+                        
+                        if association == 'danger' and strength > 0.3:
+                            result['dangerous_objects'].append({
+                                'type': obj_type,
+                                'strength': round(strength, 2)
+                            })
+                        elif association == 'goal' and strength > 0.3:
+                            result['rewarding_objects'].append({
+                                'type': obj_type,
+                                'strength': round(strength, 2)
+                            })
+                        else:
+                            result['neutral_objects'].append(obj_type)
+                    else:
+                        result['neutral_objects'].append(obj_type)
+                except Exception:
+                    result['neutral_objects'].append(obj_type)
+        
+        # Calculate confidence based on data richness
+        total_impressions = len(result['dangerous_objects']) + len(result['rewarding_objects'])
+        result['confidence'] = min(0.9, 0.3 + (total_impressions * 0.1))
+        
+        # Generate insight
+        danger_count = len(result['dangerous_objects'])
+        reward_count = len(result['rewarding_objects'])
+        if danger_count > 0 and reward_count > 0:
+            result['insight'] = f"Learned {danger_count} dangers, {reward_count} rewards. Feeling {result['emotional_state']}."
+        elif danger_count > 0:
+            result['insight'] = f"Learned {danger_count} dangers. Feeling {result['emotional_state']}."
+        elif reward_count > 0:
+            result['insight'] = f"Learned {reward_count} rewards. Feeling {result['emotional_state']}."
+        else:
+            result['insight'] = f"No strong impressions yet. Feeling {result['emotional_state']}."
+        
+        return result
+    
+    def _analyze_salience(
+        self, 
+        game_state: GameState, 
+        agent_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Q3: What is the most salient variable?
+        
+        Ranks objects/regions by salience = f(rarity, structure, consistency)
+        - Rare objects (unusual colors, unique shapes) score higher
+        - Structured objects (patterns, symmetry) score higher
+        - Inconsistent objects (changed recently) score higher
+        
+        Returns:
+            Q3 context dictionary with most salient target
+        """
+        result = {
+            'most_salient': None,
+            'salience_score': 0.0,
+            'salience_reason': '',
+            'planned_interaction': None,
+            'ranked_targets': [],
+            'confidence': 0.3
+        }
+        
+        if not game_state.frame:
+            result['insight'] = "No frame data for salience analysis"
+            return result
+        
+        try:
+            frame = game_state.frame
+            if not isinstance(frame, np.ndarray):
+                frame = np.array(frame)
+            
+            # Ensure frame is 2D numpy array for slicing operations
+            frame_arr: np.ndarray = frame if isinstance(frame, np.ndarray) else np.array(frame)
+            
+            if frame_arr.size == 0:
+                result['insight'] = "Empty frame"
+                return result
+            
+            # Analyze frame for salient features
+            salience_targets = []
+            
+            # 1. COLOR RARITY: Find rare colors
+            unique_colors, color_counts = np.unique(frame_arr, return_counts=True)
+            total_pixels = frame_arr.size
+            
+            for color, count in zip(unique_colors, color_counts):
+                if color == 0:  # Skip background
+                    continue
+                frequency = count / total_pixels
+                # Rare colors (< 5% of frame) are more salient
+                if frequency < 0.05:
+                    rarity_score = 1.0 - (frequency / 0.05)  # 0-1 scale
+                    
+                    # Find position of this rare color
+                    positions = np.where(frame_arr == color)
+                    if len(positions[0]) > 0:
+                        center_y = int(np.mean(positions[0]))
+                        center_x = int(np.mean(positions[1]))
+                        
+                        salience_targets.append({
+                            'type': f'rare_color_{int(color)}',
+                            'position': (center_y, center_x),
+                            'salience': rarity_score,
+                            'reason': f'Rare color (only {frequency:.1%} of frame)'
+                        })
+            
+            # 2. SPATIAL SIGNIFICANCE: Check center, corners, edges
+            height: int = int(frame_arr.shape[0])
+            width: int = int(frame_arr.shape[1]) if len(frame_arr.shape) > 1 else 1
+            center_y, center_x = height // 2, width // 2
+            
+            # Check if center has unique content
+            y_start: int = max(0, center_y-2)
+            y_end: int = min(height, center_y+3)
+            x_start: int = max(0, center_x-2)
+            x_end: int = min(width, center_x+3)
+            center_region = frame_arr[y_start:y_end, x_start:x_end]  # type: ignore[index]
+            center_colors = set(center_region.flatten()) - {0}
+            if center_colors:
+                # Center content is often salient (templates, examples)
+                salience_targets.append({
+                    'type': 'center_region',
+                    'position': (center_y, center_x),
+                    'salience': 0.7,  # Center gets high base salience
+                    'reason': 'Center region often contains key information'
+                })
+            
+            # 3. STRUCTURE DETECTION: Look for patterns
+            if hasattr(self, 'symbolic_engine') and self.symbolic_engine:
+                try:
+                    if hasattr(self.symbolic_engine, 'world_model') and self.symbolic_engine.world_model:
+                        state = self.symbolic_engine.world_model.state
+                        goals = state.get_goals()
+                        agent_obj = state.get_agent()
+                        
+                        if goals and agent_obj:
+                            # Closest goal is highly salient
+                            closest_goal = min(goals, key=lambda g: g.distance_to(agent_obj))
+                            salience_targets.append({
+                                'type': 'goal_object',
+                                'position': closest_goal.position,
+                                'salience': 0.9,  # Goals are very salient
+                                'reason': f'Closest goal at distance {closest_goal.distance_to(agent_obj)}'
+                            })
+                except Exception:
+                    pass
+            
+            # Sort by salience and pick top target
+            salience_targets.sort(key=lambda x: x['salience'], reverse=True)
+            
+            if salience_targets:
+                top_target = salience_targets[0]
+                result['most_salient'] = top_target['type']
+                result['salience_score'] = round(top_target['salience'], 2)
+                result['salience_reason'] = top_target['reason']
+                result['ranked_targets'] = [
+                    {'type': t['type'], 'salience': round(t['salience'], 2)}
+                    for t in salience_targets[:3]
+                ]
+                
+                # Plan interaction with most salient target
+                pos = top_target.get('position')
+                if pos:
+                    result['planned_interaction'] = f"Consider ACTION6 at position {pos}"
+                
+                result['confidence'] = min(0.9, top_target['salience'])
+                result['insight'] = f"Most salient: {top_target['type']} ({top_target['reason']})"
+            else:
+                result['insight'] = "No highly salient targets detected"
+            
+        except Exception as e:
+            logger.debug(f"Salience analysis error: {e}")
+            result['insight'] = f"Salience analysis failed: {str(e)[:30]}"
+        
+        return result
+    
+    def _analyze_cross_context_rules(
+        self,
+        game_id: str,
+        level_number: int,
+        hypothesis_biases: Dict[int, float],
+        agent_id: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Q4: What rule explains this across contexts?
+        
+        Generates working theories based on:
+        - Network failure hypotheses (what patterns failed/succeeded)
+        - Learned rules from rule_induction_engine
+        - Historical action success rates
+        
+        Returns:
+            Q4 context dictionary with working theory
+        """
+        result = {
+            'working_hypothesis': None,
+            'hypothesis_source': None,
+            'evidence_for': 0,
+            'evidence_against': 0,
+            'transferable': False,
+            'action_recommendations': {},
+            'confidence': 0.3
+        }
+        
+        # Generate working hypothesis from hypothesis_biases
+        if hypothesis_biases:
+            best_action = max(hypothesis_biases.items(), key=lambda x: x[1], default=(None, 0))
+            worst_action = min(hypothesis_biases.items(), key=lambda x: x[1], default=(None, 0))
+            
+            if best_action[0] is not None and worst_action[0] is not None:
+                if best_action[1] > 0 and worst_action[1] < 0:
+                    result['working_hypothesis'] = f"ACTION{best_action[0]} helps, ACTION{worst_action[0]} hurts"
+                    result['hypothesis_source'] = 'network_failure_hypotheses'
+                    result['evidence_for'] = int(abs(best_action[1]) * 10)
+                    result['evidence_against'] = int(abs(worst_action[1]) * 10)
+                    result['transferable'] = True
+                elif best_action[1] > 0:
+                    result['working_hypothesis'] = f"ACTION{best_action[0]} tends to help on this level"
+                    result['hypothesis_source'] = 'network_failure_hypotheses'
+                    result['evidence_for'] = int(abs(best_action[1]) * 10)
+                    result['transferable'] = True
+                
+                # Build action recommendations
+                for action_num, bias in sorted(hypothesis_biases.items(), key=lambda x: x[1], reverse=True):
+                    if bias > 0.1:
+                        result['action_recommendations'][f'ACTION{action_num}'] = 'recommended'
+                    elif bias < -0.1:
+                        result['action_recommendations'][f'ACTION{action_num}'] = 'avoid'
+        
+        # Check for learned rules from rule engine
+        if self.rule_engine and agent_id:
+            try:
+                game_type = game_id[:4] if game_id else ''
+                rules = self.db.execute_query("""
+                    SELECT rule_id, confidence, success_count, failure_count
+                    FROM learned_rules
+                    WHERE (applicable_games LIKE ? OR source_game_id LIKE ?)
+                      AND confidence > 0.5
+                    ORDER BY confidence DESC
+                    LIMIT 1
+                """, (f'%{game_type}%', f'{game_type}%'))
+                
+                if rules and rules[0]:
+                    rule = rules[0]
+                    if not result['working_hypothesis']:
+                        result['working_hypothesis'] = f"Following learned rule {rule['rule_id'][:8]}"
+                        result['hypothesis_source'] = 'learned_rules'
+                        result['evidence_for'] = rule['success_count'] or 0
+                        result['evidence_against'] = rule['failure_count'] or 0
+                        result['transferable'] = True
+                        result['confidence'] = rule['confidence']
+            except Exception:
+                pass
+        
+        # Generate in-game hypothesis if none from network
+        if not result['working_hypothesis']:
+            # Use current observations to form a hypothesis
+            perceived_objects = getattr(self, '_last_perceived_objects', [])
+            if perceived_objects:
+                result['working_hypothesis'] = f"Exploring {len(perceived_objects)} objects on level {level_number}"
+                result['hypothesis_source'] = 'in_game_observation'
+                result['transferable'] = False
+            else:
+                result['working_hypothesis'] = f"Exploring level {level_number} to discover patterns"
+                result['hypothesis_source'] = 'default_exploration'
+                result['transferable'] = False
+        
+        # Calculate confidence
+        if result['evidence_for'] > 0:
+            total_evidence = result['evidence_for'] + result['evidence_against']
+            result['confidence'] = round(result['evidence_for'] / max(total_evidence, 1), 2)
+        
+        # Generate insight
+        if result['transferable']:
+            result['insight'] = f"Theory: {result['working_hypothesis']} (from {result['hypothesis_source']}, confidence: {result['confidence']})"
+        else:
+            result['insight'] = f"Exploring: {result['working_hypothesis']}"
+        
+        return result
+    
+    def _get_salient_action_recommendation(
+        self,
+        game_state: GameState,
+        agent_id: Optional[str]
+    ) -> Optional[Tuple[str, str]]:
+        """
+        Q3 Enhancement: Get action recommendation based on salience analysis.
+        
+        If a highly salient target is detected, recommend interacting with it.
+        This enables "targeted experimentation" mode for pioneers.
+        
+        Returns:
+            Tuple of (action, reasoning) if salient target found, None otherwise
+        """
+        try:
+            salience_context = self._analyze_salience(game_state, agent_id)
+            
+            if salience_context.get('salience_score', 0) >= 0.7:
+                target = salience_context.get('most_salient')
+                reason = salience_context.get('salience_reason', 'High salience')
+                
+                # For rare colors or center regions, suggest ACTION6 (click)
+                if 'rare_color' in str(target) or 'center' in str(target):
+                    return "ACTION6", f"Q3 Targeted Experiment: {reason}"
+                
+                # For goal objects, suggest movement toward them
+                if 'goal' in str(target):
+                    # Could analyze position and suggest direction
+                    return None  # Let normal logic handle goals
+            
+            return None
+        except Exception:
+            return None
+
+    # ========================================================================
     # AGENT OPERATING MODE HELPERS
     # ========================================================================
     
@@ -4078,6 +4761,12 @@ class GameplayEngine:
         if self_reflection:
             reasoning_obj['self_reflection'] = self_reflection
         
+        # Emergent Reasoning: Four Core Questions (Q1-Q4)
+        # This surfaces the cognitive loop that drives intelligent exploration
+        emergent_reasoning = getattr(self, '_last_emergent_reasoning', None)
+        if emergent_reasoning:
+            reasoning_obj['emergent_reasoning'] = emergent_reasoning
+        
         # Add genome config if available
         genome = self.game_config.get('genome')
         if genome:
@@ -4098,9 +4787,11 @@ class GameplayEngine:
             # Truncate world_model and self_model first to save space
             reasoning_obj['world_model'] = {'truncated': True}
             reasoning_obj['self_model'] = {'truncated': True}
-            # Also truncate self_reflection if present
+            # Also truncate self_reflection and emergent_reasoning if present
             if 'self_reflection' in reasoning_obj:
                 reasoning_obj['self_reflection'] = {'truncated': True}
+            if 'emergent_reasoning' in reasoning_obj:
+                reasoning_obj['emergent_reasoning'] = {'truncated': True}
             reasoning_json = json.dumps(reasoning_obj)
             
             # If still too large, truncate reasoning text

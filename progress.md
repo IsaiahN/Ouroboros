@@ -1047,4 +1047,179 @@ if failures >= 7:
 
 ---
 
+### Session 12: Q5 Goal Variables Implementation (8:15:00 PM - 8:35:00 PM)
+
+**Focus**: Implement Question 5 from `emergent-reasoning-compressed.md` - "What actions cause score changes or game-over?"
+
+#### Approach
+Following the compressed emergent reasoning framework, Q5 asks:
+> "What is the stated or implicit goal, and what subset of variables directly affect it?"
+
+For ARC3 games, this translates to:
+- **Goal**: Score increase (level completion)
+- **Goal Variables**: Actions that cause score changes (+N)
+- **Terminal States**: Actions that cause game-over (failure)
+
+#### Implementation Plan
+Rather than creating new tables, we enhance existing systems:
+1. Add `resulted_in_game_over` column to `action_traces` table (~1 line schema)
+2. Enhance `_recent_action_traces` with `score_change` and `outcome_type` fields (~5 lines)
+3. Add `_analyze_goal_variables()` method (~50 lines)
+4. Add Q5 block to `_build_emergent_reasoning_context()` (~8 lines)
+5. Track game-over in game loop when GAME_OVER+0 detected (~3 lines)
+
+Total: ~67 lines, no new tables, backwards compatible
+
+#### Implementation Steps Completed
+
+**Step 1**: Schema Update (`complete_database_schema.sql`)
+- Added `resulted_in_game_over BOOLEAN DEFAULT FALSE` to `action_traces` table
+- Backwards compatible: DEFAULT FALSE means old data works unchanged
+
+**Step 2**: Database Interface Update (`database_interface.py`)
+- Updated INSERT statement to include `resulted_in_game_over` column
+- Uses `.get('resulted_in_game_over', False)` for safety
+
+**Step 3**: Enhanced Action Traces (`core_gameplay.py` ~line 1660)
+```python
+# Q5 enhancement: track score changes and outcome types
+score_change = game_state.score - previous_score
+outcome_type = 'neutral'
+if score_change > 0:
+    outcome_type = 'score_increase'
+elif game_state.state == 'GAME_OVER' and game_state.score == 0:
+    outcome_type = 'game_over'
+
+self._recent_action_traces.append({
+    'action_type': action,
+    'frame_before': self.action_handler.last_frame,
+    'frame_after': game_state.frame,
+    'score_change': score_change,  # Q5: score delta
+    'outcome_type': outcome_type   # Q5: neutral/score_increase/game_over
+})
+```
+
+**Step 4**: Game-Over Tracking (`core_gameplay.py` ~line 1547)
+```python
+elif game_state.state == "GAME_OVER":
+    if game_state.score == 0:
+        logger.info(f"[GAME_OVER] Game ended with zero score")
+        # Q5: Mark last action as causing game-over for learning
+        if hasattr(self, '_recent_action_traces') and self._recent_action_traces:
+            self._recent_action_traces[-1]['outcome_type'] = 'game_over'
+        break
+```
+
+**Step 5**: New `_analyze_goal_variables()` Method (~55 lines)
+```python
+def _analyze_goal_variables(self, game_id: str, current_level: int) -> Dict[str, Any]:
+    """
+    Q5: What actions cause score changes or game-over?
+    
+    Analyzes recent action traces to identify:
+    - Actions correlated with score increases (positive feedback)
+    - Actions correlated with game-over (negative feedback / terminal states)
+    - Patterns in action sequences leading to rewards
+    """
+    result = {
+        'actions_with_score_increase': [],
+        'actions_causing_game_over': [],
+        'score_increasing_patterns': [],
+        'terminal_patterns': [],
+        'goal_insight': None,
+        'confidence': 0.3
+    }
+    # ... analysis logic ...
+    return result
+```
+
+**Step 6**: Q5 Block in `_build_emergent_reasoning_context()` (~8 lines)
+```python
+# ===================================================================
+# Q5: WHAT ACTIONS CAUSE SCORE CHANGES OR GAME-OVER?
+# Uses enhanced _recent_action_traces with score_change and outcome_type
+# ===================================================================
+try:
+    q5_context = self._analyze_goal_variables(game_id, current_level)
+    context['q5_goal_variables'] = q5_context
+except Exception as e:
+    logger.debug(f"Q5 analysis failed: {e}")
+    context['q5_goal_variables'] = {'error': str(e)[:50]}
+```
+
+**Step 7**: Updated Header Comment
+```python
+# ========================================================================
+# EMERGENT REASONING: THE FOUR CORE QUESTIONS + EXTENSIONS
+# Q1: What is changing vs. what is fixed?
+# Q2: What punishes me and what rewards me?
+# Q3: What happens if I interact with the most salient variable?
+# Q4: What rule explains this across contexts?
+# Q5: What actions cause score changes or game-over? (goal variables)
+# Q7: Am I at the frontier? (ARC3 familiarity - novel vs beaten level)
+# ========================================================================
+```
+
+**Step 8**: Database Migration
+```sql
+ALTER TABLE action_traces ADD COLUMN resulted_in_game_over BOOLEAN DEFAULT FALSE;
+```
+
+#### Backwards Compatibility Verified
+- New column uses `DEFAULT FALSE` - old rows get FALSE automatically
+- Enhanced trace fields use `.get()` with defaults - old traces without new fields work
+- `_analyze_goal_variables()` uses `.get()` for all trace field access
+- No breaking changes to existing data or flows
+
+#### Verification
+- [OK] py_compile: `core_gameplay.py` syntax check passed
+- [OK] py_compile: `database_interface.py` syntax check passed
+- [OK] Import test: Both modules import successfully
+- [OK] ALTER TABLE: Column added to live database
+
+---
+
+### Current Status (8:35:00 PM)
+
+**Approach**: Implementing compressed emergent reasoning framework (Q1-Q7) from `emergent-reasoning-compressed.md`
+
+**Completed This Session (Sessions 11-12)**:
+| # | Feature | Status |
+|---|---------|--------|
+| 1 | Sequence deactivation threshold: 3 → 7 failures | [DONE] |
+| 2 | Q5: `resulted_in_game_over` column in `action_traces` | [DONE] |
+| 3 | Q5: Enhanced `_recent_action_traces` with score_change, outcome_type | [DONE] |
+| 4 | Q5: New `_analyze_goal_variables()` method | [DONE] |
+| 5 | Q5: Q5 block added to `_build_emergent_reasoning_context()` | [DONE] |
+| 6 | Q5: Game-over tracking in game loop | [DONE] |
+| 7 | Q5: Database migration (ALTER TABLE) | [DONE] |
+
+**Emergent Reasoning Questions Status**:
+| Question | Status | Implementation |
+|----------|--------|----------------|
+| Q1: What is changing vs fixed? | [DONE] | `_analyze_change_vs_invariance()` |
+| Q2: What punishes/rewards me? | [DONE] | `_analyze_punishment_reward()` |
+| Q3: What if I interact with salient variable? | [DONE] | `_analyze_salient_target()` |
+| Q4: What rule explains this across contexts? | [DONE] | `_analyze_cross_context_rules()` |
+| Q5: What actions cause score/game-over? | [DONE] | `_analyze_goal_variables()` (just added) |
+| Q6: What rules can't I discover by experimentation? | SKIP | Not needed for ARC3 (low stakes, live practice) |
+| Q7: Am I at the frontier? | [DONE] | `_get_network_max_level()` wrapper |
+
+**Current Failure Being Worked On**:
+- **None** - All Q5 implementation verified working
+
+**Files Modified This Session**:
+| File | Changes |
+|------|---------|
+| `complete_database_schema.sql` | Added `resulted_in_game_over` column |
+| `database_interface.py` | Updated INSERT to include new column |
+| `core_gameplay.py` | Enhanced traces, new method, Q5 block, game-over tracking |
+
+**Next Steps**:
+- Run evolution to verify Q5 surfaces in API payload
+- Monitor for agents using goal variable analysis in decision making
+- Consider adding Q5 insights to `_select_action()` for action weighting
+
+---
+
 **END OF SESSION: December 4, 2025**

@@ -35,6 +35,29 @@ The lengthy and arduous system for reasoning can be compressed down to four ques
 - Extracts the minimal portable principle from observed cause-effect-value triples
 - Enables generalization without building full relational graphs
 
+
+---
+
+## Additional Questions for High Stakes / Irreversible Domains
+
+### 5. What is the stated or implicit goal, and what subset of variables directly affect it?
+*Goal decomposition + variable scoping*
+
+- Identifies the win condition explicitly
+- Filters variables to only those causally linked to goal achievement
+
+### 6. What rules govern this system that I cannot discover through experimentation?
+*Prior knowledge acquisition + constraint discovery*
+
+- Recognizes when trial-and-error is too costly
+- Seeks external information (documentation, examples, network wisdom) before acting
+- **Note:** for Arc 3 Games (as of now - levels are resetable, and low stakes. you can learn with live practice, or with playback, making this one irrelevant...for now )
+
+### 7. How is this instance similar to and different from my training distribution?
+*Distribution shift detection + calibration*
+
+- Detects novel situations where past experience may not apply
+- Adjusts confidence and exploration rate accordingly
 ---
 
 ## Comprehensive Reference

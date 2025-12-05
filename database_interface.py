@@ -355,8 +355,8 @@ class DatabaseInterface:
                     session_id, game_id, action_number, coordinates,
                     timestamp, frame_before, frame_after, frame_changed,
                     score_before, score_after, score_change, response_data,
-                    level_number
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    level_number, resulted_in_game_over
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 trace_data['session_id'],
                 trace_data['game_id'],
@@ -370,7 +370,8 @@ class DatabaseInterface:
                 trace_data.get('score_after', 0.0),
                 trace_data.get('score_change', 0.0),
                 json.dumps(trace_data.get('response_data')) if trace_data.get('response_data') else None,
-                trace_data.get('level_number', 1)  # Default to level 1 if not specified
+                trace_data.get('level_number', 1),  # Default to level 1 if not specified
+                trace_data.get('resulted_in_game_over', False)  # Q5: terminal failure tracking
             ))
             conn.commit()
 
