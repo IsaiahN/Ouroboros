@@ -7,10 +7,13 @@ Phase 4.5: Enhanced with sensation-based navigation for emotional intelligence
 
 import json
 import uuid
+import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable
 from database_interface import DatabaseInterface
 from sensation_engine import SensationEngine
+
+logger = logging.getLogger(__name__)
 
 
 class AgentFactory:
@@ -90,6 +93,31 @@ class AgentFactory:
 
         # Store agent in database (Rule 2)
         self.db.store_agent(agent_dict)
+
+        # CRITICAL FIX: Assign initial role based on population needs
+        # New agents were starting with preferred_role=NULL, preventing role self-determination
+        try:
+            from agent_operating_mode_system import AgentOperatingModeSystem
+            mode_system = AgentOperatingModeSystem(self.db)
+            
+            # Get current generation from database (or default to 0)
+            gen_result = self.db.execute_query("""
+                SELECT MAX(generation) as gen FROM agent_operating_modes
+            """)
+            current_gen = gen_result[0]['gen'] if gen_result and gen_result[0]['gen'] else 0
+            
+            # Get the role most needed by the population
+            initial_role = mode_system.get_needed_role_for_new_agent(current_gen)
+            
+            # Set initial preferred_role in agents table
+            self.db.execute_query("""
+                UPDATE agents SET preferred_role = ? WHERE agent_id = ?
+            """, (initial_role, agent.agent_id))
+            
+            logger.debug(f"[ROLE] Assigned initial role {initial_role} to new agent {agent.agent_id[:8]}")
+        except Exception as e:
+            # Non-critical - agent can still function with generalist fallback
+            logger.warning(f"Initial role assignment failed (will use generalist fallback): {e}")
 
         self._log_factory_event("agent_created", {
             "agent_id": agent.agent_id,

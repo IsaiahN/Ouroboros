@@ -620,7 +620,91 @@ class GameplayEngine:
                     logger.info(f"[PKG] Captured CUMULATIVE sequence for levels 1-{level_for_storage}: {sequence_id}")
                 else:
                     logger.info(f" Captured level {level_for_storage} winning sequence: {sequence_id}")
+                
+                # Viral Package Creation: Create and spread viral packages on LEVEL wins
+                # This enables horizontal knowledge transfer before full game completion
+                if agent_id:
+                    try:
+                        from viral_package_engine import ViralPackageEngine
+                        viral_engine = ViralPackageEngine(self.db)
+                        generation = self.game_config.get('generation', 0)
+                        
+                        package_id = viral_engine.create_viral_package_from_sequence(
+                            sequence_id, agent_id, generation
+                        )
+                        if package_id:
+                            logger.info(f"[VIRAL] Created viral package {package_id[:12]} from level {level_for_storage} win")
+                            
+                            # Spread to nearby agents
+                            nearby_agents = self.db.execute_query("""
+                                SELECT agent_id FROM agents 
+                                WHERE is_active = TRUE AND agent_id != ?
+                                ORDER BY RANDOM() LIMIT 3
+                            """, (agent_id,))
+                            
+                            spread_count = 0
+                            for target in nearby_agents:
+                                if viral_engine.spread_viral_package(package_id, agent_id, target['agent_id'], generation):
+                                    spread_count += 1
+                            if spread_count > 0:
+                                logger.info(f"[VIRAL] Level win package spread to {spread_count} agents")
+                    except Exception as e:
+                        logger.debug(f"Level viral package creation failed (non-critical): {e}")
         
+        # Rule Induction: Extract rules from LEVEL completions (not just game wins)
+        # This enables cumulative rule learning as each level provides cause-effect data
+        if self.rule_engine and agent_id:
+            try:
+                session_id = self.session_manager.current_session_id
+                
+                # Get action traces for this level only
+                action_traces = self.db.execute_query("""
+                    SELECT action_number, frame_before, frame_after, coordinates
+                    FROM action_traces
+                    WHERE session_id = ? AND game_id = ? AND level_number = ?
+                    ORDER BY action_number
+                """, (session_id, game_id, loop_state.current_level))
+                
+                if action_traces and len(action_traces) >= 2:
+                    # Build initial frame from first action's frame_before
+                    initial_frame = None
+                    if action_traces[0].get('frame_before'):
+                        fb = action_traces[0]['frame_before']
+                        initial_frame = json.loads(fb) if isinstance(fb, str) else fb
+                    
+                    # Build action sequence and frame states
+                    action_sequence = []
+                    frame_states = [initial_frame] if initial_frame else []
+                    
+                    for trace in action_traces:
+                        action_sequence.append({
+                            'action_type': trace['action_number'],
+                            'coordinate_x': json.loads(trace['coordinates']).get('x') if trace.get('coordinates') else None,
+                            'coordinate_y': json.loads(trace['coordinates']).get('y') if trace.get('coordinates') else None
+                        })
+                        if trace.get('frame_after'):
+                            fa = trace['frame_after']
+                            frame_states.append(json.loads(fa) if isinstance(fa, str) else fa)
+                    
+                    # Create level-specific game session data
+                    level_session_data = {
+                        'game_id': game_id,
+                        'agent_id': agent_id,
+                        'level_number': loop_state.current_level,
+                        'initial_frame': initial_frame,
+                        'action_sequence': action_sequence,
+                        'frame_states': frame_states,
+                        'won': True,  # Level was won
+                        'score_achieved': game_state.score,
+                        'is_level_win': True  # Flag to indicate this is level-specific rule
+                    }
+                    
+                    extracted_rule = self.rule_engine.extract_rule_from_game_session(level_session_data)
+                    if extracted_rule:
+                        logger.info(f"[RULE] Extracted rule {extracted_rule['rule_id'][:12]} from level {loop_state.current_level} win")
+            except Exception as e:
+                logger.debug(f"Level rule extraction failed (non-critical): {e}")
+
         # Agent Self-Model: Track controlled objects from action traces
         if agent_id and hasattr(self, 'agent_self_model'):
             try:
@@ -2915,6 +2999,58 @@ class GameplayEngine:
         if network_suggested_action is None:
             base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
         
+        # ===================================================================
+        # PHASE 4: ABSTRACTION HINTS - Apply conceptual guidance from failed sequences
+        # When sequences fail, abstraction engine extracts patterns from multiple
+        # sequences to guide exploration. These hints suggest actions that commonly
+        # appear in winning sequences for this game type.
+        # ===================================================================
+        abstraction_reasoning = None
+        abstraction_hints = self.game_config.get('abstraction_hints')
+        
+        if abstraction_hints and abstraction_hints.get('hints'):
+            hints = abstraction_hints.get('hints', [])
+            confidence = abstraction_hints.get('confidence', 0.0)
+            
+            # Parse hints to extract action biases
+            abstraction_biases = {}
+            action_names_to_num = {'right': 1, 'down': 2, 'left': 3, 'up': 4, 'select': 5, 'submit': 6, 'reset': 7}
+            
+            for hint in hints:
+                hint_lower = hint.lower()
+                # Check for action mentions in hints
+                for action_name, action_num in action_names_to_num.items():
+                    if action_name in hint_lower or f'action{action_num}' in hint_lower:
+                        # Weight based on hint position (earlier hints = stronger) and confidence
+                        hint_weight = (1.0 - (hints.index(hint) * 0.15)) * confidence
+                        abstraction_biases[action_num] = abstraction_biases.get(action_num, 0.0) + hint_weight
+                        
+                        # Check for "early" keyword - boost if we're early in the sequence
+                        if 'early' in hint_lower:
+                            # We don't have action count here, so always apply small early boost
+                            abstraction_biases[action_num] += 0.1
+            
+            if abstraction_biases:
+                action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
+                current_abstraction_bias = abstraction_biases.get(action_num, 0.0)
+                
+                # Find best action based on abstraction hints
+                best_abstraction_action = max(abstraction_biases.items(), key=lambda x: x[1])
+                
+                # If current action is NOT the best abstraction suggestion, consider switching
+                if best_abstraction_action[0] != action_num and best_abstraction_action[1] > 0.3:
+                    # Only switch if abstraction has strong preference
+                    if current_abstraction_bias < best_abstraction_action[1] * 0.5:
+                        logger.info(f"[ABSTRACTION] Hint suggests ACTION{best_abstraction_action[0]} (weight: {best_abstraction_action[1]:.2f})")
+                        base_action = f"ACTION{best_abstraction_action[0]}"
+                        abstraction_reasoning = f"Abstraction pattern guidance (confidence: {confidence:.2f})"
+                    else:
+                        logger.debug(f"[ABSTRACTION] Current {base_action} has sufficient abstraction support")
+                        abstraction_reasoning = f"Abstraction-aligned (bias: {current_abstraction_bias:.2f})"
+                elif current_abstraction_bias > 0.2:
+                    logger.debug(f"[ABSTRACTION] Reinforcing {base_action} (abstraction bias: {current_abstraction_bias:.2f})")
+                    abstraction_reasoning = f"Abstraction-reinforced (bias: {current_abstraction_bias:.2f})"
+        
         # PHASE 4.5: Apply sensation-based biasing for navigation actions (1-7)
         if sensation_biases and agent_id:
             action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
@@ -3063,6 +3199,8 @@ class GameplayEngine:
         reasoning_parts = []
         if is_unbeaten_game:
             reasoning_parts.append("Unbeaten game - full exploration")
+        if abstraction_reasoning:
+            reasoning_parts.append(abstraction_reasoning)
         if hypothesis_reasoning:
             reasoning_parts.append(hypothesis_reasoning)
         if dm_reasoning:
@@ -3553,6 +3691,16 @@ class GameplayEngine:
                   total_actions, avg_actions, avg_efficiency, wins,
                   win_rate, sequences_discovered, sequences_validated,
                   prestige_score))
+            
+            # CRITICAL FIX: Update agents table level_progressions_detected
+            # This was missing - agents.level_progressions_detected was never being updated
+            # which caused all agents to show 0 level progressions despite playing games
+            if level_completions > 0:
+                self.db.execute_query("""
+                    UPDATE agents 
+                    SET level_progressions_detected = COALESCE(level_progressions_detected, 0) + ?
+                    WHERE agent_id = ?
+                """, (level_completions, agent_id))
             
             self.db.checkpoint_wal()
             

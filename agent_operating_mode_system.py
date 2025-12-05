@@ -824,6 +824,41 @@ class AgentOperatingModeSystem:
         # Allow 10% overflow above target
         return current_pct < (target * 1.1)
 
+    def get_needed_role_for_new_agent(self, generation: int = 0) -> str:
+        """
+        Get the role most needed for a new agent based on population distribution.
+        Called when creating new agents to ensure balanced role distribution.
+        
+        Args:
+            generation: Current generation (for distribution lookup)
+            
+        Returns:
+            Role string ('pioneer', 'optimizer', 'generalist', 'exploiter')
+        """
+        # Get current distribution
+        distribution = self.get_population_mode_distribution(generation)
+        total = sum(distribution.values()) or 1
+        
+        # Calculate current percentages
+        current_pcts = {role: count / total for role, count in distribution.items()}
+        
+        # Get target percentages
+        targets = {
+            'pioneer': self.TARGET_PIONEER_PCT,
+            'optimizer': self.TARGET_OPTIMIZER_PCT,
+            'generalist': self.TARGET_GENERALIST_PCT,
+            'exploiter': self.TARGET_EXPLOITER_PCT
+        }
+        
+        # Find role most below target (largest deficit)
+        deficits = {role: targets[role] - current_pcts.get(role, 0) 
+                    for role in targets}
+        
+        needed_role = max(deficits, key=deficits.get)
+        logger.debug(f"Population needs more {needed_role}s (deficit: {deficits[needed_role]:.2%})")
+        
+        return needed_role
+
     def update_role_fit_after_game(self, agent_id: str, role: str, game_result: Dict) -> None:
         """
         Update agent's fit score for their current role after each game.
