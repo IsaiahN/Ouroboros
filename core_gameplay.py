@@ -5276,8 +5276,8 @@ class GameplayEngine:
             if current:
                 failures = (current[0].get('consecutive_failures') or 0) + 1
                 
-                # Deactivate after 3 consecutive failures (more aggressive for 3-try system)
-                if failures >= 3:
+                # Deactivate after 7 consecutive failures (less aggressive to allow for cosmetic variations)
+                if failures >= 7:
                     self.db.execute_query("""
                         UPDATE winning_sequences 
                         SET is_active = 0, quick_flagged = 1, 

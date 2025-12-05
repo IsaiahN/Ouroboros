@@ -1007,4 +1007,44 @@ elif escape_attempt >= 8:
 
 ---
 
+### Session 11: Sequence Deactivation Threshold Adjustment (7:55:00 PM)
+
+**Focus**: Reduce aggressive sequence deactivation due to frame corruption false positives
+
+#### Problem Identified
+From assessment of Generation 270-271 run:
+- 104 winning sequences exist across 6 games
+- 0 full game wins despite having sequences
+- Sequences being marked `is_active=0` with `flag_reason='3try_deactivate: frame_corruption'`
+- Sample sequence had `consecutive_failures=3` and `success_rate_when_reused=0.5` but was deactivated
+
+**Root Cause**: The 3-failure threshold was too aggressive. ARC games can have cosmetic frame variations (colors, animations) that don't affect gameplay but trigger "frame corruption" detection.
+
+#### Implementation
+
+**File**: `core_gameplay.py` (line ~5280)
+
+**Before**:
+```python
+# Deactivate after 3 consecutive failures (more aggressive for 3-try system)
+if failures >= 3:
+```
+
+**After**:
+```python
+# Deactivate after 7 consecutive failures (less aggressive to allow for cosmetic variations)
+if failures >= 7:
+```
+
+#### Rationale
+- Gives sequences 7 chances instead of 3 before deactivation
+- Accounts for cosmetic frame variations that don't affect gameplay
+- Sequences with 50% success rate should not be deactivated after just 3 failures
+- Aligns with Bayesian approach: more data before making permanent decisions
+
+#### Verification
+- [OK] File saved successfully
+
+---
+
 **END OF SESSION: December 4, 2025**
