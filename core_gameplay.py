@@ -2890,13 +2890,24 @@ class GameplayEngine:
                 # Get positive influence from viral packages
                 action_weights = viral_engine.get_package_action_weights(agent_id)
                 
-                # Get negative influence from pariahs
-                action_penalties = viral_engine.get_pariah_action_penalties(agent_id)
+                # Get negative influence from pariahs WITH ROLE-ADJUSTED TOLERANCE
+                # Per agi_unified_theory.md: Exploiters/Optimizers have pariah immunity
+                # to prevent analysis paralysis
+                agent_mode = self.game_config.get('agent_operating_mode', 'generalist')
+                current_game_id = self.session_manager.current_game_id
+                current_level = int(game_state.score) + 1 if game_state.score else 1
+                
+                action_penalties = viral_engine.get_role_adjusted_pariah_penalties(
+                    agent_id=agent_id,
+                    agent_role=agent_mode or 'generalist',
+                    game_id=current_game_id,
+                    level_number=current_level
+                )
                 
                 if action_weights:
                     logger.debug(f"[VIRAL] Viral packages suggest: {list(action_weights.keys())[:3]}")
                 if action_penalties:
-                    logger.debug(f"  Pariahs warn against: {list(action_penalties.keys())[:3]}")
+                    logger.debug(f"[PARIAH] Warnings (role-adjusted for {agent_mode}): {list(action_penalties.keys())[:3]}")
                     
             except Exception as e:
                 logger.debug(f"Phase 3 influence error: {e}")
@@ -4122,17 +4133,28 @@ class GameplayEngine:
                 except Exception:
                     pass
             
-            # === 6. PARIAH AVOIDANCE ===
+            # === 6. PARIAH AVOIDANCE (Role-Adjusted) ===
             try:
                 from viral_package_engine import ViralPackageEngine
                 viral_engine = ViralPackageEngine(self.db)
-                pariah_penalties = viral_engine.get_pariah_action_penalties(agent_id) if agent_id else {}
+                
+                # Get agent mode for role-based pariah tolerance
+                agent_mode = self.game_config.get('agent_operating_mode', 'generalist')
+                
+                # Use role-adjusted pariah penalties to prevent analysis paralysis
+                pariah_penalties = viral_engine.get_role_adjusted_pariah_penalties(
+                    agent_id=agent_id,
+                    agent_role=agent_mode or 'generalist',
+                    game_id=game_id,
+                    level_number=level
+                ) if agent_id else {}
+                
                 for action_str, penalty in pariah_penalties.items():
                     action_num = int(action_str) if str(action_str).isdigit() else None
                     if action_num and action_num in action_scores:
                         action_scores[action_num] -= penalty * 0.5
                 if pariah_penalties:
-                    reasoning_parts.append(f"Pariah avoid: {len(pariah_penalties)}")
+                    reasoning_parts.append(f"Pariah avoid ({agent_mode}): {len(pariah_penalties)}")
             except Exception:
                 pass
             

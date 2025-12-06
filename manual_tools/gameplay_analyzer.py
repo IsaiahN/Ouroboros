@@ -36,22 +36,37 @@ def get_db_connection(db_path: str | None = None) -> sqlite3.Connection:
     return conn
 
 
-def analyze_recent_games(conn: sqlite3.Connection, hours: int = 3, limit: int = 30) -> list:
-    """Analyze recent game results."""
-    recent = conn.execute('''
-        SELECT 
-            strftime('%H:%M', created_at) as time,
-            game_id,
-            final_score,
-            level_completions,
-            total_actions,
-            win_detected,
-            created_at
-        FROM game_results
-        WHERE created_at >= datetime('now', ? || ' hours')
-        ORDER BY created_at DESC
-        LIMIT ?
-    ''', (f'-{hours}', limit)).fetchall()
+def analyze_recent_games(conn: sqlite3.Connection, hours: int = 3, limit: int = -1) -> list:
+    """Analyze recent game results. limit=-1 means no limit."""
+    if limit == -1:
+        recent = conn.execute('''
+            SELECT 
+                strftime('%H:%M', created_at) as time,
+                game_id,
+                final_score,
+                level_completions,
+                total_actions,
+                win_detected,
+                created_at
+            FROM game_results
+            WHERE created_at >= datetime('now', ? || ' hours')
+            ORDER BY created_at DESC
+        ''', (f'-{hours}',)).fetchall()
+    else:
+        recent = conn.execute('''
+            SELECT 
+                strftime('%H:%M', created_at) as time,
+                game_id,
+                final_score,
+                level_completions,
+                total_actions,
+                win_detected,
+                created_at
+            FROM game_results
+            WHERE created_at >= datetime('now', ? || ' hours')
+            ORDER BY created_at DESC
+            LIMIT ?
+        ''', (f'-{hours}', limit)).fetchall()
     
     return [dict(r) for r in recent]
 
@@ -162,7 +177,8 @@ def print_analysis(hours: int = 3, min_generation: int = 0, include_baseline: bo
     # Recent games
     if include_games:
         recent = analyze_recent_games(conn, hours, limit)
-        print(f'\nRECENT GAME RESULTS (Last {hours} Hours, limit {limit}):')
+        limit_text = f"limit {limit}" if limit > 0 else "all"
+        print(f'\nRECENT GAME RESULTS (Last {hours} Hours, {limit_text}):')
         print('-' * 70)
         print(f'{"Time":5} | {"Game ID":25} | {"Score":5} | {"Lvls":4} | {"Actions":7} | {"Won":3}')
         print('-' * 70)
@@ -251,7 +267,7 @@ def main():
     parser.add_argument('--generations', type=int, default=0, help='Minimum generation to include')
     parser.add_argument('--compare', action='store_true', help='Include baseline comparison')
     parser.add_argument('--no-games', action='store_true', help='Skip individual game listing')
-    parser.add_argument('--limit', type=int, default=30, help='Max games to show (default: 30)')
+    parser.add_argument('--limit', type=int, default=None, help='Max games to show (default: all games in time range)')
     parser.add_argument('--full', action='store_true', help='Full analysis with all options')
     
     args = parser.parse_args()
@@ -259,14 +275,16 @@ def main():
     if args.full:
         args.compare = True
         args.hours = 6
-        args.limit = 50
+    
+    # If no limit specified, show all games in time range (use -1 to indicate no limit)
+    limit = args.limit if args.limit is not None else -1
     
     print_analysis(
         hours=args.hours,
         min_generation=args.generations,
         include_baseline=args.compare or args.full,
         include_games=not args.no_games,
-        limit=args.limit
+        limit=limit
     )
 
 

@@ -530,6 +530,28 @@ The Regulatory Signal Engine maintains system health by reading database state a
 - If optimization mode (solved but suboptimal) → increase refinement agent percentage
 - If exploitation mode (fully understood) → increase analysis agent percentage
 
+**Domain-Defined Breakpoints**:
+Every problem space possesses intrinsic stress points. Rather than designing artificial failures, the network evolves by encountering and learning from these organic points of collapse or system failure.
+
+**Pariah Decay (Anti-Paralysis Mechanism)**:
+Just as viral packages have relevance decay, pariahs (failure patterns) must also decay over time. Without decay:
+- Ancient pariahs accumulate infinitely
+- Agents become paralyzed by fear of every possible failure
+- Innovation dies ("analysis paralysis")
+
+**Pariah decay formula**:
+$$\text{toxicity}(t) = \text{initial\_toxicity} \times (1 - \text{decay\_rate} \times \text{generations\_since\_trigger})$$
+
+**Role-Based Pariah Tolerance**:
+Different roles have different relationships with network failure wisdom:
+- **Exploiters**: 80% tolerance (meant to break through)
+- **Optimizers**: 60% tolerance (refining known paths)  
+- **Pioneers**: 30% tolerance (cautious on frontier)
+- **Generalists**: 0% tolerance (maintains network wisdom)
+
+**Network Paralysis Detection**:
+When multiple agents freeze on the same game/level, the system temporarily boosts pariah tolerance for that specific problem to encourage breakthrough attempts.
+
 **The system self-regulates without human intervention.**
 
 ---

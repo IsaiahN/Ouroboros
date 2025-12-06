@@ -794,6 +794,176 @@ class ViralPackageEngine:
             WHERE last_triggered_generation < ? - ?
             AND is_active = TRUE
         """, (generation, threshold_generations))
+        
+        # Apply toxicity decay to all active pariahs
+        self.decay_pariah_toxicity(generation)
+    
+    def decay_pariah_toxicity(self, generation: int, decay_rate: float = 0.05, min_toxicity: float = 0.1):
+        """
+        Apply relevance decay to pariah toxicity.
+        
+        Philosophy (from agi_unified_theory.md):
+        "Forgetting is not a bug - it's essential for intelligence."
+        Pariahs should fade naturally if not re-validated by newer generations.
+        
+        Decay Formula (mirrors viral package relevance decay):
+        new_toxicity = current_toxicity * (1 - decay_rate * generations_since_trigger)
+        
+        Args:
+            generation: Current generation
+            decay_rate: How fast toxicity decays per generation (default 5%)
+            min_toxicity: Minimum toxicity floor to maintain some warning (default 0.1)
+        """
+        try:
+            # Get all active pariahs that haven't been triggered recently
+            pariahs = self.db.execute_query("""
+                SELECT pariah_id, toxicity, discovery_generation, 
+                       COALESCE(last_triggered_generation, discovery_generation) as last_trigger
+                FROM pariahs
+                WHERE is_active = TRUE
+            """)
+            
+            if not pariahs:
+                return
+            
+            decayed_count = 0
+            for p in pariahs:
+                last_trigger = p['last_trigger'] or p['discovery_generation'] or 0
+                generations_since_trigger = max(0, generation - last_trigger)
+                
+                # Apply exponential decay based on age
+                # Toxicity halves roughly every 15 generations if not re-triggered
+                decay_factor = 1.0 - (decay_rate * min(generations_since_trigger, 20))
+                decay_factor = max(0.3, decay_factor)  # Floor at 30% of original
+                
+                new_toxicity = max(min_toxicity, p['toxicity'] * decay_factor)
+                
+                # Only update if toxicity actually changed
+                if abs(new_toxicity - p['toxicity']) > 0.01:
+                    self.db.execute_query("""
+                        UPDATE pariahs 
+                        SET toxicity = ?
+                        WHERE pariah_id = ?
+                    """, (new_toxicity, p['pariah_id']))
+                    decayed_count += 1
+            
+            if decayed_count > 0:
+                print(f"[PARIAH] Decayed toxicity for {decayed_count} pariahs (gen {generation})")
+                
+        except Exception as e:
+            print(f"[PARIAH] Error in toxicity decay: {e}")
+    
+    def get_role_adjusted_pariah_penalties(
+        self, 
+        agent_id: str, 
+        agent_role: str = 'generalist',
+        game_id: str = None,
+        level_number: int = None
+    ) -> Dict[int, float]:
+        """
+        Get pariah penalties adjusted for agent role (pariah tolerance).
+        
+        Per Master Ruleset: 
+        - Exploiters and Optimizers should have immunity/tolerance to pariahs
+        - This prevents analysis paralysis on well-explored games
+        
+        Role Tolerance Levels:
+        - exploiter: 0.8 (80% pariah penalty ignored)
+        - optimizer: 0.6 (60% penalty ignored) 
+        - pioneer: 0.3 (30% penalty ignored - still cautious on frontier)
+        - generalist: 0.0 (full penalty applied)
+        
+        Args:
+            agent_id: Agent to get penalties for
+            agent_role: Agent's current role
+            game_id: Optional - for network paralysis boost
+            level_number: Optional - for level-specific paralysis detection
+            
+        Returns:
+            Dict mapping action_id -> adjusted_penalty
+        """
+        # Role-based pariah tolerance
+        ROLE_TOLERANCE = {
+            'exploiter': 0.8,   # Nearly immune - meant to break through
+            'optimizer': 0.6,   # Significant immunity - refining known paths
+            'pioneer': 0.3,     # Some tolerance - exploring frontier
+            'generalist': 0.0   # Full sensitivity - maintains network wisdom
+        }
+        
+        base_tolerance = ROLE_TOLERANCE.get(agent_role.lower(), 0.0)
+        
+        # Check for network-level paralysis on this game/level
+        paralysis_boost = 0.0
+        if game_id and level_number:
+            paralysis_boost = self._detect_network_paralysis(game_id, level_number)
+        
+        # Combined tolerance (capped at 0.95 - always some caution)
+        final_tolerance = min(0.95, base_tolerance + paralysis_boost)
+        
+        # Get base pariah penalties
+        base_penalties = self.get_pariah_action_penalties(agent_id)
+        
+        # Apply tolerance reduction
+        adjusted_penalties = {}
+        for action, penalty in base_penalties.items():
+            adjusted_penalties[action] = penalty * (1.0 - final_tolerance)
+        
+        return adjusted_penalties
+    
+    def _detect_network_paralysis(self, game_id: str, level_number: int, 
+                                   lookback_generations: int = 5,
+                                   frozen_threshold: int = 5) -> float:
+        """
+        Detect if the network is experiencing paralysis on a specific game/level.
+        
+        If multiple agents are getting stuck ("frozen state") on the same level,
+        temporarily boost pariah tolerance to encourage breakthrough attempts.
+        
+        Args:
+            game_id: Game to check
+            level_number: Level to check
+            lookback_generations: How many generations to look back
+            frozen_threshold: Number of frozen failures to trigger boost
+            
+        Returns:
+            Paralysis boost (0.0 to 0.4) to add to role tolerance
+        """
+        try:
+            # Get current generation
+            gen_result = self.db.execute_query(
+                "SELECT MAX(generation) as max_gen FROM agents WHERE is_active = 1"
+            )
+            current_gen = gen_result[0]['max_gen'] if gen_result else 0
+            
+            # Count recent frozen state failures on this game
+            # Use game_results with low scores and specific level
+            frozen_count = self.db.execute_query("""
+                SELECT COUNT(*) as cnt
+                FROM game_results
+                WHERE game_id LIKE ? || '%'
+                AND level_completions = ?
+                AND final_score <= 1.0
+                AND created_at >= datetime('now', '-24 hours')
+            """, (game_id[:4], level_number))
+            
+            if not frozen_count:
+                return 0.0
+            
+            count = frozen_count[0]['cnt'] or 0
+            
+            if count >= frozen_threshold:
+                # Network paralysis detected - boost tolerance proportionally
+                # Max boost of 0.4 when 15+ agents stuck
+                boost = min(0.4, (count - frozen_threshold) * 0.05 + 0.1)
+                print(f"[PARALYSIS] Detected on {game_id[:8]} L{level_number}: "
+                      f"{count} frozen failures. Boosting pariah tolerance by {boost:.2f}")
+                return boost
+            
+            return 0.0
+            
+        except Exception as e:
+            print(f"[PARALYSIS] Detection error: {e}")
+            return 0.0
     
     def get_top_packages(self, limit: int = 10) -> List[Dict]:
         """Get top performing viral packages by success rate."""
