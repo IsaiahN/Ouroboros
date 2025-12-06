@@ -3,6 +3,7 @@
 Remove Unicode emoji characters from Python files to fix Windows cp1252 encoding errors.
 """
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 import re
 from pathlib import Path
 

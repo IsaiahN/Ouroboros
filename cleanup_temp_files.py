@@ -12,6 +12,7 @@ Manual usage:
 """
 
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 import logging
 from pathlib import Path
 

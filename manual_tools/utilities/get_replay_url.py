@@ -13,6 +13,8 @@ Example:
     python get_replay_url.py session_abc123_456
     Output: https://three.arcprize.org/scorecards/5e7b312e-120f-49ea-93f4-af323dea6171
 """
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 import sqlite3
 import sys

@@ -2,6 +2,8 @@
 """
 Complete system status check - verify all phases are integrated and working
 """
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 from database_interface import DatabaseInterface
 

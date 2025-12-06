@@ -13,6 +13,8 @@ This script:
 Author: Antigravity (Autonomous AI)
 Date: 2025-11-19
 """
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 import os
 import json

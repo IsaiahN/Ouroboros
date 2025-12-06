@@ -2756,3 +2756,220 @@ Created and ran `manual_tools/test_pariah_decay.py`:
 ---
 
 **END OF SESSION 19: December 6, 2025**
+
+---
+
+### Session 20: Manual Tools Reorganization & Cleanup (8:00:00 AM - 8:30:00 AM)
+
+**Focus**: Reorganize manual_tools folder, delete unused files, ensure pycache disabled in all files
+
+---
+
+#### Approach
+
+User requested:
+1. Keep only 11 specific files in `manual_tools/`
+2. Organize them into subfolders by category (analysis, database, monitoring, utilities)
+3. Delete all other files (after verifying they're not referenced by main system)
+4. Update README.md
+5. Ensure all files have pycache disabled (Rule 1)
+
+---
+
+#### Step 1: Identify Files to Keep vs Delete (8:00:00 AM)
+
+**Files to KEEP (11 total)**:
+1. `gameplay_analyzer.py`
+2. `schema_inspector.py`
+3. `inspect_db.py`
+4. `get_replay_url.py`
+5. `audit_prestige_system.py`
+6. `review_scorecards.py`
+7. `system_status_report.py`
+8. `README.md`
+9. `remove_emojis.py`
+10. `pariah_analysis.py`
+11. `test_pariah_decay.py`
+
+**Files to DELETE (17 total)** - Verified none are imported by main system:
+- `action_analyzer.py`, `assess_results.py`, `check_db.py`, `dump_logs.py`
+- `hypothesis_monitoring.py`, `list_sequences.py`, `list_tables.py`
+- `monitor_game_results.py`, `monitor_sequence_validation.py`
+- `readiness_check.py`, `real_progress_check.py`
+- `rebuild_database.py`, `rebuild_sequences.py`
+- `review_agent_roles.py`, `review_test_evolution.py`
+- `run_validation_cycle.py`, `sequence_recovery_tool.py`
+- `__pycache__/` directory
+
+**Note**: `hypothesis_monitoring.py` was referenced by `tests/test_new_modules.py`, but user manually deleted that test file.
+
+---
+
+#### Step 2: Create Subfolder Structure (8:05:00 AM)
+
+Created 4 subfolders:
+```
+manual_tools/
+|-- analysis/           # Data analysis and auditing tools
+|-- database/           # Database inspection and schema tools
+|-- monitoring/         # System status and scorecard monitoring
+|-- utilities/          # Replay URLs, emoji removal, tests
++-- README.md
+```
+
+---
+
+#### Step 3: Move Files to Subfolders (8:08:00 AM)
+
+| Destination | Files Moved |
+|-------------|-------------|
+| `analysis/` | `gameplay_analyzer.py`, `audit_prestige_system.py`, `pariah_analysis.py` |
+| `database/` | `schema_inspector.py`, `inspect_db.py` |
+| `monitoring/` | `system_status_report.py`, `review_scorecards.py` |
+| `utilities/` | `get_replay_url.py`, `remove_emojis.py`, `test_pariah_decay.py` |
+
+---
+
+#### Step 4: Delete Unused Files (8:10:00 AM)
+
+Deleted 17 files + `__pycache__/` directory from `manual_tools/`.
+
+**Verification**: Final structure is exactly as intended:
+```
+manual_tools/
+|-- analysis/
+|   |-- gameplay_analyzer.py
+|   |-- audit_prestige_system.py
+|   +-- pariah_analysis.py
+|-- database/
+|   |-- schema_inspector.py
+|   +-- inspect_db.py
+|-- monitoring/
+|   |-- system_status_report.py
+|   +-- review_scorecards.py
+|-- utilities/
+|   |-- get_replay_url.py
+|   |-- remove_emojis.py
+|   +-- test_pariah_decay.py
++-- README.md
+```
+
+---
+
+#### Step 5: Update README.md (8:12:00 AM)
+
+Rewrote `manual_tools/README.md` to reflect new folder structure:
+- Updated folder structure diagram
+- Created sections for each subfolder (Analysis, Database, Monitoring, Utilities)
+- Updated all usage examples with new paths (e.g., `manual_tools/analysis/gameplay_analyzer.py`)
+- Added note about running from project root
+
+---
+
+#### Step 6: Add Pycache Disable to All Files (8:15:00 AM)
+
+Checked all 10 Python files in `manual_tools/` for Rule 1 compliance:
+
+**Already had pycache disabled**:
+- `analysis/gameplay_analyzer.py`
+- `analysis/audit_prestige_system.py`
+- `analysis/pariah_analysis.py`
+- `database/schema_inspector.py`
+- `utilities/test_pariah_decay.py`
+
+**Fixed (added pycache disable)**:
+- `database/inspect_db.py`
+- `monitoring/system_status_report.py`
+- `monitoring/review_scorecards.py`
+- `utilities/get_replay_url.py`
+- `utilities/remove_emojis.py`
+
+All files now have:
+```python
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+```
+
+---
+
+#### Step 7: Check Root Files from Recent Commits (8:20:00 AM)
+
+Checked files from commits `d11ae35` and `2dae45d`:
+- `core_gameplay.py` - Already had pycache disable
+- `autonomous_evolution_runner.py` - Already had pycache disable
+- `evolutionary_engine.py` - Already had pycache disable
+- `cleanup_temp_files.py` - **Fixed** (added pycache disable)
+
+---
+
+#### Step 8: Update CODEBASE_INVENTORY.md (8:25:00 AM)
+
+Updated inventory to reflect changes:
+1. Updated date to 2025-12-06
+2. Updated Folder Structure section to show manual_tools subfolders
+3. Replaced flat Manual Tools listing with subfolder-based organization
+4. Updated Tests section (removed deleted `test_new_modules.py`)
+5. Added missing DOCS files (`agi_unified_theory.md`, `emergent-reasoning-compressed.md`, `payload_quality_improvement_plan.md`)
+
+---
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `manual_tools/README.md` | Complete rewrite with new folder structure |
+| `manual_tools/database/inspect_db.py` | Added pycache disable |
+| `manual_tools/monitoring/system_status_report.py` | Added pycache disable |
+| `manual_tools/monitoring/review_scorecards.py` | Added pycache disable |
+| `manual_tools/utilities/get_replay_url.py` | Added pycache disable |
+| `manual_tools/utilities/remove_emojis.py` | Added pycache disable |
+| `cleanup_temp_files.py` | Added pycache disable |
+| `CODEBASE_INVENTORY.md` | Updated folder structure, manual tools, tests, docs |
+
+**Files Deleted**: 17 unused manual_tools files + `__pycache__/`
+
+**Files Moved**: 10 files organized into 4 subfolders
+
+---
+
+#### Verification
+
+| Check | Result |
+|-------|--------|
+| All manual_tools files have pycache disable | [OK] 10/10 files |
+| cleanup_temp_files.py has pycache disable | [OK] Fixed |
+| Folder structure matches specification | [OK] 4 subfolders + README |
+| CODEBASE_INVENTORY.md updated | [OK] Reflects new structure |
+| No orphaned files in manual_tools root | [OK] Only README.md remains |
+
+---
+
+### Current Status (8:30:00 AM)
+
+**Approach**: Reorganize and clean up manual_tools folder for better maintainability
+
+**Completed This Session (Session 20)**:
+| # | Task | Status |
+|---|------|--------|
+| 1 | Identified 11 files to keep, 17 to delete | [DONE] |
+| 2 | Verified no deleted files are imported by main system | [DONE] |
+| 3 | Created 4 subfolders (analysis, database, monitoring, utilities) | [DONE] |
+| 4 | Moved 10 Python files to appropriate subfolders | [DONE] |
+| 5 | Deleted 17 unused files + __pycache__ | [DONE] |
+| 6 | Updated manual_tools/README.md | [DONE] |
+| 7 | Added pycache disable to 5 manual_tools files | [DONE] |
+| 8 | Added pycache disable to cleanup_temp_files.py | [DONE] |
+| 9 | Updated CODEBASE_INVENTORY.md | [DONE] |
+
+**Current Failure Being Worked On**:
+- **None** - All tasks completed successfully
+
+**Next Steps**:
+- Commit changes to git
+- Run evolution to verify system still works with reorganized manual_tools
+
+---
+
+**END OF SESSION 20: December 6, 2025**
+
+**END OF SESSION 19: December 6, 2025**

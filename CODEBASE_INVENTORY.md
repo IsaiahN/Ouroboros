@@ -1,6 +1,6 @@
 # BitterTruth-AI Codebase Inventory
 
-**Updated**: 2025-12-04  
+**Updated**: 2025-12-06  
 **Architecture**: Autonomous ARC-AGI-3 game playing with evolutionary agents
 
 ---
@@ -47,6 +47,10 @@ BitterTruth-AI/
 |-- *.py                    # Core Python files (root)
 |-- tests/                  # Unit test files
 |-- manual_tools/           # Debug/utility files (manual execution only)
+|   |-- analysis/           # Data analysis and auditing
+|   |-- database/           # Database inspection tools
+|   |-- monitoring/         # System monitoring tools
+|   +-- utilities/          # Misc utility scripts
 |-- migrations/             # Database migration scripts (historical)
 |   +-- completed/          # Completed migrations
 |-- DOCS/                   # Documentation files
@@ -229,39 +233,42 @@ Shared learning from failures with action biases:
 
 ## Manual Tools (`manual_tools/`)
 
-Debug and utility files for manual execution only:
+Debug and utility files for manual execution only. Reorganized into subfolders:
 
-### Reusable Analysis Tools
+```
+manual_tools/
+|-- analysis/           # Data analysis and auditing tools
+|-- database/           # Database inspection and schema tools
+|-- monitoring/         # System status and scorecard monitoring
+|-- utilities/          # Replay URLs, emoji removal, tests
++-- README.md
+```
+
+### Analysis Tools (`analysis/`)
 | File | Purpose | Usage |
 |------|---------|-------|
-| `gameplay_analyzer.py` | Gameplay progression analysis | `python manual_tools/gameplay_analyzer.py --hours 3 --compare` |
-| `schema_inspector.py` | Database schema inspection | `python manual_tools/schema_inspector.py --table agents --sample` |
+| `gameplay_analyzer.py` | Gameplay progression analysis | `python manual_tools/analysis/gameplay_analyzer.py --hours 3` |
+| `audit_prestige_system.py` | Audits prestige calculations | `python manual_tools/analysis/audit_prestige_system.py` |
+| `pariah_analysis.py` | Analyzes pariah system state | `python manual_tools/analysis/pariah_analysis.py` |
 
-### Debug Utilities
-| File | Purpose |
-| `action_analyzer.py` | Analyzes action effectiveness |
-| `assess_results.py` | Quick result assessment |
-| `audit_prestige_system.py` | Audits prestige calculations |
-| `check_db.py` | Quick database check |
-| `dump_logs.py` | Dumps logs from database |
-| `get_replay_url.py` | Gets replay URLs for games |
-| `hypothesis_monitoring.py` | Hypothesis test tracking |
-| `inspect_db.py` | Database inspection |
-| `list_sequences.py` | Lists winning sequences |
-| `list_tables.py` | Lists database tables |
-| `monitor_game_results.py` | Game result monitoring |
-| `monitor_sequence_validation.py` | Sequence validation monitoring |
-| `readiness_check.py` | System readiness check |
-| `real_progress_check.py` | Checks actual progress |
-| `rebuild_database.py` | Database rebuild utility |
-| `rebuild_sequences.py` | Rebuilds sequence table |
-| `remove_emojis.py` | Removes Unicode emojis (Rule 11) |
-| `review_agent_roles.py` | Reviews agent assignments |
-| `review_scorecards.py` | Reviews scorecard data |
-| `review_test_evolution.py` | Reviews test evolution |
-| `run_validation_cycle.py` | Validation cycle runner |
-| `sequence_recovery_tool.py` | Rebuilds sequences from traces |
-| `system_status_report.py` | Generates status reports |
+### Database Tools (`database/`)
+| File | Purpose | Usage |
+|------|---------|-------|
+| `schema_inspector.py` | Database schema inspection | `python manual_tools/database/schema_inspector.py --table agents` |
+| `inspect_db.py` | Detailed database inspection | `python manual_tools/database/inspect_db.py` |
+
+### Monitoring Tools (`monitoring/`)
+| File | Purpose | Usage |
+|------|---------|-------|
+| `system_status_report.py` | Generates status reports | `python manual_tools/monitoring/system_status_report.py` |
+| `review_scorecards.py` | Reviews scorecard data | `python manual_tools/monitoring/review_scorecards.py` |
+
+### Utility Tools (`utilities/`)
+| File | Purpose | Usage |
+|------|---------|-------|
+| `get_replay_url.py` | Gets replay URLs for games | `python manual_tools/utilities/get_replay_url.py <game_id>` |
+| `remove_emojis.py` | Removes Unicode emojis (Rule 11) | `python manual_tools/utilities/remove_emojis.py` |
+| `test_pariah_decay.py` | Tests pariah decay system | `python manual_tools/utilities/test_pariah_decay.py` |
 
 ---
 
@@ -273,9 +280,10 @@ Unit test files (allowed per Rule 5 exception):
 |------|---------|
 | `test_safe_cleanup.py` | Tests for SafeDatabaseCleaner |
 | `test_critical_systems.py` | Tests for critical systems |
-| `test_new_modules.py` | Tests for new modules |
 | `test_recent_changes.py` | Tests for recent changes |
 | `test_sequence_system.py` | Tests for sequence system |
+| `README.md` | Test documentation |
+| `__init__.py` | Package initialization |
 
 ---
 
@@ -303,6 +311,7 @@ Historical database migration scripts:
 | File | Purpose |
 |------|---------|
 | `Ouroboros_Master_Ruleset.md` | Master operating rules (source of truth) |
+| `agi_unified_theory.md` | AGI as Network Intelligence unified theory |
 | `two_streams_implementation_plan.md` | Two-Streams consciousness design |
 | `two-streams.md` | Two-Streams concept overview |
 | `ouroboros - biome theory.md` | Biome theory philosophy |
@@ -317,6 +326,8 @@ Historical database migration scripts:
 | `system-health-metrics.md` | Health metrics |
 | `operational_philosophy_and_10_questions.md` | Philosophy guide |
 | `Roadmap_Level_4_to_5.md` | Development roadmap |
+| `emergent-reasoning-compressed.md` | Emergent reasoning concepts |
+| `payload_quality_improvement_plan.md` | Payload quality improvements |
 
 ---
 
