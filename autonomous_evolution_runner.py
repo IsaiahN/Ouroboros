@@ -21,8 +21,10 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 import sys
 # Force UTF-8 encoding for stdout/stderr to prevent UnicodeEncodeError on Windows
 if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')  # type: ignore[union-attr]
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')  # type: ignore[union-attr]
 
 import asyncio
 from safe_cleanup import SafeDatabaseCleaner  # Primary cleanup routine
@@ -191,34 +193,46 @@ class AutonomousEvolutionRunner:
     
     def _calculate_target_population_from_db(self):
         """
-        Calculate target population from database game diversity.
-        Used as fallback when _current_target_population is not set.
+        Calculate target population using dynamic performance-based formula.
+        
+        Formula (Option C - Dynamic Performance-Based):
+            Base: 60 agents (minimum for role diversity)
+            Bonus: +5 agents per unbeaten game (to assign pioneers)
+            Max: 150 agents (to keep generation time ~1 hour)
         
         Returns:
-            int: Target population (game_types * 10)
+            int: Target population (60 + unbeaten_games * 5, capped at 150)
         """
+        BASE_POPULATION = 60  # Minimum for role diversity
+        BONUS_PER_UNBEATEN = 5  # Extra agents per unbeaten game
+        MAX_POPULATION = 150  # Cap to keep generation time reasonable
+        
         try:
-            # Get distinct game types from performance data
-            game_types_result = self.db.execute_query("""
-                SELECT DISTINCT SUBSTR(game_id, 1, 4) as game_type
+            # Count unbeaten games (games without full game win sequences)
+            unbeaten_result = self.db.execute_query("""
+                SELECT COUNT(DISTINCT SUBSTR(game_id, 1, 4)) as unbeaten_types
                 FROM agent_arc_performance
                 WHERE game_id IS NOT NULL
-                LIMIT 100
+                AND SUBSTR(game_id, 1, 4) NOT IN (
+                    SELECT DISTINCT SUBSTR(game_id, 1, 4)
+                    FROM winning_sequences_full_game
+                    WHERE is_active = 1
+                )
             """)
             
-            game_types = [row['game_type'] for row in game_types_result if row.get('game_type')]
+            unbeaten_games = unbeaten_result[0]['unbeaten_types'] if unbeaten_result else 0
             
-            if game_types:
-                target = len(set(game_types)) * 10
-                print(f"  [CALC] Calculated target from DB: {len(set(game_types))} game types → {target} agents")
-                return target
-            else:
-                # Ultimate fallback: assume 6 common game types
-                print(f"  [WARN] No game data in DB, using default 6 game types → 60 agents")
-                return 60
+            # Calculate target: base + bonus for each unbeaten game
+            target = BASE_POPULATION + (unbeaten_games * BONUS_PER_UNBEATEN)
+            target = min(target, MAX_POPULATION)  # Cap at max
+            
+            print(f"  [POP] Dynamic population: {BASE_POPULATION} base + ({unbeaten_games} unbeaten * {BONUS_PER_UNBEATEN}) = {target} agents (max {MAX_POPULATION})")
+            return target
+            
         except Exception as e:
-            print(f"  [ERROR] Failed to calculate target from DB: {e}, using 60 as fallback")
-            return 60
+            # Fallback if query fails (e.g., table doesn't exist yet)
+            print(f"  [WARN] Population calc failed ({e}), using base {BASE_POPULATION}")
+            return BASE_POPULATION
     
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
@@ -894,12 +908,59 @@ class AutonomousEvolutionRunner:
             # New logic: Select subset of agents to play the total num_games
             # This ensures evolution completes in reasonable time (30-60 min)
             
+            # YOUTH BONUS: Newer agents get more opportunities to prove themselves
+            # Philosophy: Network gets stronger each generation, so newer agents have better DNA
+            # This is OPPORTUNITY (more chances), not unearned PRESTIGE (credibility)
+            from evolutionary_engine import calculate_youth_bonus
+            
             if len(agents) > num_games:
-                # More agents than games: sample a subset of agents
+                # More agents than games: weighted sampling favoring younger agents
+                # Calculate youth-weighted selection probabilities
+                weights = []
+                for agent in agents:
+                    agent_gen = agent.get('generation', 0)
+                    youth_bonus = calculate_youth_bonus(agent_gen, self.current_generation)
+                    weights.append(youth_bonus)
+                
+                # Normalize weights to probabilities
+                total_weight = sum(weights)
+                probabilities = [w / total_weight for w in weights]
+                
+                # Weighted sampling without replacement
                 import random
-                selected_agents = random.sample(agents, num_games)
+                import numpy as np
+                try:
+                    # Use numpy for efficient weighted sampling without replacement
+                    indices = np.random.choice(
+                        len(agents), 
+                        size=num_games, 
+                        replace=False, 
+                        p=probabilities
+                    )
+                    selected_agents = [agents[i] for i in indices]
+                except ImportError:
+                    # Fallback: simple weighted sampling (less efficient but works)
+                    selected_agents = []
+                    remaining = list(zip(agents, weights))
+                    for _ in range(num_games):
+                        if not remaining:
+                            break
+                        total = sum(w for _, w in remaining)
+                        r = random.random() * total
+                        cumulative = 0
+                        for i, (agent, weight) in enumerate(remaining):
+                            cumulative += weight
+                            if r <= cumulative:
+                                selected_agents.append(agent)
+                                remaining.pop(i)
+                                break
+                
                 games_per_agent = 1  # Each selected agent plays 1 game
-                print(f"  [NETWORK] Selected {len(selected_agents)} agents from {len(agents)} to play {num_games} games")
+                
+                # Log youth bonus effect
+                avg_bonus = sum(weights) / len(weights) if weights else 1.0
+                young_count = sum(1 for a in selected_agents if self.current_generation - a.get('generation', 0) <= 2)
+                print(f"  [YOUTH] Selected {len(selected_agents)} agents (avg youth bonus: {avg_bonus:.2f}x, {young_count} young agents)")
             else:
                 # Fewer agents than games: each agent plays multiple games
                 selected_agents = agents
@@ -934,10 +995,34 @@ class AutonomousEvolutionRunner:
                 
                 game_types = sorted(list(game_type_prefixes))  # Sort for consistency
                 
-                # ADAPTIVE TARGET POPULATION: Scale with available game count
-                # Formula: unique_games * 10 (e.g., 6 games = 60 agents, 100 games = 1000 agents)
-                ADAPTIVE_TARGET_POPULATION = len(game_types) * 10
-                print(f"  [ADAPTIVE] {len(game_types)} game types detected → Target population: {ADAPTIVE_TARGET_POPULATION} agents")
+                # DYNAMIC PERFORMANCE-BASED POPULATION (Option C)
+                # Formula: Base 60 + 5 per unbeaten game, capped at 150
+                # This scales with difficulty while keeping generation time ~1 hour
+                BASE_POPULATION = 60
+                BONUS_PER_UNBEATEN = 5
+                MAX_POPULATION = 150
+                
+                # Count unbeaten game types (no full game win sequence)
+                try:
+                    beaten_types = set()
+                    beaten_result = self.db.execute_query("""
+                        SELECT DISTINCT SUBSTR(game_id, 1, 4) as game_type
+                        FROM winning_sequences_full_game
+                        WHERE is_active = 1
+                    """)
+                    if beaten_result:
+                        beaten_types = {r['game_type'] for r in beaten_result if r.get('game_type')}
+                    
+                    unbeaten_types = [gt for gt in game_types if gt not in beaten_types]
+                    unbeaten_count = len(unbeaten_types)
+                except Exception:
+                    unbeaten_count = len(game_types)  # Assume all unbeaten if query fails
+                
+                ADAPTIVE_TARGET_POPULATION = min(
+                    BASE_POPULATION + (unbeaten_count * BONUS_PER_UNBEATEN),
+                    MAX_POPULATION
+                )
+                print(f"  [POP] {len(game_types)} game types, {unbeaten_count} unbeaten → Target: {ADAPTIVE_TARGET_POPULATION} agents (base {BASE_POPULATION} + {unbeaten_count}*{BONUS_PER_UNBEATEN}, max {MAX_POPULATION})")
                 
                 # Store for pruning logic later
                 self._current_target_population = ADAPTIVE_TARGET_POPULATION
@@ -1768,7 +1853,7 @@ class AutonomousEvolutionRunner:
                     print(f"       New population size: {population_size - pruned_count}")
             
             # CLEANUP: Historical data garbage collection (prevent database bloat)
-            print(f"\n[🗑️ CLEANUP] Running historical data garbage collection...")
+            print(f"\n[CLEANUP] Running historical data garbage collection...")
             
             # Agent lifecycle management (Net Navi philosophy: good players live on)
             try:
@@ -1776,9 +1861,9 @@ class AutonomousEvolutionRunner:
                 lifecycle_mgr = AgentLifecycleManager(self.db)
                 
                 # Only run cleanup every 10 generations (not every generation)
-                if generation % 10 == 0:
-                    print(f"\n[🧬 AGENTS] Cleaning up ancient inactive agents...")
-                    agent_cleanup = lifecycle_mgr.cleanup_ancient_inactive_agents(generation, dry_run=False)
+                if self.current_generation % 10 == 0:
+                    print(f"\n[DNA AGENTS] Cleaning up ancient inactive agents...")
+                    agent_cleanup = lifecycle_mgr.cleanup_ancient_inactive_agents(self.current_generation, dry_run=False)
                     
                     if agent_cleanup['total_deleted'] > 0:
                         print(f"  [OK] Permanently deleted {agent_cleanup['total_deleted']} ancient agents")
@@ -1801,12 +1886,12 @@ class AutonomousEvolutionRunner:
             
             # Phase 1: Agent Revival System (Biome Theory)
             # Check if any agents should be revived based on triggers
-            if generation % 5 == 0:  # Check every 5 generations
+            if self.current_generation % 5 == 0:  # Check every 5 generations
                 try:
                     from revive_agents import AgentRevivalSystem
                     revival_system = AgentRevivalSystem()
                     
-                    triggers = revival_system.detect_revival_triggers(generation)
+                    triggers = revival_system.detect_revival_triggers(self.current_generation)
                     revived_count = 0
                     
                     for trigger in triggers:
@@ -1814,13 +1899,13 @@ class AutonomousEvolutionRunner:
                             # Try to revive the best candidate
                             candidate = trigger['candidates'][0]
                             revived = revival_system.revive_agent(
-                                candidate.get('agent_id') if isinstance(candidate, dict) else candidate,
-                                mode='hybrid',  # Option B from Master Ruleset
-                                generation=generation
+                                candidate if isinstance(candidate, dict) else {'agent_id': candidate},
+                                revival_mode='hybrid',  # Option B from Master Ruleset
+                                generation=self.current_generation
                             )
                             if revived:
                                 revived_count += 1
-                                print(f"  [REVIVAL] Revived agent due to {trigger['trigger']}: {revived['agent_id'][:12]}")
+                                print(f"  [REVIVAL] Revived agent due to {trigger['trigger']}: {revived[:12]}")
                     
                     if revived_count > 0:
                         print(f"  [OK] Revival system resurrected {revived_count} agents")
@@ -2255,7 +2340,6 @@ async def main():
         initial_population_size=args.population,
         games_per_generation=args.games_per_gen,
         max_generations=args.max_generations,
-        target_win_rate=args.target_win_rate,
         evolution_interval_minutes=args.evolution_interval,
         agi_mode=args.diversity_mode  # NEW: Pass diversity mode flag
     )

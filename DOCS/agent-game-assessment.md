@@ -111,6 +111,51 @@ Configuration:
 - Valid `ARC_API_KEY` must be set in `.env` file
 - Automatically runs `cleanup_temp_files()` on startup
 
+### Analysis Tools Reference
+
+#### gameplay_analyzer.py - Gameplay Progression Analysis
+
+Reusable tool for analyzing agent gameplay performance across generations.
+
+**Usage:**
+```bash
+python manual_tools/gameplay_analyzer.py                    # Default: last 3 hours
+python manual_tools/gameplay_analyzer.py --hours 6          # Last 6 hours  
+python manual_tools/gameplay_analyzer.py --generations 270  # From generation 270+
+python manual_tools/gameplay_analyzer.py --compare          # Include baseline comparison
+python manual_tools/gameplay_analyzer.py --full             # Full analysis with all options
+python manual_tools/gameplay_analyzer.py --no-games         # Skip individual game listing
+```
+
+**Features:**
+- Recent game results with scores, levels, actions
+- Summary statistics (positive scores, wins, averages)
+- Game type distribution
+- New winning sequences count
+- Active agents by generation
+- Baseline comparison (score/level change %)
+
+#### schema_inspector.py - Database Schema Inspection
+
+Reusable tool for inspecting database schema and finding tables/columns.
+
+**Usage:**
+```bash
+python manual_tools/schema_inspector.py                     # List all tables
+python manual_tools/schema_inspector.py --table agents      # Show specific table details
+python manual_tools/schema_inspector.py --table agents --sample  # With sample data
+python manual_tools/schema_inspector.py --find generation   # Find tables with column
+python manual_tools/schema_inspector.py --counts            # Show row counts
+python manual_tools/schema_inspector.py --full              # Full schema dump
+```
+
+**Features:**
+- List all tables (73+ tables)
+- Table details: columns, types, primary keys, indexes
+- Find tables containing specific columns
+- Row counts for all tables
+- Sample data preview
+
 ### Hypothesis Generation Framework
 - Analyze performance patterns across games and agent types
 - Identify bottlenecks in level progression

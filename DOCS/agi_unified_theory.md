@@ -533,6 +533,18 @@ The Regulatory Signal Engine maintains system health by reading database state a
 **The system self-regulates without human intervention.**
 
 ---
+#### Youth Selection Bonus:
+
+There is a fixed limit to how many agents can work on a given problem at the same time (computational, or even physical constraints — which cause diminishing returns). This requires selection be carried out, which is usually based on performance across all active agents regardless of age. 
+
+If the network gets more intelligent and robust with every generation, then the **later generations of the species/agents should have a better understanding of the current problem space**, but risk being crowded out by more experienced agents.
+
+A Youth Selection Bonus solves this problem, and is merely a temporary boost, that decays in proportion to the agent’s generational age.
+
+This gives younger agents more initial chances to prove themselves against established older agents, while not giving them unearned credibility or prestige.
+
+
+---
 
 ## Testable Predictions
 

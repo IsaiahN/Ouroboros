@@ -45,6 +45,9 @@ TEMP_PATTERNS = [
 
 # Files to KEEP (whitelist - never delete these)
 # NOTE: Files in /tests and /manual_tools are protected by SKIP_DIRS
+# NOTE: manual_tools/*.py are protected by SKIP_DIRS but listed here for documentation:
+#   - gameplay_analyzer.py: Reusable gameplay progression analysis tool
+#   - schema_inspector.py: Reusable database schema inspection tool
 KEEP_FILES = {
     # TIER 1: Core System Files (imported by core_gameplay.py or autonomous_evolution_runner.py)
     "database_interface.py",

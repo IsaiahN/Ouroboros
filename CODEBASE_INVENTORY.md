@@ -231,8 +231,14 @@ Shared learning from failures with action biases:
 
 Debug and utility files for manual execution only:
 
+### Reusable Analysis Tools
+| File | Purpose | Usage |
+|------|---------|-------|
+| `gameplay_analyzer.py` | Gameplay progression analysis | `python manual_tools/gameplay_analyzer.py --hours 3 --compare` |
+| `schema_inspector.py` | Database schema inspection | `python manual_tools/schema_inspector.py --table agents --sample` |
+
+### Debug Utilities
 | File | Purpose |
-|------|---------|
 | `action_analyzer.py` | Analyzes action effectiveness |
 | `assess_results.py` | Quick result assessment |
 | `audit_prestige_system.py` | Audits prestige calculations |

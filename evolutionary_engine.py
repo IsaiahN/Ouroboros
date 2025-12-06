@@ -3,6 +3,8 @@ Evolutionary Engine - Handles agent breeding, mutation, and selection
 Based on ARC performance data following Ouroboros principles
 All operations use database storage (Rule 2)
 """
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 import json
 import uuid
@@ -29,6 +31,46 @@ def safe_json_parse(json_str, default=None):
         return json.loads(json_str)
     except (json.JSONDecodeError, TypeError):
         return default or {}
+
+
+def calculate_youth_bonus(agent_generation: int, current_generation: int) -> float:
+    """
+    Calculate youth bonus (opportunity multiplier) for agent selection.
+    
+    Philosophy (from Unified Theory):
+    - The network gets stronger each generation
+    - Newer agents inherit better "DNA" from evolved network
+    - They deserve more OPPORTUNITIES to prove themselves
+    - This is NOT unearned prestige - just more chances to demonstrate value
+    
+    Args:
+        agent_generation: The generation the agent was born in
+        current_generation: The current evolution generation
+    
+    Returns:
+        float: Multiplier from 1.0 (no bonus) to 1.5 (50% bonus)
+        
+    Decay Schedule:
+        Age 0 (newborn): 1.5x (50% more likely to be selected)
+        Age 1: 1.4x
+        Age 2: 1.3x
+        Age 3: 1.2x
+        Age 4: 1.1x
+        Age 5+: 1.0x (no bonus, compete purely on merit)
+    """
+    MAX_YOUTH_BONUS = 1.5  # 50% boost for newborns
+    DECAY_GENERATIONS = 5  # Full decay over 5 generations
+    
+    age = current_generation - agent_generation
+    
+    if age <= 0:
+        return MAX_YOUTH_BONUS  # Newborns get max bonus
+    elif age >= DECAY_GENERATIONS:
+        return 1.0  # Mature agents get no bonus
+    else:
+        # Linear decay: 1.5 -> 1.0 over DECAY_GENERATIONS
+        decay_per_gen = (MAX_YOUTH_BONUS - 1.0) / DECAY_GENERATIONS
+        return MAX_YOUTH_BONUS - (decay_per_gen * age)
 
 
 class EvolutionaryEngine:
@@ -616,9 +658,11 @@ class EvolutionaryEngine:
         """
         Select breeding pairs based on ARC performance
         Uses tournament selection with fitness-based pairing
+        Youth bonus gives newer agents more breeding opportunities
         """
         selection_pressure = evolution_strategy.get('selection_pressure', 0.5)
         crossover_rate = evolution_strategy.get('crossover_rate', 0.6)
+        current_generation = evolution_strategy.get('generation', 0)
 
         # Number of breeding pairs needed
         num_pairs = int(len(population) * crossover_rate / 2)
@@ -626,14 +670,17 @@ class EvolutionaryEngine:
         breeding_pairs = []
 
         for _ in range(num_pairs):
-            # Tournament selection for first parent
-            parent1 = self._tournament_selection(population, fitness_scores, selection_pressure)
+            # Tournament selection for first parent (with youth bonus)
+            parent1 = self._tournament_selection(
+                population, fitness_scores, selection_pressure, current_generation
+            )
 
             # Tournament selection for second parent (ensure different from first)
             parent2 = self._tournament_selection(
                 [p for p in population if p['agent_id'] != parent1['agent_id']],
                 fitness_scores,
-                selection_pressure
+                selection_pressure,
+                current_generation
             )
 
             if parent2:  # Ensure we found a second parent
@@ -643,10 +690,15 @@ class EvolutionaryEngine:
 
     def _tournament_selection(self, population: List[Dict[str, Any]],
                             fitness_scores: Dict[str, float],
-                            selection_pressure: float) -> Dict[str, Any]:
+                            selection_pressure: float,
+                            current_generation: int = 0) -> Dict[str, Any]:
         """
-        Tournament selection based on ARC fitness with prestige weighting.
-        Phase 1: breeding_priority multiplies selection probability (1.0x to 3.0x).
+        Tournament selection based on ARC fitness with prestige and youth weighting.
+        
+        Multipliers applied to fitness:
+        - Phase 1: breeding_priority (1.0x to 3.0x) - prestige-based
+        - Youth Bonus (1.0x to 1.5x) - opportunity for newer agents
+        
         Higher selection pressure = more emphasis on fitness
         """
         tournament_size = max(2, int(len(population) * selection_pressure))
@@ -655,14 +707,20 @@ class EvolutionaryEngine:
         # Select random candidates for tournament
         tournament_candidates = random.sample(population, tournament_size)
 
-        # Phase 1: Apply prestige breeding priority to fitness scores
-        # High prestige agents get 1.0x to 3.0x multiplier on their fitness
+        # Apply all multipliers to fitness scores
+        # - Prestige breeding priority (1.0x to 3.0x): social capital from network contribution
+        # - Youth bonus (1.0x to 1.5x): opportunity for newer agents to prove themselves
         def effective_fitness(agent):
             base_fitness = fitness_scores.get(agent['agent_id'], 0.0)
             breeding_priority = agent.get('breeding_priority', 1.0)
-            return base_fitness * breeding_priority
+            
+            # Youth bonus: newer agents get more opportunities
+            agent_gen = agent.get('generation', 0)
+            youth_bonus = calculate_youth_bonus(agent_gen, current_generation)
+            
+            return base_fitness * breeding_priority * youth_bonus
 
-        # Select winner based on prestige-weighted fitness
+        # Select winner based on weighted fitness
         winner = max(tournament_candidates, key=effective_fitness)
 
         return winner

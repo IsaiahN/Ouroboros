@@ -118,6 +118,25 @@ The system includes autonomous maintenance to ensure long-term stability:
 -   `core_data.db`: The "network" (SQLite database storing ALL knowledge).
 -   `DOCS/how_the_system_works.md`: Detailed system architecture.
 
+## 📊 Analysis Tools
+
+Reusable tools for monitoring and debugging the system:
+
+```bash
+# Gameplay progression analysis
+python manual_tools/gameplay_analyzer.py --hours 3 --compare
+
+# Database schema inspection  
+python manual_tools/schema_inspector.py --table agents --sample
+python manual_tools/schema_inspector.py --find generation
+python manual_tools/schema_inspector.py --counts
+```
+
+| Tool | Purpose |
+|------|--------|
+| `gameplay_analyzer.py` | Analyze game results, scores, level completions, baseline comparison |
+| `schema_inspector.py` | Inspect database tables, columns, row counts, sample data |
+
 ## 🛠️ Configuration
 -   **Environment**: Copy `.env.example` to `.env` and set `ARC_API_KEY`.
 -   **Logs**: All logs are stored in `core_data.db` (No log files!).
