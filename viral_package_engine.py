@@ -97,14 +97,24 @@ class ViralPackageEngine:
         package_id = f"viral_{uuid.uuid4().hex[:12]}"
         
         try:
+            # ================================================================
+            # CRITICAL FIX (2025-12-06): Generate meaningful meta_strategy_description
+            # Analyze the winning sequence to describe WHAT strategy worked
+            # ================================================================
+            meta_strategy = self._generate_meta_strategy_description(
+                seq['action_sequence'],
+                seq.get('coordinate_sequence'),
+                seq.get('level_number', 1)
+            )
+            
             self.db.execute_query("""
                 INSERT INTO viral_information_packages (
                     package_id, package_name, package_type,
                     action_sequence, coordinate_pattern,
                     virulence, transmission_rate, mutation_rate,
                     discovery_generation, source_sequence_id, generation_discovered,
-                    is_active, last_successful_use_generation
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_active, last_successful_use_generation, meta_strategy_description
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 package_id,
                 f"Package_{seq['game_id'][:8]}_{generation}",
@@ -118,7 +128,8 @@ class ViralPackageEngine:
                 sequence_id,
                 generation,
                 True,  # is_active
-                generation
+                generation,
+                meta_strategy  # Now has meaningful description
             ))
             
             # Phase 4.5: Capture emotional context during package creation
@@ -154,6 +165,84 @@ class ViralPackageEngine:
         except Exception as e:
             print(f"[VIRAL] Error creating package: {e}")
             return None
+    
+    def _generate_meta_strategy_description(
+        self,
+        action_sequence: str,
+        coordinate_sequence: Optional[str],
+        level_number: int
+    ) -> str:
+        """
+        Generate a meaningful meta-strategy description for a viral package.
+        
+        ADDED (2025-12-06): Viral packages need descriptions to be useful.
+        Analyzes the winning action pattern to describe the strategy:
+        - Dominant direction (up-focused, diagonal movement, etc.)
+        - Key techniques (clicking, waiting, navigation)
+        - Efficiency characteristics
+        
+        Returns:
+            Descriptive strategy string for network learning
+        """
+        try:
+            actions = json.loads(action_sequence) if isinstance(action_sequence, str) else action_sequence
+        except:
+            return f"Level {level_number} win sequence"
+        
+        if not actions:
+            return f"Level {level_number} win sequence (empty)"
+        
+        from collections import Counter
+        action_counts = Counter(actions)
+        
+        # Map action numbers to names
+        action_names = {
+            1: 'up', 2: 'down', 3: 'left', 4: 'right',
+            5: 'wait', 6: 'click', 7: 'submit'
+        }
+        
+        strategies = []
+        
+        # Identify dominant movement direction
+        vertical = action_counts.get(1, 0) + action_counts.get(2, 0)  # up + down
+        horizontal = action_counts.get(3, 0) + action_counts.get(4, 0)  # left + right
+        
+        if vertical > horizontal * 1.5:
+            if action_counts.get(1, 0) > action_counts.get(2, 0):
+                strategies.append("upward navigation")
+            else:
+                strategies.append("downward navigation")
+        elif horizontal > vertical * 1.5:
+            if action_counts.get(4, 0) > action_counts.get(3, 0):
+                strategies.append("rightward navigation")
+            else:
+                strategies.append("leftward navigation")
+        elif vertical > 0 and horizontal > 0:
+            strategies.append("diagonal/mixed navigation")
+        
+        # Check for clicking strategy
+        click_ratio = action_counts.get(6, 0) / len(actions)
+        if click_ratio > 0.3:
+            strategies.append("click-heavy interaction")
+        elif click_ratio > 0.1:
+            strategies.append("periodic clicking")
+        
+        # Check for waiting strategy
+        wait_ratio = action_counts.get(5, 0) / len(actions)
+        if wait_ratio > 0.2:
+            strategies.append("timing-based (uses wait)")
+        
+        # Efficiency indicator
+        if len(actions) < 20:
+            strategies.append(f"efficient ({len(actions)} actions)")
+        elif len(actions) > 100:
+            strategies.append(f"complex ({len(actions)} actions)")
+        
+        # Combine into description
+        if strategies:
+            return f"L{level_number}: {', '.join(strategies)}"
+        else:
+            return f"L{level_number}: {len(actions)}-action sequence"
     
     def _infect_agent(self, 
                      agent_id: str, 
@@ -331,6 +420,10 @@ class ViralPackageEngine:
         
         This extracts the failure pattern so the network can learn to avoid it.
         
+        FIXED (2025-12-06): Now generates specific, actionable failure descriptions
+        instead of generic "Failed with score X" messages. Pariahs are also marked
+        as active and set to influence action selection.
+        
         Args:
             game_id: Game where failure occurred
             agent_id: Agent who failed
@@ -352,6 +445,12 @@ class ViralPackageEngine:
             # Calculate toxicity based on how badly it failed
             toxicity = max(0.0, min(1.0, 1.0 - (final_score / 10.0)))  # 0 score = 1.0 toxicity
             
+            # ================================================================
+            # CRITICAL FIX (2025-12-06): Generate specific failure description
+            # Analyze the action sequence to identify WHY it failed
+            # ================================================================
+            failure_description = self._analyze_failure_pattern(failed_actions, failed_coordinates, final_score)
+            
             self.db.execute_query("""
                 INSERT INTO pariahs (
                     pariah_id, pariah_name, pariah_type,
@@ -367,7 +466,7 @@ class ViralPackageEngine:
                 'action_sequence',
                 json.dumps(failed_actions),
                 json.dumps(failed_coordinates),
-                f"Failed with score {final_score:.2f}",
+                failure_description,  # Now specific instead of generic
                 toxicity,
                 0.3,  # Initial detection difficulty
                 0.5,  # Initial context specificity
@@ -530,6 +629,79 @@ class ViralPackageEngine:
     # ========================================================================
     # ACTION SELECTION (Bidirectional Influence)
     # ========================================================================
+    
+    def _analyze_failure_pattern(
+        self,
+        failed_actions: List[int],
+        failed_coordinates: List[Tuple[int, int]],
+        final_score: float
+    ) -> str:
+        """
+        Analyze a failure to generate a specific, actionable description.
+        
+        ADDED (2025-12-06): Pariahs need specific descriptions to be useful.
+        This analyzes the action pattern to identify common failure modes:
+        - Oscillation (repeated back-and-forth)
+        - Edge trapping (stuck at boundaries)
+        - Inefficiency (too many actions without progress)
+        - Specific action overuse
+        
+        Returns:
+            Specific failure description for network learning
+        """
+        if not failed_actions:
+            return f"Empty action sequence, score {final_score:.2f}"
+        
+        descriptions = []
+        
+        # Detect oscillation (e.g., up-down-up-down or left-right-left-right)
+        oscillation_count = 0
+        for i in range(len(failed_actions) - 2):
+            if failed_actions[i] == failed_actions[i + 2] and failed_actions[i] != failed_actions[i + 1]:
+                oscillation_count += 1
+        
+        if oscillation_count >= 3:
+            descriptions.append(f"oscillation detected ({oscillation_count} reversals)")
+        
+        # Detect action overuse (>40% same action)
+        from collections import Counter
+        action_counts = Counter(failed_actions)
+        most_common_action, most_common_count = action_counts.most_common(1)[0]
+        if most_common_count / len(failed_actions) > 0.4:
+            action_names = {1: 'up', 2: 'down', 3: 'left', 4: 'right', 5: 'wait', 6: 'click', 7: 'submit'}
+            action_name = action_names.get(most_common_action, f'action{most_common_action}')
+            descriptions.append(f"overused {action_name} ({most_common_count}/{len(failed_actions)} actions)")
+        
+        # Detect edge trapping from coordinates
+        if failed_coordinates:
+            x_coords = [c[0] for c in failed_coordinates if c]
+            y_coords = [c[1] for c in failed_coordinates if c]
+            
+            if x_coords and y_coords:
+                # Check if stuck at edges (0 or max values repeated)
+                edge_x = sum(1 for x in x_coords if x <= 1 or x >= 28) / len(x_coords)
+                edge_y = sum(1 for y in y_coords if y <= 1 or y >= 28) / len(y_coords)
+                
+                if edge_x > 0.5:
+                    if sum(1 for x in x_coords if x <= 1) > sum(1 for x in x_coords if x >= 28):
+                        descriptions.append("trapped at left edge")
+                    else:
+                        descriptions.append("trapped at right edge")
+                if edge_y > 0.5:
+                    if sum(1 for y in y_coords if y <= 1) > sum(1 for y in y_coords if y >= 28):
+                        descriptions.append("trapped at top edge")
+                    else:
+                        descriptions.append("trapped at bottom edge")
+        
+        # Detect inefficiency (many actions, no progress)
+        if len(failed_actions) > 50 and final_score < 0.5:
+            descriptions.append(f"inefficient ({len(failed_actions)} actions for score {final_score:.1f})")
+        
+        # Combine descriptions or use default
+        if descriptions:
+            return f"FAILURE: {'; '.join(descriptions)}"
+        else:
+            return f"Unknown failure pattern, score {final_score:.2f}, {len(failed_actions)} actions"
     
     def get_package_action_weights(self, agent_id: str) -> Dict[int, float]:
         """

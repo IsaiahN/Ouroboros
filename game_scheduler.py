@@ -366,11 +366,39 @@ class GameScheduler:
         SIMPLIFIED & FASTER: Select game by priority, with basic filtering.
         
         Old complexity: 5 rules with nested scoring and grouping
-        New: 2 simple filters + sort by priority
-        Result: 10x faster execution, similar outcomes
+        New: 2 simple filters + sort by priority + DIVERSITY CAP
+        Result: 10x faster execution, similar outcomes, no concentration
+        
+        CRITICAL FIX (2025-12-06): Added diversity cap to prevent 82% concentration
+        on a single game (like ls20-fa137e247ce6). Max 30% of plays on any game.
         """
         if not available_games:
             return None
+        
+        # RULE 0: DIVERSITY CAP - Prevent any single game from getting >30% of plays
+        # This fixes the concentration bug where 82% of plays went to one game
+        MAX_GAME_CONCENTRATION = 0.30  # 30% cap
+        
+        # Count total current plays across all games
+        total_plays = sum(g.times_played for g in available_games)
+        
+        if total_plays > 0:
+            # Calculate which games are over the concentration cap
+            over_cap_games = set()
+            for g in available_games:
+                game_concentration = g.times_played / total_plays
+                if game_concentration > MAX_GAME_CONCENTRATION and g.times_played > 5:
+                    over_cap_games.add(g.game_id)
+                    # Log only occasionally to avoid spam
+                    if random.random() < 0.1:  # 10% chance to log
+                        print(f"  [DIVERSITY] Game {g.game_id[:15]} over cap: {game_concentration*100:.0f}% of plays")
+            
+            # Filter out over-cap games (unless ALL games are over cap)
+            if over_cap_games:
+                filtered_games = [g for g in available_games if g.game_id not in over_cap_games]
+                if filtered_games:
+                    available_games = filtered_games
+                    print(f"  [DIVERSITY] Filtered {len(over_cap_games)} over-cap games, {len(filtered_games)} remain")
         
         # RULE 1: Filter fully won games - optimizer/exploiter only
         if agent_mode in ['optimizer', 'exploiter']:
@@ -386,10 +414,11 @@ class GameScheduler:
         # Just pick lowest priority (highest value) game
         eligible_games.sort(key=lambda g: g.priority)
         
-        # Optional: 20% randomness to avoid getting stuck in patterns
-        if len(eligible_games) > 1 and random.random() < 0.2:
-            # Pick from top 3 options randomly
-            top_choices = eligible_games[:min(3, len(eligible_games))]
+        # RULE 3: 30% randomness to enforce diversity (increased from 20%)
+        # This ensures games rotate more evenly
+        if len(eligible_games) > 1 and random.random() < 0.3:
+            # Pick from top 5 options randomly (increased from 3)
+            top_choices = eligible_games[:min(5, len(eligible_games))]
             return random.choice(top_choices)
         
         return eligible_games[0]

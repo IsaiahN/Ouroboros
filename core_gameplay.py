@@ -2087,6 +2087,53 @@ class GameplayEngine:
                         # NOTE: World model now updates on every action (see action_succeeded block above)
                         # No need for redundant level completion update
                         
+                        # ================================================================
+                        # CRITICAL FIX (2025-12-06): Force Level 2+ Exploration
+                        # After Level 1 win, check if Level 2+ sequences exist.
+                        # If not, force exploration mode to generate them.
+                        # This fixes agents getting stuck at L1 without progressing.
+                        # ================================================================
+                        next_level_number = int(game_state.score) + 1  # Score 1 = completed L1, next is L2
+                        
+                        if next_level_number >= 2:  # Just completed L1, now on L2+
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            has_next_level_sequence = self.db.execute_query("""
+                                SELECT COUNT(*) as seq_count
+                                FROM winning_sequences
+                                WHERE game_id LIKE ? AND level_number >= ? AND is_active = 1
+                            """, (f"{game_type}-%", next_level_number))
+                            
+                            seq_count = has_next_level_sequence[0]['seq_count'] if has_next_level_sequence else 0
+                            
+                            if seq_count == 0:
+                                # NO sequences for this level! Force exploration mode
+                                logger.info(f"[FRONTIER] Level {next_level_number}: No sequences exist! Forcing exploration mode.")
+                                
+                                # Set self-directed mode to trust own exploration
+                                self._self_directed_mode = True
+                                self._self_directed_start_action = action_count
+                                
+                                # Boost self-trust for frontier exploration
+                                if agent_id:
+                                    try:
+                                        bias_result = self.db.execute_query(
+                                            "SELECT self_network_bias FROM agents WHERE agent_id = ?",
+                                            (agent_id,)
+                                        )
+                                        if bias_result:
+                                            current_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
+                                            boosted_bias = min(0.9, current_bias + 0.3)
+                                            self._original_self_bias = current_bias
+                                            self.db.execute_query(
+                                                "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
+                                                (boosted_bias, agent_id)
+                                            )
+                                            logger.info(f"[FRONTIER] Boosted exploration confidence: {current_bias:.2f} -> {boosted_bias:.2f}")
+                                    except Exception as e:
+                                        logger.debug(f"Failed to boost frontier exploration: {e}")
+                            else:
+                                logger.debug(f"[FRONTIER] Level {next_level_number}: Found {seq_count} existing sequences")
+                        
                         # Move to next level
                         previous_score = game_state.score  # Update for next level detection
                         current_level += 1

@@ -92,6 +92,54 @@ class AgentSelfModel:
             CREATE INDEX IF NOT EXISTS idx_object_hypotheses_game 
             ON network_object_control_hypotheses(game_type, level_number, is_active)
         """)
+        
+        # ACTION5 behavior mapping - what does ACTION5 do in each game type?
+        # This is crucial because ACTION5 is context-dependent (rotate, toggle, interact, etc.)
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS action5_behavior_map (
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                behavior_type TEXT NOT NULL,
+                affected_objects TEXT,
+                effect_description TEXT,
+                confidence REAL DEFAULT 0.5,
+                discovery_count INTEGER DEFAULT 1,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (game_type, level_number)
+            )
+        """)
+        
+        # ACTION6 pseudo button behavior - what do clicks at specific regions do?
+        # ACTION6 uses x,y coordinates (0-63 range) like a touchscreen
+        # Clicking pseudo buttons often produces movement similar to ACTION1-4
+        # We divide screen into regions and track what clicking each region does
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS pseudo_button_behavior (
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                region_x INTEGER NOT NULL,
+                region_y INTEGER NOT NULL,
+                
+                -- What does clicking this region do?
+                produces_action TEXT,
+                movement_direction TEXT,
+                affected_objects TEXT,
+                effect_description TEXT,
+                
+                -- Confidence tracking
+                confidence REAL DEFAULT 0.5,
+                discovery_count INTEGER DEFAULT 1,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                PRIMARY KEY (game_type, level_number, region_x, region_y)
+            )
+        """)
+        
+        # Index for fast pseudo button lookup
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_pseudo_button_game 
+            ON pseudo_button_behavior(game_type, level_number)
+        """)
     
     def identify_controlled_objects(
         self, 
@@ -101,22 +149,61 @@ class AgentSelfModel:
         frame_sequence: List[Dict]
     ) -> Tuple[List[str], float]:
         """
-        Identify which objects respond to actions.
+        Identify which objects respond to actions using action-movement correlation.
+        
+        FIXED (2025-12-06): Previous implementation tracked ALL changed coordinates,
+        resulting in 600+ "controlled" objects (the entire screen). 
+        
+        New approach: Correlate action DIRECTION with object MOVEMENT direction.
+        - ACTION1 (up) -> object moves up (y decreases)
+        - ACTION2 (down) -> object moves down (y increases)
+        - ACTION3 (left) -> object moves left (x decreases)
+        - ACTION4 (right) -> object moves right (x increases)
+        
+        Only objects that consistently move in the action's direction are "controlled".
         
         Args:
             game_id: Game identifier
             level: Level number
-            action_sequence: List of actions taken
-            frame_sequence: List of frames (before/after each action)
+            action_sequence: List of actions taken (with 'action_type' field)
+            frame_sequence: List of frames (before/after each action, with 'grid' field)
         
         Returns:
-            (controlled_objects, confidence)
+            (controlled_objects, confidence) - controlled objects as list of "x:N,y:M" strings
         """
         if not action_sequence or not frame_sequence:
             return ([], 0.0)
         
-        # Track which coordinates change in response to actions
-        responsive_coords = {}
+        # Map action types to expected movement directions
+        # ARC games: ACTION1=up, ACTION2=down, ACTION3=left, ACTION4=right
+        # ACTION5 is CONTEXT-DEPENDENT (rotate, toggle, interact, etc.) - we learn what it does
+        # ACTION6=click, ACTION7=submit are coordinate-based, handled separately
+        ACTION_DIRECTION = {
+            'ACTION1': (0, -1),  # up: y decreases
+            'ACTION2': (0, 1),   # down: y increases  
+            'ACTION3': (-1, 0),  # left: x decreases
+            'ACTION4': (1, 0),   # right: x increases
+            'action_1': (0, -1),
+            'action_2': (0, 1),
+            'action_3': (-1, 0),
+            'action_4': (1, 0),
+        }
+        
+        # ACTION5 variants - we don't know direction, but we track if it causes changes
+        ACTION5_VARIANTS = {'ACTION5', 'action_5', 'ACTION 5'}
+        
+        # ACTION6 is coordinate-based clicking (0-63 range) - pseudo buttons
+        ACTION6_VARIANTS = {'ACTION6', 'action_6', 'ACTION 6'}
+        
+        # Track object movement correlation: object_signature -> {correct_moves, total_moves}
+        object_control_score = {}  # {object_id: {'correct': int, 'total': int, 'positions': [(x,y)]}}
+        
+        # Track ACTION5 effects separately (non-directional but may indicate control)
+        action5_effects = {}  # {object_id: {'changes': int, 'total': int}}
+        
+        # Track ACTION6 (pseudo button) effects by screen region
+        # Divides 64x64 screen into 8x8 regions (8 pixels each)
+        action6_region_effects = {}  # {(region_x, region_y): {'direction': counts, 'objects': set}}
         
         for i, action in enumerate(action_sequence):
             if i >= len(frame_sequence) - 1:
@@ -125,29 +212,323 @@ class AgentSelfModel:
             frame_before = frame_sequence[i]
             frame_after = frame_sequence[i + 1]
             
-            # Find changed coordinates
-            changed = self._find_changed_coordinates(frame_before, frame_after)
+            action_type = action.get('action_type', '')
             
-            # Track action -> coordinate correlation
-            action_type = action.get('action_type', 'unknown')
-            for coord in changed:
-                if coord not in responsive_coords:
-                    responsive_coords[coord] = {}
-                if action_type not in responsive_coords[coord]:
-                    responsive_coords[coord][action_type] = 0
-                responsive_coords[coord][action_type] += 1
+            # Handle ACTION5 specially - it's context-dependent per game type
+            if action_type in ACTION5_VARIANTS:
+                self._track_action5_effects(
+                    frame_before, frame_after, action5_effects, game_id, level
+                )
+                continue
+            
+            # Handle ACTION6 (pseudo button clicks) - coordinate-based
+            if action_type in ACTION6_VARIANTS:
+                click_x = action.get('x', action.get('click_x', 0))
+                click_y = action.get('y', action.get('click_y', 0))
+                self._track_action6_effects(
+                    frame_before, frame_after, action6_region_effects,
+                    click_x, click_y, game_id, level
+                )
+                continue
+            
+            # Get action direction (skip click/submit which are coordinate-based)
+            expected_direction = ACTION_DIRECTION.get(action_type)
+            if not expected_direction:
+                continue  # Skip ACTION6=click, ACTION7=submit (coordinate-based)
+            
+            dx_expected, dy_expected = expected_direction
+            
+            # Find objects that MOVED in the expected direction
+            grid_before = frame_before.get('grid', [])
+            grid_after = frame_after.get('grid', [])
+            
+            if not grid_before or not grid_after:
+                continue
+            
+            # Find objects in before and after frames (non-zero, non-background cells)
+            objects_before = self._find_objects_in_grid(grid_before)
+            objects_after = self._find_objects_in_grid(grid_after)
+            
+            # Match objects and check movement direction
+            for obj_id, positions_before in objects_before.items():
+                if obj_id not in objects_after:
+                    continue  # Object disappeared
+                
+                positions_after = objects_after[obj_id]
+                
+                # Calculate centroid movement
+                cx_before = sum(p[0] for p in positions_before) / len(positions_before)
+                cy_before = sum(p[1] for p in positions_before) / len(positions_before)
+                cx_after = sum(p[0] for p in positions_after) / len(positions_after)
+                cy_after = sum(p[1] for p in positions_after) / len(positions_after)
+                
+                dx_actual = cx_after - cx_before
+                dy_actual = cy_after - cy_before
+                
+                # Did object move at all?
+                if abs(dx_actual) < 0.5 and abs(dy_actual) < 0.5:
+                    continue  # Object didn't move
+                
+                # Initialize tracking for this object
+                if obj_id not in object_control_score:
+                    object_control_score[obj_id] = {'correct': 0, 'total': 0, 'positions': []}
+                
+                object_control_score[obj_id]['total'] += 1
+                object_control_score[obj_id]['positions'] = list(positions_after)[:5]  # Store sample positions
+                
+                # Check if movement matches expected direction
+                movement_matches = False
+                if dx_expected != 0:  # Horizontal action
+                    movement_matches = (dx_expected > 0 and dx_actual > 0.5) or (dx_expected < 0 and dx_actual < -0.5)
+                if dy_expected != 0:  # Vertical action
+                    movement_matches = (dy_expected > 0 and dy_actual > 0.5) or (dy_expected < 0 and dy_actual < -0.5)
+                
+                if movement_matches:
+                    object_control_score[obj_id]['correct'] += 1
         
-        # Identify consistently responsive objects (high correlation)
+        # Identify controlled objects: >60% correct movement correlation with at least 2 samples
         controlled = []
-        for coord, action_counts in responsive_coords.items():
-            # If coordinate responds to multiple action types, likely controlled
-            if len(action_counts) >= 2:
-                controlled.append(coord)
+        best_score = 0.0
         
-        # Calculate confidence based on consistency
-        confidence = min(1.0, len(controlled) / max(1, len(responsive_coords)))
+        for obj_id, scores in object_control_score.items():
+            if scores['total'] < 2:
+                continue  # Not enough samples
+            
+            correlation = scores['correct'] / scores['total']
+            if correlation >= 0.6:  # 60% threshold for "controlled"
+                # Store representative position(s) of this object
+                for pos in scores['positions'][:3]:  # Max 3 positions per controlled object
+                    controlled.append(f"x:{pos[0]},y:{pos[1]}")
+                best_score = max(best_score, correlation)
+        
+        # Also check ACTION5 effects - objects that consistently change on ACTION5
+        # may be "controlled" even if not directionally
+        for obj_id, effects in action5_effects.items():
+            if effects['total'] < 2:
+                continue
+            
+            change_rate = effects['changes'] / effects['total']
+            if change_rate >= 0.7:  # 70% threshold for ACTION5 control (higher since non-directional)
+                # This object responds to ACTION5 - mark as controlled
+                if obj_id not in object_control_score:
+                    # Get positions from the effects tracking
+                    for pos in effects.get('positions', [])[:3]:
+                        controlled.append(f"x:{pos[0]},y:{pos[1]}")
+                    best_score = max(best_score, change_rate)
+                    logger.debug(f"[SELF-MODEL] ACTION5 controls object {obj_id} (change rate: {change_rate:.2f})")
+        
+        # Confidence is the best correlation score, or 0 if nothing found
+        confidence = best_score if controlled else 0.0
+        
+        # Limit to max 50 controlled coordinates (prevent bloat)
+        controlled = controlled[:50]
         
         return (controlled, confidence)
+    
+    def _track_action5_effects(
+        self,
+        frame_before: Dict,
+        frame_after: Dict,
+        action5_effects: Dict,
+        game_id: str,
+        level: int
+    ) -> None:
+        """
+        Track what ACTION5 does in this game/level.
+        
+        ACTION5 is context-dependent: rotate, toggle, interact, select, etc.
+        We learn empirically by tracking which objects change when ACTION5 is used.
+        
+        Args:
+            frame_before: Frame before ACTION5
+            frame_after: Frame after ACTION5
+            action5_effects: Dict tracking {object_id: {changes, total, positions}}
+            game_id: Current game (for logging)
+            level: Current level
+        """
+        grid_before = frame_before.get('grid', [])
+        grid_after = frame_after.get('grid', [])
+        
+        if not grid_before or not grid_after:
+            return
+        
+        objects_before = self._find_objects_in_grid(grid_before)
+        objects_after = self._find_objects_in_grid(grid_after)
+        
+        # Check each object for ANY change (position, size, color transformation)
+        for obj_id, positions_before in objects_before.items():
+            if obj_id not in action5_effects:
+                action5_effects[obj_id] = {'changes': 0, 'total': 0, 'positions': []}
+            
+            action5_effects[obj_id]['total'] += 1
+            
+            if obj_id not in objects_after:
+                # Object disappeared - that's a change!
+                action5_effects[obj_id]['changes'] += 1
+                action5_effects[obj_id]['positions'] = list(positions_before)[:5]
+                continue
+            
+            positions_after = objects_after[obj_id]
+            
+            # Check for position change
+            cx_before = sum(p[0] for p in positions_before) / len(positions_before)
+            cy_before = sum(p[1] for p in positions_before) / len(positions_before)
+            cx_after = sum(p[0] for p in positions_after) / len(positions_after)
+            cy_after = sum(p[1] for p in positions_after) / len(positions_after)
+            
+            position_changed = abs(cx_after - cx_before) > 0.3 or abs(cy_after - cy_before) > 0.3
+            
+            # Check for size/shape change
+            size_changed = abs(len(positions_after) - len(positions_before)) > 0
+            
+            # Check for rotation/transformation (positions differ but centroid same)
+            positions_set_before = set(positions_before)
+            positions_set_after = set(positions_after)
+            shape_changed = positions_set_before != positions_set_after
+            
+            if position_changed or size_changed or shape_changed:
+                action5_effects[obj_id]['changes'] += 1
+                action5_effects[obj_id]['positions'] = list(positions_after)[:5]
+        
+        # Also check for NEW objects that appeared (ACTION5 might create things)
+        for obj_id, positions_after in objects_after.items():
+            if obj_id not in objects_before:
+                if obj_id not in action5_effects:
+                    action5_effects[obj_id] = {'changes': 0, 'total': 0, 'positions': []}
+                action5_effects[obj_id]['changes'] += 1
+                action5_effects[obj_id]['total'] += 1
+                action5_effects[obj_id]['positions'] = list(positions_after)[:5]
+    
+    def _track_action6_effects(
+        self,
+        frame_before: Dict,
+        frame_after: Dict,
+        action6_region_effects: Dict,
+        click_x: int,
+        click_y: int,
+        game_id: str,
+        level: int
+    ) -> None:
+        """
+        Track what ACTION6 (pseudo button clicks) do at specific screen regions.
+        
+        ACTION6 uses x,y coordinates (0-63 range) like a touchscreen.
+        Clicking on pseudo buttons often produces movement effects similar to ACTION1-4.
+        We divide the screen into 8x8 regions and track what clicking each region does.
+        
+        Args:
+            frame_before: Frame before click
+            frame_after: Frame after click
+            action6_region_effects: Dict tracking effects by region
+            click_x, click_y: Click coordinates (0-63)
+            game_id: Current game
+            level: Current level
+        """
+        grid_before = frame_before.get('grid', [])
+        grid_after = frame_after.get('grid', [])
+        
+        if not grid_before or not grid_after:
+            return
+        
+        # Convert click coords to region (divide into 8x8 grid of regions)
+        # Each region is 8 pixels (64 / 8 = 8)
+        region_x = min(click_x // 8, 7)  # 0-7
+        region_y = min(click_y // 8, 7)  # 0-7
+        region_key = (region_x, region_y)
+        
+        if region_key not in action6_region_effects:
+            action6_region_effects[region_key] = {
+                'up': 0, 'down': 0, 'left': 0, 'right': 0,
+                'toggle': 0, 'no_effect': 0,
+                'affected_objects': set(),
+                'total': 0
+            }
+        
+        action6_region_effects[region_key]['total'] += 1
+        
+        objects_before = self._find_objects_in_grid(grid_before)
+        objects_after = self._find_objects_in_grid(grid_after)
+        
+        # Track what direction objects moved (if any)
+        movement_detected = False
+        for obj_id, positions_before in objects_before.items():
+            if obj_id not in objects_after:
+                # Object disappeared - that's a toggle/change
+                action6_region_effects[region_key]['toggle'] += 1
+                action6_region_effects[region_key]['affected_objects'].add(obj_id)
+                movement_detected = True
+                continue
+            
+            positions_after = objects_after[obj_id]
+            
+            # Calculate movement
+            cx_before = sum(p[0] for p in positions_before) / len(positions_before)
+            cy_before = sum(p[1] for p in positions_before) / len(positions_before)
+            cx_after = sum(p[0] for p in positions_after) / len(positions_after)
+            cy_after = sum(p[1] for p in positions_after) / len(positions_after)
+            
+            dx = cx_after - cx_before
+            dy = cy_after - cy_before
+            
+            # Determine movement direction
+            if abs(dy) > 0.5 and dy < 0:
+                action6_region_effects[region_key]['up'] += 1
+                action6_region_effects[region_key]['affected_objects'].add(obj_id)
+                movement_detected = True
+            elif abs(dy) > 0.5 and dy > 0:
+                action6_region_effects[region_key]['down'] += 1
+                action6_region_effects[region_key]['affected_objects'].add(obj_id)
+                movement_detected = True
+            elif abs(dx) > 0.5 and dx < 0:
+                action6_region_effects[region_key]['left'] += 1
+                action6_region_effects[region_key]['affected_objects'].add(obj_id)
+                movement_detected = True
+            elif abs(dx) > 0.5 and dx > 0:
+                action6_region_effects[region_key]['right'] += 1
+                action6_region_effects[region_key]['affected_objects'].add(obj_id)
+                movement_detected = True
+        
+        # Check for new objects (button might spawn things)
+        for obj_id in objects_after:
+            if obj_id not in objects_before:
+                action6_region_effects[region_key]['toggle'] += 1
+                action6_region_effects[region_key]['affected_objects'].add(obj_id)
+                movement_detected = True
+        
+        if not movement_detected:
+            action6_region_effects[region_key]['no_effect'] += 1
+    
+    def _find_objects_in_grid(self, grid: List) -> Dict[int, List[Tuple[int, int]]]:
+        """
+        Find all distinct objects in a grid by color/value.
+        
+        Returns dict mapping object_id (color value) -> list of (x, y) positions.
+        Ignores background (value 0) and very common values (>50% of grid = background).
+        """
+        objects = {}  # color -> [(x, y), ...]
+        
+        if not grid:
+            return objects
+        
+        height = len(grid)
+        width = len(grid[0]) if grid else 0
+        total_cells = height * width
+        
+        for y, row in enumerate(grid):
+            for x, cell in enumerate(row):
+                if cell == 0:  # Skip background
+                    continue
+                if cell not in objects:
+                    objects[cell] = []
+                objects[cell].append((x, y))
+        
+        # Filter out "background" colors that cover >50% of non-zero cells
+        filtered = {}
+        for color, positions in objects.items():
+            if len(positions) < total_cells * 0.5:  # Not background
+                filtered[color] = positions
+        
+        return filtered
     
     def _find_changed_coordinates(
         self, 
@@ -482,6 +863,380 @@ class AgentSelfModel:
         """
         sorted_objects = sorted(controlled_objects)
         return json.dumps(sorted_objects)
+    
+    # =========================================================================
+    # ACTION5 BEHAVIOR MAPPING (Network-Level Knowledge)
+    # =========================================================================
+    
+    def save_action5_behavior(
+        self,
+        game_type: str,
+        level: int,
+        behavior_type: str,
+        affected_objects: List[str],
+        effect_description: str,
+        confidence: float
+    ) -> None:
+        """
+        Save discovered ACTION5 behavior to network-level knowledge.
+        
+        This allows all agents to benefit from one agent's discovery
+        of what ACTION5 does in a particular game type.
+        
+        Args:
+            game_type: The game type (e.g., "tetris_variant")
+            level: Level number where behavior was observed
+            behavior_type: Type of behavior (rotation, toggle, interact, select, etc.)
+            affected_objects: List of object color IDs affected
+            effect_description: Human-readable description of the effect
+            confidence: Confidence level (0.0 to 1.0)
+        """
+        existing = self.db.execute_query("""
+            SELECT confidence, discovery_count FROM action5_behavior_map
+            WHERE game_type = ? AND level_number = ?
+        """, (game_type, level))
+        
+        affected_str = ",".join(str(o) for o in affected_objects) if affected_objects else ""
+        
+        if existing:
+            # Update with weighted average confidence
+            row = existing[0]
+            old_conf = row['confidence']
+            count = row['discovery_count']
+            new_count = count + 1
+            new_conf = (old_conf * count + confidence) / new_count
+            
+            self.db.execute_query("""
+                UPDATE action5_behavior_map
+                SET behavior_type = ?,
+                    affected_objects = ?,
+                    effect_description = ?,
+                    confidence = ?,
+                    discovery_count = ?,
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE game_type = ? AND level_number = ?
+            """, (behavior_type, affected_str, effect_description, new_conf, new_count, game_type, level))
+            
+            logger.debug(f"[ACTION5] Updated behavior for {game_type} L{level}: {behavior_type} (conf: {new_conf:.2f}, count: {new_count})")
+        else:
+            # Insert new discovery
+            self.db.execute_query("""
+                INSERT INTO action5_behavior_map
+                (game_type, level_number, behavior_type, affected_objects, effect_description, confidence)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (game_type, level, behavior_type, affected_str, effect_description, confidence))
+            
+            logger.info(f"[ACTION5] New behavior discovered for {game_type} L{level}: {behavior_type}")
+    
+    def get_action5_behavior(self, game_type: str, level: int) -> Optional[Dict]:
+        """
+        Retrieve known ACTION5 behavior for a game type and level.
+        
+        Returns:
+            Dict with behavior_type, affected_objects, effect_description, confidence
+            or None if no behavior known
+        """
+        result = self.db.execute_query("""
+            SELECT behavior_type, affected_objects, effect_description, confidence
+            FROM action5_behavior_map
+            WHERE game_type = ? AND level_number = ?
+        """, (game_type, level))
+        
+        if result:
+            row = result[0]
+            return {
+                'behavior_type': row['behavior_type'],
+                'affected_objects': row['affected_objects'].split(",") if row['affected_objects'] else [],
+                'effect_description': row['effect_description'],
+                'confidence': row['confidence']
+            }
+        return None
+    
+    def classify_action5_effect(self, action5_effects: Dict, game_type: str, level: int) -> str:
+        """
+        Classify what ACTION5 does based on observed effects.
+        
+        Analyzes the tracked effects and determines the behavior type.
+        Also saves the discovery to network knowledge.
+        
+        Args:
+            action5_effects: Dict from identify_controlled_objects tracking
+            game_type: Game type for storing
+            level: Level number
+        
+        Returns:
+            Behavior type string (rotation, toggle, interact, select, unknown)
+        """
+        if not action5_effects:
+            return "unknown"
+        
+        # Analyze the effects
+        total_observations = 0
+        position_changes = 0
+        affected_ids = []
+        
+        for obj_id, effects in action5_effects.items():
+            if effects['total'] < 1:
+                continue
+            
+            total_observations += effects['total']
+            
+            if effects['changes'] > 0:
+                affected_ids.append(str(obj_id))
+                
+                # Analyze what kind of changes occurred
+                if effects.get('positions'):
+                    # If object moved significantly, it's position change
+                    position_changes += 1
+                
+        if total_observations < 2:
+            return "unknown"
+        
+        # Determine behavior type based on patterns
+        behavior_type = "interact"  # Default
+        effect_description = "ACTION5 affects objects in this level"
+        
+        change_rate = len(affected_ids) / len(action5_effects) if action5_effects else 0
+        
+        if change_rate > 0.5:
+            # Most objects change - likely global effect
+            behavior_type = "toggle"
+            effect_description = f"ACTION5 toggles/transforms multiple objects (affects {len(affected_ids)} objects)"
+        elif change_rate > 0.0 and len(affected_ids) <= 2:
+            # One or two objects change - likely rotation or select
+            if position_changes > 0:
+                behavior_type = "rotation"
+                effect_description = f"ACTION5 rotates object {affected_ids[0] if affected_ids else 'unknown'}"
+            else:
+                behavior_type = "select"
+                effect_description = f"ACTION5 selects or activates object {affected_ids[0] if affected_ids else 'unknown'}"
+        
+        # Save to network knowledge
+        confidence = min(0.9, total_observations / 10)  # More observations = higher confidence
+        self.save_action5_behavior(
+            game_type=game_type,
+            level=level,
+            behavior_type=behavior_type,
+            affected_objects=affected_ids,
+            effect_description=effect_description,
+            confidence=confidence
+        )
+        
+        return behavior_type
+    
+    # =========================================================================
+    # ACTION6 PSEUDO BUTTON BEHAVIOR (Network-Level Knowledge)
+    # =========================================================================
+    
+    def save_pseudo_button_behavior(
+        self,
+        game_type: str,
+        level: int,
+        region_x: int,
+        region_y: int,
+        produces_action: str,
+        movement_direction: str,
+        affected_objects: List[str],
+        effect_description: str,
+        confidence: float
+    ) -> None:
+        """
+        Save discovered pseudo button behavior to network-level knowledge.
+        
+        When agents discover what clicking a screen region does,
+        share it so other agents can use the pseudo buttons effectively.
+        
+        Args:
+            game_type: The game type
+            level: Level number
+            region_x, region_y: Screen region (0-7 each, dividing 64x64 into 8x8)
+            produces_action: Equivalent action (e.g., 'up', 'down', 'toggle')
+            movement_direction: Direction of movement if any
+            affected_objects: Object IDs affected by this button
+            effect_description: Human-readable description
+            confidence: Confidence level (0.0 to 1.0)
+        """
+        existing = self.db.execute_query("""
+            SELECT confidence, discovery_count FROM pseudo_button_behavior
+            WHERE game_type = ? AND level_number = ? AND region_x = ? AND region_y = ?
+        """, (game_type, level, region_x, region_y))
+        
+        affected_str = ",".join(str(o) for o in affected_objects) if affected_objects else ""
+        
+        if existing:
+            row = existing[0]
+            old_conf = row['confidence']
+            count = row['discovery_count']
+            new_count = count + 1
+            new_conf = (old_conf * count + confidence) / new_count
+            
+            self.db.execute_query("""
+                UPDATE pseudo_button_behavior
+                SET produces_action = ?,
+                    movement_direction = ?,
+                    affected_objects = ?,
+                    effect_description = ?,
+                    confidence = ?,
+                    discovery_count = ?,
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE game_type = ? AND level_number = ? AND region_x = ? AND region_y = ?
+            """, (produces_action, movement_direction, affected_str, effect_description,
+                  new_conf, new_count, game_type, level, region_x, region_y))
+            
+            logger.debug(f"[BUTTON] Updated region ({region_x},{region_y}) for {game_type} L{level}: {produces_action}")
+        else:
+            self.db.execute_query("""
+                INSERT INTO pseudo_button_behavior
+                (game_type, level_number, region_x, region_y, produces_action,
+                 movement_direction, affected_objects, effect_description, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (game_type, level, region_x, region_y, produces_action,
+                  movement_direction, affected_str, effect_description, confidence))
+            
+            logger.info(f"[BUTTON] New pseudo button at ({region_x},{region_y}) for {game_type} L{level}: {produces_action}")
+    
+    def get_pseudo_button_behavior(self, game_type: str, level: int, region_x: int, region_y: int) -> Optional[Dict]:
+        """
+        Retrieve known pseudo button behavior for a specific screen region.
+        
+        Returns:
+            Dict with produces_action, movement_direction, affected_objects, confidence
+            or None if no behavior known
+        """
+        result = self.db.execute_query("""
+            SELECT produces_action, movement_direction, affected_objects, effect_description, confidence
+            FROM pseudo_button_behavior
+            WHERE game_type = ? AND level_number = ? AND region_x = ? AND region_y = ?
+        """, (game_type, level, region_x, region_y))
+        
+        if result:
+            row = result[0]
+            return {
+                'produces_action': row['produces_action'],
+                'movement_direction': row['movement_direction'],
+                'affected_objects': row['affected_objects'].split(",") if row['affected_objects'] else [],
+                'effect_description': row['effect_description'],
+                'confidence': row['confidence']
+            }
+        return None
+    
+    def get_all_pseudo_buttons(self, game_type: str, level: int, min_confidence: float = 0.5) -> List[Dict]:
+        """
+        Get all known pseudo buttons for a game/level.
+        
+        Args:
+            game_type: Game type to query
+            level: Level number
+            min_confidence: Minimum confidence threshold
+        
+        Returns:
+            List of pseudo button dicts with region coords and behavior
+        """
+        results = self.db.execute_query("""
+            SELECT region_x, region_y, produces_action, movement_direction, 
+                   affected_objects, effect_description, confidence
+            FROM pseudo_button_behavior
+            WHERE game_type = ? AND level_number = ? AND confidence >= ?
+            ORDER BY confidence DESC
+        """, (game_type, level, min_confidence))
+        
+        buttons = []
+        for row in results or []:
+            buttons.append({
+                'region_x': row['region_x'],
+                'region_y': row['region_y'],
+                'screen_x_range': (row['region_x'] * 8, row['region_x'] * 8 + 7),
+                'screen_y_range': (row['region_y'] * 8, row['region_y'] * 8 + 7),
+                'produces_action': row['produces_action'],
+                'movement_direction': row['movement_direction'],
+                'affected_objects': row['affected_objects'].split(",") if row['affected_objects'] else [],
+                'effect_description': row['effect_description'],
+                'confidence': row['confidence']
+            })
+        return buttons
+    
+    def classify_pseudo_button_effects(
+        self,
+        action6_region_effects: Dict,
+        game_type: str,
+        level: int
+    ) -> Dict[Tuple[int, int], str]:
+        """
+        Classify and save pseudo button behaviors based on tracked effects.
+        
+        Analyzes what each screen region does when clicked and saves
+        the discoveries to network knowledge.
+        
+        Args:
+            action6_region_effects: Dict from identify_controlled_objects tracking
+            game_type: Game type for storing
+            level: Level number
+        
+        Returns:
+            Dict mapping (region_x, region_y) -> behavior description
+        """
+        classified = {}
+        
+        for region_key, effects in action6_region_effects.items():
+            region_x, region_y = region_key
+            
+            if effects['total'] < 2:
+                continue  # Not enough samples
+            
+            # Determine dominant effect
+            directions = {
+                'up': effects['up'],
+                'down': effects['down'],
+                'left': effects['left'],
+                'right': effects['right']
+            }
+            
+            max_direction = max(directions.items(), key=lambda x: x[1])
+            toggle_count = effects['toggle']
+            no_effect_count = effects['no_effect']
+            total = effects['total']
+            
+            # Determine what this button does
+            if no_effect_count > total * 0.7:
+                # Mostly no effect - not a useful button
+                continue
+            
+            affected_list = list(effects['affected_objects'])
+            
+            if toggle_count > max_direction[1] and toggle_count > total * 0.3:
+                # Toggle behavior dominates
+                produces_action = 'toggle'
+                movement_direction = 'none'
+                effect_desc = f"Clicking region ({region_x},{region_y}) toggles/spawns objects"
+            elif max_direction[1] > total * 0.4:
+                # Directional movement dominates
+                produces_action = f'move_{max_direction[0]}'
+                movement_direction = max_direction[0]
+                effect_desc = f"Clicking region ({region_x},{region_y}) moves objects {max_direction[0]}"
+            else:
+                # Mixed or unclear effect
+                produces_action = 'interact'
+                movement_direction = 'mixed'
+                effect_desc = f"Clicking region ({region_x},{region_y}) has mixed effects"
+            
+            confidence = min(0.9, effects['total'] / 10)
+            
+            # Save to network
+            self.save_pseudo_button_behavior(
+                game_type=game_type,
+                level=level,
+                region_x=region_x,
+                region_y=region_y,
+                produces_action=produces_action,
+                movement_direction=movement_direction,
+                affected_objects=affected_list,
+                effect_description=effect_desc,
+                confidence=confidence
+            )
+            
+            classified[region_key] = produces_action
+        
+        return classified
 
 
 # ============================================================================
@@ -785,6 +1540,17 @@ if __name__ == "__main__":
     else:
         print("[FAIL] Table creation failed")
     
+    # Test ACTION5 behavior table
+    result = asm.db.execute_query("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='action5_behavior_map'
+    """)
+    
+    if result:
+        print("[OK] action5_behavior_map table exists")
+    else:
+        print("[FAIL] ACTION5 behavior table creation failed")
+    
     # Test basic functionality
     test_controlled = ["x:5,y:10", "x:6,y:10"]
     asm.store_control_map("test_agent", "test_game", 1, test_controlled, 0.85)
@@ -794,5 +1560,58 @@ if __name__ == "__main__":
         print("[OK] Store and retrieve working")
     else:
         print(f"[FAIL] Mismatch: {retrieved} != {test_controlled}")
+    
+    # Test ACTION5 behavior storage
+    asm.save_action5_behavior(
+        game_type="test_game_type",
+        level=1,
+        behavior_type="rotation",
+        affected_objects=["3", "5"],
+        effect_description="ACTION5 rotates object 3",
+        confidence=0.75
+    )
+    
+    behavior = asm.get_action5_behavior("test_game_type", 1)
+    if behavior and behavior['behavior_type'] == "rotation":
+        print("[OK] ACTION5 behavior storage working")
+    else:
+        print(f"[FAIL] ACTION5 behavior mismatch: {behavior}")
+    
+    # Test pseudo button behavior storage
+    result = asm.db.execute_query("""
+        SELECT name FROM sqlite_master 
+        WHERE type='table' AND name='pseudo_button_behavior'
+    """)
+    
+    if result:
+        print("[OK] pseudo_button_behavior table exists")
+    else:
+        print("[FAIL] Pseudo button table creation failed")
+    
+    # Test pseudo button storage
+    asm.save_pseudo_button_behavior(
+        game_type="test_game_type",
+        level=1,
+        region_x=7,
+        region_y=0,
+        produces_action="move_up",
+        movement_direction="up",
+        affected_objects=["3"],
+        effect_description="Clicking top-right moves object up",
+        confidence=0.8
+    )
+    
+    button = asm.get_pseudo_button_behavior("test_game_type", 1, 7, 0)
+    if button and button['produces_action'] == "move_up":
+        print("[OK] Pseudo button behavior storage working")
+    else:
+        print(f"[FAIL] Pseudo button behavior mismatch: {button}")
+    
+    # Test get all buttons
+    all_buttons = asm.get_all_pseudo_buttons("test_game_type", 1)
+    if len(all_buttons) >= 1:
+        print(f"[OK] Get all pseudo buttons working ({len(all_buttons)} buttons)")
+    else:
+        print("[FAIL] Get all pseudo buttons failed")
     
     print("\n[OK] Agent Self-Model system operational")
