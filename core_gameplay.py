@@ -1566,10 +1566,18 @@ class GameplayEngine:
             action_count = 0
             level_action_count = 0  # Track actions per level
             start_time = datetime.now()
-            previous_score = 0.0  # Track score for level completion detection
-            level_completions = 0  # Track how many levels completed
-            current_level = 1  # Start at level 1 (first challenge to complete)
+            
+            # CRITICAL FIX (2025-12-07): Initialize level tracking from current game state
+            # After sequence replay, game_state.score reflects levels completed
+            # If we reset to 0, we lose track of progress from replay
+            # BUG: Previously always reset to 0, causing 2790/2798 games to show 0 level_completions
+            previous_score = game_state.score if game_state else 0.0
+            level_completions = int(game_state.score) if game_state and game_state.score >= 1.0 else 0
+            current_level = int(game_state.score) + 1 if game_state else 1  # Score N = on level N+1
             level_start_action = 0  # Track where each level starts
+            
+            if level_completions > 0:
+                logger.info(f"[INIT] Starting game loop with {level_completions} levels already completed (score={previous_score})")
             
             # API RESET tracking (NEW - hybrid approach)
             level_api_resets = 0  # Track resets used on current level

@@ -27,6 +27,8 @@ Tools for analyzing gameplay, prestige, and system behavior.
 | `gameplay_analyzer.py` | Analyze agent gameplay progression | `python analysis/gameplay_analyzer.py --hours 6` |
 | `audit_prestige_system.py` | Audit prestige calculations | `python analysis/audit_prestige_system.py` |
 | `pariah_analysis.py` | Analyze pariah system state | `python analysis/pariah_analysis.py` |
+| `theory_verification.py` | Verify AGI unified theory alignment | `python analysis/theory_verification.py` |
+| `theory_analysis.py` | Comprehensive theory alignment analysis | `python analysis/theory_analysis.py` |
 
 ### gameplay_analyzer.py
 
@@ -39,6 +41,23 @@ python analysis/gameplay_analyzer.py --full             # Full analysis with all
 python analysis/gameplay_analyzer.py --no-games         # Skip individual game listing
 python analysis/gameplay_analyzer.py --limit 50         # Show more games
 ```
+
+### theory_verification.py & theory_analysis.py
+
+Verify system alignment with AGI Unified Theory (agi_unified_theory.md):
+
+```bash
+python analysis/theory_verification.py   # Quick verification checks
+python analysis/theory_analysis.py        # Comprehensive analysis
+```
+
+Checks performed:
+- Two-Stream Consciousness (Private Memory vs Network Wisdom)
+- Dual Economy (Prestige vs Action Budgets separation)
+- Agent Self-Model ("I am this object" comprehension)
+- Pariah System Health (decay, obsolescence)
+- Winning Sequences (network knowledge)
+- Viral Package System health
 
 ---
 

@@ -1,6 +1,6 @@
 # BitterTruth-AI Codebase Inventory
 
-**Updated**: 2025-12-06  
+**Updated**: 2025-12-08  
 **Architecture**: Autonomous ARC-AGI-3 game playing with evolutionary agents
 
 ---
@@ -250,6 +250,8 @@ manual_tools/
 | `gameplay_analyzer.py` | Gameplay progression analysis | `python manual_tools/analysis/gameplay_analyzer.py --hours 3` |
 | `audit_prestige_system.py` | Audits prestige calculations | `python manual_tools/analysis/audit_prestige_system.py` |
 | `pariah_analysis.py` | Analyzes pariah system state | `python manual_tools/analysis/pariah_analysis.py` |
+| `theory_verification.py` | Verify AGI unified theory alignment | `python manual_tools/analysis/theory_verification.py` |
+| `theory_analysis.py` | Comprehensive theory alignment analysis | `python manual_tools/analysis/theory_analysis.py` |
 
 ### Database Tools (`database/`)
 | File | Purpose | Usage |

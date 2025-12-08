@@ -27,8 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def get_db_connection(db_path: str | None = None) -> sqlite3.Connection:
     """Get database connection with row factory."""
     if db_path is None:
-        # Find core_data.db relative to this script
-        script_dir = Path(__file__).parent.parent
+        # Find core_data.db relative to this script (go up 2 levels: analysis -> manual_tools -> project root)
+        script_dir = Path(__file__).parent.parent.parent
         db_path = str(script_dir / 'core_data.db')
     
     conn = sqlite3.connect(db_path)

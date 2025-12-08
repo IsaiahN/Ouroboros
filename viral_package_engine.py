@@ -957,20 +957,42 @@ class ViralPackageEngine:
         """
         Check if any pariahs have become obsolete.
         
-        Pariahs that haven't been triggered in threshold_generations may no longer be relevant.
+        CRITICAL FIX: Decay runs FIRST on ALL pariahs, then obsolescence check runs AFTER.
+        Per agi_unified_theory.md: "Forgetting is not a bug - it's essential for intelligence."
+        
+        Pariahs are only marked obsolete if:
+        1. Toxicity has decayed to minimum (0.1) AND
+        2. Not triggered in threshold_generations (50+ gens)
+        
+        Low-toxicity pariahs remain ACTIVE to provide weak warnings.
         """
+        # STEP 1: Apply toxicity decay FIRST to ALL pariahs (active or not)
+        self.decay_pariah_toxicity(generation)
+        
+        # STEP 2: Reactivate decayed pariahs that were incorrectly marked inactive
+        # Pariahs with toxicity > min should stay active for weak warnings
+        reactivated = self.db.execute_query("""
+            UPDATE pariahs
+            SET is_active = TRUE, obsolescence_score = 0.0
+            WHERE is_active = FALSE 
+            AND toxicity > 0.15
+            RETURNING pariah_id
+        """)
+        if reactivated:
+            print(f"[PARIAH] Reactivated {len(reactivated)} previously-obsolete pariahs")
+        
+        # STEP 3: Only mark truly obsolete pariahs (min toxicity AND very old)
+        # Increased threshold to 50 generations - give more time
         self.db.execute_query("""
             UPDATE pariahs
             SET obsolescence_score = 1.0,
                 is_active = FALSE
-            WHERE last_triggered_generation < ? - ?
+            WHERE last_triggered_generation < ? - 50
+            AND toxicity <= 0.15
             AND is_active = TRUE
-        """, (generation, threshold_generations))
-        
-        # Apply toxicity decay to all active pariahs
-        self.decay_pariah_toxicity(generation)
+        """, (generation,))
     
-    def decay_pariah_toxicity(self, generation: int, decay_rate: float = 0.05, min_toxicity: float = 0.1):
+    def decay_pariah_toxicity(self, generation: int, decay_rate: float = 0.03, min_toxicity: float = 0.1):
         """
         Apply relevance decay to pariah toxicity.
         
@@ -978,22 +1000,27 @@ class ViralPackageEngine:
         "Forgetting is not a bug - it's essential for intelligence."
         Pariahs should fade naturally if not re-validated by newer generations.
         
-        Decay Formula (mirrors viral package relevance decay):
-        new_toxicity = current_toxicity * (1 - decay_rate * generations_since_trigger)
+        FIXED: Now operates on ALL pariahs, not just active ones.
+        This ensures pariahs decay properly before obsolescence check.
+        
+        Decay Formula (exponential decay):
+        new_toxicity = current_toxicity * decay_factor
+        where decay_factor = max(0.3, 1.0 - decay_rate * generations_since_trigger)
         
         Args:
             generation: Current generation
-            decay_rate: How fast toxicity decays per generation (default 5%)
+            decay_rate: How fast toxicity decays per generation (default 3% - slower decay)
             min_toxicity: Minimum toxicity floor to maintain some warning (default 0.1)
         """
         try:
-            # Get all active pariahs that haven't been triggered recently
+            # FIXED: Operate on ALL pariahs, not just active ones
+            # This ensures decay happens before obsolescence marking
             pariahs = self.db.execute_query("""
                 SELECT pariah_id, toxicity, discovery_generation, 
                        COALESCE(last_triggered_generation, discovery_generation) as last_trigger
                 FROM pariahs
-                WHERE is_active = TRUE
-            """)
+                WHERE toxicity > ?
+            """, (min_toxicity,))
             
             if not pariahs:
                 return
@@ -1003,15 +1030,15 @@ class ViralPackageEngine:
                 last_trigger = p['last_trigger'] or p['discovery_generation'] or 0
                 generations_since_trigger = max(0, generation - last_trigger)
                 
-                # Apply exponential decay based on age
-                # Toxicity halves roughly every 15 generations if not re-triggered
-                decay_factor = 1.0 - (decay_rate * min(generations_since_trigger, 20))
+                # Apply decay based on age
+                # FIXED: Cap at 30 generations to prevent over-decay
+                decay_factor = 1.0 - (decay_rate * min(generations_since_trigger, 30))
                 decay_factor = max(0.3, decay_factor)  # Floor at 30% of original
                 
                 new_toxicity = max(min_toxicity, p['toxicity'] * decay_factor)
                 
-                # Only update if toxicity actually changed
-                if abs(new_toxicity - p['toxicity']) > 0.01:
+                # Only update if toxicity actually changed significantly
+                if abs(new_toxicity - p['toxicity']) > 0.005:
                     self.db.execute_query("""
                         UPDATE pariahs 
                         SET toxicity = ?

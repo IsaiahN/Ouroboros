@@ -370,14 +370,17 @@ class GameScheduler:
         Result: 10x faster execution, similar outcomes, no concentration
         
         CRITICAL FIX (2025-12-06): Added diversity cap to prevent 82% concentration
-        on a single game (like ls20-fa137e247ce6). Max 30% of plays on any game.
+        on a single game (like ls20-fa137e247ce6). Max 15% of plays on any game.
+        
+        FIX (2025-12-07): Lowered cap from 30% to 15% per-game-instance.
+        Per agi_unified_theory.md: "System should explore all games, not concentrate on few"
         """
         if not available_games:
             return None
         
-        # RULE 0: DIVERSITY CAP - Prevent any single game from getting >30% of plays
-        # This fixes the concentration bug where 82% of plays went to one game
-        MAX_GAME_CONCENTRATION = 0.30  # 30% cap
+        # RULE 0: DIVERSITY CAP - Prevent any single game from getting >15% of plays
+        # Per-INSTANCE cap, not per-type. Each game_id is tracked individually.
+        MAX_GAME_CONCENTRATION = 0.15  # 15% cap (lowered from 30%)
         
         # Count total current plays across all games
         total_plays = sum(g.times_played for g in available_games)
@@ -387,10 +390,11 @@ class GameScheduler:
             over_cap_games = set()
             for g in available_games:
                 game_concentration = g.times_played / total_plays
-                if game_concentration > MAX_GAME_CONCENTRATION and g.times_played > 5:
+                # Lower threshold: >15% AND more than 3 plays (catches concentration earlier)
+                if game_concentration > MAX_GAME_CONCENTRATION and g.times_played > 3:
                     over_cap_games.add(g.game_id)
                     # Log only occasionally to avoid spam
-                    if random.random() < 0.1:  # 10% chance to log
+                    if random.random() < 0.05:  # 5% chance to log
                         print(f"  [DIVERSITY] Game {g.game_id[:15]} over cap: {game_concentration*100:.0f}% of plays")
             
             # Filter out over-cap games (unless ALL games are over cap)
@@ -398,7 +402,9 @@ class GameScheduler:
                 filtered_games = [g for g in available_games if g.game_id not in over_cap_games]
                 if filtered_games:
                     available_games = filtered_games
-                    print(f"  [DIVERSITY] Filtered {len(over_cap_games)} over-cap games, {len(filtered_games)} remain")
+                    # Only log once per generation, not every call
+                    if random.random() < 0.2:
+                        print(f"  [DIVERSITY] Filtered {len(over_cap_games)} over-cap games, {len(filtered_games)} remain")
         
         # RULE 1: Filter fully won games - optimizer/exploiter only
         if agent_mode in ['optimizer', 'exploiter']:

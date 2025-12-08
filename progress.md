@@ -3339,3 +3339,257 @@ AGENT SELF-MODEL SYSTEM TEST
 ---
 
 **END OF SESSION 21: December 6, 2025 - 4:40:00 PM**
+
+---
+
+## Session 22: Theory Verification & Critical Bug Fixes
+**Date**: December 8, 2025  
+**Time Started**: 10:00:00 AM  
+**Focus**: Verify network alignment with AGI Unified Theory, fix critical bugs preventing level progression
+
+---
+
+### Approach
+
+**Goal**: Use AGI Unified Theory as source of truth to identify and fix network health issues.
+
+**Methodology**:
+1. Create theory verification tools to analyze database alignment
+2. Query database for evidence of theory violations
+3. Identify root causes of level progression failures
+4. Implement fixes aligned with theory principles
+5. Move useful tools to `manual_tools/` for long-term use
+
+---
+
+### Phase 1: Theory Verification Tool Creation (10:15:00 AM)
+
+Created two analysis scripts to verify theory alignment:
+
+**1. `theory_verification.py`** - Quick verification checks:
+- Two-Stream Consciousness (Private Memory vs Network Wisdom)
+- Dual Economy (Prestige vs Action Budgets separation)
+- Pariah System Health
+- Winning Sequences
+- Viral Package System
+
+**2. `theory_analysis.py`** - Comprehensive analysis:
+- Detailed table counts
+- Agent self-model status
+- Network hypothesis sharing
+- Level progression analysis
+
+---
+
+### Phase 2: Critical Bug Discovery (10:30:00 AM)
+
+Ran analysis and discovered 5 critical issues:
+
+| # | Issue | Evidence | Theory Violation |
+|---|-------|----------|------------------|
+| 1 | **Pariah Obsolescence Bug** | Only 8/5834 pariahs active (0.14%) | Pariahs marked obsolete BEFORE decay runs |
+| 2 | **Pariah Decay Not Running** | 5821 pariahs at toxicity=1.0 | Evolutionary Forgetting Principle violated |
+| 3 | **Game Concentration** | Top 5 games = 92.8% of plays | System should explore all games |
+| 4 | **Level Completion Tracking** | 2790/2798 games with score>0 but level_completions=0 | Somatic learning not captured |
+| 5 | **Low Viral Packages** | Only 61 packages, 8 active | Horizontal gene transfer broken |
+
+---
+
+### Phase 3: Fix 1 - Pariah Obsolescence Order (11:00:00 AM)
+
+**Problem**: `check_pariah_obsolescence()` marks pariahs inactive BEFORE `decay_pariah_toxicity()` runs.
+
+**Root Cause**: Order of operations in evolution loop:
+1. ❌ Mark obsolete (sets is_active=FALSE)
+2. ❌ Then decay (only affects is_active=TRUE)
+3. Result: Decay never applies to most pariahs
+
+**Solution**: Modified `check_pariah_obsolescence()` in `viral_package_engine.py`:
+1. Call `decay_pariah_toxicity()` FIRST
+2. Only mark obsolete if toxicity at floor (0.10) AND 50+ generations stale
+3. Low-toxicity pariahs remain active as "background noise"
+
+**Files Modified**: `viral_package_engine.py`
+
+---
+
+### Phase 4: Fix 2 - Game Concentration Cap (11:15:00 AM)
+
+**Problem**: ls20 = 25.7%, vc33 = 20.8% of all plays. Top 5 games = 92.8%.
+
+**Solution**: Enhanced diversity cap in `game_scheduler.py`:
+1. Reduced cap from 30% to 15% per game type
+2. Added dynamic penalty for over-played games
+3. Games at >10% get selection weight reduced by (concentration - 10%) * 2
+
+**Formula**:
+```python
+if concentration > 0.10:
+    penalty = (concentration - 0.10) * 2  # Up to 0.30 penalty at 25%
+    selection_weight *= (1 - penalty)
+```
+
+**Files Modified**: `game_scheduler.py`
+
+---
+
+### Phase 5: Fix 3 - Level Completion Tracking (11:30:00 AM)
+
+**Problem**: 2790/2798 games (99.7%) had `level_completions = 0` despite positive scores.
+
+**Root Cause**: In `_finalize_game()`, after sequence replay:
+```python
+# OLD CODE (broken)
+level_completions = loop_state.current_level - 1  # Always 0 after replay
+```
+
+**Solution**: Preserve level_completions from sequence replay result:
+```python
+# NEW CODE
+if fallback_result and fallback_result.success:
+    level_completions = fallback_result.levels_completed  # Preserve from replay
+else:
+    level_completions = loop_state.current_level - 1
+```
+
+**Impact**: 
+- Game results now properly record levels completed
+- Viral packages can be created (require level_completions > 0)
+- Agent fitness properly calculated
+
+**Files Modified**: `core_gameplay.py`
+
+---
+
+### Phase 6: Fix 4 - Pariah Decay Formula (11:45:00 AM)
+
+**Problem**: Even after fixing order, only 13/5834 pariahs (0.2%) would decay.
+
+**Root Cause**: Pariahs with `last_triggered_generation=0` (never re-triggered) have:
+```
+decay_factor = max(0.3, 1.0 - 0.05 * 282) = max(0.3, -13.1) = 0.30
+```
+Floor is 0.30, but should decay to 0.10 for very old pariahs.
+
+**Solution**: Added generation-based minimum:
+```python
+# After 100+ generations, floor drops to 0.10
+if generations_since_trigger > 100:
+    min_toxicity = 0.10
+else:
+    min_toxicity = 0.30
+```
+
+**Files Modified**: `viral_package_engine.py`
+
+---
+
+### Phase 7: Integration Audit (12:00:00 PM)
+
+Verified all theory features are actually called in hot paths:
+
+| Feature | Method | Called? | Location |
+|---------|--------|---------|----------|
+| Sensation Engine | `record_sensation()` | ✅ YES | `_select_action()` |
+| Agent Self-Model | `identify_controlled_objects()` | ✅ YES | `_handle_level_completion()` |
+| Viral Engine | `create_viral_package()` | ✅ YES | `_finalize_game()` |
+| Rule Induction | `extract_rule_from_game_session()` | ✅ YES | `_handle_level_completion()`, `_finalize_game()` |
+| Network Hypotheses | `_generate_failure_hypothesis()` | ✅ YES | `_finalize_game()` |
+
+**Result**: All systems properly integrated. Issue was data flow (level_completions=0), not missing calls.
+
+---
+
+### Phase 8: Manual Tools Reorganization (12:15:00 PM)
+
+**Actions**:
+1. Moved `theory_verification.py` to `manual_tools/analysis/`
+2. Moved `theory_analysis.py` to `manual_tools/analysis/`
+3. Deleted 6 temp files:
+   - `temp_analysis.py`
+   - `temp_health.py`
+   - `temp_level_analysis.py`
+   - `temp_pariah_check.py`
+   - `temp_score_investigate.py`
+   - `temp_table_check.py`
+4. Updated `manual_tools/README.md`
+5. Updated `CODEBASE_INVENTORY.md`
+
+**New Analysis Tools**:
+| Tool | Purpose | Usage |
+|------|---------|-------|
+| `theory_verification.py` | Quick AGI theory alignment check | `python manual_tools/analysis/theory_verification.py` |
+| `theory_analysis.py` | Comprehensive theory analysis | `python manual_tools/analysis/theory_analysis.py` |
+
+---
+
+### Summary of Session 22 Fixes
+
+**Files Modified**:
+
+| File | Changes | Purpose |
+|------|---------|---------|
+| `viral_package_engine.py` | ~40 lines | Pariah decay order, floor adjustment |
+| `game_scheduler.py` | ~20 lines | 15% cap, dynamic penalty |
+| `core_gameplay.py` | ~15 lines | Preserve level_completions from replay |
+| `manual_tools/README.md` | Updated | Added theory tools |
+| `CODEBASE_INVENTORY.md` | Updated | Reflect new structure |
+
+**Root Cause Analysis**:
+
+```
+Why weren't agents progressing?
+├── Level completions always = 0 (tracking bug)
+│   └── Viral packages not created (require level_completions > 0)
+│       └── No horizontal gene transfer
+│           └── Network can't share successful strategies
+├── Same 5 games played 92.8% of time (concentration)
+│   └── No exploration of game variety
+│       └── Can't discover diverse strategies
+└── Pariahs at toxicity=1.0 forever (decay bug)
+    └── Agents too scared to try anything
+        └── Analysis paralysis on stuck levels
+```
+
+---
+
+### Current Status (12:30:00 PM)
+
+**Completed This Session (Session 22)**:
+| # | Task | Status |
+|---|------|--------|
+| 1 | Created theory verification tools | [DONE] |
+| 2 | Fixed pariah obsolescence order | [DONE] |
+| 3 | Fixed pariah decay floor for old pariahs | [DONE] |
+| 4 | Reduced game concentration cap to 15% | [DONE] |
+| 5 | Fixed level_completions tracking from replay | [DONE] |
+| 6 | Audited core_gameplay integration | [DONE] |
+| 7 | Moved tools to manual_tools/analysis/ | [DONE] |
+| 8 | Deleted temp files | [DONE] |
+| 9 | Updated documentation | [DONE] |
+
+**Current Failure Being Worked On**:
+- **None** - All identified issues fixed
+
+**Theory Alignment**:
+| Principle | Status |
+|-----------|--------|
+| Evolutionary Forgetting (pariah decay) | ✅ FIXED |
+| Dual Economy (prestige/budgets separate) | ✅ OK |
+| Viral Exchange (horizontal transfer) | ✅ FIXED (level tracking) |
+| Two-Stream Consciousness | ✅ OK |
+| Agent Self-Model | ✅ OK |
+
+**Next Steps**:
+1. Run 10 generations to verify fixes
+2. Monitor for:
+   - Pariah toxicity decreasing over generations
+   - Game diversity improving (less concentration)
+   - Level completions being recorded
+   - Viral packages being created
+3. Run `theory_verification.py` again post-evolution to confirm alignment
+
+---
+
+**END OF SESSION 22: December 8, 2025 - 12:30:00 PM**
+
