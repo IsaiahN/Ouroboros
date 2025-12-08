@@ -2697,3 +2697,335 @@ CREATE INDEX idx_system_logs_timestamp
             ;
 
 CREATE INDEX idx_weaving_agent_game ON decision_weaving_reports(agent_id, game_id);
+
+-- =============================================================================
+-- SESSION 25: PERCEPTUAL PRIMITIVES TABLES
+-- =============================================================================
+-- Added: December 8, 2025
+-- Purpose: Give agents conceptual vocabulary for perception without game-specific rules
+-- Philosophy: "Grammar of perception, not dictionary of solutions"
+-- =============================================================================
+
+-- Self-Object Identity: "I am exactly one thing"
+-- Tracks which object the agent controls in each level
+CREATE TABLE IF NOT EXISTS self_object_identity (
+    identity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    
+    -- Current controlled object
+    self_object_color INTEGER NOT NULL,       -- Color ID of controlled object
+    self_object_signature TEXT,               -- Shape hash for stable identification
+    self_object_center_x REAL,                -- Center of mass at identification
+    self_object_center_y REAL,
+    
+    -- Confidence and evidence
+    confidence REAL DEFAULT 0.5,              -- 0.0 to 1.0
+    correlation_score REAL DEFAULT 0.0,       -- Action-direction correlation
+    sample_count INTEGER DEFAULT 0,           -- Number of action samples
+    
+    -- Singularity check (should be exactly 1 controlled object)
+    total_candidate_objects INTEGER DEFAULT 1,  -- How many objects responded?
+    is_ambiguous INTEGER DEFAULT 0,             -- 1 = multiple objects respond equally
+    
+    -- When was this identity established?
+    established_at_action INTEGER DEFAULT 0,    -- Action number when identified
+    still_valid INTEGER DEFAULT 1,              -- 0 = object lost/changed
+    
+    -- Timestamps
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(game_id, level_number, established_at_action)
+);
+
+CREATE INDEX IF NOT EXISTS idx_self_object_identity_game 
+ON self_object_identity(game_id, level_number, still_valid);
+
+-- Control Transfer Events: "I was controlling X, now I control Y"
+-- Records when control switches from one object to another
+CREATE TABLE IF NOT EXISTS control_transfer_events (
+    transfer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    action_number INTEGER NOT NULL,
+    
+    -- What was controlled before
+    previous_object_color INTEGER,
+    previous_object_signature TEXT,
+    previous_object_center_x REAL,
+    previous_object_center_y REAL,
+    
+    -- What is controlled now
+    new_object_color INTEGER NOT NULL,
+    new_object_signature TEXT,
+    new_object_center_x REAL,
+    new_object_center_y REAL,
+    
+    -- What caused the transfer?
+    transfer_trigger_action TEXT,             -- ACTION6 click, automatic, etc.
+    transfer_trigger_coords TEXT,             -- Click coords if ACTION6
+    transfer_trigger_reason TEXT,             -- 'selection', 'automatic', 'collision', 'unknown'
+    
+    -- Confidence that this is a real control transfer (not just indirect causation)
+    transfer_confidence REAL DEFAULT 0.5,
+    verified_by_movement INTEGER DEFAULT 0,   -- 1 = confirmed new object responds to ACTION1-4
+    
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_control_transfer_game 
+ON control_transfer_events(game_id, level_number);
+
+-- Control Transfer Patterns: Network-learned control switching patterns
+-- "In game X level Y, clicking color 5 transfers control to it"
+CREATE TABLE IF NOT EXISTS control_transfer_patterns (
+    pattern_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    
+    -- Transfer pattern
+    transfer_trigger_action TEXT NOT NULL,    -- Usually ACTION6
+    target_object_color INTEGER,              -- Color of object that becomes controlled
+    target_object_signature TEXT,             -- Shape of object (for non-color identification)
+    transfer_conditions TEXT,                 -- JSON: what conditions enable this transfer
+    
+    -- Validation
+    occurrence_count INTEGER DEFAULT 1,
+    success_count INTEGER DEFAULT 1,          -- Times transfer was verified
+    confidence REAL DEFAULT 0.5,
+    is_active INTEGER DEFAULT 1,              -- For deprecation tracking
+    last_observed_generation INTEGER DEFAULT 0,
+    
+    -- Timestamps
+    discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(game_type, level_number, transfer_trigger_action, target_object_color)
+);
+
+CREATE INDEX IF NOT EXISTS idx_control_transfer_patterns_game 
+ON control_transfer_patterns(game_type, level_number);
+
+-- Indirect Causation Events: "I control X, X affects Y, but I still control X"
+-- Different from control transfer - here X is still controlled, Y is just affected
+CREATE TABLE IF NOT EXISTS indirect_causation_events (
+    causation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    action_number INTEGER NOT NULL,
+    
+    -- The controlled object (I still control this)
+    controlled_object_color INTEGER NOT NULL,
+    controlled_action TEXT NOT NULL,          -- What action I took (ACTION1-4)
+    controlled_movement_x REAL,               -- How controlled object moved
+    controlled_movement_y REAL,
+    
+    -- The affected object (I DON'T control this, but my action affected it)
+    affected_object_color INTEGER NOT NULL,
+    affected_effect_type TEXT,                -- 'moved', 'disappeared', 'appeared', 'color_changed', 'transformed'
+    affected_movement_x REAL,                 -- If moved, how much?
+    affected_movement_y REAL,
+    affected_details TEXT,                    -- JSON with before/after details
+    
+    -- Causation type
+    causation_type TEXT,                      -- 'collision', 'trigger', 'push', 'remote'
+    causation_distance REAL,                  -- Distance between controlled and affected
+    
+    -- Confidence this is indirect causation (not control transfer)
+    confidence REAL DEFAULT 0.5,
+    verified_still_controlled INTEGER DEFAULT 0,  -- 1 = confirmed I still control original
+    
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_indirect_causation_game 
+ON indirect_causation_events(game_id, level_number);
+
+-- Grid Region Classification: "UI vs playfield distinction"
+-- Classifies regions as 'playfield', 'ui', 'decoration', or 'unknown'
+CREATE TABLE IF NOT EXISTS grid_region_classification (
+    classification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    
+    -- Region bounds (divide grid into macro-regions)
+    region_x INTEGER NOT NULL,                -- 0-7 (divides into 8x8 regions)
+    region_y INTEGER NOT NULL,                -- 0-7
+    region_min_pixel_x INTEGER,               -- Actual pixel bounds
+    region_max_pixel_x INTEGER,
+    region_min_pixel_y INTEGER,
+    region_max_pixel_y INTEGER,
+    
+    -- Classification
+    classification TEXT DEFAULT 'unknown',    -- 'playfield', 'ui', 'decoration', 'unknown'
+    classification_reason TEXT,               -- Why this classification
+    
+    -- Evidence tracking
+    total_observations INTEGER DEFAULT 0,     -- How many times observed
+    times_changed INTEGER DEFAULT 0,          -- How many times content changed
+    times_responded_to_action INTEGER DEFAULT 0,  -- Changes correlated with actions
+    times_symbolic_change INTEGER DEFAULT 0,  -- Small isolated changes (counters)
+    contains_self_object INTEGER DEFAULT 0,   -- Ever contained the controlled object
+    
+    -- Confidence
+    confidence REAL DEFAULT 0.5,
+    
+    -- Timestamps
+    first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(game_type, level_number, region_x, region_y)
+);
+
+CREATE INDEX IF NOT EXISTS idx_grid_region_classification_game 
+ON grid_region_classification(game_type, level_number, classification);
+
+-- Resource Counter Detection: "Finite resources exist"
+-- Tracks detected counters like lives, moves, score, energy
+CREATE TABLE IF NOT EXISTS detected_resource_counters (
+    counter_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    
+    -- Location (should be in UI region)
+    region_x INTEGER NOT NULL,
+    region_y INTEGER NOT NULL,
+    pixel_x INTEGER,                          -- Exact location
+    pixel_y INTEGER,
+    
+    -- Counter characteristics
+    counter_type TEXT DEFAULT 'unknown',      -- 'lives', 'moves', 'score', 'energy', 'unknown'
+    initial_value INTEGER,                    -- Value at level start
+    current_value INTEGER,                    -- Last observed value
+    min_observed INTEGER,                     -- Lowest value seen
+    max_observed INTEGER,                     -- Highest value seen
+    
+    -- Change behavior
+    change_direction TEXT,                    -- 'decreasing', 'increasing', 'both'
+    change_trigger TEXT,                      -- 'per_action', 'per_collision', 'per_time', 'unknown'
+    change_amount INTEGER DEFAULT 1,          -- Typical change per event
+    
+    -- Depletion consequence
+    depletion_consequence TEXT,               -- 'game_over', 'level_fail', 'lose_ability', 'unknown'
+    depletion_observed INTEGER DEFAULT 0,     -- Have we seen it hit 0?
+    
+    -- Validation
+    observation_count INTEGER DEFAULT 1,
+    confidence REAL DEFAULT 0.5,
+    
+    -- Timestamps
+    first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(game_type, level_number, region_x, region_y)
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_counters_game 
+ON detected_resource_counters(game_type, level_number);
+
+-- Valence Associations: "Changes have positive/negative value"
+-- Tags interactions with outcome-based feelings
+CREATE TABLE IF NOT EXISTS valence_associations (
+    association_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    
+    -- What triggered this valence?
+    trigger_type TEXT NOT NULL,               -- 'collision', 'action', 'proximity', 'selection'
+    trigger_action TEXT,                      -- ACTION1-7 if applicable
+    trigger_object_color INTEGER,             -- Object color if applicable
+    trigger_target_color INTEGER,             -- Target of interaction if applicable
+    
+    -- What was the consequence?
+    consequence_type TEXT NOT NULL,           -- 'score_change', 'counter_change', 'game_end', 'level_end'
+    consequence_details TEXT,                 -- JSON with specifics
+    
+    -- Valence: -1.0 (very bad) to +1.0 (very good)
+    valence REAL NOT NULL,
+    valence_magnitude REAL DEFAULT 0.5,       -- How strong is this association?
+    
+    -- Validation
+    observation_count INTEGER DEFAULT 1,
+    consistent_count INTEGER DEFAULT 1,       -- Times this valence was confirmed
+    confidence REAL DEFAULT 0.5,
+    is_active INTEGER DEFAULT 1,              -- For deprecation tracking
+    last_observed_generation INTEGER DEFAULT 0,
+    
+    -- Timestamps
+    first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(game_type, level_number, trigger_type, trigger_object_color, 
+           trigger_target_color, consequence_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_valence_associations_game 
+ON valence_associations(game_type, level_number);
+
+CREATE INDEX IF NOT EXISTS idx_valence_associations_valence 
+ON valence_associations(valence);
+
+-- Inferred Goal States: "Win conditions may be abstract"
+-- Stores hypotheses about what the goal of each level is
+CREATE TABLE IF NOT EXISTS inferred_goal_states (
+    goal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    
+    -- Goal type
+    goal_type TEXT NOT NULL,                  -- 'clear_color', 'reach_position', 'match_pattern', 
+                                              -- 'survive', 'collect_all', 'transform', 'unknown'
+    
+    -- Goal parameters (depends on goal_type)
+    goal_params TEXT,                         -- JSON: {color_to_clear, position_to_reach, pattern_hash, etc.}
+    
+    -- How was this goal inferred?
+    inference_method TEXT,                    -- 'level_end_analysis', 'score_correlation', 'network_wisdom'
+    inference_evidence TEXT,                  -- JSON: evidence supporting this inference
+    
+    -- Goal progress tracking (for agents to use)
+    progress_metric TEXT,                     -- How to measure progress toward this goal
+    
+    -- Validation
+    times_validated INTEGER DEFAULT 1,        -- Times this goal was confirmed by level wins
+    confidence REAL DEFAULT 0.5,
+    
+    -- Is the goal visible or abstract?
+    is_visible INTEGER DEFAULT 0,             -- 1 = goal object exists on grid
+    goal_object_color INTEGER,                -- If visible, what color is the goal?
+    
+    -- Timestamps
+    discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
+    
+    UNIQUE(game_type, level_number, goal_type, goal_params)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inferred_goals_game 
+ON inferred_goal_states(game_type, level_number);
+
+CREATE INDEX IF NOT EXISTS idx_inferred_goals_confidence 
+ON inferred_goal_states(confidence DESC);
+
+-- Perceptual Observations: Raw per-action observation data
+-- High-volume table for raw perceptual snapshots (cleaned after 30 generations)
+CREATE TABLE IF NOT EXISTS perceptual_observations (
+    observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    action_number INTEGER NOT NULL,
+    
+    -- What was observed
+    observation_type TEXT NOT NULL,           -- 'self_position', 'object_state', 'region_activity', etc.
+    observation_data TEXT NOT NULL,           -- JSON with observation details
+    
+    -- Context
+    action_taken TEXT,                        -- What action preceded this observation
+    score_at_observation REAL,                -- Score at this moment
+    
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_perceptual_observations_game 
+ON perceptual_observations(game_id, level_number);

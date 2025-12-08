@@ -4315,3 +4315,288 @@ Added cleanup rules for 9 new perceptual primitive tables:
 
 **END OF SESSION 25: December 8, 2025 - 2:00:00 PM**
 
+---
+
+## Session 25 (Continued): Perceptual Primitives Bug Fixes & Finalization
+**Date**: December 8, 2025  
+**Time Started**: 2:15:00 PM  
+**Focus**: Fix type errors in agent_self_model.py and complete integration
+
+---
+
+### Approach
+
+**Goal**: Fix Pylance errors discovered in `agent_self_model.py` and ensure all perceptual primitives are fully integrated.
+
+**User Request**: "fix the problems in the workspace for agent_self_model"
+
+**Methodology**:
+1. Query workspace for errors in agent_self_model.py
+2. Identify root cause of type errors
+3. Fix with proper type handling
+4. Verify all files compile correctly
+
+---
+
+### Phase 1: Error Discovery (2:15:00 PM)
+
+Ran `get_errors` on `agent_self_model.py` and found 2 type errors:
+
+| Line | Error | Issue |
+|------|-------|-------|
+| 4729 | `Cannot access attribute "replace" for class "int"` | `obj_id` could be int or string |
+| 5240 | `Cannot access attribute "replace" for class "int"` | Same issue |
+
+**Root Cause**: The `_find_objects_in_grid()` method returns a dictionary with keys that can be either:
+- String format: `'color_5'` 
+- Integer format: `5`
+
+The code assumed string format and called `.replace('color_', '')` without checking type.
+
+---
+
+### Phase 2: Bug Fix Implementation (2:20:00 PM)
+
+Fixed both locations with proper type checking:
+
+**Location 1** (line 4729 - in `verify_still_controlled()`):
+```python
+# Before (broken):
+new_color = int(obj_id.replace('color_', ''))
+
+# After (fixed):
+if isinstance(obj_id, str) and obj_id.startswith('color_'):
+    new_color = int(obj_id.replace('color_', ''))
+else:
+    new_color = int(obj_id)
+```
+
+**Location 2** (line 5240 - in `infer_goal_from_level_end()`):
+```python
+# Before (broken):
+color = int(obj_id.replace('color_', ''))
+
+# After (fixed):
+if isinstance(obj_id, str) and obj_id.startswith('color_'):
+    color = int(obj_id.replace('color_', ''))
+else:
+    color = int(obj_id)
+```
+
+**Files Modified**: `agent_self_model.py`
+
+---
+
+### Phase 3: Verification (2:25:00 PM)
+
+| Check | Result |
+|-------|--------|
+| `agent_self_model.py` Pylance errors | [OK] 0 errors |
+| `core_gameplay.py` Pylance errors | [OK] 0 errors |
+| `safe_cleanup.py` Pylance errors | [OK] 0 errors |
+
+---
+
+### Summary of Session 25 (Complete)
+
+**Total Changes Across Session 25**:
+
+| File | Changes | Lines Added |
+|------|---------|-------------|
+| `agent_self_model.py` | +9 tables, +16 methods, +2 bug fixes | ~620 lines |
+| `safe_cleanup.py` | +9 table cleanup rules, +verification | ~100 lines |
+| `core_gameplay.py` | +6 integration points | ~140 lines |
+| `progress.md` | Full documentation | ~200 lines |
+
+**New Database Tables Created** (9 total):
+1. `self_object_identity` - Current/historical object control
+2. `control_transfer_events` - Object-to-object control switches
+3. `control_transfer_patterns` - Network-learned transfer patterns
+4. `indirect_causation_events` - Remote effects from controlled objects
+5. `grid_region_classification` - UI vs playfield regions
+6. `detected_resource_counters` - Life/move/score counters
+7. `valence_associations` - Positive/negative outcome tagging
+8. `inferred_goal_states` - Abstract goal discovery
+9. `perceptual_observations` - Raw per-action observations
+
+**New Methods Implemented** (16 total):
+1. `update_self_object_identity()` - Track current controlled object
+2. `get_current_self_object()` - Query current control state
+3. `verify_still_controlled()` - Check if control persists after action
+4. `detect_control_transfer()` - Record control switches
+5. `get_known_control_transfers()` - Query network patterns
+6. `record_indirect_causation()` - Track "X affects Y" chains
+7. `classify_grid_regions()` - Identify playfield vs UI
+8. `get_playfield_bounds()` - Get playable area bounds
+9. `is_ui_region()` - Check if position is UI
+10. `detect_resource_counters()` - Find life/score counters
+11. `record_valence_association()` - Tag objects as good/bad
+12. `get_object_valence()` - Query object valence
+13. `get_all_object_valences()` - Get all valences for level
+14. `infer_goal_from_level_end()` - Deduce win condition
+15. `get_goal_hypothesis()` - Query inferred goal
+16. `get_goal_progress()` - Estimate goal completion
+
+**Integration Points Added to core_gameplay.py**:
+1. Initial region classification on game start
+2. Level transition region classification
+3. Goal state inference on level completion
+4. Control transfer detection after movement
+5. Indirect causation recording on collisions
+6. Valence association recording on score changes
+
+**Cleanup Rules Added to safe_cleanup.py**:
+- RAW tables (30 gen retention): perceptual_observations, control_transfer_events, indirect_causation_events
+- AGGREGATED tables (permanent with deprecation): self_object_identity, control_transfer_patterns, valence_associations
+- Structural tables (permanent): grid_region_classification, detected_resource_counters, inferred_goal_states
+
+---
+
+### Current Status (2:30:00 PM)
+
+**Completed This Session**:
+| # | Task | Status |
+|---|------|--------|
+| 1 | Designed 5 perceptual primitives | [DONE] |
+| 2 | Created 9 new database tables | [DONE] |
+| 3 | Implemented 16 new methods | [DONE] |
+| 4 | Integrated into core_gameplay.py | [DONE] |
+| 5 | Added cleanup rules to safe_cleanup.py | [DONE] |
+| 6 | Fixed obj_id type errors | [DONE] |
+| 7 | Verified all files compile | [DONE] |
+
+**Current Failure Being Worked On**:
+- **None** - All perceptual primitives implementation complete
+
+**Next Steps**:
+1. Update `complete_database_schema.sql` with new table definitions
+2. Run evolution to verify primitives are being populated
+3. Analyze collected perceptual data after a few generations
+4. Consider using valence data to influence action selection
+
+---
+
+**END OF SESSION 25 (Continued): December 8, 2025 - 2:30:00 PM**
+
+---
+
+## Session 25 (Final): Schema Update & Documentation
+**Date**: December 8, 2025  
+**Time Started**: 2:45:00 PM  
+**Focus**: Update database schema documentation with new perceptual primitive tables
+
+---
+
+### Approach
+
+**Goal**: Complete the perceptual primitives implementation by updating the official database schema documentation.
+
+**User Request**: "update teh schema"
+
+**Methodology**:
+1. Verify new tables are not already in schema
+2. Extract table definitions from agent_self_model.py
+3. Add all 9 tables with full column definitions to complete_database_schema.sql
+4. Add appropriate indexes
+5. Verify schema file loads correctly
+
+---
+
+### Phase 1: Schema Verification (2:45:00 PM)
+
+Checked `complete_database_schema.sql` for existing perceptual primitive tables:
+- `self_object_identity` - NOT FOUND (needs adding)
+- All 9 new tables missing from schema
+
+---
+
+### Phase 2: Schema Update (2:50:00 PM)
+
+Added 9 new tables to `complete_database_schema.sql`:
+
+| Table | Purpose | Primary Key | Key Indexes |
+|-------|---------|-------------|-------------|
+| `self_object_identity` | Track which object agent controls | `identity_id` | `(game_id, level_number, still_valid)` |
+| `control_transfer_events` | Record control switches | `transfer_id` | `(game_id, level_number)` |
+| `control_transfer_patterns` | Network-learned transfer patterns | `pattern_id` | `(game_type, level_number)` |
+| `indirect_causation_events` | "X affects Y" chains | `causation_id` | `(game_id, level_number)` |
+| `grid_region_classification` | UI vs playfield regions | `classification_id` | `(game_type, level_number, classification)` |
+| `detected_resource_counters` | Life/move/score counters | `counter_id` | `(game_type, level_number)` |
+| `valence_associations` | Positive/negative tagging | `association_id` | `(game_type, level_number)`, `(valence)` |
+| `inferred_goal_states` | Abstract goal discovery | `goal_id` | `(game_type, level_number)`, `(confidence DESC)` |
+| `perceptual_observations` | Raw per-action data | `observation_id` | `(game_id, level_number)` |
+
+**Schema Statistics After Update**:
+- Total file size: 123,782 characters
+- Total tables: 132 (up from 123)
+
+---
+
+### Phase 3: Verification (2:55:00 PM)
+
+| Check | Result |
+|-------|--------|
+| Schema file loads | [OK] 123,782 chars |
+| Table count correct | [OK] 132 tables |
+| All 9 perceptual tables added | [OK] |
+| Indexes created | [OK] 12 new indexes |
+
+---
+
+### Summary of Complete Session 25
+
+**Full Session Timeline**:
+| Time | Phase | What Was Done |
+|------|-------|---------------|
+| 12:00:00 PM | Design | Designed 5 perceptual primitives based on Plato's Cave problem |
+| 12:30:00 PM | Tables | Created 9 new database tables in agent_self_model.py |
+| 1:00:00 PM | Methods | Implemented 16 new methods for perceptual primitives |
+| 1:30:00 PM | Integration | Added 6 integration points to core_gameplay.py |
+| 1:45:00 PM | Cleanup | Added cleanup rules to safe_cleanup.py |
+| 2:00:00 PM | Docs | Updated progress.md with Session 25 details |
+| 2:15:00 PM | Bug Fix | Fixed obj_id type errors (int vs string) |
+| 2:45:00 PM | Schema | Updated complete_database_schema.sql with 9 tables |
+| 2:55:00 PM | Verify | Verified schema loads correctly (132 tables) |
+
+**Files Modified This Session**:
+
+| File | Changes | Lines |
+|------|---------|-------|
+| `agent_self_model.py` | +9 tables, +16 methods, +2 bug fixes | ~620 |
+| `core_gameplay.py` | +6 integration points | ~140 |
+| `safe_cleanup.py` | +9 table cleanup rules, +verification | ~100 |
+| `complete_database_schema.sql` | +9 tables, +12 indexes | ~320 |
+| `progress.md` | Full session documentation | ~400 |
+
+**Total Lines Changed**: ~1,580 lines
+
+---
+
+### Current Status (3:00:00 PM)
+
+**Completed This Session**:
+| # | Task | Status |
+|---|------|--------|
+| 1 | Designed 5 perceptual primitives | [DONE] |
+| 2 | Created 9 new database tables | [DONE] |
+| 3 | Implemented 16 new methods | [DONE] |
+| 4 | Integrated into core_gameplay.py | [DONE] |
+| 5 | Added cleanup rules to safe_cleanup.py | [DONE] |
+| 6 | Fixed obj_id type errors | [DONE] |
+| 7 | Verified all files compile | [DONE] |
+| 8 | Updated complete_database_schema.sql | [DONE] |
+| 9 | Verified schema (132 tables) | [DONE] |
+
+**Current Failure Being Worked On**:
+- **None** - Perceptual primitives implementation fully complete
+
+**Next Steps**:
+1. Run evolution to verify primitives are being populated
+2. Analyze collected perceptual data after a few generations
+3. Consider using valence data to influence action selection
+4. Consider using goal inference to guide exploration
+
+---
+
+**END OF SESSION 25 (Final): December 8, 2025 - 3:00:00 PM**
+
