@@ -140,6 +140,526 @@ class AgentSelfModel:
             CREATE INDEX IF NOT EXISTS idx_pseudo_button_game 
             ON pseudo_button_behavior(game_type, level_number)
         """)
+        
+        # =====================================================================
+        # OBJECT SELECTION STATE (Added 2025-12-08)
+        # =====================================================================
+        # ACTION6 can do TWO things:
+        # 1. Click on "buttons" -> triggers events (existing pseudo_button_behavior)
+        # 2. Click on "objects" -> SELECTS that object for control by ACTION1-4
+        #
+        # This table tracks which objects are SELECTABLE (can become controlled)
+        # vs which are just buttons. The currently selected object determines
+        # what ACTION1-4 will move.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS object_selection_state (
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                object_color INTEGER NOT NULL,
+                
+                -- Object identification
+                object_coordinates TEXT,           -- Last known "(x,y)" of selectable object
+                object_signature TEXT,             -- Stable identifier for the object
+                
+                -- What kind of object is this?
+                is_selectable BOOLEAN DEFAULT FALSE,    -- Can it be selected via ACTION6?
+                is_moveable BOOLEAN DEFAULT FALSE,      -- Does it respond to ACTION1-4 when selected?
+                is_button BOOLEAN DEFAULT FALSE,        -- Does clicking trigger an event instead?
+                
+                -- Selection mechanics
+                selection_method TEXT DEFAULT 'action6_click',  -- How is it selected?
+                control_actions TEXT,                   -- Which actions control it when selected (JSON list)
+                
+                -- Network learning
+                confidence REAL DEFAULT 0.5,
+                discovery_count INTEGER DEFAULT 1,
+                discovered_by_agent TEXT,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                PRIMARY KEY (game_type, level_number, object_color)
+            )
+        """)
+        
+        # Index for fast selectable object lookup
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_object_selection_game 
+            ON object_selection_state(game_type, level_number, is_selectable)
+        """)
+        
+        # =====================================================================
+        # CURRENT SELECTION TRACKING (per-session, not persisted long-term)
+        # =====================================================================
+        # Tracks what object is CURRENTLY selected during gameplay.
+        # This is ephemeral - cleared each game session.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS current_selection_tracking (
+                session_id TEXT NOT NULL,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Currently selected object
+                selected_object_color INTEGER,
+                selected_object_coords TEXT,        -- "(x,y)" when selected
+                selection_action_index INTEGER,     -- Which action selected it
+                
+                -- Tracking
+                selection_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                PRIMARY KEY (session_id, game_id, level_number)
+            )
+        """)
+        
+        # =====================================================================
+        # ACTION6 AVAILABILITY TRACKING (Added 2025-12-08)
+        # =====================================================================
+        # ACTION6 availability is a SIGNAL:
+        # - ACTION6 present = something is selectable on the grid
+        # - ACTION6 absent = nothing is currently selectable
+        # This helps agents discover CONDITIONS that enable selectability
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS action6_availability_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                action_number INTEGER,
+                
+                -- Availability state
+                action6_available INTEGER NOT NULL,  -- 1 = available, 0 = not available
+                previous_action TEXT,                -- What action preceded this state
+                previous_action_coords TEXT,         -- Coordinates if applicable
+                
+                -- Context for pattern detection
+                grid_hash TEXT,                      -- Hash of grid state when availability changed
+                available_actions_list TEXT,         -- Full list of available actions (JSON)
+                
+                -- Tracking
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_action6_availability_game 
+            ON action6_availability_events(game_id, level_number, action6_available)
+        """)
+        
+        # =====================================================================
+        # SELECTABILITY CONDITIONS (Network Knowledge)
+        # =====================================================================
+        # Learned patterns for what makes ACTION6 become available/unavailable
+        # Example: "Move blue object to (3,4)" -> ACTION6 becomes available
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS selectability_conditions (
+                condition_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- What triggers selectability change
+                trigger_action TEXT,                 -- e.g., "ACTION1", "ACTION6"
+                trigger_coords TEXT,                 -- Coordinates if relevant
+                trigger_object_color INTEGER,        -- Object involved in trigger
+                trigger_description TEXT,            -- Human-readable description
+                
+                -- Result of trigger
+                action6_became_available INTEGER,    -- 1 = appeared, 0 = disappeared
+                
+                -- Validation
+                occurrence_count INTEGER DEFAULT 1,
+                confidence REAL DEFAULT 0.5,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, trigger_action, trigger_coords, action6_became_available)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_selectability_conditions_game 
+            ON selectability_conditions(game_type, level_number, action6_became_available)
+        """)
+        
+        # =====================================================================
+        # COLLISION/INTERACTION DETECTION (Added 2025-12-08)
+        # =====================================================================
+        # When controlled objects move through the grid, they can collide with
+        # or interact with other objects. These collisions can trigger:
+        # - Object disappearance (collected)
+        # - Object transformation (color change)
+        # - New object appearance
+        # - Level progress (score increase)
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS collision_events (
+                collision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                action_number INTEGER,
+                
+                -- Controlled object that moved
+                controlled_object_color INTEGER NOT NULL,
+                controlled_from_x INTEGER,
+                controlled_from_y INTEGER,
+                controlled_to_x INTEGER,
+                controlled_to_y INTEGER,
+                
+                -- Object that was collided with
+                target_object_color INTEGER,
+                target_object_x INTEGER,
+                target_object_y INTEGER,
+                
+                -- Collision type
+                collision_type TEXT,  -- 'overlap', 'adjacent', 'push', 'same_cell'
+                
+                -- What happened after collision
+                effect_observed TEXT,  -- 'target_disappeared', 'target_moved', 'nothing', etc.
+                grid_changes_json TEXT,  -- Detailed changes
+                
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_collision_events_game 
+            ON collision_events(game_id, level_number, controlled_object_color)
+        """)
+        
+        # =====================================================================
+        # COLLISION EFFECTS (Network Knowledge)
+        # =====================================================================
+        # Learned patterns: "When color X collides with color Y, effect Z happens"
+        # These are verified through multiple observations
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS collision_effects (
+                effect_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Interaction pattern
+                controlled_object_color INTEGER NOT NULL,
+                target_object_color INTEGER NOT NULL,
+                collision_type TEXT,  -- 'overlap', 'push', 'adjacent'
+                
+                -- Observed effect
+                effect_type TEXT NOT NULL,  -- 'target_disappears', 'target_moves', 'color_change', 'spawn_object', 'score_increase'
+                effect_details TEXT,        -- JSON with additional info
+                
+                -- Validation tracking
+                occurrence_count INTEGER DEFAULT 1,
+                confidence REAL DEFAULT 0.5,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, controlled_object_color, target_object_color, effect_type)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_collision_effects_game 
+            ON collision_effects(game_type, level_number)
+        """)
+        
+        # =====================================================================
+        # AUTONOMOUS OBJECTS (Objects that move without player input)
+        # =====================================================================
+        # Some objects in games move on their own (NPCs, enemies, etc.)
+        # The agent needs to distinguish:
+        # - Objects I control
+        # - Objects that react to my actions
+        # - Objects that move independently (autonomous)
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS autonomous_objects (
+                record_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Object identification
+                object_color INTEGER NOT NULL,
+                
+                -- Movement characteristics
+                movement_pattern TEXT,           -- 'random', 'chasing', 'fleeing', 'patrol', 'unknown'
+                moves_per_turn REAL DEFAULT 0,   -- Average moves per player action
+                moves_without_input INTEGER DEFAULT 0,  -- How often it moves when we don't act
+                
+                -- Controllability
+                is_ever_controllable INTEGER DEFAULT 0,  -- Can it be controlled sometimes?
+                controllable_conditions TEXT,            -- What makes it controllable (JSON)
+                
+                -- Validation
+                observation_count INTEGER DEFAULT 1,
+                confidence REAL DEFAULT 0.5,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, object_color)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_autonomous_objects_game 
+            ON autonomous_objects(game_type, level_number)
+        """)
+        
+        # =====================================================================
+        # INTERACTION TRIGGERS (Grid-Wide Effects from Any Action)
+        # =====================================================================
+        # KEY INSIGHT: When you interact with object A at position (5,5),
+        # it might cause a change to object B at position (20,20).
+        # This is a TRIGGER - a causal relationship the agent must learn.
+        #
+        # Examples:
+        # - Clicking a button (ACTION6) makes a wall disappear elsewhere
+        # - Moving into an object causes another object to change color
+        # - Selecting an object unlocks a previously non-selectable object
+        #
+        # CONSISTENCY = CAUSALITY: If the same trigger produces the same
+        # effect 3+ times, it's likely causal, not coincidental.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS interaction_triggers (
+                trigger_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- The triggering action
+                trigger_action TEXT NOT NULL,         -- ACTION1-7
+                trigger_position_x INTEGER,           -- Where action was taken (for ACTION6)
+                trigger_position_y INTEGER,
+                trigger_object_color INTEGER,         -- Object that was interacted with
+                trigger_interaction_type TEXT,        -- 'collision', 'selection', 'click', 'adjacent'
+                
+                -- The observed effect (can be anywhere on the grid)
+                effect_position_x INTEGER,            -- Where effect happened
+                effect_position_y INTEGER,
+                effect_object_color INTEGER,          -- Object that was affected
+                effect_type TEXT NOT NULL,            -- 'color_change', 'disappear', 'appear', 'move', 
+                                                      -- 'size_change', 'shape_change', 'become_controllable',
+                                                      -- 'become_selectable', 'score_increase'
+                effect_details TEXT,                  -- JSON with before/after values
+                
+                -- Distance between trigger and effect (remote effects are interesting)
+                effect_distance REAL,                 -- Manhattan distance from trigger to effect
+                
+                -- Consistency tracking (key to distinguishing causal from coincidental)
+                occurrence_count INTEGER DEFAULT 1,
+                consistent_count INTEGER DEFAULT 1,   -- Times effect matched exactly
+                inconsistent_count INTEGER DEFAULT 0, -- Times expected effect didn't happen
+                confidence REAL DEFAULT 0.5,
+                
+                -- Timestamps
+                first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, trigger_action, trigger_object_color, 
+                       effect_object_color, effect_type)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_interaction_triggers_game 
+            ON interaction_triggers(game_type, level_number)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_interaction_triggers_confidence 
+            ON interaction_triggers(confidence DESC)
+        """)
+        
+        # =====================================================================
+        # TRIGGER SEQUENCES (Order of Triggers Matters!)
+        # =====================================================================
+        # KEY INSIGHT: The ORDER in which you activate triggers can be the key
+        # to winning. Example: "First rotate A, THEN click B, THEN move C"
+        #
+        # This table tracks successful trigger sequences that led to:
+        # - Level wins
+        # - Score increases
+        # - Unlocking new areas
+        #
+        # SEQUENCE MATCHING: When replaying, agents can follow proven sequences.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS trigger_sequences (
+                sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- The sequence itself (JSON array of trigger steps)
+                -- Each step: {action, object_color, effect_type, step_number}
+                sequence_json TEXT NOT NULL,
+                sequence_length INTEGER NOT NULL,
+                sequence_hash TEXT,               -- Hash for quick comparison
+                
+                -- What did this sequence achieve?
+                outcome_type TEXT NOT NULL,       -- 'level_win', 'score_increase', 'unlock', 'progress'
+                outcome_details TEXT,             -- JSON with specifics
+                
+                -- Validation tracking
+                times_succeeded INTEGER DEFAULT 1,
+                times_attempted INTEGER DEFAULT 1,
+                success_rate REAL DEFAULT 1.0,
+                
+                -- Discovery context
+                discovered_by_agent TEXT,
+                discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                -- Is this a complete solution or partial?
+                is_complete_solution INTEGER DEFAULT 0,  -- Did it win the level?
+                
+                UNIQUE(game_type, level_number, sequence_hash)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_trigger_sequences_game 
+            ON trigger_sequences(game_type, level_number, outcome_type)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_trigger_sequences_success 
+            ON trigger_sequences(success_rate DESC)
+        """)
+        
+        # =====================================================================
+        # TRIGGER SEQUENCE EVENTS (Individual steps in a sequence attempt)
+        # =====================================================================
+        # Track each trigger activation during gameplay.
+        # At level end, successful sequences are promoted to trigger_sequences.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS trigger_sequence_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                action_number INTEGER NOT NULL,
+                
+                -- What trigger was activated
+                trigger_action TEXT NOT NULL,
+                trigger_object_color INTEGER,
+                trigger_interaction_type TEXT,
+                
+                -- What effect occurred
+                effect_object_color INTEGER,
+                effect_type TEXT,
+                
+                -- Position in the sequence (1-indexed)
+                step_number INTEGER NOT NULL,
+                
+                -- Context
+                score_before REAL,
+                score_after REAL,
+                
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_trigger_events_game 
+            ON trigger_sequence_events(game_id, level_number)
+        """)
+        
+        # =====================================================================
+        # OBJECT PROPERTIES (Track size, shape, position, controllability)
+        # =====================================================================
+        # Beyond just color, objects have:
+        # - Size (number of cells)
+        # - Shape (contiguous pattern)
+        # - Position (center of mass)
+        # - Controllability (can it be selected/controlled?)
+        # Changes to ANY of these properties are potential triggers.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS object_property_snapshots (
+                snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                action_number INTEGER NOT NULL,
+                
+                -- Object identification
+                object_color INTEGER NOT NULL,
+                
+                -- Object properties at this moment
+                cell_count INTEGER,               -- Size = number of cells
+                bounding_box_width INTEGER,       -- Shape approximation
+                bounding_box_height INTEGER,
+                center_x REAL,                    -- Center of mass
+                center_y REAL,
+                shape_hash TEXT,                  -- Hash of relative positions (for shape comparison)
+                is_contiguous INTEGER DEFAULT 1,  -- Is object one connected piece?
+                
+                -- Orientation/rotation tracking
+                orientation TEXT,                 -- 'original', 'rot90', 'rot180', 'rot270', 'flip_h', 'flip_v', etc.
+                orientation_hash TEXT,            -- Canonical shape hash (same for all rotations of same shape)
+                
+                -- Controllability state
+                is_controlled INTEGER DEFAULT 0,     -- Currently controlled by player?
+                is_selectable INTEGER DEFAULT 0,     -- Can be selected (ACTION6 would select it)?
+                
+                -- Context
+                frame_hash TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_object_snapshots_game 
+            ON object_property_snapshots(game_id, level_number, action_number)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_object_snapshots_color 
+            ON object_property_snapshots(game_id, object_color)
+        """)
+        
+        # =====================================================================
+        # OBJECT PROPERTY CHANGES (What property changed and when)
+        # =====================================================================
+        # Track changes to object properties over time.
+        # This helps learn what interactions cause what property changes.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS object_property_changes (
+                change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                action_number INTEGER NOT NULL,
+                
+                -- Object identification
+                object_color INTEGER NOT NULL,
+                
+                -- What changed
+                property_name TEXT NOT NULL,      -- 'size', 'shape', 'position', 'controllable', 'selectable', 'color'
+                value_before TEXT,                -- String representation of before value
+                value_after TEXT,                 -- String representation of after value
+                
+                -- Context: what action triggered this change?
+                triggering_action TEXT,           -- ACTION1-7
+                triggering_object_color INTEGER,  -- If collision, what color did we interact with?
+                
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_property_changes_game 
+            ON object_property_changes(game_id, level_number)
+        """)
     
     def identify_controlled_objects(
         self, 
@@ -1237,6 +1757,2121 @@ class AgentSelfModel:
             classified[region_key] = produces_action
         
         return classified
+
+    # ========================================================================
+    # OBJECT SELECTION TRACKING (Added 2025-12-08)
+    # ========================================================================
+    # ACTION6 has two modes:
+    # 1. Click "buttons" -> triggers events (handled by pseudo_button_behavior)
+    # 2. Click "objects" -> SELECTS that object for control by ACTION1-4
+    #
+    # This section implements dynamic selection tracking:
+    # - What object is currently selected?
+    # - Which objects are selectable (can become controlled)?
+    # - How does selection change what ACTION1-4 do?
+    # ========================================================================
+    
+    def track_selection_change(
+        self,
+        session_id: str,
+        game_id: str,
+        level: int,
+        action_index: int,
+        action_type: str,
+        click_x: Optional[int],
+        click_y: Optional[int],
+        frame_before: Dict,
+        frame_after: Dict
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Track if an ACTION6 click selected a new object for control.
+        
+        This is called after every ACTION6 to detect if clicking on an object
+        caused it to become the "selected" object that ACTION1-4 will now move.
+        
+        Pattern detection:
+        1. ACTION6 clicks at (x, y)
+        2. Subsequent ACTION1-4 moves object at/near (x, y)
+        3. Conclusion: ACTION6 selected that object
+        
+        Args:
+            session_id: Current game session
+            game_id: Game identifier
+            level: Level number
+            action_index: Which action in sequence
+            action_type: Should be ACTION6 or similar
+            click_x, click_y: Where was clicked (0-63 range)
+            frame_before, frame_after: Frame data
+        
+        Returns:
+            Selection info dict if selection detected, None otherwise
+        """
+        if click_x is None or click_y is None:
+            return None
+        
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        grid_before = frame_before.get('grid', [])
+        grid_after = frame_after.get('grid', [])
+        
+        if not grid_before or not grid_after:
+            return None
+        
+        # Find what object was clicked on
+        clicked_object = self._get_object_at_coords(grid_before, click_x, click_y)
+        
+        if clicked_object is None or clicked_object == 0:
+            # Clicked on background - might be a button area instead
+            return None
+        
+        # Store the current selection
+        self._update_current_selection(
+            session_id=session_id,
+            game_id=game_id,
+            level=level,
+            object_color=clicked_object,
+            object_coords=f"({click_x},{click_y})",
+            action_index=action_index
+        )
+        
+        logger.debug(
+            f"[SELECTION] Clicked on object color {clicked_object} at ({click_x},{click_y}) "
+            f"- may now be selected for control"
+        )
+        
+        return {
+            'selected_object_color': clicked_object,
+            'selected_coords': (click_x, click_y),
+            'action_index': action_index,
+            'game_type': game_type,
+            'level': level
+        }
+    
+    def verify_selection_controls_movement(
+        self,
+        session_id: str,
+        game_id: str,
+        level: int,
+        movement_action: str,  # ACTION1-4
+        frame_before: Dict,
+        frame_after: Dict
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Verify if the currently selected object moved in response to ACTION1-4.
+        
+        If the previously selected object (via ACTION6) moved when we used
+        ACTION1-4, then we've confirmed the selection mechanism.
+        
+        Args:
+            session_id: Current game session
+            game_id: Game identifier  
+            level: Level number
+            movement_action: The action used (ACTION1, ACTION2, etc.)
+            frame_before, frame_after: Frame data
+        
+        Returns:
+            Verification result dict if selection was confirmed, None otherwise
+        """
+        # Get current selection
+        current_selection = self.get_current_selection(session_id, game_id, level)
+        
+        if not current_selection:
+            return None  # No object was selected
+        
+        selected_color = current_selection.get('selected_object_color')
+        if selected_color is None:
+            return None
+        
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        grid_before = frame_before.get('grid', [])
+        grid_after = frame_after.get('grid', [])
+        
+        if not grid_before or not grid_after:
+            return None
+        
+        # Find positions of selected object before and after
+        objects_before = self._find_objects_in_grid(grid_before)
+        objects_after = self._find_objects_in_grid(grid_after)
+        
+        if selected_color not in objects_before or selected_color not in objects_after:
+            return None  # Object not found or disappeared
+        
+        positions_before = objects_before[selected_color]
+        positions_after = objects_after[selected_color]
+        
+        # Calculate movement
+        cx_before = sum(p[0] for p in positions_before) / len(positions_before)
+        cy_before = sum(p[1] for p in positions_before) / len(positions_before)
+        cx_after = sum(p[0] for p in positions_after) / len(positions_after)
+        cy_after = sum(p[1] for p in positions_after) / len(positions_after)
+        
+        dx = cx_after - cx_before
+        dy = cy_after - cy_before
+        
+        # Did it move?
+        if abs(dx) < 0.5 and abs(dy) < 0.5:
+            return None  # Object didn't move
+        
+        # Determine movement direction
+        movement_direction = None
+        if abs(dy) > abs(dx):
+            movement_direction = 'up' if dy < 0 else 'down'
+        else:
+            movement_direction = 'left' if dx < 0 else 'right'
+        
+        # Check if movement matches action
+        action_to_expected_direction = {
+            'ACTION1': 'up', 'action_1': 'up',
+            'ACTION2': 'down', 'action_2': 'down',
+            'ACTION3': 'left', 'action_3': 'left',
+            'ACTION4': 'right', 'action_4': 'right',
+        }
+        
+        expected = action_to_expected_direction.get(movement_action)
+        movement_matches = (expected == movement_direction)
+        
+        if movement_matches:
+            # Confirmed: This object is selectable and moveable
+            self._save_selectable_object(
+                game_type=game_type,
+                level=level,
+                object_color=selected_color,
+                object_coords=current_selection.get('selected_object_coords'),
+                is_moveable=True,
+                control_actions=[movement_action],
+                confidence=0.8
+            )
+            
+            logger.info(
+                f"[SELECTION CONFIRMED] Object color {selected_color} "
+                f"moved {movement_direction} on {movement_action} after selection"
+            )
+            
+            return {
+                'confirmed': True,
+                'object_color': selected_color,
+                'movement_direction': movement_direction,
+                'action_used': movement_action,
+                'game_type': game_type,
+                'level': level
+            }
+        
+        return None
+    
+    def get_current_selection(
+        self,
+        session_id: str,
+        game_id: str,
+        level: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the currently selected object for this session/game/level.
+        
+        Returns:
+            Dict with selection info, or None if nothing selected
+        """
+        result = self.db.execute_query("""
+            SELECT selected_object_color, selected_object_coords, selection_action_index
+            FROM current_selection_tracking
+            WHERE session_id = ? AND game_id = ? AND level_number = ?
+        """, (session_id, game_id, level))
+        
+        if result and result[0]['selected_object_color'] is not None:
+            return {
+                'selected_object_color': result[0]['selected_object_color'],
+                'selected_object_coords': result[0]['selected_object_coords'],
+                'selection_action_index': result[0]['selection_action_index']
+            }
+        return None
+    
+    def _update_current_selection(
+        self,
+        session_id: str,
+        game_id: str,
+        level: int,
+        object_color: int,
+        object_coords: str,
+        action_index: int
+    ) -> None:
+        """Update the currently selected object."""
+        self.db.execute_query("""
+            INSERT OR REPLACE INTO current_selection_tracking
+            (session_id, game_id, level_number, selected_object_color, 
+             selected_object_coords, selection_action_index, selection_time)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (session_id, game_id, level, object_color, object_coords, action_index))
+    
+    def clear_selection(self, session_id: str, game_id: str, level: int) -> None:
+        """Clear the current selection (e.g., when level ends)."""
+        self.db.execute_query("""
+            DELETE FROM current_selection_tracking
+            WHERE session_id = ? AND game_id = ? AND level_number = ?
+        """, (session_id, game_id, level))
+    
+    def _get_object_at_coords(self, grid: List, x: int, y: int) -> Optional[int]:
+        """Get the object color at specific coordinates."""
+        if not grid:
+            return None
+        
+        if 0 <= y < len(grid) and 0 <= x < len(grid[0] if grid else []):
+            return grid[y][x]
+        return None
+    
+    def _save_selectable_object(
+        self,
+        game_type: str,
+        level: int,
+        object_color: int,
+        object_coords: Optional[str],
+        is_moveable: bool,
+        control_actions: List[str],
+        confidence: float
+    ) -> None:
+        """Save a discovered selectable object to network knowledge."""
+        import json
+        
+        # Check if entry exists
+        existing = self.db.execute_query("""
+            SELECT discovery_count, confidence, control_actions
+            FROM object_selection_state
+            WHERE game_type = ? AND level_number = ? AND object_color = ?
+        """, (game_type, level, object_color))
+        
+        if existing:
+            # Update existing entry
+            old_count = existing[0]['discovery_count']
+            old_confidence = existing[0]['confidence']
+            old_actions = json.loads(existing[0]['control_actions'] or '[]')
+            
+            # Merge control actions
+            merged_actions = list(set(old_actions + control_actions))
+            
+            # Bayesian confidence update
+            new_confidence = (old_confidence * old_count + confidence) / (old_count + 1)
+            
+            self.db.execute_query("""
+                UPDATE object_selection_state
+                SET is_selectable = TRUE,
+                    is_moveable = ?,
+                    object_coordinates = COALESCE(?, object_coordinates),
+                    control_actions = ?,
+                    confidence = ?,
+                    discovery_count = discovery_count + 1,
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE game_type = ? AND level_number = ? AND object_color = ?
+            """, (is_moveable, object_coords, json.dumps(merged_actions), 
+                  new_confidence, game_type, level, object_color))
+        else:
+            # Insert new entry
+            self.db.execute_query("""
+                INSERT INTO object_selection_state
+                (game_type, level_number, object_color, object_coordinates,
+                 is_selectable, is_moveable, is_button, control_actions, confidence)
+                VALUES (?, ?, ?, ?, TRUE, ?, FALSE, ?, ?)
+            """, (game_type, level, object_color, object_coords, 
+                  is_moveable, json.dumps(control_actions), confidence))
+        
+        logger.info(
+            f"[NETWORK] Saved selectable object: {game_type} L{level} "
+            f"color={object_color} moveable={is_moveable}"
+        )
+    
+    def get_selectable_objects(
+        self,
+        game_type: str,
+        level: int,
+        min_confidence: float = 0.5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all known selectable objects for a game/level.
+        
+        Args:
+            game_type: Game type to query
+            level: Level number
+            min_confidence: Minimum confidence threshold
+        
+        Returns:
+            List of selectable object dicts
+        """
+        results = self.db.execute_query("""
+            SELECT object_color, object_coordinates, is_moveable, 
+                   control_actions, confidence
+            FROM object_selection_state
+            WHERE game_type = ? AND level_number = ? 
+                  AND is_selectable = TRUE AND confidence >= ?
+            ORDER BY confidence DESC
+        """, (game_type, level, min_confidence))
+        
+        objects = []
+        for row in results or []:
+            objects.append({
+                'object_color': row['object_color'],
+                'coordinates': row['object_coordinates'],
+                'is_moveable': bool(row['is_moveable']),
+                'control_actions': json.loads(row['control_actions'] or '[]'),
+                'confidence': row['confidence']
+            })
+        return objects
+    
+    def discover_selectable_objects(
+        self,
+        game_id: str,
+        level: int,
+        action_sequence: List[Dict],
+        frame_sequence: List[Dict]
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze an action sequence to discover selectable objects.
+        
+        Pattern: ACTION6(x,y) -> ACTION1-4 -> object at (x,y) moved
+        
+        This is the main entry point for discovering the selection mechanism
+        by analyzing complete gameplay sequences.
+        
+        Args:
+            game_id: Game identifier
+            level: Level number
+            action_sequence: List of actions with action_type, x, y
+            frame_sequence: List of frames with grid data
+        
+        Returns:
+            List of discovered selectable objects
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        discovered = []
+        
+        # Look for pattern: ACTION6 followed by ACTION1-4
+        ACTION6_VARIANTS = {'ACTION6', 'action_6', 'ACTION 6'}
+        MOVEMENT_ACTIONS = {'ACTION1', 'ACTION2', 'ACTION3', 'ACTION4',
+                          'action_1', 'action_2', 'action_3', 'action_4'}
+        
+        pending_click = None  # Store last ACTION6 click info
+        
+        for i, action in enumerate(action_sequence):
+            if i >= len(frame_sequence) - 1:
+                break
+            
+            action_type = action.get('action_type', '')
+            frame_before = frame_sequence[i]
+            frame_after = frame_sequence[i + 1]
+            
+            if action_type in ACTION6_VARIANTS:
+                # Record this click as potential selection
+                click_x = action.get('x', action.get('click_x'))
+                click_y = action.get('y', action.get('click_y'))
+                
+                if click_x is not None and click_y is not None:
+                    grid = frame_before.get('grid', [])
+                    clicked_color = self._get_object_at_coords(grid, click_x, click_y)
+                    
+                    if clicked_color and clicked_color != 0:
+                        pending_click = {
+                            'click_x': click_x,
+                            'click_y': click_y,
+                            'object_color': clicked_color,
+                            'action_index': i,
+                            'frame': frame_before
+                        }
+            
+            elif action_type in MOVEMENT_ACTIONS and pending_click:
+                # Check if the clicked object moved
+                grid_before = frame_before.get('grid', [])
+                grid_after = frame_after.get('grid', [])
+                
+                clicked_color = pending_click['object_color']
+                
+                objects_before = self._find_objects_in_grid(grid_before)
+                objects_after = self._find_objects_in_grid(grid_after)
+                
+                if clicked_color in objects_before and clicked_color in objects_after:
+                    pos_before = objects_before[clicked_color]
+                    pos_after = objects_after[clicked_color]
+                    
+                    # Calculate movement
+                    cx_before = sum(p[0] for p in pos_before) / len(pos_before)
+                    cy_before = sum(p[1] for p in pos_before) / len(pos_before)
+                    cx_after = sum(p[0] for p in pos_after) / len(pos_after)
+                    cy_after = sum(p[1] for p in pos_after) / len(pos_after)
+                    
+                    dx = cx_after - cx_before
+                    dy = cy_after - cy_before
+                    
+                    # Did it move?
+                    if abs(dx) >= 0.5 or abs(dy) >= 0.5:
+                        # Object moved after being clicked - it's selectable!
+                        self._save_selectable_object(
+                            game_type=game_type,
+                            level=level,
+                            object_color=clicked_color,
+                            object_coords=f"({pending_click['click_x']},{pending_click['click_y']})",
+                            is_moveable=True,
+                            control_actions=[action_type],
+                            confidence=0.85
+                        )
+                        
+                        discovered.append({
+                            'object_color': clicked_color,
+                            'click_coords': (pending_click['click_x'], pending_click['click_y']),
+                            'movement_action': action_type,
+                            'confirmed': True
+                        })
+                        
+                        logger.info(
+                            f"[DISCOVERY] Selectable object found: color {clicked_color} "
+                            f"at ({pending_click['click_x']},{pending_click['click_y']}) "
+                            f"responds to {action_type} after ACTION6 selection"
+                        )
+                
+                # Clear pending click after movement action (successful or not)
+                pending_click = None
+        
+        return discovered
+
+    # ========================================================================
+    # ACTION6 AVAILABILITY TRACKING (Added 2025-12-08)
+    # ========================================================================
+    # ACTION6 availability is a SIGNAL about game state:
+    # - Present = something is selectable
+    # - Absent = nothing currently selectable (conditions not met)
+    # Learning these conditions is key to solving selection-based puzzles
+    # ========================================================================
+    
+    def track_action6_availability(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int,
+        action_number: int,
+        available_actions: List[str],
+        previous_action: Optional[str] = None,
+        previous_action_coords: Optional[str] = None,
+        grid: Optional[List] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Track when ACTION6 becomes available or unavailable.
+        
+        This is called after every action to detect availability changes.
+        When ACTION6 appears/disappears, it signals a change in selectability state.
+        
+        Args:
+            agent_id: Agent identifier
+            game_id: Game identifier
+            level: Level number
+            action_number: Which action in sequence
+            available_actions: Current list of available actions
+            previous_action: What action was just taken
+            previous_action_coords: Coordinates if applicable
+            grid: Current grid state for hashing
+        
+        Returns:
+            Dict with availability info if state changed, None otherwise
+        """
+        action6_available = 1 if 'ACTION6' in available_actions or 'action_6' in available_actions else 0
+        
+        # Calculate grid hash for pattern matching
+        grid_hash = None
+        if grid:
+            import hashlib
+            grid_str = str(grid)
+            grid_hash = hashlib.md5(grid_str.encode()).hexdigest()[:16]
+        
+        # Store the event
+        self.db.execute_query("""
+            INSERT INTO action6_availability_events
+            (agent_id, game_id, level_number, action_number, action6_available,
+             previous_action, previous_action_coords, grid_hash, available_actions_list)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (agent_id, game_id, level, action_number, action6_available,
+              previous_action, previous_action_coords, grid_hash,
+              json.dumps(available_actions)))
+        
+        return {
+            'action6_available': bool(action6_available),
+            'action_number': action_number,
+            'previous_action': previous_action,
+            'grid_hash': grid_hash
+        }
+    
+    def detect_action6_state_change(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze action history to detect when ACTION6 availability changed.
+        
+        Returns list of state change events with context about what triggered them.
+        """
+        results = self.db.execute_query("""
+            SELECT action_number, action6_available, previous_action, 
+                   previous_action_coords, grid_hash
+            FROM action6_availability_events
+            WHERE agent_id = ? AND game_id = ? AND level_number = ?
+            ORDER BY action_number ASC
+        """, (agent_id, game_id, level))
+        
+        if not results or len(results) < 2:
+            return []
+        
+        state_changes = []
+        prev_available = results[0]['action6_available']
+        
+        for row in results[1:]:
+            current_available = row['action6_available']
+            
+            if current_available != prev_available:
+                # State changed!
+                state_changes.append({
+                    'action_number': row['action_number'],
+                    'became_available': current_available == 1,
+                    'trigger_action': row['previous_action'],
+                    'trigger_coords': row['previous_action_coords'],
+                    'grid_hash': row['grid_hash']
+                })
+                
+                # Learn this as a selectability condition
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                self._save_selectability_condition(
+                    game_type=game_type,
+                    level=level,
+                    trigger_action=row['previous_action'],
+                    trigger_coords=row['previous_action_coords'],
+                    action6_became_available=current_available
+                )
+            
+            prev_available = current_available
+        
+        return state_changes
+    
+    def _save_selectability_condition(
+        self,
+        game_type: str,
+        level: int,
+        trigger_action: Optional[str],
+        trigger_coords: Optional[str],
+        action6_became_available: int
+    ) -> None:
+        """Save a discovered selectability condition to network knowledge."""
+        if not trigger_action:
+            return
+        
+        # Try to update existing or insert new
+        existing = self.db.execute_query("""
+            SELECT condition_id, occurrence_count, confidence
+            FROM selectability_conditions
+            WHERE game_type = ? AND level_number = ? 
+                  AND trigger_action = ? AND COALESCE(trigger_coords, '') = COALESCE(?, '')
+                  AND action6_became_available = ?
+        """, (game_type, level, trigger_action, trigger_coords or '', action6_became_available))
+        
+        if existing:
+            # Update count and confidence
+            old_count = existing[0]['occurrence_count']
+            new_confidence = min(0.95, 0.5 + (old_count * 0.1))  # Cap at 0.95
+            
+            self.db.execute_query("""
+                UPDATE selectability_conditions
+                SET occurrence_count = occurrence_count + 1,
+                    confidence = ?,
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE condition_id = ?
+            """, (new_confidence, existing[0]['condition_id']))
+        else:
+            # Insert new condition
+            desc = f"{trigger_action}"
+            if trigger_coords:
+                desc += f" at {trigger_coords}"
+            desc += f" -> ACTION6 {'appears' if action6_became_available else 'disappears'}"
+            
+            self.db.execute_query("""
+                INSERT OR IGNORE INTO selectability_conditions
+                (game_type, level_number, trigger_action, trigger_coords,
+                 trigger_description, action6_became_available, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, 0.5)
+            """, (game_type, level, trigger_action, trigger_coords, desc, action6_became_available))
+        
+        logger.debug(
+            f"[SELECTABILITY] Learned: {trigger_action} "
+            f"{'enables' if action6_became_available else 'disables'} ACTION6 in {game_type} L{level}"
+        )
+    
+    def get_selectability_triggers(
+        self,
+        game_type: str,
+        level: int,
+        want_available: bool = True,
+        min_confidence: float = 0.5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get known conditions that make ACTION6 available/unavailable.
+        
+        Args:
+            game_type: Game type to query
+            level: Level number
+            want_available: If True, get conditions that ENABLE ACTION6
+                           If False, get conditions that DISABLE ACTION6
+            min_confidence: Minimum confidence threshold
+        
+        Returns:
+            List of trigger conditions
+        """
+        target = 1 if want_available else 0
+        
+        results = self.db.execute_query("""
+            SELECT trigger_action, trigger_coords, trigger_description,
+                   occurrence_count, confidence
+            FROM selectability_conditions
+            WHERE game_type = ? AND level_number = ? 
+                  AND action6_became_available = ? AND confidence >= ?
+            ORDER BY confidence DESC
+        """, (game_type, level, target, min_confidence))
+        
+        return [
+            {
+                'trigger_action': row['trigger_action'],
+                'trigger_coords': row['trigger_coords'],
+                'description': row['trigger_description'],
+                'occurrence_count': row['occurrence_count'],
+                'confidence': row['confidence']
+            }
+            for row in (results or [])
+        ]
+
+    # ========================================================================
+    # COLLISION/INTERACTION DETECTION (Added 2025-12-08)
+    # ========================================================================
+    # When controlled objects move through the grid, they can interact with
+    # other objects. Detecting these interactions is key to understanding
+    # game mechanics and discovering winning strategies.
+    # ========================================================================
+    
+    def get_grid_diff(
+        self,
+        grid_before: List,
+        grid_after: List
+    ) -> Dict[str, Any]:
+        """
+        Calculate differences between two grid states.
+        
+        Returns detailed information about what changed:
+        - Objects that appeared
+        - Objects that disappeared
+        - Objects that moved
+        - Objects that changed color
+        
+        Args:
+            grid_before: Grid state before action
+            grid_after: Grid state after action
+        
+        Returns:
+            Dict with change information
+        """
+        if not grid_before or not grid_after:
+            return {'changed': False, 'changes': []}
+        
+        # Find all object positions in both grids
+        objects_before = self._find_objects_in_grid(grid_before)
+        objects_after = self._find_objects_in_grid(grid_after)
+        
+        changes = []
+        
+        # Check each cell for changes
+        for y in range(min(len(grid_before), len(grid_after))):
+            row_before = grid_before[y] if y < len(grid_before) else []
+            row_after = grid_after[y] if y < len(grid_after) else []
+            
+            for x in range(max(len(row_before), len(row_after))):
+                cell_before = row_before[x] if x < len(row_before) else 0
+                cell_after = row_after[x] if x < len(row_after) else 0
+                
+                if cell_before != cell_after:
+                    changes.append({
+                        'x': x,
+                        'y': y,
+                        'color_before': cell_before,
+                        'color_after': cell_after,
+                        'type': self._classify_change(cell_before, cell_after)
+                    })
+        
+        # Calculate object-level changes
+        appeared = {}
+        disappeared = {}
+        moved = {}
+        
+        all_colors = set(objects_before.keys()) | set(objects_after.keys())
+        
+        for color in all_colors:
+            if color == 0:  # Skip background
+                continue
+            
+            before_positions = set(objects_before.get(color, []))
+            after_positions = set(objects_after.get(color, []))
+            
+            if before_positions and not after_positions:
+                disappeared[color] = list(before_positions)
+            elif after_positions and not before_positions:
+                appeared[color] = list(after_positions)
+            elif before_positions != after_positions:
+                moved[color] = {
+                    'from': list(before_positions),
+                    'to': list(after_positions)
+                }
+        
+        return {
+            'changed': len(changes) > 0,
+            'cell_changes': changes,
+            'objects_appeared': appeared,
+            'objects_disappeared': disappeared,
+            'objects_moved': moved
+        }
+    
+    def _classify_change(self, before: int, after: int) -> str:
+        """Classify the type of cell change."""
+        if before == 0 and after != 0:
+            return 'appeared'
+        elif before != 0 and after == 0:
+            return 'disappeared'
+        elif before != 0 and after != 0:
+            return 'color_changed'
+        else:
+            return 'unknown'
+    
+    def detect_collision(
+        self,
+        controlled_color: int,
+        grid_before: List,
+        grid_after: List,
+        movement_direction: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect if a controlled object collided with another object.
+        
+        Args:
+            controlled_color: Color of the controlled object
+            grid_before: Grid state before movement
+            grid_after: Grid state after movement
+            movement_direction: 'up', 'down', 'left', 'right'
+        
+        Returns:
+            Collision info dict if collision detected, None otherwise
+        """
+        objects_before = self._find_objects_in_grid(grid_before)
+        objects_after = self._find_objects_in_grid(grid_after)
+        
+        if controlled_color not in objects_before:
+            return None
+        
+        # Get controlled object positions
+        controlled_before = objects_before[controlled_color]
+        controlled_after = objects_after.get(controlled_color, [])
+        
+        if not controlled_after:
+            return None  # Controlled object disappeared (might be game over)
+        
+        # Calculate movement vector
+        direction_map = {
+            'up': (0, -1),
+            'down': (0, 1),
+            'left': (-1, 0),
+            'right': (1, 0)
+        }
+        
+        dx, dy = direction_map.get(movement_direction, (0, 0))
+        
+        # Find cells the controlled object moved into
+        controlled_before_set = set(tuple(p) for p in controlled_before)
+        new_positions = []
+        
+        for pos in controlled_before:
+            new_pos = (pos[0] + dx, pos[1] + dy)
+            if new_pos not in controlled_before_set:
+                new_positions.append(new_pos)
+        
+        # Check if any new position was occupied by another object
+        collisions = []
+        
+        for new_pos in new_positions:
+            x, y = new_pos
+            if 0 <= y < len(grid_before) and 0 <= x < len(grid_before[0] if grid_before else []):
+                cell_before = grid_before[y][x]
+                
+                if cell_before != 0 and cell_before != controlled_color:
+                    # Collision detected!
+                    cell_after = grid_after[y][x] if (0 <= y < len(grid_after) and 0 <= x < len(grid_after[0] if grid_after else [])) else 0
+                    
+                    collisions.append({
+                        'target_color': cell_before,
+                        'target_position': (x, y),
+                        'collision_type': 'same_cell',
+                        'target_disappeared': cell_before not in objects_after,
+                        'target_still_there': cell_after == cell_before
+                    })
+        
+        if collisions:
+            return {
+                'controlled_color': controlled_color,
+                'movement_direction': movement_direction,
+                'collisions': collisions
+            }
+        
+        return None
+    
+    def record_collision_event(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int,
+        action_number: int,
+        controlled_color: int,
+        from_pos: Tuple[int, int],
+        to_pos: Tuple[int, int],
+        target_color: int,
+        target_pos: Tuple[int, int],
+        collision_type: str,
+        effect_observed: str,
+        grid_changes: Optional[Dict] = None
+    ) -> None:
+        """Record a collision event to the database."""
+        self.db.execute_query("""
+            INSERT INTO collision_events
+            (agent_id, game_id, level_number, action_number,
+             controlled_object_color, controlled_from_x, controlled_from_y,
+             controlled_to_x, controlled_to_y,
+             target_object_color, target_object_x, target_object_y,
+             collision_type, effect_observed, grid_changes_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (agent_id, game_id, level, action_number,
+              controlled_color, from_pos[0], from_pos[1],
+              to_pos[0], to_pos[1],
+              target_color, target_pos[0], target_pos[1],
+              collision_type, effect_observed,
+              json.dumps(grid_changes) if grid_changes else None))
+        
+        # Learn this as a collision effect
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        self._save_collision_effect(
+            game_type=game_type,
+            level=level,
+            controlled_color=controlled_color,
+            target_color=target_color,
+            collision_type=collision_type,
+            effect_type=effect_observed
+        )
+    
+    def _save_collision_effect(
+        self,
+        game_type: str,
+        level: int,
+        controlled_color: int,
+        target_color: int,
+        collision_type: str,
+        effect_type: str
+    ) -> None:
+        """Save a discovered collision effect to network knowledge."""
+        existing = self.db.execute_query("""
+            SELECT effect_id, occurrence_count, confidence
+            FROM collision_effects
+            WHERE game_type = ? AND level_number = ?
+                  AND controlled_object_color = ? AND target_object_color = ?
+                  AND effect_type = ?
+        """, (game_type, level, controlled_color, target_color, effect_type))
+        
+        if existing:
+            old_count = existing[0]['occurrence_count']
+            new_confidence = min(0.95, 0.5 + (old_count * 0.1))
+            
+            self.db.execute_query("""
+                UPDATE collision_effects
+                SET occurrence_count = occurrence_count + 1,
+                    confidence = ?,
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE effect_id = ?
+            """, (new_confidence, existing[0]['effect_id']))
+        else:
+            self.db.execute_query("""
+                INSERT OR IGNORE INTO collision_effects
+                (game_type, level_number, controlled_object_color, target_object_color,
+                 collision_type, effect_type, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, 0.5)
+            """, (game_type, level, controlled_color, target_color, collision_type, effect_type))
+        
+        logger.debug(
+            f"[COLLISION] Learned: color {controlled_color} + color {target_color} "
+            f"-> {effect_type} in {game_type} L{level}"
+        )
+    
+    def get_collision_effects(
+        self,
+        game_type: str,
+        level: int,
+        controlled_color: Optional[int] = None,
+        min_confidence: float = 0.5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get known collision effects for a game/level.
+        
+        Args:
+            game_type: Game type to query
+            level: Level number
+            controlled_color: Optional filter by controlled object color
+            min_confidence: Minimum confidence threshold
+        
+        Returns:
+            List of collision effect patterns
+        """
+        if controlled_color is not None:
+            results = self.db.execute_query("""
+                SELECT controlled_object_color, target_object_color, collision_type,
+                       effect_type, occurrence_count, confidence
+                FROM collision_effects
+                WHERE game_type = ? AND level_number = ?
+                      AND controlled_object_color = ? AND confidence >= ?
+                ORDER BY confidence DESC
+            """, (game_type, level, controlled_color, min_confidence))
+        else:
+            results = self.db.execute_query("""
+                SELECT controlled_object_color, target_object_color, collision_type,
+                       effect_type, occurrence_count, confidence
+                FROM collision_effects
+                WHERE game_type = ? AND level_number = ? AND confidence >= ?
+                ORDER BY confidence DESC
+            """, (game_type, level, min_confidence))
+        
+        return [
+            {
+                'controlled_color': row['controlled_object_color'],
+                'target_color': row['target_object_color'],
+                'collision_type': row['collision_type'],
+                'effect_type': row['effect_type'],
+                'occurrence_count': row['occurrence_count'],
+                'confidence': row['confidence']
+            }
+            for row in (results or [])
+        ]
+
+    # ========================================================================
+    # AUTONOMOUS OBJECT DETECTION (Added 2025-12-08)
+    # ========================================================================
+    # Some objects move independently of player input (NPCs, enemies, etc.)
+    # The agent needs to distinguish between objects it controls, objects
+    # that react to its actions, and objects that move on their own.
+    # ========================================================================
+    
+    def detect_autonomous_movement(
+        self,
+        grid_before: List,
+        grid_after: List,
+        controlled_colors: List[int],
+        action_taken: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect objects that moved without being controlled.
+        
+        Args:
+            grid_before: Grid state before action
+            grid_after: Grid state after action
+            controlled_colors: Colors of objects the agent controls
+            action_taken: What action was taken
+        
+        Returns:
+            List of autonomously moving objects
+        """
+        objects_before = self._find_objects_in_grid(grid_before)
+        objects_after = self._find_objects_in_grid(grid_after)
+        
+        autonomous_movements = []
+        
+        for color in objects_before:
+            if color == 0:  # Skip background
+                continue
+            if color in controlled_colors:  # Skip controlled objects
+                continue
+            
+            if color in objects_after:
+                before_positions = set(tuple(p) for p in objects_before[color])
+                after_positions = set(tuple(p) for p in objects_after[color])
+                
+                if before_positions != after_positions:
+                    # This object moved but we didn't control it!
+                    autonomous_movements.append({
+                        'object_color': color,
+                        'from_positions': list(before_positions),
+                        'to_positions': list(after_positions),
+                        'action_when_moved': action_taken
+                    })
+        
+        return autonomous_movements
+    
+    def record_autonomous_object(
+        self,
+        game_type: str,
+        level: int,
+        object_color: int,
+        movement_pattern: str = 'unknown',
+        moves_without_input: bool = False
+    ) -> None:
+        """Record discovery of an autonomous object."""
+        existing = self.db.execute_query("""
+            SELECT record_id, observation_count, moves_per_turn
+            FROM autonomous_objects
+            WHERE game_type = ? AND level_number = ? AND object_color = ?
+        """, (game_type, level, object_color))
+        
+        if existing:
+            self.db.execute_query("""
+                UPDATE autonomous_objects
+                SET observation_count = observation_count + 1,
+                    moves_per_turn = moves_per_turn + 1,
+                    moves_without_input = CASE WHEN ? THEN 1 ELSE moves_without_input END,
+                    movement_pattern = COALESCE(NULLIF(?, 'unknown'), movement_pattern),
+                    confidence = LEAST(0.95, confidence + 0.05),
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE game_type = ? AND level_number = ? AND object_color = ?
+            """, (moves_without_input, movement_pattern, game_type, level, object_color))
+        else:
+            self.db.execute_query("""
+                INSERT INTO autonomous_objects
+                (game_type, level_number, object_color, movement_pattern,
+                 moves_without_input, confidence)
+                VALUES (?, ?, ?, ?, ?, 0.5)
+            """, (game_type, level, object_color, movement_pattern, 1 if moves_without_input else 0))
+        
+        logger.debug(
+            f"[AUTONOMOUS] Object color {object_color} moves independently "
+            f"in {game_type} L{level}, pattern: {movement_pattern}"
+        )
+    
+    def get_autonomous_objects(
+        self,
+        game_type: str,
+        level: int,
+        min_confidence: float = 0.5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get known autonomous objects for a game/level.
+        
+        Args:
+            game_type: Game type to query
+            level: Level number
+            min_confidence: Minimum confidence threshold
+        
+        Returns:
+            List of autonomous object info
+        """
+        results = self.db.execute_query("""
+            SELECT object_color, movement_pattern, moves_per_turn,
+                   moves_without_input, is_ever_controllable, 
+                   controllable_conditions, confidence
+            FROM autonomous_objects
+            WHERE game_type = ? AND level_number = ? AND confidence >= ?
+            ORDER BY confidence DESC
+        """, (game_type, level, min_confidence))
+        
+        return [
+            {
+                'object_color': row['object_color'],
+                'movement_pattern': row['movement_pattern'],
+                'moves_per_turn': row['moves_per_turn'],
+                'moves_without_input': bool(row['moves_without_input']),
+                'is_controllable': bool(row['is_ever_controllable']),
+                'controllable_conditions': row['controllable_conditions'],
+                'confidence': row['confidence']
+            }
+            for row in (results or [])
+        ]
+
+    # ========================================================================
+    # COMPREHENSIVE OBJECT PROPERTY ANALYSIS (Added 2025-12-08)
+    # ========================================================================
+    # Track all object properties: size, shape, position, controllability.
+    # Changes to ANY property can be triggers for game mechanics.
+    # ========================================================================
+    
+    def analyze_object_properties(
+        self,
+        grid: List,
+        controlled_colors: Optional[List[int]] = None
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Analyze all objects in a grid and compute their properties.
+        
+        Properties tracked:
+        - cell_count: Number of cells (size)
+        - bounding_box: (width, height)
+        - center: (x, y) center of mass
+        - shape_hash: Hash of relative positions (for shape comparison)
+        - is_contiguous: Whether object is one connected piece
+        - is_controlled: Whether currently under player control
+        - orientation: Normalized shape signature for rotation/flip detection
+        - canonical_shape: Positions normalized to detect rotations
+        
+        Args:
+            grid: Grid state to analyze
+            controlled_colors: List of colors currently controlled by player
+        
+        Returns:
+            Dict mapping color -> property dict
+        """
+        if not grid:
+            return {}
+        
+        objects = self._find_objects_in_grid(grid)
+        properties = {}
+        
+        controlled_set = set(controlled_colors or [])
+        
+        for color, positions in objects.items():
+            if color == 0:
+                continue
+            
+            # Size
+            cell_count = len(positions)
+            
+            # Bounding box
+            xs = [p[0] for p in positions]
+            ys = [p[1] for p in positions]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            bb_width = max_x - min_x + 1
+            bb_height = max_y - min_y + 1
+            
+            # Center of mass
+            center_x = sum(xs) / cell_count
+            center_y = sum(ys) / cell_count
+            
+            # Shape hash: relative positions from top-left corner (orientation-dependent)
+            relative_positions = sorted([(x - min_x, y - min_y) for x, y in positions])
+            shape_hash = hash(tuple(relative_positions))
+            
+            # Contiguity check (BFS from first cell)
+            is_contiguous = self._check_contiguity(positions)
+            
+            # ================================================================
+            # ORIENTATION DETECTION (Added 2025-12-08)
+            # ================================================================
+            # Compute all 8 transformations (4 rotations x 2 flips) and use
+            # the lexicographically smallest as the "canonical" form.
+            # If two objects have the same canonical form but different
+            # relative_positions, one is a rotation/flip of the other.
+            # ================================================================
+            orientation_data = self._compute_orientation(relative_positions, bb_width, bb_height)
+            
+            properties[color] = {
+                'cell_count': cell_count,
+                'bounding_box': (bb_width, bb_height),
+                'center': (center_x, center_y),
+                'shape_hash': str(shape_hash),
+                'is_contiguous': is_contiguous,
+                'is_controlled': color in controlled_set,
+                'positions': positions,
+                'relative_positions': relative_positions,
+                'canonical_shape': orientation_data['canonical'],
+                'orientation': orientation_data['orientation'],
+                'orientation_hash': orientation_data['canonical_hash']
+            }
+        
+        return properties
+    
+    def _compute_orientation(
+        self, 
+        relative_positions: List[Tuple[int, int]], 
+        width: int, 
+        height: int
+    ) -> Dict[str, Any]:
+        """
+        Compute orientation and canonical form of a shape.
+        
+        Generates all 8 transformations (4 rotations x 2 flips) and returns:
+        - canonical: The lexicographically smallest transformation
+        - orientation: Which transformation the original shape is
+        - canonical_hash: Hash of the canonical form (same for all rotations/flips)
+        
+        Orientations:
+        - 'original': No transformation
+        - 'rot90': Rotated 90 degrees clockwise
+        - 'rot180': Rotated 180 degrees
+        - 'rot270': Rotated 270 degrees clockwise
+        - 'flip_h': Flipped horizontally
+        - 'flip_v': Flipped vertically
+        - 'flip_h_rot90': Flipped horizontally then rotated 90
+        - 'flip_v_rot90': Flipped vertically then rotated 90
+        """
+        if not relative_positions:
+            return {'canonical': [], 'orientation': 'original', 'canonical_hash': '0'}
+        
+        # Generate all 8 transformations
+        transformations = {}
+        
+        # Original
+        transformations['original'] = tuple(sorted(relative_positions))
+        
+        # Rotate 90 clockwise: (x, y) -> (y, width-1-x) but we normalize to (0,0) origin
+        def rotate_90(positions, w, h):
+            rotated = [(y, w - 1 - x) for x, y in positions]
+            min_x = min(p[0] for p in rotated)
+            min_y = min(p[1] for p in rotated)
+            return sorted([(x - min_x, y - min_y) for x, y in rotated])
+        
+        # Rotate 180: (x, y) -> (width-1-x, height-1-y)
+        def rotate_180(positions, w, h):
+            rotated = [(w - 1 - x, h - 1 - y) for x, y in positions]
+            min_x = min(p[0] for p in rotated)
+            min_y = min(p[1] for p in rotated)
+            return sorted([(x - min_x, y - min_y) for x, y in rotated])
+        
+        # Rotate 270 clockwise: (x, y) -> (height-1-y, x)
+        def rotate_270(positions, w, h):
+            rotated = [(h - 1 - y, x) for x, y in positions]
+            min_x = min(p[0] for p in rotated)
+            min_y = min(p[1] for p in rotated)
+            return sorted([(x - min_x, y - min_y) for x, y in rotated])
+        
+        # Flip horizontal: (x, y) -> (width-1-x, y)
+        def flip_h(positions, w, h):
+            flipped = [(w - 1 - x, y) for x, y in positions]
+            min_x = min(p[0] for p in flipped)
+            return sorted([(x - min_x, y) for x, y in flipped])
+        
+        # Flip vertical: (x, y) -> (x, height-1-y)
+        def flip_v(positions, w, h):
+            flipped = [(x, h - 1 - y) for x, y in positions]
+            min_y = min(p[1] for p in flipped)
+            return sorted([(x, y - min_y) for x, y in flipped])
+        
+        # Apply transformations
+        transformations['rot90'] = tuple(rotate_90(relative_positions, width, height))
+        transformations['rot180'] = tuple(rotate_180(relative_positions, width, height))
+        transformations['rot270'] = tuple(rotate_270(relative_positions, width, height))
+        transformations['flip_h'] = tuple(flip_h(relative_positions, width, height))
+        transformations['flip_v'] = tuple(flip_v(relative_positions, width, height))
+        
+        # Combined: flip then rotate
+        flipped_h = flip_h(relative_positions, width, height)
+        flipped_v = flip_v(relative_positions, width, height)
+        h_bb = (max(p[0] for p in flipped_h) + 1, max(p[1] for p in flipped_h) + 1)
+        v_bb = (max(p[0] for p in flipped_v) + 1, max(p[1] for p in flipped_v) + 1)
+        transformations['flip_h_rot90'] = tuple(rotate_90(flipped_h, h_bb[0], h_bb[1]))
+        transformations['flip_v_rot90'] = tuple(rotate_90(flipped_v, v_bb[0], v_bb[1]))
+        
+        # Find canonical form (lexicographically smallest)
+        canonical_orientation = min(transformations.keys(), key=lambda k: transformations[k])
+        canonical = transformations[canonical_orientation]
+        
+        # Determine what orientation the ORIGINAL shape is relative to canonical
+        # The original shape's orientation is how you'd need to transform canonical to get original
+        original = transformations['original']
+        
+        # Find which transformation the original matches
+        for orient, transformed in transformations.items():
+            if transformed == original:
+                current_orientation = orient
+                break
+        else:
+            current_orientation = 'original'
+        
+        return {
+            'canonical': list(canonical),
+            'orientation': current_orientation,
+            'canonical_hash': str(hash(canonical))
+        }
+    
+    def detect_rotation(
+        self,
+        props_before: Dict[str, Any],
+        props_after: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect if an object rotated or flipped between two states.
+        
+        Args:
+            props_before: Object properties before action
+            props_after: Object properties after action
+        
+        Returns:
+            Rotation info dict if rotation detected, None otherwise
+        """
+        if not props_before or not props_after:
+            return None
+        
+        # Same canonical shape = same object, possibly rotated
+        if props_before.get('orientation_hash') != props_after.get('orientation_hash'):
+            return None  # Different shape entirely, not a rotation
+        
+        orient_before = props_before.get('orientation', 'original')
+        orient_after = props_after.get('orientation', 'original')
+        
+        if orient_before == orient_after:
+            return None  # No rotation
+        
+        # Determine the type of rotation/flip
+        rotation_type = self._classify_rotation(orient_before, orient_after)
+        
+        return {
+            'rotated': True,
+            'from_orientation': orient_before,
+            'to_orientation': orient_after,
+            'rotation_type': rotation_type
+        }
+    
+    def _classify_rotation(self, orient_before: str, orient_after: str) -> str:
+        """Classify the type of rotation/flip between two orientations."""
+        # Map orientation transitions to human-readable rotation types
+        rotation_map = {
+            ('original', 'rot90'): 'rotate_90_cw',
+            ('original', 'rot180'): 'rotate_180',
+            ('original', 'rot270'): 'rotate_90_ccw',
+            ('original', 'flip_h'): 'flip_horizontal',
+            ('original', 'flip_v'): 'flip_vertical',
+            ('rot90', 'original'): 'rotate_90_ccw',
+            ('rot90', 'rot180'): 'rotate_90_cw',
+            ('rot90', 'rot270'): 'rotate_180',
+            ('rot180', 'original'): 'rotate_180',
+            ('rot180', 'rot90'): 'rotate_90_ccw',
+            ('rot180', 'rot270'): 'rotate_90_cw',
+            ('rot270', 'original'): 'rotate_90_cw',
+            ('rot270', 'rot90'): 'rotate_180',
+            ('rot270', 'rot180'): 'rotate_90_ccw',
+            ('flip_h', 'original'): 'flip_horizontal',
+            ('flip_v', 'original'): 'flip_vertical',
+        }
+        
+        return rotation_map.get((orient_before, orient_after), f'{orient_before}_to_{orient_after}')
+    
+    def _check_contiguity(self, positions: List[Tuple[int, int]]) -> bool:
+        """Check if a set of positions forms a contiguous object."""
+        if len(positions) <= 1:
+            return True
+        
+        pos_set = set(positions)
+        visited = set()
+        stack = [positions[0]]
+        
+        while stack:
+            curr = stack.pop()
+            if curr in visited:
+                continue
+            visited.add(curr)
+            
+            # Check 4-connected neighbors
+            x, y = curr
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                neighbor = (x + dx, y + dy)
+                if neighbor in pos_set and neighbor not in visited:
+                    stack.append(neighbor)
+        
+        return len(visited) == len(positions)
+    
+    def detect_property_changes(
+        self,
+        grid_before: List,
+        grid_after: List,
+        controlled_colors: Optional[List[int]] = None,
+        action_taken: Optional[str] = None,
+        triggering_color: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect all property changes for all objects between two grid states.
+        
+        This is the COMPREHENSIVE change detection that catches:
+        - Color changes (object changes color)
+        - Size changes (object grows or shrinks)
+        - Shape changes (object changes form)
+        - Position changes (object moves)
+        - Controllability changes (object becomes/stops being controllable)
+        - Appearance/disappearance
+        
+        Args:
+            grid_before: Grid state before action
+            grid_after: Grid state after action
+            controlled_colors: Colors currently under control
+            action_taken: What action triggered this
+            triggering_color: What object was interacted with
+        
+        Returns:
+            List of property change dicts
+        """
+        props_before = self.analyze_object_properties(grid_before, controlled_colors)
+        props_after = self.analyze_object_properties(grid_after, controlled_colors)
+        
+        changes = []
+        all_colors = set(props_before.keys()) | set(props_after.keys())
+        
+        for color in all_colors:
+            if color == 0:
+                continue
+            
+            before = props_before.get(color)
+            after = props_after.get(color)
+            
+            # Object appeared
+            if before is None and after is not None:
+                changes.append({
+                    'object_color': color,
+                    'property_name': 'existence',
+                    'value_before': 'absent',
+                    'value_after': 'present',
+                    'change_type': 'appeared',
+                    'triggering_action': action_taken,
+                    'triggering_color': triggering_color
+                })
+                continue
+            
+            # Object disappeared
+            if before is not None and after is None:
+                changes.append({
+                    'object_color': color,
+                    'property_name': 'existence',
+                    'value_before': 'present',
+                    'value_after': 'absent',
+                    'change_type': 'disappeared',
+                    'triggering_action': action_taken,
+                    'triggering_color': triggering_color
+                })
+                continue
+            
+            # At this point, both before and after MUST exist (not None)
+            # The above continue statements handle the None cases
+            if before is None or after is None:
+                continue  # Safety guard for type checker
+            
+            # Check each property for changes
+            if before['cell_count'] != after['cell_count']:
+                changes.append({
+                    'object_color': color,
+                    'property_name': 'size',
+                    'value_before': str(before['cell_count']),
+                    'value_after': str(after['cell_count']),
+                    'change_type': 'grew' if after['cell_count'] > before['cell_count'] else 'shrank',
+                    'triggering_action': action_taken,
+                    'triggering_color': triggering_color
+                })
+            
+            if before['shape_hash'] != after['shape_hash']:
+                changes.append({
+                    'object_color': color,
+                    'property_name': 'shape',
+                    'value_before': before['shape_hash'],
+                    'value_after': after['shape_hash'],
+                    'change_type': 'shape_changed',
+                    'triggering_action': action_taken,
+                    'triggering_color': triggering_color
+                })
+            
+            # Position change (center moved more than 0.5 cells)
+            dist = ((before['center'][0] - after['center'][0])**2 + 
+                    (before['center'][1] - after['center'][1])**2) ** 0.5
+            if dist > 0.5:
+                changes.append({
+                    'object_color': color,
+                    'property_name': 'position',
+                    'value_before': f"{before['center'][0]:.1f},{before['center'][1]:.1f}",
+                    'value_after': f"{after['center'][0]:.1f},{after['center'][1]:.1f}",
+                    'change_type': 'moved',
+                    'distance_moved': dist,
+                    'triggering_action': action_taken,
+                    'triggering_color': triggering_color
+                })
+            
+            if before['is_controlled'] != after['is_controlled']:
+                changes.append({
+                    'object_color': color,
+                    'property_name': 'controllable',
+                    'value_before': str(before['is_controlled']),
+                    'value_after': str(after['is_controlled']),
+                    'change_type': 'became_controllable' if after['is_controlled'] else 'lost_control',
+                    'triggering_action': action_taken,
+                    'triggering_color': triggering_color
+                })
+            
+            if before['is_contiguous'] != after['is_contiguous']:
+                changes.append({
+                    'object_color': color,
+                    'property_name': 'contiguity',
+                    'value_before': 'contiguous' if before['is_contiguous'] else 'fragmented',
+                    'value_after': 'contiguous' if after['is_contiguous'] else 'fragmented',
+                    'change_type': 'merged' if after['is_contiguous'] else 'split',
+                    'triggering_action': action_taken,
+                    'triggering_color': triggering_color
+                })
+            
+            # ================================================================
+            # ORIENTATION/ROTATION DETECTION (Added 2025-12-08)
+            # ================================================================
+            # Check if the object rotated or flipped.
+            # Same canonical shape but different orientation = rotation/flip.
+            # This is a key trigger type for puzzle mechanics.
+            # ================================================================
+            rotation_info = self.detect_rotation(before, after)
+            if rotation_info and rotation_info.get('rotated'):
+                changes.append({
+                    'object_color': color,
+                    'property_name': 'orientation',
+                    'value_before': rotation_info['from_orientation'],
+                    'value_after': rotation_info['to_orientation'],
+                    'change_type': rotation_info['rotation_type'],
+                    'triggering_action': action_taken,
+                    'triggering_color': triggering_color
+                })
+        
+        return changes
+    
+    def record_interaction_trigger(
+        self,
+        game_type: str,
+        level_number: int,
+        trigger_action: str,
+        trigger_position: Optional[Tuple[int, int]],
+        trigger_object_color: Optional[int],
+        trigger_interaction_type: str,
+        effect_position: Optional[Tuple[int, int]],
+        effect_object_color: int,
+        effect_type: str,
+        effect_details: Optional[Dict] = None
+    ) -> None:
+        """
+        Record a discovered interaction trigger to network knowledge.
+        
+        This learns causal relationships:
+        "When I do X at position A, effect Y happens at position B"
+        
+        Consistency tracking: If this exact trigger+effect pair is seen again,
+        confidence increases. If trigger happens but effect doesn't, confidence decreases.
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            trigger_action: What action triggered this (ACTION1-7)
+            trigger_position: Where action was taken (for ACTION6)
+            trigger_object_color: Object that was interacted with
+            trigger_interaction_type: 'collision', 'selection', 'click', 'adjacent'
+            effect_position: Where effect happened
+            effect_object_color: Object that was affected
+            effect_type: What happened
+            effect_details: Additional info as dict
+        """
+        # Calculate distance between trigger and effect
+        effect_distance = None
+        if trigger_position and effect_position:
+            effect_distance = abs(trigger_position[0] - effect_position[0]) + \
+                            abs(trigger_position[1] - effect_position[1])
+        
+        existing = self.db.execute_query("""
+            SELECT trigger_id, occurrence_count, consistent_count, confidence
+            FROM interaction_triggers
+            WHERE game_type = ? AND level_number = ?
+                  AND trigger_action = ? AND trigger_object_color = ?
+                  AND effect_object_color = ? AND effect_type = ?
+        """, (game_type, level_number, trigger_action, trigger_object_color,
+              effect_object_color, effect_type))
+        
+        if existing:
+            # Seen this before - increase confidence
+            old_count = existing[0]['occurrence_count']
+            old_consistent = existing[0]['consistent_count']
+            new_confidence = min(0.99, (old_consistent + 1) / (old_count + 1 + 2))  # Laplace smoothing
+            
+            self.db.execute_query("""
+                UPDATE interaction_triggers
+                SET occurrence_count = occurrence_count + 1,
+                    consistent_count = consistent_count + 1,
+                    confidence = ?,
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE trigger_id = ?
+            """, (new_confidence, existing[0]['trigger_id']))
+            
+            logger.debug(
+                f"[TRIGGER] Confirmed: {trigger_action}+{trigger_object_color} -> "
+                f"{effect_type} on {effect_object_color} (count={old_count+1}, conf={new_confidence:.2f})"
+            )
+        else:
+            # First time seeing this trigger
+            self.db.execute_query("""
+                INSERT OR IGNORE INTO interaction_triggers
+                (game_type, level_number, trigger_action, trigger_position_x, trigger_position_y,
+                 trigger_object_color, trigger_interaction_type,
+                 effect_position_x, effect_position_y, effect_object_color,
+                 effect_type, effect_details, effect_distance, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)
+            """, (game_type, level_number, trigger_action,
+                  trigger_position[0] if trigger_position else None,
+                  trigger_position[1] if trigger_position else None,
+                  trigger_object_color, trigger_interaction_type,
+                  effect_position[0] if effect_position else None,
+                  effect_position[1] if effect_position else None,
+                  effect_object_color, effect_type,
+                  json.dumps(effect_details) if effect_details else None,
+                  effect_distance))
+            
+            logger.info(
+                f"[TRIGGER] New: {trigger_action}+{trigger_object_color} -> "
+                f"{effect_type} on {effect_object_color} (distance={effect_distance})"
+            )
+    
+    def record_trigger_inconsistency(
+        self,
+        game_type: str,
+        level_number: int,
+        trigger_action: str,
+        trigger_object_color: int
+    ) -> None:
+        """
+        Record when an expected trigger didn't produce the expected effect.
+        
+        This decreases confidence - if a trigger is inconsistent, it might be
+        coincidental rather than causal.
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            trigger_action: What action was taken
+            trigger_object_color: Object that was interacted with
+        """
+        # Find all triggers matching this action+object
+        self.db.execute_query("""
+            UPDATE interaction_triggers
+            SET inconsistent_count = inconsistent_count + 1,
+                confidence = MAX(0.1, 
+                    CAST(consistent_count AS REAL) / 
+                    (occurrence_count + inconsistent_count + 2)
+                )
+            WHERE game_type = ? AND level_number = ?
+                  AND trigger_action = ? AND trigger_object_color = ?
+        """, (game_type, level_number, trigger_action, trigger_object_color))
+    
+    def get_known_triggers(
+        self,
+        game_type: str,
+        level_number: int,
+        min_confidence: float = 0.6,
+        min_occurrences: int = 2
+    ) -> List[Dict[str, Any]]:
+        """
+        Get known interaction triggers for a game/level.
+        
+        Only returns triggers that have been observed multiple times
+        with high consistency (likely causal, not coincidental).
+        
+        Args:
+            game_type: Game type to query
+            level_number: Level number
+            min_confidence: Minimum confidence threshold
+            min_occurrences: Minimum times trigger was observed
+        
+        Returns:
+            List of trigger patterns with confidence scores
+        """
+        results = self.db.execute_query("""
+            SELECT trigger_action, trigger_position_x, trigger_position_y,
+                   trigger_object_color, trigger_interaction_type,
+                   effect_position_x, effect_position_y, effect_object_color,
+                   effect_type, effect_details, effect_distance,
+                   occurrence_count, consistent_count, inconsistent_count, confidence
+            FROM interaction_triggers
+            WHERE game_type = ? AND level_number = ?
+                  AND confidence >= ? AND occurrence_count >= ?
+            ORDER BY confidence DESC, occurrence_count DESC
+        """, (game_type, level_number, min_confidence, min_occurrences))
+        
+        return [
+            {
+                'trigger_action': row['trigger_action'],
+                'trigger_position': (row['trigger_position_x'], row['trigger_position_y']) 
+                                    if row['trigger_position_x'] is not None else None,
+                'trigger_object_color': row['trigger_object_color'],
+                'trigger_type': row['trigger_interaction_type'],
+                'effect_position': (row['effect_position_x'], row['effect_position_y'])
+                                   if row['effect_position_x'] is not None else None,
+                'effect_object_color': row['effect_object_color'],
+                'effect_type': row['effect_type'],
+                'effect_distance': row['effect_distance'],
+                'occurrences': row['occurrence_count'],
+                'consistent': row['consistent_count'],
+                'inconsistent': row['inconsistent_count'],
+                'confidence': row['confidence']
+            }
+            for row in (results or [])
+        ]
+    
+    def record_all_grid_effects(
+        self,
+        game_type: str,
+        level_number: int,
+        action_taken: str,
+        trigger_position: Optional[Tuple[int, int]],
+        trigger_object_color: Optional[int],
+        trigger_type: str,
+        grid_before: List,
+        grid_after: List,
+        controlled_colors: Optional[List[int]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect and record ALL effects on the grid from a single action.
+        
+        This is the main entry point for comprehensive effect detection.
+        It finds all property changes and records them as potential triggers.
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            action_taken: What action was taken
+            trigger_position: Where action was taken (for ACTION6)
+            trigger_object_color: What object was directly interacted with
+            trigger_type: 'collision', 'selection', 'click', 'movement'
+            grid_before: Grid state before action
+            grid_after: Grid state after action
+            controlled_colors: Colors currently under control
+        
+        Returns:
+            List of all detected effects
+        """
+        # Get all property changes
+        changes = self.detect_property_changes(
+            grid_before=grid_before,
+            grid_after=grid_after,
+            controlled_colors=controlled_colors,
+            action_taken=action_taken,
+            triggering_color=trigger_object_color
+        )
+        
+        # Record each change as a potential trigger
+        for change in changes:
+            # Skip recording the movement of the controlled object itself
+            # (that's expected, not a trigger)
+            if (change['object_color'] == trigger_object_color and 
+                change['property_name'] == 'position' and
+                trigger_type == 'movement'):
+                continue
+            
+            # Get position of affected object if available
+            props_after = self.analyze_object_properties(grid_after)
+            effect_position = None
+            if change['object_color'] in props_after:
+                center = props_after[change['object_color']]['center']
+                effect_position = (int(center[0]), int(center[1]))
+            
+            self.record_interaction_trigger(
+                game_type=game_type,
+                level_number=level_number,
+                trigger_action=action_taken,
+                trigger_position=trigger_position,
+                trigger_object_color=trigger_object_color,
+                trigger_interaction_type=trigger_type,
+                effect_position=effect_position,
+                effect_object_color=change['object_color'],
+                effect_type=change['change_type'],
+                effect_details={
+                    'property': change['property_name'],
+                    'before': change['value_before'],
+                    'after': change['value_after']
+                }
+            )
+        
+        return changes
+
+    # ========================================================================
+    # TRIGGER SEQUENCE TRACKING (Order of Triggers Matters!)
+    # ========================================================================
+    # Track the order in which triggers are activated during gameplay.
+    # Successful sequences are stored for replay by other agents.
+    # ========================================================================
+    
+    def __init_sequence_tracker(self, game_id: str, level_number: int) -> None:
+        """Initialize a new sequence tracking session for a level."""
+        if not hasattr(self, '_active_sequences'):
+            self._active_sequences = {}
+        
+        key = f"{game_id}:{level_number}"
+        self._active_sequences[key] = {
+            'game_id': game_id,
+            'level_number': level_number,
+            'steps': [],
+            'step_count': 0,
+            'start_score': None
+        }
+    
+    def record_trigger_step(
+        self,
+        game_id: str,
+        level_number: int,
+        action_number: int,
+        trigger_action: str,
+        trigger_object_color: Optional[int],
+        trigger_interaction_type: str,
+        effect_object_color: Optional[int],
+        effect_type: str,
+        score_before: Optional[float] = None,
+        score_after: Optional[float] = None
+    ) -> None:
+        """
+        Record a single trigger activation as part of the current sequence.
+        
+        This builds up the sequence step-by-step during gameplay.
+        At level end, finalize_sequence() is called to save if successful.
+        
+        Args:
+            game_id: Current game ID
+            level_number: Current level
+            action_number: Action index
+            trigger_action: What action was taken
+            trigger_object_color: Object that was interacted with
+            trigger_interaction_type: Type of interaction
+            effect_object_color: Object that was affected
+            effect_type: What effect occurred
+            score_before: Score before this action
+            score_after: Score after this action
+        """
+        key = f"{game_id}:{level_number}"
+        
+        # Initialize if needed
+        if not hasattr(self, '_active_sequences'):
+            self._active_sequences = {}
+        if key not in self._active_sequences:
+            self.__init_sequence_tracker(game_id, level_number)
+        
+        seq = self._active_sequences[key]
+        seq['step_count'] += 1
+        
+        step = {
+            'step_number': seq['step_count'],
+            'action_number': action_number,
+            'trigger_action': trigger_action,
+            'trigger_object_color': trigger_object_color,
+            'trigger_interaction_type': trigger_interaction_type,
+            'effect_object_color': effect_object_color,
+            'effect_type': effect_type
+        }
+        
+        seq['steps'].append(step)
+        
+        # Track score changes
+        if seq['start_score'] is None and score_before is not None:
+            seq['start_score'] = score_before
+        
+        # Also log to database for later analysis
+        self.db.execute_query("""
+            INSERT INTO trigger_sequence_events
+            (game_id, level_number, action_number, trigger_action,
+             trigger_object_color, trigger_interaction_type,
+             effect_object_color, effect_type, step_number,
+             score_before, score_after)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (game_id, level_number, action_number, trigger_action,
+              trigger_object_color, trigger_interaction_type,
+              effect_object_color, effect_type, seq['step_count'],
+              score_before, score_after))
+    
+    def finalize_sequence(
+        self,
+        game_id: str,
+        level_number: int,
+        outcome_type: str,
+        outcome_details: Optional[Dict] = None,
+        agent_id: Optional[str] = None,
+        level_won: bool = False
+    ) -> Optional[str]:
+        """
+        Finalize and save a trigger sequence at level end.
+        
+        Only saves sequences that achieved something meaningful
+        (level win, score increase, etc.)
+        
+        Args:
+            game_id: Game ID
+            level_number: Level number
+            outcome_type: 'level_win', 'score_increase', 'progress', etc.
+            outcome_details: Additional outcome information
+            agent_id: Agent that discovered this sequence
+            level_won: Whether the level was completed
+        
+        Returns:
+            Sequence ID if saved, None if not worth saving
+        """
+        key = f"{game_id}:{level_number}"
+        
+        if not hasattr(self, '_active_sequences') or key not in self._active_sequences:
+            return None
+        
+        seq = self._active_sequences[key]
+        
+        # Don't save empty sequences
+        if not seq['steps']:
+            del self._active_sequences[key]
+            return None
+        
+        # Create sequence hash for deduplication
+        sequence_json = json.dumps(seq['steps'], sort_keys=True)
+        sequence_hash = str(hash(sequence_json))
+        
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Check if we've seen this sequence before
+        existing = self.db.execute_query("""
+            SELECT sequence_id, times_succeeded, times_attempted
+            FROM trigger_sequences
+            WHERE game_type = ? AND level_number = ? AND sequence_hash = ?
+        """, (game_type, level_number, sequence_hash))
+        
+        if existing:
+            # Update existing sequence
+            new_attempts = existing[0]['times_attempted'] + 1
+            new_successes = existing[0]['times_succeeded'] + (1 if level_won else 0)
+            new_rate = new_successes / new_attempts if new_attempts > 0 else 0
+            
+            self.db.execute_query("""
+                UPDATE trigger_sequences
+                SET times_attempted = ?,
+                    times_succeeded = ?,
+                    success_rate = ?,
+                    last_validated = CURRENT_TIMESTAMP,
+                    is_complete_solution = MAX(is_complete_solution, ?)
+                WHERE sequence_id = ?
+            """, (new_attempts, new_successes, new_rate, 
+                  1 if level_won else 0, existing[0]['sequence_id']))
+            
+            del self._active_sequences[key]
+            return str(existing[0]['sequence_id'])
+        else:
+            # Save new sequence
+            self.db.execute_query("""
+                INSERT INTO trigger_sequences
+                (game_type, level_number, sequence_json, sequence_length,
+                 sequence_hash, outcome_type, outcome_details,
+                 discovered_by_agent, is_complete_solution)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (game_type, level_number, sequence_json, len(seq['steps']),
+                  sequence_hash, outcome_type,
+                  json.dumps(outcome_details) if outcome_details else None,
+                  agent_id, 1 if level_won else 0))
+            
+            logger.info(
+                f"[SEQUENCE] Saved new trigger sequence for {game_type} L{level_number}: "
+                f"{len(seq['steps'])} steps, outcome={outcome_type}"
+            )
+            
+            del self._active_sequences[key]
+            return sequence_hash
+    
+    def get_proven_sequences(
+        self,
+        game_type: str,
+        level_number: int,
+        min_success_rate: float = 0.5,
+        complete_only: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Get proven trigger sequences for a game/level.
+        
+        Returns sequences that have been successfully used before,
+        ordered by success rate.
+        
+        Args:
+            game_type: Game type to query
+            level_number: Level number
+            min_success_rate: Minimum success rate threshold
+            complete_only: Only return complete solutions (level wins)
+        
+        Returns:
+            List of sequence dicts with steps and success info
+        """
+        query = """
+            SELECT sequence_id, sequence_json, sequence_length,
+                   outcome_type, times_succeeded, times_attempted,
+                   success_rate, is_complete_solution
+            FROM trigger_sequences
+            WHERE game_type = ? AND level_number = ?
+                  AND success_rate >= ?
+        """
+        params = [game_type, level_number, min_success_rate]
+        
+        if complete_only:
+            query += " AND is_complete_solution = 1"
+        
+        query += " ORDER BY success_rate DESC, times_succeeded DESC"
+        
+        results = self.db.execute_query(query, tuple(params))
+        
+        sequences = []
+        for row in (results or []):
+            try:
+                steps = json.loads(row['sequence_json'])
+            except:
+                steps = []
+            
+            sequences.append({
+                'sequence_id': row['sequence_id'],
+                'steps': steps,
+                'length': row['sequence_length'],
+                'outcome_type': row['outcome_type'],
+                'times_succeeded': row['times_succeeded'],
+                'times_attempted': row['times_attempted'],
+                'success_rate': row['success_rate'],
+                'is_complete': bool(row['is_complete_solution'])
+            })
+        
+        return sequences
+    
+    def get_next_expected_trigger(
+        self,
+        game_type: str,
+        level_number: int,
+        completed_steps: List[Dict]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Given completed trigger steps, predict the next trigger to activate.
+        
+        Matches current progress against proven sequences to suggest
+        the next step.
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            completed_steps: Steps already completed this attempt
+        
+        Returns:
+            Suggested next trigger step, or None if no match found
+        """
+        sequences = self.get_proven_sequences(game_type, level_number, min_success_rate=0.5)
+        
+        if not sequences:
+            return None
+        
+        completed_len = len(completed_steps)
+        
+        # Find sequences that match our progress so far
+        for seq in sequences:
+            if len(seq['steps']) <= completed_len:
+                continue  # This sequence is shorter than our progress
+            
+            # Check if our steps match the beginning of this sequence
+            match = True
+            for i, step in enumerate(completed_steps):
+                if i >= len(seq['steps']):
+                    match = False
+                    break
+                
+                seq_step = seq['steps'][i]
+                # Compare key fields
+                if (step.get('trigger_action') != seq_step.get('trigger_action') or
+                    step.get('effect_type') != seq_step.get('effect_type')):
+                    match = False
+                    break
+            
+            if match and completed_len < len(seq['steps']):
+                # Found a matching sequence - return the next step
+                next_step = seq['steps'][completed_len]
+                next_step['from_sequence_id'] = seq['sequence_id']
+                next_step['sequence_success_rate'] = seq['success_rate']
+                return next_step
+        
+        return None
+    
+    def clear_sequence_tracker(self, game_id: str, level_number: int) -> None:
+        """Clear the sequence tracker for a game/level without saving."""
+        key = f"{game_id}:{level_number}"
+        if hasattr(self, '_active_sequences') and key in self._active_sequences:
+            del self._active_sequences[key]
 
 
 # ============================================================================

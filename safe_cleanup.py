@@ -49,6 +49,16 @@ class SafeDatabaseCleaner:
     - Agent operating modes: 100,000 entries
     - Decision weaving reports: 50,000 entries (Two-Streams)
     - Role cohort wisdom: 7 days (re-calculated on demand)
+    
+    Session 23 Tables (Interaction/Trigger Tracking):
+    - interaction_triggers: KEEP (aggregated knowledge, already compressed)
+    - trigger_sequences: KEEP (winning sequences - CRITICAL)
+    - trigger_sequence_events: 100,000 entries (raw data, purge after sequences finalized)
+    - object_property_snapshots: 200,000 entries (raw data, patterns go to interaction_triggers)
+    - object_property_changes: 100,000 entries (raw data, patterns go to interaction_triggers)
+    - action6_availability_events: 50,000 entries (patterns go to selectability_conditions)
+    - collision_events: 50,000 entries (patterns go to collision_effects)
+    - autonomous_objects: KEEP (small table, discovered NPCs)
     """
     
     def __init__(self, db_path='core_data.db'):
@@ -66,6 +76,15 @@ class SafeDatabaseCleaner:
         self.cohort_wisdom_retention_days = 7
         # Failure hypotheses: Keep validated + recent unvalidated
         self.failure_hypotheses_retention = 10000  # Keep top 10k hypotheses
+        
+        # Session 23: Interaction/trigger tracking cleanup
+        # These tables contain RAW DATA that gets AGGREGATED into knowledge tables
+        # Once aggregated, raw data can be purged (keeps DB lean)
+        self.trigger_sequence_events_retention = 100000  # Raw trigger steps
+        self.object_property_snapshots_retention = 200000  # Object state per action
+        self.object_property_changes_retention = 100000  # Property change log
+        self.action6_availability_retention = 50000  # ACTION6 state changes
+        self.collision_events_retention = 50000  # Raw collision data
     
     def cleanup(self, dry_run=True, verbose=True):
         """

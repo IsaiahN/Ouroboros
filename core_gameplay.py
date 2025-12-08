@@ -599,6 +599,30 @@ class GameplayEngine:
         
         loop_state.level_api_resets = 0
         
+        # ================================================================
+        # TRIGGER SEQUENCE FINALIZATION (Added 2025-12-08)
+        # ================================================================
+        # Save the trigger sequence that led to this level win.
+        # Order of triggers matters - this records the successful order.
+        # ================================================================
+        if hasattr(self, 'agent_self_model'):
+            try:
+                self.agent_self_model.finalize_sequence(
+                    game_id=game_id,
+                    level_number=loop_state.current_level,
+                    outcome_type='level_win',
+                    outcome_details={
+                        'score_before': loop_state.previous_score,
+                        'score_after': game_state.score,
+                        'actions_taken': loop_state.level_action_count
+                    },
+                    agent_id=agent_id,
+                    level_won=True
+                )
+                logger.info(f"[SEQUENCE] Saved winning trigger sequence for level {loop_state.current_level}")
+            except Exception as e:
+                logger.debug(f"Trigger sequence finalization failed (non-critical): {e}")
+        
         # Pattern Learning: Capture sequence on level completion
         if self.game_config.get('enable_pattern_learning', True):
             level_for_storage = int(game_state.score)
@@ -2552,6 +2576,69 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Rule query failed (falling back to other strategies): {e}")
         
+        # ===================================================================
+        # SELECTION-AWARE ACTION (Added 2025-12-08)
+        # ===================================================================
+        # Before using ACTION1-4 to move, check if we need to select an object.
+        # In many ARC games, ACTION6 selects an object, then ACTION1-4 moves it.
+        # If network knows about selectable objects and nothing is selected,
+        # we should select first before trying to move.
+        # ===================================================================
+        if hasattr(self, 'agent_self_model') and game_state.frame:
+            try:
+                session_id = self.session_manager.current_session_id
+                current_game_id = self.session_manager.current_game_id
+                current_level = game_state.score + 1  # Estimate level from score
+                
+                if session_id and current_game_id:
+                    game_type = current_game_id.split('-')[0] if '-' in current_game_id else current_game_id
+                    
+                    # Check what's currently selected
+                    current_selection = self.agent_self_model.get_current_selection(
+                        session_id, current_game_id, current_level
+                    )
+                    
+                    # Query known selectable objects for this game/level
+                    selectable_objects = self.agent_self_model.get_selectable_objects(
+                        game_type=game_type,
+                        level=current_level,
+                        min_confidence=0.6
+                    )
+                    
+                    if selectable_objects and not current_selection:
+                        # Network knows about selectable objects, but nothing is selected!
+                        # Recommend selecting an object before trying to move
+                        best_selectable = selectable_objects[0]
+                        
+                        # Parse coordinates to get click target
+                        coords_str = best_selectable.get('coordinates', '')
+                        if coords_str and '(' in coords_str:
+                            try:
+                                # Parse "(x,y)" format
+                                coords_str = coords_str.strip('()')
+                                x_str, y_str = coords_str.split(',')
+                                target_x, target_y = int(x_str), int(y_str)
+                                
+                                # Store target for ACTION6
+                                self._selection_target = {
+                                    'x': target_x,
+                                    'y': target_y,
+                                    'object_color': best_selectable['object_color']
+                                }
+                                
+                                reasoning = (
+                                    f"Selection required: Clicking on selectable object "
+                                    f"(color {best_selectable['object_color']}) at ({target_x},{target_y}) "
+                                    f"before movement"
+                                )
+                                logger.info(f"[SELECTION] {reasoning}")
+                                return "ACTION6", reasoning
+                            except (ValueError, IndexError):
+                                pass  # Could not parse coordinates
+                                
+            except Exception as e:
+                logger.debug(f"Selection-aware check failed (non-critical): {e}")
+        
         # === NEW: Check for active subgoal plan ===
         # SELF-DIRECTED: Skip subgoal plans - agent is off-script now
         if agent_id and hasattr(self, 'subgoal_planner') and self.subgoal_planner and not is_self_directed:
@@ -3319,8 +3406,16 @@ class GameplayEngine:
         )
         
         if action == "ACTION6":
-            # Check if we have meta-learned coordinates to use
-            if hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
+            # Priority 1: Check if we have a selection target from selection-aware logic
+            if hasattr(self, '_selection_target') and self._selection_target:
+                target = self._selection_target
+                x, y = target['x'], target['y']
+                reason = f"Selecting object color {target.get('object_color', '?')} for control"
+                full_reasoning = f"{reasoning} | Selection: {reason}"
+                logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
+                del self._selection_target  # Clear after use
+            # Priority 2: Check if we have meta-learned coordinates to use
+            elif hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
                 # Use coordinates from meta-learning
                 next_action = self._pattern_action_queue[0]  # Peek at next action
                 if next_action['type'] == 'ACTION6':
@@ -3353,6 +3448,40 @@ class GameplayEngine:
             # Send ACTION6 with reasoning JSON
             new_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=reasoning_json, level_number=current_level)
             
+            # ================================================================
+            # SELECTION TRACKING (Added 2025-12-08)
+            # ================================================================
+            # ACTION6 can select objects for control by ACTION1-4.
+            # Track what was clicked to detect selection changes.
+            # ================================================================
+            if new_state and new_state.frame and hasattr(self, 'agent_self_model'):
+                try:
+                    session_id = self.session_manager.current_session_id
+                    game_id = self.session_manager.current_game_id
+                    agent_id = self.game_config.get('agent_id')
+                    
+                    if session_id and game_id:
+                        # Track if this click selected an object
+                        selection_result = self.agent_self_model.track_selection_change(
+                            session_id=session_id,
+                            game_id=game_id,
+                            level=current_level,
+                            action_index=getattr(self, '_action_counter', 0),
+                            action_type='ACTION6',
+                            click_x=x,
+                            click_y=y,
+                            frame_before={'grid': game_state.frame},
+                            frame_after={'grid': new_state.frame}
+                        )
+                        
+                        if selection_result:
+                            logger.info(
+                                f"[SELECTION] ACTION6 clicked on object color "
+                                f"{selection_result['selected_object_color']} at ({x},{y})"
+                            )
+                except Exception as e:
+                    logger.debug(f"Selection tracking failed (non-critical): {e}")
+            
             # Track frame changes to detect productive actions
             if new_state and new_state.frame:
                 # Pass current score to help adaptive exploration
@@ -3363,6 +3492,97 @@ class GameplayEngine:
                 )
                 if not frame_changed:
                     logger.debug(f"ACTION6 at ({x}, {y}) did not change frame")
+                
+                # ================================================================
+                # COMPREHENSIVE GRID EFFECTS FOR ACTION6 (Added 2025-12-08)
+                # ================================================================
+                # ACTION6 (click/select) can trigger effects anywhere on the grid:
+                # - Clicking a button might open a door elsewhere
+                # - Selecting an object might change colors of other objects
+                # - Interactions can trigger chain reactions
+                # Track ALL changes to learn causal relationships.
+                # ================================================================
+                try:
+                    game_type = self.session_manager.current_game_type or \
+                               (self.session_manager.current_game_id or 'unknown').split('-')[0]
+                    
+                    # Get clicked object color
+                    clicked_color = None
+                    if game_state.frame and 0 <= y < len(game_state.frame):
+                        row = game_state.frame[y]
+                        if 0 <= x < len(row):
+                            clicked_color = row[x]
+                    
+                    effects = self.agent_self_model.record_all_grid_effects(
+                        game_type=game_type,
+                        level_number=current_level,
+                        action_taken='ACTION6',
+                        trigger_position=(x, y),
+                        trigger_object_color=clicked_color,
+                        trigger_type='click',
+                        grid_before=game_state.frame,
+                        grid_after=new_state.frame,
+                        controlled_colors=[]  # ACTION6 is a click, not controlling anything yet
+                    )
+                    
+                    if effects:
+                        for effect in effects[:3]:  # Log first 3 effects
+                            logger.info(
+                                f"[ACTION6 EFFECT] {effect['property_name']}: "
+                                f"color {effect['object_color']} "
+                                f"{effect['change_type']} "
+                                f"({effect['value_before']} -> {effect['value_after']})"
+                            )
+                        if len(effects) > 3:
+                            logger.info(f"[ACTION6 EFFECT] ... and {len(effects) - 3} more effects")
+                        
+                        # ================================================================
+                        # TRIGGER SEQUENCE TRACKING (Added 2025-12-08)
+                        # ================================================================
+                        # Record each trigger activation as part of the current sequence.
+                        # Order matters - successful sequences can be replayed.
+                        # ================================================================
+                        score_before = game_state.score if hasattr(game_state, 'score') else None
+                        score_after = new_state.score if hasattr(new_state, 'score') else None
+                        
+                        for effect in effects:
+                            self.agent_self_model.record_trigger_step(
+                                game_id=self.session_manager.current_game_id,
+                                level_number=current_level,
+                                action_number=getattr(self, '_action_counter', 0),
+                                trigger_action='ACTION6',
+                                trigger_object_color=clicked_color,
+                                trigger_interaction_type='click',
+                                effect_object_color=effect['object_color'],
+                                effect_type=effect['change_type'],
+                                score_before=score_before,
+                                score_after=score_after
+                            )
+                except Exception as e:
+                    logger.debug(f"ACTION6 grid effects tracking failed (non-critical): {e}")
+            
+            # ================================================================
+            # ACTION6 AVAILABILITY TRACKING (Added 2025-01-XX)
+            # ================================================================
+            # Track whether ACTION6 is available after this action.
+            # ACTION6 available = something on grid is selectable.
+            # ACTION6 absent = nothing selectable (conditions not met).
+            # ================================================================
+            if hasattr(self, 'agent_self_model') and new_state:
+                try:
+                    available_actions = new_state.available_actions if hasattr(new_state, 'available_actions') else []
+                    self.agent_self_model.track_action6_availability(
+                        agent_id=self.game_config.get('agent_id'),
+                        game_id=self.session_manager.current_game_id,
+                        level_number=current_level,
+                        action_number=getattr(self, '_action_counter', 0),
+                        available_actions=available_actions,
+                        previous_action='ACTION6',
+                        previous_action_coords={'x': x, 'y': y},
+                        grid_state=new_state.frame
+                    )
+                except Exception as e:
+                    logger.debug(f"ACTION6 availability tracking failed (non-critical): {e}")
                     
             return new_state
         else:
@@ -3372,8 +3592,187 @@ class GameplayEngine:
             method_name = f"send_action_{action_num}"
             if hasattr(self.action_handler, method_name):
                 method = getattr(self.action_handler, method_name)
+                # Store frame before for selection verification
+                frame_before = game_state.frame
+                
                 # Pass reasoning JSON and level_number to action handler
-                return await method(reasoning=reasoning_json, level_number=current_level)
+                new_state = await method(reasoning=reasoning_json, level_number=current_level)
+                
+                # ================================================================
+                # SELECTION VERIFICATION (Added 2025-12-08)
+                # ================================================================
+                # For ACTION1-4 (movement), verify if a previously selected
+                # object moved. This confirms the selection mechanism.
+                # ================================================================
+                if action_num in ['1', '2', '3', '4'] and hasattr(self, 'agent_self_model'):
+                    try:
+                        session_id = self.session_manager.current_session_id
+                        game_id = self.session_manager.current_game_id
+                        
+                        if session_id and game_id and new_state and new_state.frame:
+                            verification = self.agent_self_model.verify_selection_controls_movement(
+                                session_id=session_id,
+                                game_id=game_id,
+                                level=current_level,
+                                movement_action=action,
+                                frame_before={'grid': frame_before},
+                                frame_after={'grid': new_state.frame}
+                            )
+                            
+                            if verification and verification.get('confirmed'):
+                                logger.info(
+                                    f"[SELECTION CONFIRMED] Object color "
+                                    f"{verification['object_color']} moved "
+                                    f"{verification['movement_direction']} on {action}"
+                                )
+                            
+                            # ================================================================
+                            # COLLISION DETECTION (Added 2025-01-XX)
+                            # ================================================================
+                            # After movement, check if controlled object collided with
+                            # another object. This builds causal model of interactions.
+                            # ================================================================
+                            if verification and verification.get('object_color'):
+                                controlled_color = verification['object_color']
+                                from_pos = verification.get('from_pos')
+                                to_pos = verification.get('to_pos')
+                                
+                                collision = self.agent_self_model.detect_collision(
+                                    grid_before=frame_before,
+                                    grid_after=new_state.frame,
+                                    controlled_object_color=controlled_color,
+                                    controlled_from_pos=from_pos,
+                                    controlled_to_pos=to_pos,
+                                    action=action
+                                )
+                                
+                                if collision:
+                                    self.agent_self_model.record_collision_event(
+                                        agent_id=self.game_config.get('agent_id'),
+                                        game_id=game_id,
+                                        level_number=current_level,
+                                        action_number=getattr(self, '_action_counter', 0),
+                                        collision_data=collision
+                                    )
+                                    logger.info(
+                                        f"[COLLISION] {controlled_color} hit "
+                                        f"{collision['target_object_color']} - "
+                                        f"effect: {collision['effect_observed']}"
+                                    )
+                            
+                            # ================================================================
+                            # COMPREHENSIVE GRID EFFECTS TRACKING (Added 2025-12-08)
+                            # ================================================================
+                            # Track ALL effects on the entire grid from this action:
+                            # - Color changes anywhere
+                            # - Size changes (objects grow/shrink)
+                            # - Shape changes
+                            # - Remote effects (action at A causes change at B)
+                            # - Controllability changes
+                            # Consistency = causality (repeated = real trigger)
+                            # ================================================================
+                            game_type = self.session_manager.current_game_type or game_id.split('-')[0]
+                            controlled_colors = [verification['object_color']] if verification.get('object_color') else []
+                            
+                            effects = self.agent_self_model.record_all_grid_effects(
+                                game_type=game_type,
+                                level_number=current_level,
+                                action_taken=action,
+                                trigger_position=verification.get('to_pos'),
+                                trigger_object_color=verification.get('object_color'),
+                                trigger_type='movement' if verification.get('confirmed') else 'collision',
+                                grid_before=frame_before,
+                                grid_after=new_state.frame,
+                                controlled_colors=controlled_colors
+                            )
+                            
+                            if effects:
+                                for effect in effects[:3]:  # Log first 3 effects
+                                    logger.info(
+                                        f"[EFFECT] {effect['property_name']}: "
+                                        f"color {effect['object_color']} "
+                                        f"{effect['change_type']} "
+                                        f"({effect['value_before']} -> {effect['value_after']})"
+                                    )
+                                if len(effects) > 3:
+                                    logger.info(f"[EFFECT] ... and {len(effects) - 3} more effects")
+                                
+                                # ================================================================
+                                # TRIGGER SEQUENCE TRACKING (Added 2025-12-08)
+                                # ================================================================
+                                # Record each trigger activation as part of the current sequence.
+                                # Order matters - successful sequences can be replayed.
+                                # ================================================================
+                                score_before = game_state.score if hasattr(game_state, 'score') else None
+                                score_after = new_state.score if hasattr(new_state, 'score') else None
+                                trigger_type = 'movement' if verification.get('confirmed') else 'collision'
+                                
+                                for effect in effects:
+                                    self.agent_self_model.record_trigger_step(
+                                        game_id=game_id,
+                                        level_number=current_level,
+                                        action_number=getattr(self, '_action_counter', 0),
+                                        trigger_action=action,
+                                        trigger_object_color=verification.get('object_color'),
+                                        trigger_interaction_type=trigger_type,
+                                        effect_object_color=effect['object_color'],
+                                        effect_type=effect['change_type'],
+                                        score_before=score_before,
+                                        score_after=score_after
+                                    )
+                            
+                            # ================================================================
+                            # AUTONOMOUS OBJECT DETECTION (Added 2025-01-XX)
+                            # ================================================================
+                            # Check if any objects moved that we didn't control.
+                            # These are NPCs, enemies, or environmental hazards.
+                            # ================================================================
+                            autonomous_movements = self.agent_self_model.detect_autonomous_movement(
+                                grid_before=frame_before,
+                                grid_after=new_state.frame,
+                                controlled_object_color=verification.get('object_color'),
+                                my_action=action
+                            )
+                            
+                            for auto_obj in autonomous_movements:
+                                self.agent_self_model.record_autonomous_object(
+                                    game_type=self.session_manager.current_game_type or 'unknown',
+                                    level_number=current_level,
+                                    object_color=auto_obj['color'],
+                                    movement_data=auto_obj
+                                )
+                                logger.info(
+                                    f"[AUTONOMOUS] Object color {auto_obj['color']} "
+                                    f"moved {auto_obj.get('direction', 'unknown')} "
+                                    f"without player control"
+                                )
+                    except Exception as e:
+                        logger.debug(f"Selection verification failed (non-critical): {e}")
+                
+                # ================================================================
+                # ACTION6 AVAILABILITY TRACKING (Added 2025-01-XX)
+                # ================================================================
+                # Track whether ACTION6 is available after this action.
+                # ACTION6 available = something on grid is selectable.
+                # ACTION6 absent = nothing selectable (conditions not met).
+                # ================================================================
+                if hasattr(self, 'agent_self_model') and new_state:
+                    try:
+                        available_actions = new_state.available_actions if hasattr(new_state, 'available_actions') else []
+                        self.agent_self_model.track_action6_availability(
+                            agent_id=self.game_config.get('agent_id'),
+                            game_id=self.session_manager.current_game_id,
+                            level_number=current_level,
+                            action_number=getattr(self, '_action_counter', 0),
+                            available_actions=available_actions,
+                            previous_action=action,
+                            previous_action_coords=None,  # Movement actions don't have coords
+                            grid_state=new_state.frame
+                        )
+                    except Exception as e:
+                        logger.debug(f"ACTION6 availability tracking failed (non-critical): {e}")
+                
+                return new_state
             else:
                 raise ValueError(f"Unknown action: {action}")
 
