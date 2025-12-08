@@ -765,3 +765,248 @@ class SensationEngine:
             return total_bias / weight_sum
         
         return 0.0
+
+    def get_tetrahedral_sensation(
+        self,
+        agent_id: str,
+        object_info: dict,
+        control_data: Optional[dict] = None
+    ) -> dict:
+        """
+        Calculate four-axis tetrahedral sensation for an object.
+        
+        Implements the McGuffin grammar: Structure >< Function >< Method >< Interpretation
+        Each object is perceived through all four axes simultaneously.
+        
+        Args:
+            agent_id: The perceiving agent
+            object_info: Dict with keys:
+                - 'object_type': str (e.g., 'controlled_object_color_4')
+                - 'position': tuple (x, y) 
+                - 'color': int (0-9)
+                - 'shape': str (optional)
+            control_data: Optional control hypothesis from self-model
+                - 'is_controlled': bool
+                - 'confidence': float
+                - 'control_method': str
+                
+        Returns:
+            Tetrahedral sensation dict:
+            {
+                'structure': {  # What IS it (invariant form)
+                    'identity': str,  # Object type/class
+                    'position': tuple,  # Spatial coordinates
+                    'properties': dict,  # Color, shape, size
+                    'stability': float  # How fixed/stable (0-1)
+                },
+                'function': {  # What does it DO (relational dynamics)
+                    'sensation_score': float,  # Emotional valence (-1 to 1)
+                    'attraction': float,  # Draw toward/away (-1 to 1)
+                    'association': str,  # danger/obstacle/neutral/opportunity/goal
+                    'predicted_behavior': str  # What we expect it to do
+                },
+                'method': {  # HOW we interact (procedural knowledge)
+                    'is_controlled': bool,  # Do we control it?
+                    'control_method': str,  # How we control (if applicable)
+                    'approach_actions': List[int],  # Actions to approach
+                    'avoid_actions': List[int],  # Actions to avoid
+                    'interaction_history': int  # Times interacted
+                },
+                'interpretation': {  # WHY it matters (semantic meaning)
+                    'semantic_role': str,  # self/tool/goal/obstacle/environment
+                    'goal_relevance': float,  # How relevant to current goal (-1 to 1)
+                    'threat_level': float,  # Danger assessment (0-1)
+                    'curiosity': float,  # Novelty/exploration value (0-1)
+                    'personal_meaning': str  # Agent's personal interpretation
+                },
+                'balance': float,  # How balanced the four axes are (0-1)
+                'dominant_axis': str  # Which axis dominates perception
+            }
+        """
+        object_type = object_info.get('object_type', 'unknown')
+        position = object_info.get('position', (0, 0))
+        color = object_info.get('color', 0)
+        
+        # STRUCTURE AXIS - What IS it
+        structure = {
+            'identity': object_type,
+            'position': position,
+            'properties': {
+                'color': color,
+                'shape': object_info.get('shape', 'unknown')
+            },
+            'stability': 1.0 if 'wall' in object_type or 'boundary' in object_type else 0.5
+        }
+        
+        # FUNCTION AXIS - What does it DO (from sensation/impression data)
+        impression = self.query_personal_impression(agent_id, object_type)
+        
+        if impression:
+            function = {
+                'sensation_score': impression.get('sensation_score', 0.0),
+                'attraction': self._calculate_attraction(impression),
+                'association': impression.get('association', 'neutral'),
+                'predicted_behavior': self._predict_object_behavior(object_type, impression)
+            }
+        else:
+            # Default function for unknown objects
+            function = {
+                'sensation_score': 0.0,
+                'attraction': 0.0,
+                'association': 'neutral',
+                'predicted_behavior': 'unknown'
+            }
+        
+        # METHOD AXIS - HOW we interact (from control data)
+        if control_data:
+            method = {
+                'is_controlled': control_data.get('is_controlled', False),
+                'control_method': control_data.get('control_method', 'none'),
+                'approach_actions': control_data.get('approach_actions', []),
+                'avoid_actions': control_data.get('avoid_actions', []),
+                'interaction_history': control_data.get('interaction_count', 0)
+            }
+        else:
+            method = {
+                'is_controlled': False,
+                'control_method': 'none',
+                'approach_actions': [],
+                'avoid_actions': [],
+                'interaction_history': 0
+            }
+        
+        # INTERPRETATION AXIS - WHY it matters
+        interpretation = self._calculate_interpretation(
+            agent_id, object_type, structure, function, method
+        )
+        
+        # Calculate balance and dominant axis
+        axis_strengths = {
+            'structure': structure['stability'],
+            'function': abs(function['sensation_score']),
+            'method': 1.0 if method['is_controlled'] else 0.3,
+            'interpretation': interpretation['goal_relevance']
+        }
+        
+        max_strength = max(axis_strengths.values())
+        min_strength = min(axis_strengths.values())
+        balance = 1.0 - (max_strength - min_strength) if max_strength > 0 else 0.5
+        
+        dominant_axis = max(axis_strengths, key=axis_strengths.get)
+        
+        return {
+            'structure': structure,
+            'function': function,
+            'method': method,
+            'interpretation': interpretation,
+            'balance': balance,
+            'dominant_axis': dominant_axis
+        }
+    
+    def _calculate_attraction(self, impression: dict) -> float:
+        """Calculate attraction score from impression data."""
+        association = impression.get('association', 'neutral')
+        strength = impression.get('impression_strength', 0.5)
+        
+        attraction_map = {
+            'goal': 1.0,
+            'success': 0.8,
+            'opportunity': 0.5,
+            'neutral': 0.0,
+            'obstacle': -0.3,
+            'danger': -1.0
+        }
+        
+        base = attraction_map.get(association, 0.0)
+        return base * strength
+    
+    def _predict_object_behavior(self, object_type: str, impression: dict) -> str:
+        """Predict what this object will do based on type and history."""
+        association = impression.get('association', 'neutral')
+        
+        if 'wall' in object_type or 'boundary' in object_type:
+            return 'static_blocking'
+        elif 'goal' in object_type or association == 'goal':
+            return 'static_target'
+        elif association == 'danger':
+            return 'potentially_harmful'
+        elif 'moving' in object_type or 'enemy' in object_type:
+            return 'dynamic_unpredictable'
+        else:
+            return 'passive'
+    
+    def _calculate_interpretation(
+        self,
+        agent_id: str,
+        object_type: str,
+        structure: dict,
+        function: dict,
+        method: dict
+    ) -> dict:
+        """
+        Calculate the Interpretation/Void axis - semantic meaning.
+        
+        This is the 'D' axis of the McGuffin tetrahedron that provides
+        the WHY - why does this object matter to the agent's goals?
+        """
+        # Determine semantic role
+        if method['is_controlled']:
+            semantic_role = 'self'
+        elif function['association'] == 'goal':
+            semantic_role = 'goal'
+        elif function['association'] in ('danger', 'obstacle'):
+            semantic_role = 'obstacle'
+        elif function['attraction'] > 0.3:
+            semantic_role = 'tool'
+        else:
+            semantic_role = 'environment'
+        
+        # Goal relevance from function data
+        goal_relevance = function['attraction'] if function['attraction'] > 0 else 0.0
+        if semantic_role == 'goal':
+            goal_relevance = 1.0
+        elif semantic_role == 'self':
+            goal_relevance = 0.8  # Self is highly relevant
+        
+        # Threat level
+        if function['association'] == 'danger':
+            threat_level = 0.9
+        elif function['association'] == 'obstacle':
+            threat_level = 0.4
+        else:
+            threat_level = 0.0
+        
+        # Curiosity - novelty value for unknown/neutral objects
+        curiosity = 0.0
+        if function['association'] == 'neutral' and method['interaction_history'] < 3:
+            curiosity = 0.7
+        elif function['association'] == 'unknown':
+            curiosity = 1.0
+        
+        # Personal meaning - retrieve or generate
+        personal_meaning = self._get_personal_meaning(agent_id, object_type)
+        
+        return {
+            'semantic_role': semantic_role,
+            'goal_relevance': goal_relevance,
+            'threat_level': threat_level,
+            'curiosity': curiosity,
+            'personal_meaning': personal_meaning
+        }
+    
+    def _get_personal_meaning(self, agent_id: str, object_type: str) -> str:
+        """Get agent's personal meaning for an object type."""
+        impression = self.query_personal_impression(agent_id, object_type)
+        
+        if impression and impression.get('memory'):
+            return impression['memory']
+        
+        # Default meanings based on object type
+        if 'goal' in object_type:
+            return 'target to reach'
+        elif 'wall' in object_type:
+            return 'immovable barrier'
+        elif 'enemy' in object_type or 'danger' in object_type:
+            return 'threat to avoid'
+        else:
+            return 'unknown significance'

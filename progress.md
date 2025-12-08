@@ -2,6 +2,192 @@
 
 ---
 
+## Session: December 8, 2025
+
+---
+
+### Session 2: Tetrahedral Grammar Implementation (Time: 2:30:00 PM - 3:45:00 PM)
+
+**Focus**: Implement McGuffin Tetrahedral Grammar fixes for agent perception
+
+#### Approach
+
+Applied the McGuffin Tetrahedral Model from `DOCS/McGuffin (D).txt`, `DOCS/McGuf_ven Helicals (D).txt`, and `DOCS/Advanced Tensors (D).txt` to fix the agent grammar problem identified in Session 1. The core insight from these documents:
+
+> **The tetrahedron has 4 vertices (A, B, C, D) where D is the "Void" - the interpretation axis that contextualizes all other axes.**
+
+The approach is to:
+1. Add the missing Interpretation (Void) axis to agent perception
+2. Unify sensation_engine and agent_self_model through tetrahedral perception
+3. Calculate mood vector from perception balance
+4. Integrate into core_gameplay action selection
+
+#### Steps Completed
+
+**Step 1**: Added `calculate_interpretation_axis()` to `agent_self_model.py` (2:30 PM)
+- 161-line method calculating semantic role, goal relevance, threat level, attraction
+- Integrates control knowledge with sensation data
+
+**Step 2**: Added `get_tetrahedral_sensation()` to `sensation_engine.py` (2:45 PM)
+- ~250 lines including 4 helper methods
+- Returns full 4-axis sensation: Structure, Function, Method, Interpretation
+- Added: `_calculate_attraction()`, `_predict_object_behavior()`, `_calculate_interpretation()`, `_get_personal_meaning()`
+
+**Step 3**: Added `ObjectDetector` import to `core_gameplay.py` (3:00 PM)
+- Import and initialization of object detector for actual object detection
+
+**Step 4**: Rewrote `_analyze_sensation_context()` in `core_gameplay.py` (3:10 PM)
+- ~220 lines replacing old abstract pattern detection
+- Now detects ACTUAL objects from grid (not "dense_pattern", "multi_color_pattern")
+- For each object: builds tetrahedral sensation with all 4 axes
+- Categorizes objects: self_objects, goal_objects, threat_objects
+- Calculates mood_vector (valence, arousal, dominance)
+- Added 6 helper methods: `_get_control_data_for_object()`, `_infer_shape()`, `_calculate_mood_from_perceptions()`, `_add_legacy_patterns()`, `_summarize_object()`
+
+**Step 5**: Enhanced `_build_self_model_context()` in `core_gameplay.py` (3:25 PM)
+- Added optional `sensation_context` parameter
+- New `tetrahedral_perception` field in context
+- Includes self/goal/threat objects and mood vector
+
+**Step 6**: Connected sensation context flow (3:30 PM)
+- Store `_last_sensation_context` after analysis
+- Pass to `_build_self_model_context()` call site
+
+**Step 7**: Syntax and import verification (3:40 PM)
+- [OK] `py_compile agent_self_model.py`
+- [OK] `py_compile sensation_engine.py`
+- [OK] `py_compile core_gameplay.py`
+- [OK] Import test: `from agent_self_model import AgentSelfModel`
+- [OK] Import test: `from sensation_engine import SensationEngine`
+- [OK] Import test: `from core_gameplay import GameplayEngine`
+
+**Step 8**: Evolution test run (3:45 PM)
+- Ran `python run_evolution.py --max-generations 10`
+- Exit code: 0 (success)
+
+#### Current Status
+
+**COMPLETED**: All tetrahedral grammar implementation steps passed.
+
+**Architecture Change**:
+
+| Component | Before | After |
+|-----------|--------|-------|
+| `_analyze_sensation_context` | Returns abstract patterns (`dense_pattern`) | Returns tetrahedral perception for EACH object |
+| `_build_self_model_context` | No sensation data | Includes `tetrahedral_perception` with mood vector |
+| Object detection | None | Uses `ObjectDetector` to find actual objects |
+| Perception axes | 2-3 axes (Structure, Function, partial Method) | Full 4 axes (Structure, Function, Method, Interpretation) |
+
+**Key Data Flow**:
+```
+Grid → ObjectDetector → Actual Objects → 
+  For each object:
+    → get_tetrahedral_sensation() → 4-axis perception
+    → _get_control_data_for_object() → Method axis enrichment
+  → Categorize (self/goal/threat)
+  → Calculate mood_vector
+  → Store in _last_sensation_context
+  → Pass to _build_self_model_context
+  → Include in reasoning JSON for action selection
+```
+
+#### Files Modified
+
+| File | Lines Added | Changes |
+|------|-------------|---------|
+| `agent_self_model.py` | ~161 | Added `calculate_interpretation_axis()` |
+| `sensation_engine.py` | ~250 | Added `get_tetrahedral_sensation()` + 4 helpers |
+| `core_gameplay.py` | ~280 | Rewrote perception pipeline, added 6 helpers |
+
+#### Next Steps (If Needed)
+
+1. Monitor evolution runs for any runtime errors with new perception
+2. Validate tetrahedral perception improves self-identification accuracy
+3. Consider adding relational tensors (object-object relationships) in future session
+
+---
+
+### Session 1: Tetrahedral Grammar Analysis for Agent Self-Model (Time: 1:00:00 PM - 2:15:00 PM)
+
+**Focus**: Apply McGuffin Tensor Framework to diagnose and fix agent perception grammar
+
+#### Approach
+
+Read and analyzed the McGuffin theoretical documents to understand the tetrahedral grammar model:
+- `DOCS/Advanced Tensors (D).txt` - Tensor mathematics
+- `DOCS/McGuffin (D).txt` - Core tetrahedral model (A, B, C, D vertices)
+- `DOCS/McGuf_ven Helicals (D).txt` - Helical relationships
+- `DOCS/agi_unified_theory.md` - AGI framework
+
+Applied this framework to audit `agent_self_model.py` and `sensation_engine.py` to identify grammar gaps.
+
+#### Problem Identified
+
+The agent self-model and world model systems are missing a critical **fourth axis** in their perception grammar. Using the McGuffin Tetrahedral Model as a diagnostic framework, the analysis revealed:
+
+| McGuffin Axis | Agent Equivalent | Current Status |
+|--------------|------------------|----------------|
+| **Object** (Structure) | What objects exist | Implemented |
+| **Catalyst** (Function) | How objects respond | Implemented |
+| **Subject** (Method) | Control relationships | Partially implemented |
+| **Interpretation** (Void) | **Semantic meaning** | **MISSING** |
+
+**Core Insight**: Agents see Structure, Function, and Method but never ask "What does this MEAN for my goal?" - the context anchor that makes everything coherent.
+
+#### Analysis Deliverable
+
+Created comprehensive report: `DOCS/tetrahedral_grammar_report.md`
+
+**Key Findings**:
+
+1. **Missing Void Axis**: Agents lack semantic role detection (self vs tool vs obstacle vs goal)
+
+2. **No Mood Vector**: Agents don't calculate decision mood based on perception balance:
+   - Driven (one axis dominant) → focused action
+   - Balanced (two axes close) → careful action  
+   - Diffuse (three equal) → exploratory
+   - Conflict (void outlying) → hesitate
+
+3. **Incomplete Self-Identification**: Current "I am this object" detection uses Structure+Function only, missing Method+Interpretation
+
+4. **Missing Relational Tensors**: No calculation of the 6 relationship types between object pairs:
+   - Structure >< Function = enables/constrains
+   - Structure >< Method = defines/limits
+   - Structure >< Interpretation = grounds/anchors
+   - Function >< Method = triggers/activates
+   - Function >< Interpretation = reveals/manifests
+   - Method >< Interpretation = realizes/embodies
+
+#### Proposed Fixes (from report)
+
+**Phase 1: Add Interpretation Axis (HIGH PRIORITY)**
+- Add `semantic_role`, `goal_relevance`, `threat_level`, `attraction` to object detection
+- Implement `_calculate_meaning()` methods
+
+**Phase 2: Add Mood Vector (MEDIUM PRIORITY)**  
+- Add `_calculate_mood_vector()` based on perception balance
+- Use mood to modulate action weights
+
+**Phase 3: Add Relational Tensors (MEDIUM PRIORITY)**
+- Calculate object-object relationships
+- Store in database for network learning
+
+**Phase 4: Add Observer Tensor Phases (LOWER PRIORITY)**
+- Refactor perception into Perceive/Query/Parse/Model phases
+
+#### Expected Outcomes
+
+After implementation:
+- Self-identification accuracy: ~70% → ~95%
+- Goal relevance detection: Agents understand WHY objects matter
+- Decision quality: Mood vectors prevent erratic behavior
+- Network learning speed: Tetrahedral packages transfer better
+
+#### Files Created
+- `DOCS/tetrahedral_grammar_report.md` - Full analysis and implementation guide
+
+---
+
 ## Session: December 4, 2025
 
 ---

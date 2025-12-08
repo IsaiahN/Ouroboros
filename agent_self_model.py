@@ -1591,6 +1591,344 @@ class AgentSelfModel:
         
         return None
     
+    # ========================================================================
+    # TETRAHEDRAL GRAMMAR: INTERPRETATION (VOID) AXIS
+    # ========================================================================
+    # From McGuffin Tensor Framework: Every object needs four axes:
+    #   Structure (A) - What it IS (position, color, form)
+    #   Function (B)  - What it DOES (responds to actions, effects)
+    #   Method (C)    - HOW it operates (control correlation, action map)
+    #   Interpretation (D) - WHAT IT MEANS (semantic role, goal relevance)
+    # 
+    # This is the VOID axis - the meaning anchor that makes all other axes coherent.
+    # ========================================================================
+    
+    # Relational tensors from McGuffin: Each pair of axes creates a relationship
+    OBJECT_RELATIONSHIP_TENSORS = {
+        ('structure', 'function'): 'enables',      # Structure enables Function
+        ('structure', 'method'): 'constrains',     # Structure constrains Method
+        ('structure', 'interpretation'): 'defines', # Structure defines Meaning
+        ('function', 'method'): 'triggers',        # Function triggers Method
+        ('function', 'interpretation'): 'reveals', # Function reveals Meaning
+        ('method', 'interpretation'): 'anchors',   # Method anchors Meaning
+    }
+    
+    def calculate_interpretation_axis(
+        self,
+        agent_id: str,
+        obj_data: Dict[str, Any],
+        goal_context: Dict[str, Any],
+        sensation_engine: Any = None
+    ) -> Dict[str, Any]:
+        """
+        Calculate the Interpretation (Void) axis for an object.
+        
+        This is the MEANING layer that integrates:
+        - Is this ME or something else?
+        - Is this relevant to my goal?
+        - Is this dangerous or helpful?
+        
+        From McGuffin: Void = Context = Meaning. Without this axis,
+        agents see facts but don't understand them.
+        
+        Args:
+            agent_id: Agent identifier
+            obj_data: Object data with structure/function/method info
+            goal_context: Goal information (positions, types)
+            sensation_engine: Optional SensationEngine for emotional data
+            
+        Returns:
+            Interpretation axis dictionary with semantic role, relevance, threat, attraction
+        """
+        interpretation = {
+            'semantic_role': 'unknown',    # 'self', 'tool', 'obstacle', 'goal', 'environmental'
+            'goal_relevance': 0.0,         # 0-1: How relevant to winning?
+            'threat_level': 0.0,           # 0-1: How dangerous?
+            'attraction': 0.0,             # -1 to 1: Avoid (-) or approach (+)?
+            'meaning_confidence': 0.0,     # 0-1: How confident in this interpretation?
+            'is_self': False,              # Boolean: Is this the agent?
+            'is_tool': False,              # Boolean: Is this a controllable tool?
+            'is_goal': False,              # Boolean: Is this a goal/target?
+            'is_obstacle': False           # Boolean: Is this blocking progress?
+        }
+        
+        # Get sensation data if available (emotional context)
+        sensation_score = 0.0
+        impression_data = None
+        if sensation_engine:
+            try:
+                obj_type = f"color_{obj_data.get('color', 0)}"
+                sensation_score = sensation_engine.perceive_object(agent_id, obj_type, obj_data)
+                impression_data = sensation_engine.query_personal_impression(agent_id, obj_type)
+                
+                if impression_data:
+                    # Apply learned associations from sensation engine
+                    association = impression_data.get('association', 'neutral')
+                    strength = impression_data.get('impression_strength', 0.5)
+                    
+                    if association == 'danger':
+                        interpretation['threat_level'] = strength
+                        interpretation['is_obstacle'] = strength > 0.5
+                    elif association == 'goal':
+                        interpretation['goal_relevance'] = strength
+                        interpretation['is_goal'] = strength > 0.5
+                    elif association == 'obstacle':
+                        interpretation['threat_level'] = strength * 0.5
+                        interpretation['is_obstacle'] = strength > 0.5
+            except Exception as e:
+                logger.debug(f"Sensation integration failed: {e}")
+        
+        # Determine semantic role based on control quality (Method axis)
+        control_quality = obj_data.get('control_correlation', 0.0)
+        
+        if control_quality > 0.8:
+            # High control = likely self
+            interpretation['semantic_role'] = 'self'
+            interpretation['is_self'] = True
+            interpretation['meaning_confidence'] = control_quality
+            interpretation['attraction'] = 0.0  # Neutral - we ARE this
+        elif control_quality > 0.5:
+            # Medium control = tool we can use
+            interpretation['semantic_role'] = 'tool'
+            interpretation['is_tool'] = True
+            interpretation['meaning_confidence'] = control_quality * 0.8
+            interpretation['attraction'] = 0.3  # Mild approach
+        elif interpretation['threat_level'] > 0.5:
+            # High threat = obstacle
+            interpretation['semantic_role'] = 'obstacle'
+            interpretation['meaning_confidence'] = interpretation['threat_level']
+            interpretation['attraction'] = -0.8  # Strong avoid
+        elif interpretation['goal_relevance'] > 0.5:
+            # High goal relevance = target
+            interpretation['semantic_role'] = 'goal'
+            interpretation['meaning_confidence'] = interpretation['goal_relevance']
+            interpretation['attraction'] = 0.9  # Strong approach
+        else:
+            # Default: environmental object
+            interpretation['semantic_role'] = 'environmental'
+            interpretation['meaning_confidence'] = 0.3
+            interpretation['attraction'] = sensation_score * 0.3  # Mild bias from sensation
+        
+        # Check against goal context for goal relevance
+        goal_positions = goal_context.get('goal_positions', [])
+        obj_position = obj_data.get('position')
+        
+        if obj_position and goal_positions:
+            # Check if this object is at or near a goal position
+            for goal_pos in goal_positions:
+                if obj_position == goal_pos:
+                    interpretation['goal_relevance'] = 1.0
+                    interpretation['is_goal'] = True
+                    interpretation['semantic_role'] = 'goal'
+                    interpretation['attraction'] = 1.0
+                    interpretation['meaning_confidence'] = 0.9
+                    break
+        
+        # Final attraction calculation: combine all signals
+        interpretation['attraction'] = max(-1.0, min(1.0, (
+            interpretation['goal_relevance'] * 0.5 +
+            sensation_score * 0.2 -
+            interpretation['threat_level'] * 0.5 +
+            (0.2 if interpretation['is_tool'] else 0.0)
+        )))
+        
+        return interpretation
+    
+    def build_tetrahedral_object(
+        self,
+        agent_id: str,
+        obj_color: int,
+        positions: List[Tuple[int, int]],
+        game_id: str,
+        level: int,
+        frame: Optional[List] = None,
+        sensation_engine: Any = None
+    ) -> Dict[str, Any]:
+        """
+        Build a complete tetrahedral perception for an object.
+        
+        Integrates all four axes:
+        - Structure (A): What it IS
+        - Function (B): What it DOES
+        - Method (C): HOW it operates
+        - Interpretation (D): WHAT IT MEANS
+        
+        Args:
+            agent_id: Agent identifier
+            obj_color: Object color value
+            positions: List of (row, col) positions for this object
+            game_id: Game identifier
+            level: Level number
+            frame: Current game frame
+            sensation_engine: Optional SensationEngine
+            
+        Returns:
+            Complete tetrahedral object perception
+        """
+        # STRUCTURE AXIS (A) - What it IS
+        structure = {
+            'color': obj_color,
+            'positions': positions[:10],  # Limit for size
+            'cell_count': len(positions),
+            'stability': 1.0,  # Assume stable unless tracked otherwise
+            'centroid': (
+                sum(p[0] for p in positions) / len(positions) if positions else 0,
+                sum(p[1] for p in positions) / len(positions) if positions else 0
+            )
+        }
+        
+        # FUNCTION AXIS (B) - What it DOES
+        function = {
+            'responds_to_actions': [],
+            'effect': 'unknown',
+            'reactivity': 0.0,
+            'known_effects': []
+        }
+        
+        try:
+            # Query collision effects for this color
+            effects = self.db.execute_query("""
+                SELECT effect_type, confidence, occurrence_count
+                FROM collision_effects
+                WHERE game_type = ? AND level_number = ? 
+                  AND (controlled_object_color = ? OR target_object_color = ?)
+                ORDER BY confidence DESC LIMIT 5
+            """, (game_id, level, obj_color, obj_color))
+            
+            if effects:
+                function['known_effects'] = [
+                    {'type': e['effect_type'], 'confidence': e['confidence']}
+                    for e in effects
+                ]
+                function['reactivity'] = len(effects) / 5.0  # Normalize
+        except Exception:
+            pass
+        
+        # METHOD AXIS (C) - HOW it operates
+        method = {
+            'is_controlled': False,
+            'control_correlation': 0.0,
+            'action_response_map': {},
+            'intentionality': 0.0  # 0 = passive, 1 = autonomous
+        }
+        
+        try:
+            # Check if this color is in controlled objects
+            controlled = self.get_controlled_objects(agent_id, game_id, level)
+            if controlled:
+                for coord in controlled:
+                    # Parse coordinate and check if it matches this object's positions
+                    try:
+                        parts = coord.split(',')
+                        x = int(parts[0].replace('x:', ''))
+                        y = int(parts[1].replace('y:', ''))
+                        if (y, x) in positions:
+                            method['is_controlled'] = True
+                            method['control_correlation'] = 0.8
+                            break
+                    except Exception:
+                        pass
+            
+            # Check for autonomous movement patterns
+            autonomous = self.db.execute_query("""
+                SELECT movement_pattern, moves_per_turn, is_ever_controllable
+                FROM autonomous_objects
+                WHERE game_type = ? AND level_number = ? AND object_color = ?
+            """, (game_id, level, obj_color))
+            
+            if autonomous:
+                a = autonomous[0]
+                method['intentionality'] = a['moves_per_turn'] if a['moves_per_turn'] else 0.0
+                if a['is_ever_controllable']:
+                    method['is_controlled'] = True
+        except Exception:
+            pass
+        
+        # INTERPRETATION AXIS (D) - WHAT IT MEANS (The Void)
+        interpretation = self.calculate_interpretation_axis(
+            agent_id,
+            {
+                'color': obj_color,
+                'position': structure['centroid'],
+                'control_correlation': method['control_correlation']
+            },
+            {'goal_positions': []},  # Will be populated by caller if available
+            sensation_engine
+        )
+        
+        return {
+            'structure': structure,
+            'function': function,
+            'method': method,
+            'interpretation': interpretation
+        }
+    
+    def calculate_mood_vector(self, tetrahedral_perception: Dict[str, Dict]) -> str:
+        """
+        Calculate agent's decision mood from tetrahedral perception balance.
+        
+        From McGuffin's decision framework:
+        - Driven: One axis dominant - focused action
+        - Balanced: Two axes compete - careful action
+        - Diffuse: Three axes equal - exploratory
+        - Conflict: Void axis outlying - hesitate
+        
+        Args:
+            tetrahedral_perception: Dict of object_key -> tetrahedral object
+            
+        Returns:
+            Mood state: 'driven', 'balanced', 'diffuse', or 'conflict'
+        """
+        if not tetrahedral_perception:
+            return 'diffuse'
+        
+        # Aggregate weights across all perceived objects
+        structure_weight = 0.0
+        function_weight = 0.0
+        method_weight = 0.0
+        interpretation_weight = 0.0
+        obj_count = 0
+        
+        for obj_key, obj_data in tetrahedral_perception.items():
+            structure = obj_data.get('structure', {})
+            function = obj_data.get('function', {})
+            method = obj_data.get('method', {})
+            interpretation = obj_data.get('interpretation', {})
+            
+            structure_weight += structure.get('stability', 0.5)
+            function_weight += function.get('reactivity', 0.5)
+            method_weight += method.get('control_correlation', 0.5)
+            interpretation_weight += interpretation.get('goal_relevance', 0.5)
+            obj_count += 1
+        
+        if obj_count == 0:
+            return 'diffuse'
+        
+        # Normalize
+        weights = [
+            structure_weight / obj_count,
+            function_weight / obj_count,
+            method_weight / obj_count,
+            interpretation_weight / obj_count
+        ]
+        
+        max_w, min_w = max(weights), min(weights)
+        spread = max_w - min_w
+        
+        # Check if void (interpretation) is outlying
+        void_weight = interpretation_weight / obj_count
+        other_avg = (structure_weight + function_weight + method_weight) / (obj_count * 3)
+        void_deviation = abs(void_weight - other_avg)
+        
+        if void_deviation > 0.4:
+            return 'conflict'  # Void axis misaligned - internal struggle
+        elif spread > 0.5:
+            return 'driven'    # One axis dominates - focused action
+        elif spread > 0.3:
+            return 'balanced'  # Two axes compete - careful action
+        else:
+            return 'diffuse'   # All axes similar - exploratory
+    
     def build_control_map(
         self,
         agent_id: str,

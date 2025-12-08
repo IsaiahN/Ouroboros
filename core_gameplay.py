@@ -43,6 +43,7 @@ from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
 from agent_self_model import AgentSelfModel, WeavingReporter
+from object_detector import ObjectDetector
 
 # Two-Streams: Import cohort wisdom for role-based sequence selection
 try:
@@ -138,6 +139,7 @@ class GameplayEngine:
         self.matching_pipeline = MultiStageMatchingPipeline(self.db)  # Tier 1: Multi-stage matching (+40%)
         self.subgoal_activator = SubgoalPlanningActivator(self.db)  # Tier 1: Subgoal planning (+30%)
         self.agent_self_model = AgentSelfModel(db_path)  # Self-model: Track controlled objects
+        self.object_detector = ObjectDetector(db_path)  # Object detection for tetrahedral perception
         
         # Two-Streams: Weaving reporter for self-reflection in every action
         self.weaving_reporter = WeavingReporter(self.db)
@@ -2794,11 +2796,21 @@ class GameplayEngine:
                 logger.debug(f" Pioneer mode: Sensation navigation disabled (pure exploration)")
             else:
                 try:
-                    # Analyze frame for emotional context
+                    # Analyze frame for emotional context using tetrahedral perception
                     frame_data = self._convert_game_state_for_sensation_analysis(game_state)
                     
                     # Update agent's navigation state based on perceptions
-                    sensation_context = self._analyze_sensation_context(frame_data, agent_id)
+                    # McGuffin Grammar: Now uses tetrahedral perception with all 4 axes
+                    sensation_context = self._analyze_sensation_context(
+                        frame_data, 
+                        agent_id,
+                        game_id=self.session_manager.current_game_id,
+                        level=game_state.current_level
+                    )
+                    
+                    # Store sensation context for use in self-model building
+                    self._last_sensation_context = sensation_context
+                    
                     navigation_state = self.sensation_engine.update_navigation_state(
                         agent_id, 
                         sensation_context.get('dominant_sensation', 0.0),
@@ -4902,7 +4914,8 @@ class GameplayEngine:
         agent_id: Optional[str], 
         game_id: str, 
         level: int,
-        frame: Optional[List] = None
+        frame: Optional[List] = None,
+        sensation_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Build self-model context for reasoning JSON.
         
@@ -4910,21 +4923,36 @@ class GameplayEngine:
         Also queries network-validated control hypotheses for bootstrapping.
         Task 3 enhancement: Now aggregates raw coordinates into meaningful object IDs.
         
+        McGuffin Grammar Enhancement: Includes tetrahedral perception context
+        when sensation_context is provided, unifying Structure-Function-Method-Interpretation.
+        
         Args:
             agent_id: Agent identifier
             game_id: Current game ID
             level: Current level number
             frame: Current game frame for object aggregation
+            sensation_context: Optional tetrahedral sensation context from _analyze_sensation_context
             
         Returns:
-            Self-model context dictionary
+            Self-model context dictionary with tetrahedral perception
         """
         context = {
             'objects_agent_controls': [],      # Raw coordinates (legacy)
             'aggregated_controlled': [],       # Task 3: Meaningful object IDs
             'control_confidence': 0.0,
             'object_dependencies': [],
-            'network_control_hypotheses': []   # Cross-agent validated hypotheses
+            'network_control_hypotheses': [],   # Cross-agent validated hypotheses
+            # McGuffin Grammar: Tetrahedral perception axes
+            'tetrahedral_perception': {
+                'self_objects': [],       # Objects agent controls (Method axis)
+                'goal_objects': [],       # Objects identified as goals (Interpretation axis)
+                'threat_objects': [],     # Objects identified as threats (Interpretation axis)
+                'mood': {                 # Emotional state from sensation balance
+                    'valence': 0.0,
+                    'arousal': 0.0,
+                    'dominance': 0.0
+                }
+            }
         }
         
         if not agent_id:
@@ -4963,10 +4991,49 @@ class GameplayEngine:
                     }
                     for h in network_hypotheses[:3]
                 ]
+            
+            # McGuffin Grammar: Integrate tetrahedral perception from sensation context
+            if sensation_context:
+                tetra = context['tetrahedral_perception']
+                
+                # Self objects (Method axis - what we control)
+                tetra['self_objects'] = [
+                    self._summarize_object(obj) 
+                    for obj in sensation_context.get('self_objects', [])[:5]
+                ]
+                
+                # Goal objects (Interpretation axis - what we want)
+                tetra['goal_objects'] = [
+                    self._summarize_object(obj)
+                    for obj in sensation_context.get('goal_objects', [])[:5]
+                ]
+                
+                # Threat objects (Interpretation axis - what to avoid)
+                tetra['threat_objects'] = [
+                    self._summarize_object(obj)
+                    for obj in sensation_context.get('threat_objects', [])[:5]
+                ]
+                
+                # Mood vector (emergent from perception balance)
+                tetra['mood'] = sensation_context.get('mood_vector', tetra['mood'])
+                
         except Exception as e:
             logger.debug(f"Self-model context build failed: {e}")
         
         return context
+    
+    def _summarize_object(self, obj: Dict) -> Dict[str, Any]:
+        """Create a concise summary of an object for context."""
+        try:
+            props = json.loads(obj.get('properties', '{}'))
+        except (json.JSONDecodeError, TypeError):
+            props = {}
+        
+        return {
+            'color': props.get('color', 0),
+            'center': props.get('center', [0, 0]),
+            'size': props.get('size', [1, 1])
+        }
     
     def _aggregate_controlled_objects(
         self, 
@@ -5877,8 +5944,10 @@ class GameplayEngine:
         
         # Add self-model context (what objects agent controls)
         # Task 3: Now passes frame for aggregation of controlled objects
+        # McGuffin Grammar: Now includes tetrahedral perception context
         reasoning_obj['self_model'] = self._build_self_model_context(
-            agent_id, game_id, current_level, frame=game_state.frame
+            agent_id, game_id, current_level, frame=game_state.frame,
+            sensation_context=getattr(self, '_last_sensation_context', None)
         )
         
         # Add world-model context (obstacles, goals, hypotheses)
@@ -9244,13 +9313,38 @@ class GameplayEngine:
         
         return frame_data
 
-    def _analyze_sensation_context(self, frame_data: Dict[str, Any], agent_id: str) -> Dict[str, Any]:
-        """Analyze frame data for sensation context."""
+    def _analyze_sensation_context(
+        self,
+        frame_data: Dict[str, Any],
+        agent_id: str,
+        game_id: Optional[str] = None,
+        level: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Analyze frame data using tetrahedral perception grammar.
+        
+        Implements McGuffin grammar: Structure >< Function >< Method >< Interpretation
+        Each detected object is perceived through all four axes.
+        
+        Args:
+            frame_data: Current frame with grid data
+            agent_id: The perceiving agent
+            game_id: Current game ID (for object detection context)
+            level: Current level number
+            
+        Returns:
+            Sensation context with tetrahedral perception data
+        """
         
         sensation_context = {
             'dominant_sensation': 0.0,
-            'perceived_objects': [],
-            'complexity_score': 0.0
+            'perceived_objects': [],  # Now contains tetrahedral data, not just strings
+            'complexity_score': 0.0,
+            'tetrahedral_perceptions': [],  # Full 4-axis perception for each object
+            'mood_vector': {'valence': 0.0, 'arousal': 0.0, 'dominance': 0.0},
+            'self_objects': [],  # Objects agent controls
+            'goal_objects': [],  # Objects identified as goals
+            'threat_objects': []  # Objects identified as threats
         }
         
         grid = frame_data.get('current_frame', {}).get('grid', [])
@@ -9261,54 +9355,245 @@ class GameplayEngine:
         try:
             # Convert to numpy array for analysis
             if not isinstance(grid, np.ndarray):
-                grid = np.array(grid)
+                grid_array = np.array(grid)
+            else:
+                grid_array = grid
             
-            if grid.size == 0:
+            if grid_array.size == 0:
                 return sensation_context
             
-            # Analyze grid properties
-            unique_colors = len(np.unique(grid))
-            non_zero_cells = np.count_nonzero(grid)
-            total_cells = grid.size
-            
-            # Determine perceived objects based on grid analysis
-            perceived_objects = []
-            
-            if unique_colors > 1:
-                perceived_objects.append('multi_color_pattern')
-            if unique_colors > 3:
-                perceived_objects.append('complex_color_pattern')
-            if non_zero_cells > total_cells * 0.5:
-                perceived_objects.append('dense_pattern')
-            if non_zero_cells < total_cells * 0.1:
-                perceived_objects.append('sparse_pattern')
-            if grid.shape[0] > 10 or grid.shape[1] > 10:
-                perceived_objects.append('large_grid')
-            
-            # Calculate complexity score
+            # Calculate complexity score (grid-level property)
+            unique_colors = len(np.unique(grid_array))
+            non_zero_cells = np.count_nonzero(grid_array)
+            total_cells = grid_array.size
             complexity_score = (unique_colors / 10.0) + (non_zero_cells / total_cells)
+            sensation_context['complexity_score'] = min(complexity_score, 1.0)
             
-            # Calculate dominant sensation from perceived objects
+            # DETECT ACTUAL OBJECTS (not abstract patterns)
+            frame_for_detection = {'grid': grid if isinstance(grid, list) else grid_array.tolist()}
+            detected_objects = self.object_detector.detect_objects_in_frame(
+                frame_for_detection,
+                game_id or 'unknown',
+                level,
+                0  # frame_index
+            )
+            
+            # BUILD TETRAHEDRAL PERCEPTION FOR EACH OBJECT
             total_sensation = 0.0
-            sensation_count = 0
+            total_goal_relevance = 0.0
+            total_threat = 0.0
             
-            for obj_type in perceived_objects:
-                obj_sensation = self.sensation_engine.perceive_object(
-                    agent_id, obj_type, {'complexity': complexity_score}
+            for obj in detected_objects:
+                # Parse object properties
+                try:
+                    props = json.loads(obj.get('properties', '{}'))
+                except (json.JSONDecodeError, TypeError):
+                    props = {}
+                
+                color = props.get('color', 0)
+                center = props.get('center', [0, 0])
+                
+                # Create object type identifier
+                object_type = f"object_color_{color}"
+                
+                # Get control data from self-model
+                control_data = self._get_control_data_for_object(
+                    agent_id, game_id, level, obj, color
                 )
-                total_sensation += obj_sensation
-                sensation_count += 1
+                
+                # Build object info for tetrahedral sensation
+                object_info = {
+                    'object_type': object_type,
+                    'position': tuple(center),
+                    'color': color,
+                    'shape': self._infer_shape(props)
+                }
+                
+                # GET TETRAHEDRAL SENSATION (all 4 axes)
+                tetra_sensation = self.sensation_engine.get_tetrahedral_sensation(
+                    agent_id, object_info, control_data
+                )
+                
+                # Store full tetrahedral perception
+                sensation_context['tetrahedral_perceptions'].append({
+                    'object': obj,
+                    'sensation': tetra_sensation
+                })
+                
+                # Categorize by semantic role
+                semantic_role = tetra_sensation['interpretation']['semantic_role']
+                if semantic_role == 'self':
+                    sensation_context['self_objects'].append(obj)
+                elif semantic_role == 'goal':
+                    sensation_context['goal_objects'].append(obj)
+                elif semantic_role == 'obstacle':
+                    sensation_context['threat_objects'].append(obj)
+                
+                # Accumulate for aggregate scores
+                total_sensation += tetra_sensation['function']['sensation_score']
+                total_goal_relevance += tetra_sensation['interpretation']['goal_relevance']
+                total_threat += tetra_sensation['interpretation']['threat_level']
+                
+                # Add to perceived objects list (now meaningful names)
+                if control_data and control_data.get('is_controlled'):
+                    sensation_context['perceived_objects'].append(f"controlled_{object_type}")
+                else:
+                    sensation_context['perceived_objects'].append(object_type)
             
-            if sensation_count > 0:
-                sensation_context['dominant_sensation'] = total_sensation / sensation_count
+            # Calculate aggregates
+            obj_count = max(1, len(detected_objects))
+            sensation_context['dominant_sensation'] = total_sensation / obj_count
             
-            sensation_context['perceived_objects'] = perceived_objects
-            sensation_context['complexity_score'] = complexity_score
+            # Calculate mood vector from tetrahedral perception balance
+            sensation_context['mood_vector'] = self._calculate_mood_from_perceptions(
+                sensation_context['tetrahedral_perceptions']
+            )
+            
+            # Legacy fallback: add abstract patterns for backwards compatibility
+            if not detected_objects:
+                # Fallback to old pattern detection if no objects found
+                self._add_legacy_patterns(sensation_context, grid_array)
         
         except Exception as e:
-            logger.debug(f"Error in sensation analysis: {e}")
+            logger.debug(f"Error in tetrahedral sensation analysis: {e}")
+            # Fallback to minimal context
+            sensation_context['perceived_objects'] = ['analysis_error']
         
         return sensation_context
+    
+    def _get_control_data_for_object(
+        self,
+        agent_id: str,
+        game_id: Optional[str],
+        level: int,
+        obj: Dict,
+        color: int
+    ) -> Optional[Dict]:
+        """Get control hypothesis from self-model for an object."""
+        if not game_id:
+            return None
+        
+        try:
+            # Check if agent controls this object color
+            controlled_objects = self.agent_self_model.get_controlled_objects(
+                agent_id, game_id, level
+            )
+            
+            for controlled in controlled_objects:
+                ctrl_color = controlled.get('object_color')
+                if ctrl_color == color:
+                    return {
+                        'is_controlled': True,
+                        'confidence': controlled.get('confidence', 0.5),
+                        'control_method': controlled.get('control_type', 'unknown'),
+                        'interaction_count': controlled.get('evidence_count', 0),
+                        'approach_actions': [],  # Could be populated from action history
+                        'avoid_actions': []
+                    }
+            
+            return {
+                'is_controlled': False,
+                'control_method': 'none',
+                'interaction_count': 0
+            }
+        except Exception:
+            return None
+    
+    def _infer_shape(self, props: Dict) -> str:
+        """Infer shape from object properties."""
+        size = props.get('size', [1, 1])
+        area = props.get('area', 1)
+        
+        if size[0] == size[1] and area == size[0] * size[1]:
+            return 'square'
+        elif size[0] == size[1]:
+            return 'diamond'  # Same dims but not filled = likely diamond
+        elif abs(size[0] - size[1]) > 2:
+            return 'line'  # Very different dims = line
+        else:
+            return 'irregular'
+    
+    def _calculate_mood_from_perceptions(
+        self,
+        tetrahedral_perceptions: List[Dict]
+    ) -> Dict[str, float]:
+        """
+        Calculate mood vector from tetrahedral perception balance.
+        
+        Uses the PAD model (Pleasure-Arousal-Dominance):
+        - Valence (Pleasure): Net positive vs negative sensations
+        - Arousal: Threat level + goal urgency
+        - Dominance: Control over situation (self objects vs obstacles)
+        """
+        if not tetrahedral_perceptions:
+            return {'valence': 0.0, 'arousal': 0.0, 'dominance': 0.0}
+        
+        total_valence = 0.0
+        total_arousal = 0.0
+        controlled_count = 0
+        obstacle_count = 0
+        
+        for tp in tetrahedral_perceptions:
+            sensation = tp.get('sensation', {})
+            
+            # Valence from function axis
+            function = sensation.get('function', {})
+            total_valence += function.get('sensation_score', 0.0)
+            
+            # Arousal from interpretation axis
+            interpretation = sensation.get('interpretation', {})
+            total_arousal += interpretation.get('threat_level', 0.0)
+            total_arousal += interpretation.get('goal_relevance', 0.0)
+            
+            # Dominance from method axis
+            method = sensation.get('method', {})
+            if method.get('is_controlled'):
+                controlled_count += 1
+            
+            if interpretation.get('semantic_role') == 'obstacle':
+                obstacle_count += 1
+        
+        n = len(tetrahedral_perceptions)
+        
+        # Normalize
+        valence = total_valence / n
+        arousal = min(1.0, total_arousal / n)
+        
+        # Dominance: ratio of controlled to obstacles
+        dominance = 0.5  # Neutral default
+        if controlled_count > 0 or obstacle_count > 0:
+            dominance = controlled_count / max(1, controlled_count + obstacle_count)
+        
+        return {
+            'valence': valence,
+            'arousal': arousal,
+            'dominance': dominance
+        }
+    
+    def _add_legacy_patterns(
+        self,
+        sensation_context: Dict[str, Any],
+        grid: np.ndarray
+    ) -> None:
+        """Add legacy abstract patterns for backwards compatibility."""
+        unique_colors = len(np.unique(grid))
+        non_zero_cells = np.count_nonzero(grid)
+        total_cells = grid.size
+        
+        perceived_objects = []
+        
+        if unique_colors > 1:
+            perceived_objects.append('multi_color_pattern')
+        if unique_colors > 3:
+            perceived_objects.append('complex_color_pattern')
+        if non_zero_cells > total_cells * 0.5:
+            perceived_objects.append('dense_pattern')
+        if non_zero_cells < total_cells * 0.1:
+            perceived_objects.append('sparse_pattern')
+        if grid.shape[0] > 10 or grid.shape[1] > 10:
+            perceived_objects.append('large_grid')
+        
+        sensation_context['perceived_objects'].extend(perceived_objects)
 
     def _calculate_recent_success_rate_from_game_state(self, game_state: GameState) -> float:
         """Calculate recent success rate from current game context."""
