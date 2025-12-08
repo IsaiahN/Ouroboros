@@ -3888,3 +3888,205 @@ if before is None or after is None:
 
 **END OF SESSION 23: December 8, 2025 - 10:25:00 AM**
 
+---
+
+## Session 24: Generation-Based Data Retention System
+**Date**: December 8, 2025  
+**Time Started**: 10:30:00 AM  
+**Focus**: Build sustainable data lifecycle management for Session 23 tables to prevent hard drive bloat
+
+---
+
+### Problem Statement
+
+**User Concern**: "How to keep all this new data relevant on a rolling basis so that it doesnt clog up my hard drive"
+
+Session 23 added 10 new tables tracking every object property, collision, trigger, and sequence. At scale:
+- ~150 agents * 100 games * 800 actions = ~12M action records per generation
+- 30 generations = 360M+ records
+- Estimated storage: **8-10 GB for 30 generations**
+
+**Critical Constraint**: Database must stay under 10 GB (SQLite vacuum requires 2x space).
+
+---
+
+### User Insight: "Generational Computation Gate"
+
+**Key Quote**: "Tying it to time is foolish. I could leave for a weekend and everything is deleted"
+
+**User Requirement**: 
+- NO time-based deletion (24 hours, 7 days, etc.)
+- Use GENERATIONS as the unit of time
+- "Generations are quasi-approximations of time"
+- Keep minimum 30 generations of raw data
+- System must work asynchronously (no human time dependencies)
+
+---
+
+### Data Lifecycle Model
+
+**Three Categories of Data**:
+
+| Category | Description | Retention |
+|----------|-------------|-----------|
+| **RAW** (ephemeral) | Individual observations per action | Delete after 30 generations |
+| **AGGREGATED** (permanent) | Network-learned patterns | Never delete, deprecate after 50 gens stale |
+| **CROSS-GENERATIONAL** | Validated patterns across multiple generations | Permanent (highest value) |
+
+**RAW Tables** (session 23 - delete old):
+- `object_property_snapshots` - Property state at each action
+- `object_property_changes` - Property change log
+- `trigger_sequence_events` - Steps during sequence attempts
+- `collision_events` - Individual collision records
+- `action6_availability_events` - ACTION6 presence/absence signals
+
+**AGGREGATED Tables** (session 23 - deprecate only):
+- `interaction_triggers` - Grid-wide causal relationships (has confidence score)
+- `trigger_sequences` - Proven trigger sequences (has success_rate)
+- `collision_effects` - Network-learned collision patterns
+- `selectability_conditions` - What enables/disables ACTION6
+
+---
+
+### Implementation: Pure Generation-Based Retention
+
+**Approach**: Multi-layer fallback for generation lookup:
+1. **Primary**: `game_results.generation` column (new)
+2. **Fallback**: `agents.generation` via session tracking
+3. **Safety Net**: If no generation found, count-based deletion (keep recent N rows)
+
+**Key Changes**:
+
+#### 1. Added `generation` Column to `game_results`
+```sql
+ALTER TABLE game_results ADD COLUMN generation INTEGER;
+```
+- Enables efficient queries: "DELETE WHERE generation < (current - 30)"
+- No joins needed for cleanup
+
+#### 2. Updated `database_interface.py`
+- `save_game_result()` now accepts and stores `generation` parameter
+
+#### 3. Updated `game_session_manager.py`
+- Both game creation and completion calls now include `generation: self._current_generation`
+
+#### 4. Rewrote `safe_cleanup.py`
+Removed ALL time-based logic. New constants:
+```python
+raw_data_generation_retention = 30  # Keep 30 generations of raw data
+pattern_staleness_generations = 50  # Deprecate unused patterns after 50 gens
+```
+
+**New Cleanup Functions**:
+- `_clean_raw_observation_data()` - Deletes raw data older than 30 generations
+- `_deprecate_stale_patterns()` - Marks patterns inactive (doesn't delete)
+
+#### 5. Updated `agent_self_model.py`
+Added deprecation tracking to aggregated tables:
+```sql
+-- To interaction_triggers
+is_active INTEGER DEFAULT 1,
+last_observed_generation INTEGER
+
+-- To trigger_sequences  
+is_active INTEGER DEFAULT 1,
+last_observed_generation INTEGER
+```
+
+New method: `_get_current_generation()` - Helper to get current generation from agent
+
+Updated `record_interaction_trigger()` and `finalize_sequence()` to track `last_observed_generation`
+
+---
+
+### Space Estimation
+
+| Metric | Estimate |
+|--------|----------|
+| Data per action | ~1.8 KB |
+| Data per game | ~1.8 MB |
+| Data per generation | ~270 MB |
+| 30 generations | ~8 GB |
+| Safety margin | 2 GB |
+
+**Cleanup Trigger**: When database approaches 8 GB, aggressive cleanup of:
+- Zero-score game results
+- Oldest raw observation data
+- Excess system logs
+
+---
+
+### Deprecation Strategy (Aggregated Patterns)
+
+**Why Deprecate Instead of Delete**:
+- Patterns may return after dormancy
+- Game strategies may cycle
+- Historical patterns have archaeological value
+
+**Process**:
+1. If pattern not observed for 50 generations -> `is_active = 0`
+2. Inactive patterns excluded from active queries
+3. Can be reactivated if pattern recurs
+4. Never automatically deleted
+
+---
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `import safe_cleanup` | [OK] OK |
+| `import agent_self_model` | [OK] OK |
+| `import game_session_manager` | [OK] OK |
+| `import database_interface` | [OK] OK |
+| Dry run cleanup | [OK] Works (new tables don't exist yet) |
+
+---
+
+### Summary of Session 24 Changes
+
+**Files Modified**:
+
+| File | Changes |
+|------|---------|
+| `safe_cleanup.py` | ~100 lines: Complete rewrite for generation-based retention |
+| `agent_self_model.py` | ~30 lines: Deprecation columns, generation tracking |
+| `database_interface.py` | ~5 lines: Added generation to INSERT |
+| `game_session_manager.py` | ~10 lines: Pass generation in game saves |
+| `complete_database_schema.sql` | ~20 lines: New columns |
+
+**New Database Columns**:
+
+| Table | Column | Purpose |
+|-------|--------|---------|
+| `game_results` | `generation INTEGER` | Enable generation-based cleanup queries |
+| `interaction_triggers` | `is_active INTEGER DEFAULT 1` | Deprecation flag |
+| `interaction_triggers` | `last_observed_generation INTEGER` | Staleness tracking |
+| `trigger_sequences` | `is_active INTEGER DEFAULT 1` | Deprecation flag |
+| `trigger_sequences` | `last_observed_generation INTEGER` | Staleness tracking |
+
+---
+
+### Current Status
+
+**Completed This Session**:
+| # | Task | Status |
+|---|------|--------|
+| 1 | Designed data lifecycle model | [DONE] |
+| 2 | Implemented pure generation-based retention | [DONE] |
+| 3 | Added deprecation tracking to aggregated tables | [DONE] |
+| 4 | Added generation column to game_results | [DONE] |
+| 5 | Updated all game save calls | [DONE] |
+| 6 | Space estimation (~8-10 GB for 30 gens) | [DONE] |
+| 7 | Verified all imports | [DONE] |
+
+**Current Failure Being Worked On**:
+- **None** - Data lifecycle system complete
+
+**Key Design Principle**:
+> The system uses its own computational units (generations) rather than human time, making it portable across different hardware and schedules.
+
+---
+
+**END OF SESSION 24: December 8, 2025 - 11:00:00 AM**
+

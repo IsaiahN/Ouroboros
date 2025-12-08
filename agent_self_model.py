@@ -461,6 +461,10 @@ class AgentSelfModel:
                 first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
                 
+                -- Deprecation tracking (for safe_cleanup.py)
+                is_active INTEGER DEFAULT 1,              -- 0 = deprecated (stale or low confidence)
+                last_observed_generation INTEGER DEFAULT 0, -- For staleness detection
+                
                 UNIQUE(game_type, level_number, trigger_action, trigger_object_color, 
                        effect_object_color, effect_type)
             )
@@ -518,6 +522,10 @@ class AgentSelfModel:
                 
                 -- Is this a complete solution or partial?
                 is_complete_solution INTEGER DEFAULT 0,  -- Did it win the level?
+                
+                -- Deprecation tracking (for safe_cleanup.py)
+                is_active INTEGER DEFAULT 1,              -- 0 = deprecated
+                last_observed_generation INTEGER DEFAULT 0, -- For staleness detection
                 
                 UNIQUE(game_type, level_number, sequence_hash)
             )
@@ -660,6 +668,16 @@ class AgentSelfModel:
             CREATE INDEX IF NOT EXISTS idx_property_changes_game 
             ON object_property_changes(game_id, level_number)
         """)
+    
+    def _get_current_generation(self) -> int:
+        """Get current generation from evolutionary_state for deprecation tracking."""
+        try:
+            result = self.db.execute_query(
+                'SELECT value FROM evolutionary_state WHERE key = "current_generation"'
+            )
+            return int(result[0]['value']) if result else 0
+        except:
+            return 0
     
     def identify_controlled_objects(
         self, 
@@ -3371,15 +3389,18 @@ class AgentSelfModel:
             old_count = existing[0]['occurrence_count']
             old_consistent = existing[0]['consistent_count']
             new_confidence = min(0.99, (old_consistent + 1) / (old_count + 1 + 2))  # Laplace smoothing
+            current_gen = self._get_current_generation()
             
             self.db.execute_query("""
                 UPDATE interaction_triggers
                 SET occurrence_count = occurrence_count + 1,
                     consistent_count = consistent_count + 1,
                     confidence = ?,
-                    last_observed = CURRENT_TIMESTAMP
+                    last_observed = CURRENT_TIMESTAMP,
+                    last_observed_generation = ?,
+                    is_active = 1
                 WHERE trigger_id = ?
-            """, (new_confidence, existing[0]['trigger_id']))
+            """, (new_confidence, current_gen, existing[0]['trigger_id']))
             
             logger.debug(
                 f"[TRIGGER] Confirmed: {trigger_action}+{trigger_object_color} -> "
@@ -3387,13 +3408,15 @@ class AgentSelfModel:
             )
         else:
             # First time seeing this trigger
+            current_gen = self._get_current_generation()
             self.db.execute_query("""
                 INSERT OR IGNORE INTO interaction_triggers
                 (game_type, level_number, trigger_action, trigger_position_x, trigger_position_y,
                  trigger_object_color, trigger_interaction_type,
                  effect_position_x, effect_position_y, effect_object_color,
-                 effect_type, effect_details, effect_distance, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)
+                 effect_type, effect_details, effect_distance, confidence,
+                 is_active, last_observed_generation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5, 1, ?)
             """, (game_type, level_number, trigger_action,
                   trigger_position[0] if trigger_position else None,
                   trigger_position[1] if trigger_position else None,
@@ -3402,7 +3425,7 @@ class AgentSelfModel:
                   effect_position[1] if effect_position else None,
                   effect_object_color, effect_type,
                   json.dumps(effect_details) if effect_details else None,
-                  effect_distance))
+                  effect_distance, current_gen))
             
             logger.info(
                 f"[TRIGGER] New: {trigger_action}+{trigger_object_color} -> "
@@ -3718,6 +3741,7 @@ class AgentSelfModel:
             new_attempts = existing[0]['times_attempted'] + 1
             new_successes = existing[0]['times_succeeded'] + (1 if level_won else 0)
             new_rate = new_successes / new_attempts if new_attempts > 0 else 0
+            current_gen = self._get_current_generation()
             
             self.db.execute_query("""
                 UPDATE trigger_sequences
@@ -3725,25 +3749,29 @@ class AgentSelfModel:
                     times_succeeded = ?,
                     success_rate = ?,
                     last_validated = CURRENT_TIMESTAMP,
-                    is_complete_solution = MAX(is_complete_solution, ?)
+                    is_complete_solution = MAX(is_complete_solution, ?),
+                    last_observed_generation = ?,
+                    is_active = 1
                 WHERE sequence_id = ?
             """, (new_attempts, new_successes, new_rate, 
-                  1 if level_won else 0, existing[0]['sequence_id']))
+                  1 if level_won else 0, current_gen, existing[0]['sequence_id']))
             
             del self._active_sequences[key]
             return str(existing[0]['sequence_id'])
         else:
             # Save new sequence
+            current_gen = self._get_current_generation()
             self.db.execute_query("""
                 INSERT INTO trigger_sequences
                 (game_type, level_number, sequence_json, sequence_length,
                  sequence_hash, outcome_type, outcome_details,
-                 discovered_by_agent, is_complete_solution)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 discovered_by_agent, is_complete_solution,
+                 is_active, last_observed_generation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
             """, (game_type, level_number, sequence_json, len(seq['steps']),
                   sequence_hash, outcome_type,
                   json.dumps(outcome_details) if outcome_details else None,
-                  agent_id, 1 if level_won else 0))
+                  agent_id, 1 if level_won else 0, current_gen))
             
             logger.info(
                 f"[SEQUENCE] Saved new trigger sequence for {game_type} L{level_number}: "

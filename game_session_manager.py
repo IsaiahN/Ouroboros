@@ -184,7 +184,8 @@ class GameSessionManager:
             'status': 'started',
             'final_score': game_data.get('score', 0.0),
             'total_actions': 0,
-            'available_actions': game_data.get('available_actions', [])
+            'available_actions': game_data.get('available_actions', []),
+            'generation': self._current_generation  # Track generation for cleanup
         })
 
         self.current_game_id = game_id
@@ -560,7 +561,8 @@ class GameSessionManager:
             'final_score': final_score,
             'total_actions': actions_taken if actions_taken > 0 else self.session_stats['total_actions'],  # CRITICAL FIX: Use per-game count!
             'win_detected': final_state == 'WIN',
-            'level_completions': level_completions  # CRITICAL FIX: Store level completions!
+            'level_completions': level_completions,  # CRITICAL FIX: Store level completions!
+            'generation': self._current_generation  # Track generation for cleanup
         })
         
         # CRITICAL: Force WAL checkpoint after EVERY game to prevent data loss on force-close

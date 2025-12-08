@@ -1059,7 +1059,9 @@ CREATE TABLE game_results (
     frame_changes INTEGER DEFAULT 0,
     coordinate_attempts INTEGER DEFAULT 0,
     coordinate_successes INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, scorecard_id TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    scorecard_id TEXT,
+    generation INTEGER,  -- Generation number for cleanup tracking
     PRIMARY KEY (game_id, session_id),
     FOREIGN KEY (session_id) REFERENCES training_sessions(session_id)
 );
@@ -2439,6 +2441,10 @@ CREATE TABLE interaction_triggers (
     first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
     
+    -- Deprecation tracking (for safe_cleanup.py)
+    is_active INTEGER DEFAULT 1,              -- 0 = deprecated (stale or low confidence)
+    last_observed_generation INTEGER DEFAULT 0, -- For staleness detection
+    
     UNIQUE(game_type, level_number, trigger_action, trigger_object_color, 
            effect_object_color, effect_type)
 );
@@ -2476,6 +2482,10 @@ CREATE TABLE trigger_sequences (
     
     -- Is this a complete solution or partial?
     is_complete_solution INTEGER DEFAULT 0,
+    
+    -- Deprecation tracking (for safe_cleanup.py)
+    is_active INTEGER DEFAULT 1,              -- 0 = deprecated
+    last_observed_generation INTEGER DEFAULT 0, -- For staleness detection
     
     UNIQUE(game_type, level_number, sequence_hash)
 );

@@ -5,20 +5,52 @@ SAFE DATABASE CLEANUP
 The primary database cleanup routine for the Ouroboros system.
 Called by autonomous_evolution_runner.py and can be run standalone.
 
-Only deletes:
-1. Zero-score game results (failed games that provide no learning value)
-2. Old system/database logs
-3. Old score history (>7 days) 
-4. Old sensation learning events from completed sessions
-5. Excessive navigation state history
-6. Old action traces
-7. Excessive agent operating modes
+DATA LIFECYCLE PHILOSOPHY:
+==========================
+Data in this system follows a lifecycle:
 
-DOES NOT DELETE:
-- Winning sequences (critical!)
-- Agent data
+1. RAW OBSERVATIONS (Per-Game Ephemeral)
+   - object_property_snapshots, trigger_sequence_events, collision_events
+   - Only useful DURING gameplay to detect patterns
+   - Once patterns extracted to aggregated tables, raw data is redundant
+   - CLEANUP: After game ends AND patterns recorded
+
+2. AGGREGATED KNOWLEDGE (Permanent Network Memory)
+   - interaction_triggers, trigger_sequences, collision_effects
+   - Compressed patterns validated across multiple agents/generations
+   - Like winning_sequences - these ARE the learned knowledge
+   - CLEANUP: NEVER delete (only deprecate if stale)
+
+3. VALIDATION-DEPENDENT DATA (Cross-Generational)
+   - Triggers have occurrence_count, consistent_count, inconsistent_count
+   - Each new agent validates/refutes patterns, refining confidence
+   - Raw data from current generation needed for validation
+   - CLEANUP: Keep current generation's raw data until validation complete
+
+RETENTION STRATEGY:
+==================
+- Raw data: Keep from last 30 GENERATIONS (not time-based!)
+- Aggregated patterns: Keep forever (mark is_active=FALSE if stale)
+- Stale pattern threshold: 50 generations with no observations
+- ASYNC-SAFE: Uses generations as computational clock, not wall time
+- PORTABLE: Works on any hardware speed - fast machine = more gens/day
+
+WHAT THIS CLEANS:
+- Zero-score game results (failed games, no learning value)
+- Old system/database logs (keep recent 5,000)
+- Old score history (>7 days)
+- Old sensation learning events (keep 200,000)
+- Excessive navigation state history (keep 50,000)
+- Old action traces (keep 500,000)
+- Raw observation data from COMPLETED generations
+- Stale patterns (50+ generations without observation)
+
+WHAT THIS PRESERVES:
+- Winning sequences (CRITICAL)
+- Active agents
 - Game results with positive scores
-- Recent learning data
+- All aggregated knowledge patterns (interaction_triggers, trigger_sequences, etc.)
+- Current generation's raw observation data (for cross-agent validation)
 
 Per Master Ruleset Rule 2: All data in database, intelligent cleanup
 
@@ -39,52 +71,102 @@ class SafeDatabaseCleaner:
     """
     Safe database cleanup that preserves all critical learning data.
     
-    Retention Policies:
-    - Zero-score games: DELETE (no learning value)
-    - Score history: 7 days
-    - System logs: 5,000 entries
-    - Navigation state: 50,000 entries
-    - Action traces: 100,000 entries
-    - Sensation events: 200,000 entries
-    - Agent operating modes: 100,000 entries
-    - Decision weaving reports: 50,000 entries (Two-Streams)
-    - Role cohort wisdom: 7 days (re-calculated on demand)
+    DATA CATEGORIES:
+    ================
     
-    Session 23 Tables (Interaction/Trigger Tracking):
-    - interaction_triggers: KEEP (aggregated knowledge, already compressed)
-    - trigger_sequences: KEEP (winning sequences - CRITICAL)
-    - trigger_sequence_events: 100,000 entries (raw data, purge after sequences finalized)
-    - object_property_snapshots: 200,000 entries (raw data, patterns go to interaction_triggers)
-    - object_property_changes: 100,000 entries (raw data, patterns go to interaction_triggers)
-    - action6_availability_events: 50,000 entries (patterns go to selectability_conditions)
-    - collision_events: 50,000 entries (patterns go to collision_effects)
-    - autonomous_objects: KEEP (small table, discovered NPCs)
+    1. EPHEMERAL RAW DATA (delete after N generations complete):
+       - object_property_snapshots: Object state per action (huge volume)
+       - object_property_changes: Property change log
+       - trigger_sequence_events: Individual trigger steps during gameplay
+       - collision_events: Individual collision records
+       - action6_availability_events: ACTION6 state changes
+       
+       These are PER-GAME observations. They're linked to game_id, which
+       has a generation number. We keep raw data from the last N generations
+       (default: 10) to ensure cross-agent validation can complete.
+       
+       SAFE: Uses multi-layer protection:
+       1. Try generation-based via game_results.generation
+       2. Try generation-based via session -> agent link
+       3. Final fallback: keep most recent 50M records by count
+       
+       ALL methods are generation-agnostic (no time assumptions).
+       System paused for a month? Nothing deleted until new gens run.
+       
+       RETENTION: Keep raw data from last 30 generations
+    
+    2. AGGREGATED KNOWLEDGE (never delete, only deprecate):
+       - interaction_triggers: Causal patterns with consistency scores
+       - trigger_sequences: Proven trigger orderings (winning sequences)
+       - collision_effects: What happens when objects collide
+       - selectability_conditions: What enables ACTION6
+       - autonomous_objects: NPCs/independent movers
+       
+       These ARE the learned knowledge. Like winning_sequences, they
+       represent compressed wisdom from thousands of observations.
+       
+       RETENTION: Permanent. Mark is_active=FALSE if stale (50+ generations
+       without observation or confidence < 10% after 20+ attempts).
+    
+    3. OPERATIONAL DATA (standard retention by count/age):
+       - score_history: 7 days
+       - system_logs: 5,000 entries
+       - navigation_state_history: 50,000 entries
+       - action_traces: 500,000 entries
+       - sensation_learning_events: 200,000 entries
+       - agent_operating_modes: 100,000 entries
+       - decision_weaving_reports: 50,000 entries
+       - role_cohort_wisdom: 7 days (cache, recalculated on demand)
+       - network_failure_hypotheses: 10,000 (keep validated + high-confidence)
     """
     
     def __init__(self, db_path='core_data.db'):
         self.db_path = db_path
         
-        # Retention policies
+        # =================================================================
+        # OPERATIONAL DATA RETENTION (by count or age)
+        # =================================================================
         self.score_history_retention_days = 7
         self.system_logs_retention = 5000
         self.navigation_retention = 50000
         self.action_traces_retention = 500000  # ~5 generations worth, allows sequence rebuild
         self.sensation_events_retention = 200000
         self.operating_modes_retention = 100000
-        # Two-Streams: New retention policies
         self.weaving_reports_retention = 50000
         self.cohort_wisdom_retention_days = 7
-        # Failure hypotheses: Keep validated + recent unvalidated
-        self.failure_hypotheses_retention = 10000  # Keep top 10k hypotheses
+        self.failure_hypotheses_retention = 10000
         
-        # Session 23: Interaction/trigger tracking cleanup
-        # These tables contain RAW DATA that gets AGGREGATED into knowledge tables
-        # Once aggregated, raw data can be purged (keeps DB lean)
-        self.trigger_sequence_events_retention = 100000  # Raw trigger steps
-        self.object_property_snapshots_retention = 200000  # Object state per action
-        self.object_property_changes_retention = 100000  # Property change log
-        self.action6_availability_retention = 50000  # ACTION6 state changes
-        self.collision_events_retention = 50000  # Raw collision data
+        # =================================================================
+        # RAW OBSERVATION DATA RETENTION
+        # =================================================================
+        # Strategy: Keep raw data from the last N GENERATIONS.
+        # 
+        # This is GENERATION-BASED, not time-based. The system measures
+        # its own computational progress, not human wall-clock time.
+        # 
+        # Benefits:
+        # - Works asynchronously (no 24/7 requirement)
+        # - Portable across different hardware speeds
+        # - Self-referential (system measures itself)
+        # - Safe during pauses (nothing deleted until new gens run)
+        #
+        # If someone runs this on fast hardware: more gens/day, more cleanup
+        # If someone runs this on slow hardware: fewer gens/day, less cleanup
+        # If system pauses for a week: no cleanup until evolution resumes
+        #
+        # 30 generations = roughly 1 week of continuous evolution at ~4h/gen
+        # But the actual time doesn't matter - what matters is 30 generations
+        # of learning have occurred, making older raw data redundant.
+        self.raw_data_generation_retention = 30  # Keep raw data from last 30 generations
+        
+        # =================================================================
+        # AGGREGATED KNOWLEDGE DEPRECATION
+        # =================================================================
+        # Patterns become stale if not observed for many generations.
+        # Don't delete - just mark inactive (game might return).
+        self.pattern_staleness_generations = 50
+        self.pattern_low_confidence_threshold = 0.10
+        self.pattern_min_attempts_for_deprecation = 20
     
     def cleanup(self, dry_run=True, verbose=True):
         """
@@ -159,6 +241,85 @@ class SafeDatabaseCleaner:
         if verbose:
             print('\n10. Old/low-value failure hypotheses')
         results['tables_cleaned']['network_failure_hypotheses'] = self._clean_failure_hypotheses(c, conn, dry_run, verbose)
+        
+        # =====================================================================
+        # SESSION 23: RAW OBSERVATION DATA CLEANUP
+        # =====================================================================
+        # These tables contain per-action raw data that feeds aggregated patterns.
+        # Strategy: Keep only current generation (last 24h) for cross-agent validation.
+        # Once generation completes, patterns are in aggregated tables.
+        
+        # 11. Object property snapshots (HUGE volume - every object * every action)
+        if verbose:
+            print('\n11. Old object property snapshots (raw data)')
+        results['tables_cleaned']['object_property_snapshots'] = self._clean_raw_observation_data(
+            c, conn, dry_run, verbose, 
+            table='object_property_snapshots',
+            id_column='snapshot_id',
+            timestamp_column='timestamp'
+        )
+        
+        # 12. Object property changes
+        if verbose:
+            print('\n12. Old object property changes (raw data)')
+        results['tables_cleaned']['object_property_changes'] = self._clean_raw_observation_data(
+            c, conn, dry_run, verbose,
+            table='object_property_changes', 
+            id_column='change_id',
+            timestamp_column='timestamp'
+        )
+        
+        # 13. Trigger sequence events (steps during gameplay, before finalization)
+        if verbose:
+            print('\n13. Old trigger sequence events (raw data)')
+        results['tables_cleaned']['trigger_sequence_events'] = self._clean_raw_observation_data(
+            c, conn, dry_run, verbose,
+            table='trigger_sequence_events',
+            id_column='event_id', 
+            timestamp_column='timestamp'
+        )
+        
+        # 14. Collision events
+        if verbose:
+            print('\n14. Old collision events (raw data)')
+        results['tables_cleaned']['collision_events'] = self._clean_raw_observation_data(
+            c, conn, dry_run, verbose,
+            table='collision_events',
+            id_column='collision_id',
+            timestamp_column='timestamp'
+        )
+        
+        # 15. ACTION6 availability events
+        if verbose:
+            print('\n15. Old ACTION6 availability events (raw data)')
+        results['tables_cleaned']['action6_availability_events'] = self._clean_raw_observation_data(
+            c, conn, dry_run, verbose,
+            table='action6_availability_events',
+            id_column='event_id',
+            timestamp_column='timestamp'
+        )
+        
+        # =====================================================================
+        # AGGREGATED KNOWLEDGE DEPRECATION (mark stale, don't delete)
+        # =====================================================================
+        
+        # 16. Deprecate stale interaction triggers
+        if verbose:
+            print('\n16. Deprecate stale interaction triggers')
+        results['tables_cleaned']['interaction_triggers_deprecated'] = self._deprecate_stale_patterns(
+            c, conn, dry_run, verbose,
+            table='interaction_triggers',
+            use_confidence=True
+        )
+        
+        # 17. Deprecate stale trigger sequences (but NOT delete - these are like winning sequences)
+        if verbose:
+            print('\n17. Deprecate stale trigger sequences')
+        results['tables_cleaned']['trigger_sequences_deprecated'] = self._deprecate_stale_patterns(
+            c, conn, dry_run, verbose,
+            table='trigger_sequences',
+            use_confidence=False  # trigger_sequences use success_rate, not confidence
+        )
         
         # Calculate total
         results['total_deleted'] = sum(r.get('deleted', 0) for r in results['tables_cleaned'].values())
@@ -459,32 +620,358 @@ class SafeDatabaseCleaner:
         
         return {'found': to_delete, 'deleted': 0}
     
+    # =========================================================================
+    # SESSION 23: RAW OBSERVATION DATA CLEANUP
+    # =========================================================================
+    
+    def _clean_raw_observation_data(self, c, conn, dry_run, verbose, 
+                                     table: str, id_column: str, timestamp_column: str):
+        """
+        Clean raw observation data tables using PURE GENERATION-BASED retention.
+        
+        NO TIME-BASED LOGIC. The system measures its own computational progress
+        (generations), not human wall-clock time. This makes it:
+        - Asynchronous (no 24/7 requirement)
+        - Portable (works on any hardware speed)
+        - Self-referential (system measures itself)
+        - Safe during pauses (nothing deleted until new generations run)
+        
+        Strategy:
+        1. Get current generation from agents table (MAX(generation))
+        2. Calculate cutoff = current_gen - retention_generations
+        3. Delete raw data linked to games from generations < cutoff
+        4. If generation link not available, fall back to COUNT-based (keep N most recent)
+        
+        The count-based fallback is also generation-agnostic - it just keeps
+        the most recent N records regardless of when they were created.
+        
+        Args:
+            table: Table name to clean
+            id_column: Primary key column name  
+            timestamp_column: Ignored (kept for API compatibility)
+        """
+        try:
+            c.execute(f'SELECT COUNT(*) FROM {table}')
+            total = c.fetchone()[0]
+        except:
+            if verbose:
+                print(f'   Table {table} does not exist (skip)')
+            return {'found': 0, 'deleted': 0}
+        
+        if total == 0:
+            if verbose:
+                print(f'   Table {table} is empty')
+            return {'found': 0, 'deleted': 0}
+        
+        # Check if table has game_id column
+        c.execute(f"PRAGMA table_info({table})")
+        columns = {row[1] for row in c.fetchall()}
+        
+        if 'game_id' not in columns:
+            if verbose:
+                print(f'   Table {table} has no game_id column (skip)')
+            return {'found': 0, 'deleted': 0}
+        
+        # Get current generation (the system's own computational clock)
+        try:
+            c.execute('SELECT MAX(generation) FROM agents')
+            row = c.fetchone()
+            current_gen = int(row[0]) if row and row[0] else 0
+        except:
+            current_gen = 0
+        
+        if current_gen == 0:
+            if verbose:
+                print(f'   Cannot determine current generation (skip)')
+            return {'found': 0, 'deleted': 0}
+        
+        cutoff_gen = current_gen - self.raw_data_generation_retention
+        
+        if cutoff_gen <= 0:
+            if verbose:
+                print(f'   Only {current_gen} generations run, keeping all data (retention={self.raw_data_generation_retention})')
+            return {'found': 0, 'deleted': 0}
+        
+        # Try to link raw data -> game_results -> session -> agent -> generation
+        # This requires game_results to have session_id which links to agents
+        try:
+            # Method 1: Direct generation link if game_results has generation column
+            c.execute("PRAGMA table_info(game_results)")
+            gr_columns = {row[1] for row in c.fetchall()}
+            
+            if 'generation' in gr_columns:
+                # Direct link available
+                c.execute(f'''
+                    SELECT COUNT(*) FROM {table} t
+                    WHERE EXISTS (
+                        SELECT 1 FROM game_results g 
+                        WHERE g.game_id = t.game_id 
+                        AND g.generation < ?
+                    )
+                ''', (cutoff_gen,))
+                old_count = c.fetchone()[0]
+                
+                if verbose:
+                    print(f'   Total: {total:,}, From gens < {cutoff_gen} (of {current_gen}): {old_count:,}')
+                
+                if not dry_run and old_count > 0:
+                    c.execute(f'''
+                        DELETE FROM {table}
+                        WHERE EXISTS (
+                            SELECT 1 FROM game_results g 
+                            WHERE g.game_id = {table}.game_id 
+                            AND g.generation < ?
+                        )
+                    ''', (cutoff_gen,))
+                    conn.commit()
+                    if verbose:
+                        print(f'   Deleted: {old_count:,} rows')
+                    return {'found': old_count, 'deleted': old_count}
+                elif old_count > 0 and verbose:
+                    print(f'   Would delete: {old_count:,} rows')
+                return {'found': old_count, 'deleted': 0}
+            
+            # Method 2: Link through sessions to agents (if available)
+            if 'session_id' in gr_columns:
+                c.execute(f'''
+                    SELECT COUNT(*) FROM {table} t
+                    WHERE EXISTS (
+                        SELECT 1 FROM game_results g
+                        JOIN agents a ON g.session_id = a.agent_id
+                        WHERE g.game_id = t.game_id 
+                        AND a.generation < ?
+                    )
+                ''', (cutoff_gen,))
+                old_count = c.fetchone()[0]
+                
+                if verbose:
+                    print(f'   Total: {total:,}, From gens < {cutoff_gen} (via agents): {old_count:,}')
+                
+                if not dry_run and old_count > 0:
+                    c.execute(f'''
+                        DELETE FROM {table}
+                        WHERE EXISTS (
+                            SELECT 1 FROM game_results g
+                            JOIN agents a ON g.session_id = a.agent_id
+                            WHERE g.game_id = {table}.game_id 
+                            AND a.generation < ?
+                        )
+                    ''', (cutoff_gen,))
+                    conn.commit()
+                    if verbose:
+                        print(f'   Deleted: {old_count:,} rows')
+                    return {'found': old_count, 'deleted': old_count}
+                elif old_count > 0 and verbose:
+                    print(f'   Would delete: {old_count:,} rows')
+                return {'found': old_count, 'deleted': 0}
+                
+        except Exception as e:
+            if verbose:
+                print(f'   Generation link failed: {e}')
+        
+        # FALLBACK: Count-based retention (also generation-agnostic)
+        # Keep the most recent N records. This is still safe because:
+        # - Recent records = recent generations (by definition)
+        # - No time-based assumptions
+        # - Works regardless of schema limitations
+        #
+        # Estimate: 30 gens * 150 games/gen * 1000 actions * 10 objects = 45M records
+        # We'll keep 50M as a safe buffer
+        retention_count = 50_000_000  # 50 million records
+        
+        # But also cap at a reasonable size based on current total
+        # If table is small, just skip
+        if total < retention_count:
+            if verbose:
+                print(f'   Total: {total:,}, under {retention_count:,} limit (skip)')
+            return {'found': 0, 'deleted': 0}
+        
+        excess = total - retention_count
+        
+        if verbose:
+            print(f'   Count-based fallback: Total {total:,}, keeping {retention_count:,}, excess: {excess:,}')
+        
+        if not dry_run and excess > 0:
+            c.execute(f'''
+                DELETE FROM {table}
+                WHERE {id_column} NOT IN (
+                    SELECT {id_column} FROM {table}
+                    ORDER BY {id_column} DESC
+                    LIMIT {retention_count}
+                )
+            ''')
+            conn.commit()
+            if verbose:
+                print(f'   Deleted: {excess:,} rows')
+            return {'found': excess, 'deleted': excess}
+        elif excess > 0 and verbose:
+            print(f'   Would delete: {excess:,} rows')
+        
+        return {'found': excess, 'deleted': 0}
+    
+    def _deprecate_stale_patterns(self, c, conn, dry_run, verbose, 
+                                   table: str, use_confidence: bool = True):
+        """
+        Mark stale patterns as inactive (don't delete - game might return).
+        
+        Patterns become stale if:
+        1. Not observed for pattern_staleness_generations (50+) generations
+        2. Confidence dropped below threshold after min attempts
+        
+        This is like pariah decay - knowledge that's no longer relevant
+        gets marked inactive, but isn't deleted in case it becomes
+        relevant again.
+        
+        Args:
+            table: Table name (must have is_active, last_observed columns)
+            use_confidence: If True, also check confidence threshold
+        """
+        try:
+            # Check if table has required columns
+            c.execute(f"PRAGMA table_info({table})")
+            columns = {row[1] for row in c.fetchall()}
+            
+            if 'is_active' not in columns:
+                if verbose:
+                    print(f'   Table {table} has no is_active column (skip)')
+                return {'found': 0, 'deleted': 0, 'deprecated': 0}
+                
+        except Exception as e:
+            if verbose:
+                print(f'   Table {table} does not exist (skip)')
+            return {'found': 0, 'deleted': 0, 'deprecated': 0}
+        
+        deprecated = 0
+        
+        # Get current generation from evolutionary_state
+        try:
+            c.execute('SELECT value FROM evolutionary_state WHERE key = "current_generation"')
+            row = c.fetchone()
+            current_gen = int(row[0]) if row else 0
+        except:
+            current_gen = 0
+        
+        staleness_cutoff = current_gen - self.pattern_staleness_generations
+        
+        # Count and deprecate stale patterns (not observed in 50+ generations)
+        # Check if table has generation tracking
+        if 'last_observed_generation' in columns:
+            c.execute(f'''
+                SELECT COUNT(*) FROM {table} 
+                WHERE is_active = 1 AND last_observed_generation < ?
+            ''', (staleness_cutoff,))
+            stale_by_gen = c.fetchone()[0]
+            
+            if not dry_run and stale_by_gen > 0:
+                c.execute(f'''
+                    UPDATE {table} SET is_active = 0 
+                    WHERE is_active = 1 AND last_observed_generation < ?
+                ''', (staleness_cutoff,))
+                deprecated += stale_by_gen
+        else:
+            stale_by_gen = 0
+        
+        # Also deprecate low-confidence patterns (if confidence tracking exists)
+        stale_by_confidence = 0
+        if use_confidence and 'confidence' in columns and 'occurrence_count' in columns:
+            c.execute(f'''
+                SELECT COUNT(*) FROM {table}
+                WHERE is_active = 1 
+                AND confidence < ?
+                AND occurrence_count >= ?
+            ''', (self.pattern_low_confidence_threshold, self.pattern_min_attempts_for_deprecation))
+            stale_by_confidence = c.fetchone()[0]
+            
+            if not dry_run and stale_by_confidence > 0:
+                c.execute(f'''
+                    UPDATE {table} SET is_active = 0
+                    WHERE is_active = 1 
+                    AND confidence < ?
+                    AND occurrence_count >= ?
+                ''', (self.pattern_low_confidence_threshold, self.pattern_min_attempts_for_deprecation))
+                deprecated += stale_by_confidence
+        
+        if not dry_run and deprecated > 0:
+            conn.commit()
+        
+        total_stale = stale_by_gen + stale_by_confidence
+        
+        if verbose:
+            print(f'   Stale by generation (>{self.pattern_staleness_generations} gens): {stale_by_gen:,}')
+            print(f'   Low confidence (<{self.pattern_low_confidence_threshold} after {self.pattern_min_attempts_for_deprecation} attempts): {stale_by_confidence:,}')
+            if dry_run and total_stale > 0:
+                print(f'   Would deprecate: {total_stale:,} patterns')
+            elif deprecated > 0:
+                print(f'   Deprecated: {deprecated:,} patterns')
+        
+        return {'found': total_stale, 'deleted': 0, 'deprecated': deprecated if not dry_run else 0}
+    
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         
+        # Core winning sequences (CRITICAL)
         c.execute('SELECT COUNT(*) FROM winning_sequences WHERE is_active = 1')
         sequences = c.fetchone()[0]
         
+        # Active agents
         c.execute('SELECT COUNT(*) FROM agents WHERE is_active = 1')
         agents = c.fetchone()[0]
         
+        # Positive-score games
         c.execute('SELECT COUNT(*) FROM game_results WHERE final_score > 0')
         good_games = c.fetchone()[0]
+        
+        # Session 23: Aggregated knowledge tables (PRESERVED, not deleted)
+        aggregated_knowledge = {}
+        
+        # Interaction triggers (causal patterns)
+        try:
+            c.execute('SELECT COUNT(*) FROM interaction_triggers')
+            aggregated_knowledge['interaction_triggers'] = c.fetchone()[0]
+        except:
+            aggregated_knowledge['interaction_triggers'] = 0
+        
+        # Trigger sequences (winning trigger orderings)
+        try:
+            c.execute('SELECT COUNT(*) FROM trigger_sequences')
+            aggregated_knowledge['trigger_sequences'] = c.fetchone()[0]
+        except:
+            aggregated_knowledge['trigger_sequences'] = 0
+        
+        # Collision effects
+        try:
+            c.execute('SELECT COUNT(*) FROM collision_effects')
+            aggregated_knowledge['collision_effects'] = c.fetchone()[0]
+        except:
+            aggregated_knowledge['collision_effects'] = 0
+        
+        # Selectability conditions
+        try:
+            c.execute('SELECT COUNT(*) FROM selectability_conditions')
+            aggregated_knowledge['selectability_conditions'] = c.fetchone()[0]
+        except:
+            aggregated_knowledge['selectability_conditions'] = 0
         
         conn.close()
         
         if verbose:
             print('\nCritical Data Preserved:')
-            print(f'  Active sequences: {sequences} [OK]')
-            print(f'  Active agents: {agents} [OK]')
-            print(f'  Positive-score games: {good_games} [OK]')
+            print(f'  Active sequences: {sequences:,} [OK]')
+            print(f'  Active agents: {agents:,} [OK]')
+            print(f'  Positive-score games: {good_games:,} [OK]')
+            print('\nAggregated Knowledge (PERMANENT):')
+            print(f'  Interaction triggers: {aggregated_knowledge["interaction_triggers"]:,}')
+            print(f'  Trigger sequences: {aggregated_knowledge["trigger_sequences"]:,}')
+            print(f'  Collision effects: {aggregated_knowledge["collision_effects"]:,}')
+            print(f'  Selectability conditions: {aggregated_knowledge["selectability_conditions"]:,}')
         
         return {
             'sequences': sequences,
             'agents': agents,
-            'good_games': good_games
+            'good_games': good_games,
+            'aggregated_knowledge': aggregated_knowledge
         }
 
 
