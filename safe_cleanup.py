@@ -300,26 +300,102 @@ class SafeDatabaseCleaner:
         )
         
         # =====================================================================
+        # SESSION 25: PERCEPTUAL PRIMITIVES DATA CLEANUP
+        # =====================================================================
+        # New tables from perceptual primitives framework (agent_self_model.py)
+        # Classification:
+        #   RAW (30 gen retention): perceptual_observations, control_transfer_events, indirect_causation_events
+        #   AGGREGATED (permanent with deprecation): self_object_identity, control_transfer_patterns,
+        #       grid_region_classification, detected_resource_counters, valence_associations, inferred_goal_states
+        
+        # 16. Perceptual observations (RAW - per-action data)
+        if verbose:
+            print('\n16. Old perceptual observations (raw data)')
+        results['tables_cleaned']['perceptual_observations'] = self._clean_raw_observation_data(
+            c, conn, dry_run, verbose,
+            table='perceptual_observations',
+            id_column='observation_id',
+            timestamp_column='timestamp'
+        )
+        
+        # 17. Control transfer events (RAW - individual transfer occurrences)
+        if verbose:
+            print('\n17. Old control transfer events (raw data)')
+        results['tables_cleaned']['control_transfer_events'] = self._clean_raw_observation_data(
+            c, conn, dry_run, verbose,
+            table='control_transfer_events',
+            id_column='event_id',
+            timestamp_column='timestamp'
+        )
+        
+        # 18. Indirect causation events (RAW - individual causation occurrences)
+        if verbose:
+            print('\n18. Old indirect causation events (raw data)')
+        results['tables_cleaned']['indirect_causation_events'] = self._clean_raw_observation_data(
+            c, conn, dry_run, verbose,
+            table='indirect_causation_events',
+            id_column='event_id',
+            timestamp_column='timestamp'
+        )
+        
+        # =====================================================================
         # AGGREGATED KNOWLEDGE DEPRECATION (mark stale, don't delete)
         # =====================================================================
         
-        # 16. Deprecate stale interaction triggers
+        # 19. Deprecate stale interaction triggers
         if verbose:
-            print('\n16. Deprecate stale interaction triggers')
+            print('\n19. Deprecate stale interaction triggers')
         results['tables_cleaned']['interaction_triggers_deprecated'] = self._deprecate_stale_patterns(
             c, conn, dry_run, verbose,
             table='interaction_triggers',
             use_confidence=True
         )
         
-        # 17. Deprecate stale trigger sequences (but NOT delete - these are like winning sequences)
+        # 20. Deprecate stale trigger sequences (but NOT delete - these are like winning sequences)
         if verbose:
-            print('\n17. Deprecate stale trigger sequences')
+            print('\n20. Deprecate stale trigger sequences')
         results['tables_cleaned']['trigger_sequences_deprecated'] = self._deprecate_stale_patterns(
             c, conn, dry_run, verbose,
             table='trigger_sequences',
             use_confidence=False  # trigger_sequences use success_rate, not confidence
         )
+        
+        # =====================================================================
+        # SESSION 25: AGGREGATED PERCEPTUAL KNOWLEDGE DEPRECATION
+        # =====================================================================
+        # These tables contain network-learned patterns from perceptual primitives.
+        # Don't delete - just mark stale (patterns may become relevant again).
+        
+        # 21. Deprecate stale self-object identity mappings
+        if verbose:
+            print('\n21. Deprecate stale self-object identity')
+        results['tables_cleaned']['self_object_identity_deprecated'] = self._deprecate_stale_patterns(
+            c, conn, dry_run, verbose,
+            table='self_object_identity',
+            use_confidence=True
+        )
+        
+        # 22. Deprecate stale control transfer patterns
+        if verbose:
+            print('\n22. Deprecate stale control transfer patterns')
+        results['tables_cleaned']['control_transfer_patterns_deprecated'] = self._deprecate_stale_patterns(
+            c, conn, dry_run, verbose,
+            table='control_transfer_patterns',
+            use_confidence=True
+        )
+        
+        # 23. Deprecate stale valence associations
+        if verbose:
+            print('\n23. Deprecate stale valence associations')
+        results['tables_cleaned']['valence_associations_deprecated'] = self._deprecate_stale_patterns(
+            c, conn, dry_run, verbose,
+            table='valence_associations',
+            use_confidence=True
+        )
+        
+        # NOTE: grid_region_classification, detected_resource_counters, inferred_goal_states
+        # do NOT have is_active columns - they're structural data that doesn't become stale.
+        # They remain as permanent reference data for the game/level.
         
         # Calculate total
         results['total_deleted'] = sum(r.get('deleted', 0) for r in results['tables_cleaned'].values())
@@ -954,6 +1030,44 @@ class SafeDatabaseCleaner:
         except:
             aggregated_knowledge['selectability_conditions'] = 0
         
+        # Session 25: Perceptual primitives aggregated knowledge
+        perceptual_knowledge = {}
+        
+        # Self-object identity mappings
+        try:
+            c.execute('SELECT COUNT(*) FROM self_object_identity')
+            perceptual_knowledge['self_object_identity'] = c.fetchone()[0]
+        except:
+            perceptual_knowledge['self_object_identity'] = 0
+        
+        # Control transfer patterns
+        try:
+            c.execute('SELECT COUNT(*) FROM control_transfer_patterns')
+            perceptual_knowledge['control_transfer_patterns'] = c.fetchone()[0]
+        except:
+            perceptual_knowledge['control_transfer_patterns'] = 0
+        
+        # Valence associations (positive/negative outcomes)
+        try:
+            c.execute('SELECT COUNT(*) FROM valence_associations')
+            perceptual_knowledge['valence_associations'] = c.fetchone()[0]
+        except:
+            perceptual_knowledge['valence_associations'] = 0
+        
+        # Region classifications
+        try:
+            c.execute('SELECT COUNT(*) FROM grid_region_classification')
+            perceptual_knowledge['grid_region_classification'] = c.fetchone()[0]
+        except:
+            perceptual_knowledge['grid_region_classification'] = 0
+        
+        # Goal state inferences
+        try:
+            c.execute('SELECT COUNT(*) FROM inferred_goal_states')
+            perceptual_knowledge['inferred_goal_states'] = c.fetchone()[0]
+        except:
+            perceptual_knowledge['inferred_goal_states'] = 0
+        
         conn.close()
         
         if verbose:
@@ -966,12 +1080,19 @@ class SafeDatabaseCleaner:
             print(f'  Trigger sequences: {aggregated_knowledge["trigger_sequences"]:,}')
             print(f'  Collision effects: {aggregated_knowledge["collision_effects"]:,}')
             print(f'  Selectability conditions: {aggregated_knowledge["selectability_conditions"]:,}')
+            print('\nPerceptual Primitives Knowledge (Session 25):')
+            print(f'  Self-object identity: {perceptual_knowledge["self_object_identity"]:,}')
+            print(f'  Control transfer patterns: {perceptual_knowledge["control_transfer_patterns"]:,}')
+            print(f'  Valence associations: {perceptual_knowledge["valence_associations"]:,}')
+            print(f'  Grid region classifications: {perceptual_knowledge["grid_region_classification"]:,}')
+            print(f'  Inferred goal states: {perceptual_knowledge["inferred_goal_states"]:,}')
         
         return {
             'sequences': sequences,
             'agents': agents,
             'good_games': good_games,
-            'aggregated_knowledge': aggregated_knowledge
+            'aggregated_knowledge': aggregated_knowledge,
+            'perceptual_knowledge': perceptual_knowledge
         }
 
 

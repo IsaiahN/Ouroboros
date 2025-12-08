@@ -4090,3 +4090,228 @@ Updated `record_interaction_trigger()` and `finalize_sequence()` to track `last_
 
 **END OF SESSION 24: December 8, 2025 - 11:00:00 AM**
 
+---
+
+## Session 25: Perceptual Primitives Framework Implementation
+**Date**: December 8, 2025  
+**Time Started**: 11:30:00 AM  
+**Focus**: Implement the "grammar of perception" - observation rules, not solution rules
+
+---
+
+### The Problem
+
+**User Insight**: "Agents trained from scratch inside the ARC 3 environment have no outside reference frame."
+
+They're like Plato's cave prisoners - they can observe correlations but lack the conceptual vocabulary to interpret them. They can learn "ACTION1 moves this object up" but can't conceptualize:
+- "Hearts = lives" (cultural knowledge)
+- "That's a UI counter, not a gameplay object" (perceptual framing)
+- "This is a puzzle with a goal" (meta-game knowledge)
+
+**The Solution**: Give agents the **grammar of perception** (how to see) without the **dictionary of solutions** (what to do).
+
+---
+
+### The Five Perceptual Primitives
+
+| # | Primitive | Description | What It Enables |
+|---|-----------|-------------|-----------------|
+| 1 | **Self-Object Identity** | "I am exactly one thing" | Distinguish actor from environment |
+| 2 | **Control Transfer** | "I WAS X, now I AM Y" | Handle object switching during play |
+| 3 | **Indirect Causation** | "I control X, X affects Y" | Distinguish control from cause |
+| 4 | **Region Classification** | "UI vs Playfield" | Know what's information vs interaction |
+| 5 | **Goal State Inference** | "Win conditions may be abstract" | Discover goals empirically |
+
+**Plus supporting primitives**:
+- Resource Counter Detection
+- Valence Associations (good/bad tagging)
+
+---
+
+### Key Insight: Control Transfer vs Indirect Causation
+
+**User Quote**: "You can be object X...trigger some actions and then 'you become in control over a different object' - I am object Y. This is different from: I controlled object X to interact with something which triggered a reaction in object Y (but I still don't directly control it)"
+
+| Concept | Description | Example |
+|---------|-------------|---------|
+| **Control Transfer** | ACTION1-4 now move a DIFFERENT object | Click on blue square, now my arrows move blue not red |
+| **Indirect Causation** | ACTION1-4 still move same object, but its actions affect another | Push red into wall, wall disappears (but I still control red) |
+
+**Detection Method**:
+1. Take ACTION1-4
+2. Check if expected object moved in expected direction
+3. If NO but different object moved: Control Transfer
+4. If YES and another object also changed: Indirect Causation
+
+---
+
+### Implementation
+
+**New Database Tables (9 total)**:
+
+| Table | Purpose | Retention |
+|-------|---------|-----------|
+| `self_object_identity` | Current controlled object per game/level | Raw (30 gen) |
+| `control_transfer_events` | "I was X, now I am Y" events | Raw (30 gen) |
+| `control_transfer_patterns` | Network-learned transfer patterns | Aggregated |
+| `indirect_causation_events` | "I control X, X affects Y" events | Raw (30 gen) |
+| `grid_region_classification` | UI vs playfield per region | Aggregated |
+| `detected_resource_counters` | Life/move counters | Aggregated |
+| `valence_associations` | Good/bad object associations | Aggregated |
+| `inferred_goal_states` | Discovered win conditions | Aggregated |
+
+**New Methods in `agent_self_model.py`**:
+
+| Method | Purpose |
+|--------|---------|
+| `update_self_object_identity()` | Record current controlled object |
+| `get_current_self_object()` | Get what object agent controls |
+| `detect_control_transfer()` | Record control transfer event |
+| `get_known_control_transfers()` | Query network transfer patterns |
+| `record_indirect_causation()` | Record "X affects Y" events |
+| `verify_still_controlled()` | Check if expected object still controlled |
+| `classify_grid_regions()` | Classify regions as UI/playfield |
+| `get_playfield_bounds()` | Get playfield bounding box |
+| `is_ui_region()` | Check if coordinate is in UI |
+| `detect_resource_counters()` | Find counter-like objects |
+| `record_valence_association()` | Record good/bad tagging |
+| `get_object_valence()` | Get valence for an object |
+| `get_all_object_valences()` | Get all known valences |
+| `infer_goal_from_level_end()` | Infer goal from win state |
+| `get_goal_hypothesis()` | Get current goal theory |
+| `get_goal_progress()` | Estimate progress toward goal |
+
+---
+
+### Alignment with AGI Theory
+
+| AGI Principle | Implementation |
+|---------------|----------------|
+| **Viral Exchange** | Control patterns, valences, goals spread as network knowledge |
+| **Evolutionary Forgetting** | Raw events deleted after 30 gens, patterns persist |
+| **Two-Stream** | Private observations → Network validation → Refined perception |
+| **Emergent Reasoning** | Q1 (change vs fixed) → region classification |
+| **Emergent Reasoning** | Q2 (reward/punish) → valence associations |
+
+---
+
+### The Key Constraint (Preserved)
+
+**We NEVER tell agents**:
+- "Hearts mean lives"
+- "Move to the door to win"
+- "Avoid red enemies"
+
+**We ONLY give them**:
+- "You control one object" (self-identity)
+- "Control can transfer" (control transfer detection)
+- "You can affect things you don't control" (indirect causation)
+- "Some regions are information, not interaction" (region classification)
+- "There's a goal state (you'll discover what it is)" (goal inference)
+
+**The vocabulary of perception, not the dictionary of solutions.**
+
+---
+
+### Files Modified
+
+| File | Changes | Lines |
+|------|---------|-------|
+| `agent_self_model.py` | +9 new tables, +16 new methods | ~600 lines |
+| `safe_cleanup.py` | +9 new table cleanup rules | ~80 lines |
+| `core_gameplay.py` | +5 integration points for perceptual primitives | ~120 lines |
+
+---
+
+### Integration into core_gameplay.py
+
+**1. Initial Region Classification** (line ~1275)
+- Location: After symbolic engine initialization
+- Call: `agent_self_model.classify_grid_regions(game_id, level=1, frame)`
+- Purpose: Identify playfield vs UI regions on game start
+
+**2. Level Transition Region Classification** (line ~855)
+- Location: In `_handle_level_completion()`, after moving to next level
+- Call: `agent_self_model.classify_grid_regions(game_id, new_level, frame)`
+- Purpose: Update region classification for each new level
+
+**3. Goal State Inference** (line ~625)
+- Location: In `_handle_level_completion()`, after trigger sequence finalization
+- Call: `agent_self_model.infer_goal_from_level_end(game_id, level, final_frame, action_history, agent_id)`
+- Purpose: Infer abstract win condition from completed level
+
+**4. Control Transfer Detection** (line ~3680)
+- Location: In action processing, after collision detection
+- Calls: 
+  - `agent_self_model.verify_still_controlled()` - Check if we still control same object
+  - `agent_self_model.detect_control_transfer()` - Record transfer if control changed
+- Purpose: Track "I was X, now I'm Y" transitions
+
+**5. Indirect Causation Recording** (line ~3650)
+- Location: In action processing, when collision causes effect
+- Call: `agent_self_model.record_indirect_causation(game_id, level, controlled_color, action, affected_color, effect_type, details)`
+- Purpose: Track "I control X, X hit Y, Y changed" causation chains
+
+**6. Valence Association Recording** (line ~3890)
+- Location: After trigger step recording, when score changes
+- Call: `agent_self_model.record_valence_association(game_type, level, trigger_type, object_color, consequence, valence, confidence)`
+- Purpose: Build positive/negative associations for objects based on outcomes
+
+---
+
+### Integration into safe_cleanup.py
+
+Added cleanup rules for 9 new perceptual primitive tables:
+
+**RAW Data Tables (30 generation retention)**:
+| Table | Cleanup Method | Description |
+|-------|---------------|-------------|
+| `perceptual_observations` | `_clean_raw_observation_data()` | Per-action observations |
+| `control_transfer_events` | `_clean_raw_observation_data()` | Individual transfer events |
+| `indirect_causation_events` | `_clean_raw_observation_data()` | Individual causation events |
+
+**AGGREGATED Knowledge Tables (permanent with deprecation)**:
+| Table | Cleanup Method | Description |
+|-------|---------------|-------------|
+| `self_object_identity` | `_deprecate_stale_patterns()` | Mark stale after 50 gens |
+| `control_transfer_patterns` | `_deprecate_stale_patterns()` | Network-learned patterns |
+| `valence_associations` | `_deprecate_stale_patterns()` | Positive/negative tags |
+
+**Structural Tables (permanent, no cleanup)**:
+- `grid_region_classification` - Playfield vs UI regions
+- `detected_resource_counters` - Counter locations
+- `inferred_goal_states` - Abstract goal hypotheses
+
+---
+
+### Current Status
+
+**Completed This Session**:
+| # | Task | Status |
+|---|------|--------|
+| 1 | Designed 5 perceptual primitives | [DONE] |
+| 2 | Added self_object_identity table | [DONE] |
+| 3 | Added control_transfer_events/patterns tables | [DONE] |
+| 4 | Added indirect_causation_events table | [DONE] |
+| 5 | Added grid_region_classification table | [DONE] |
+| 6 | Added detected_resource_counters table | [DONE] |
+| 7 | Added valence_associations table | [DONE] |
+| 8 | Added inferred_goal_states table | [DONE] |
+| 9 | Implemented all self-model methods | [DONE] |
+| 10 | Implemented region classification methods | [DONE] |
+| 11 | Implemented valence methods | [DONE] |
+| 12 | Implemented goal inference methods | [DONE] |
+| 13 | Verified syntax and imports | [DONE] |
+| 14 | Integrated into core_gameplay.py | [DONE] |
+| 15 | Added cleanup rules to safe_cleanup.py | [DONE] |
+| 16 | Updated verify_critical_data() | [DONE] |
+
+**Next Steps**:
+1. Update `complete_database_schema.sql` with new table definitions
+2. Run evolution to verify primitives are being populated
+3. Analyze collected perceptual data after a few generations
+
+---
+
+**END OF SESSION 25: December 8, 2025 - 2:00:00 PM**
+

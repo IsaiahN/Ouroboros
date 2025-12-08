@@ -622,6 +622,40 @@ class GameplayEngine:
                 logger.info(f"[SEQUENCE] Saved winning trigger sequence for level {loop_state.current_level}")
             except Exception as e:
                 logger.debug(f"Trigger sequence finalization failed (non-critical): {e}")
+            
+            # ================================================================
+            # SESSION 25: GOAL STATE INFERENCE
+            # ================================================================
+            # Infer what the win condition was from the final frame.
+            # Abstract goals: "all X gone", "reached location", "counters match", etc.
+            # This builds grammar of perception for generalizing across games.
+            # ================================================================
+            try:
+                # Get action history for this level
+                session_id = self.session_manager.current_session_id
+                action_traces = self.db.execute_query("""
+                    SELECT action_type FROM action_traces
+                    WHERE session_id = ? AND game_id = ? AND level_number = ?
+                    ORDER BY action_number
+                """, (session_id, game_id, loop_state.current_level))
+                
+                action_history = [t.get('action_type', 'unknown') for t in (action_traces or [])]
+                
+                goal_info = self.agent_self_model.infer_goal_from_level_end(
+                    game_id=game_id,
+                    level=loop_state.current_level,
+                    final_frame={'grid': game_state.frame} if game_state.frame else None,
+                    action_history=action_history,
+                    agent_id=agent_id
+                )
+                
+                if goal_info and goal_info.get('goal_type'):
+                    logger.info(
+                        f"[GOAL INFERRED] Level {loop_state.current_level}: "
+                        f"{goal_info['goal_type']} (confidence: {goal_info.get('confidence', 0):.2f})"
+                    )
+            except Exception as e:
+                logger.debug(f"Goal inference failed (non-critical): {e}")
         
         # Pattern Learning: Capture sequence on level completion
         if self.game_config.get('enable_pattern_learning', True):
@@ -799,6 +833,28 @@ class GameplayEngine:
         loop_state.level_action_count = 0
         loop_state.level_start_action = loop_state.action_count
         loop_state.consecutive_no_frame_change = 0
+        
+        # ================================================================
+        # SESSION 25: REGION CLASSIFICATION ON LEVEL START
+        # ================================================================
+        # Classify the grid into playfield vs UI regions for new level.
+        # This helps agents understand which objects are interactive.
+        # ================================================================
+        if hasattr(self, 'agent_self_model') and game_state.frame:
+            try:
+                regions = self.agent_self_model.classify_grid_regions(
+                    game_id=game_id,
+                    level=loop_state.current_level,
+                    frame={'grid': game_state.frame}
+                )
+                if regions:
+                    logger.debug(
+                        f"[REGION] Level {loop_state.current_level}: "
+                        f"Playfield: {regions.get('playfield_bounds', 'unknown')}, "
+                        f"UI zones: {len(regions.get('ui_regions', []))}"
+                    )
+            except Exception as e:
+                logger.debug(f"Region classification failed (non-critical): {e}")
 
     async def _finalize_game(
         self,
@@ -1209,6 +1265,28 @@ class GameplayEngine:
             except Exception as e:
                 self.symbolic_engine = None
                 logger.debug(f"Symbolic engine init failed (non-critical): {e}")
+        
+        # ================================================================
+        # SESSION 25: INITIAL REGION CLASSIFICATION
+        # ================================================================
+        # Classify the grid into playfield vs UI regions for level 1.
+        # This helps agents understand which objects are interactive.
+        # ================================================================
+        if hasattr(self, 'agent_self_model') and game_state.frame:
+            try:
+                regions = self.agent_self_model.classify_grid_regions(
+                    game_id=game_id,
+                    level=1,  # Starting level
+                    frame={'grid': game_state.frame}
+                )
+                if regions:
+                    logger.debug(
+                        f"[REGION] Level 1 initial: "
+                        f"Playfield: {regions.get('playfield_bounds', 'unknown')}, "
+                        f"UI zones: {len(regions.get('ui_regions', []))}"
+                    )
+            except Exception as e:
+                logger.debug(f"Initial region classification failed (non-critical): {e}")
         
         # Set game context in action handler for subgoal planning (Tier 1: +30%)
         self.action_handler._current_game_id = game_id  # type: ignore[attr-defined]
@@ -3659,6 +3737,73 @@ class GameplayEngine:
                                         f"{collision['target_object_color']} - "
                                         f"effect: {collision['effect_observed']}"
                                     )
+                                    
+                                    # ================================================================
+                                    # SESSION 25: INDIRECT CAUSATION DETECTION
+                                    # ================================================================
+                                    # When collision causes change in another object:
+                                    # "I control X, X hits Y, Y changes" = indirect causation
+                                    # Different from control transfer (I don't become Y)
+                                    # ================================================================
+                                    if collision.get('effect_observed') and collision['effect_observed'] != 'none':
+                                        try:
+                                            self.agent_self_model.record_indirect_causation(
+                                                game_id=game_id,
+                                                level=current_level,
+                                                controlled_color=controlled_color,
+                                                action=action,
+                                                affected_color=collision['target_object_color'],
+                                                effect_type=collision['effect_observed'],
+                                                details={
+                                                    'my_pos': to_pos,
+                                                    'target_pos': collision.get('collision_pos'),
+                                                    'action_num': getattr(self, '_action_counter', 0)
+                                                }
+                                            )
+                                            logger.info(
+                                                f"[INDIRECT] {controlled_color} caused "
+                                                f"{collision['target_object_color']} to "
+                                                f"{collision['effect_observed']}"
+                                            )
+                                        except Exception as e:
+                                            logger.debug(f"Indirect causation recording failed: {e}")
+                            
+                            # ================================================================
+                            # SESSION 25: CONTROL TRANSFER DETECTION
+                            # ================================================================
+                            # Check if we lost control of one object and gained control of another.
+                            # "I was controlling X, now I'm controlling Y" = control transfer
+                            # This can happen via collision or special grid triggers.
+                            # ================================================================
+                            if verification and verification.get('object_color'):
+                                try:
+                                    still_controlled, new_object_id = self.agent_self_model.verify_still_controlled(
+                                        game_id=game_id,
+                                        level=current_level,
+                                        expected_color=verification['object_color'],
+                                        frame_before={'grid': frame_before},
+                                        frame_after={'grid': new_state.frame},
+                                        action=action
+                                    )
+                                    
+                                    if not still_controlled and new_object_id is not None:
+                                        # Get the new object's color from the frame
+                                        # new_object_id is the color of the newly controlled object
+                                        new_color = new_object_id  # It's actually the color, not ID
+                                        self.agent_self_model.detect_control_transfer(
+                                            game_id=game_id,
+                                            level=current_level,
+                                            from_color=verification['object_color'],
+                                            to_color=new_color,
+                                            trigger_action=action,
+                                            agent_id=self.game_config.get('agent_id')
+                                        )
+                                        logger.info(
+                                            f"[CONTROL TRANSFER] Was controlling {verification['object_color']}, "
+                                            f"now controlling {new_color}"
+                                        )
+                                except Exception as e:
+                                    logger.debug(f"Control transfer detection failed: {e}")
                             
                             # ================================================================
                             # COMPREHENSIVE GRID EFFECTS TRACKING (Added 2025-12-08)
@@ -3720,6 +3865,46 @@ class GameplayEngine:
                                         score_before=score_before,
                                         score_after=score_after
                                     )
+                                
+                                # ================================================================
+                                # SESSION 25: VALENCE ASSOCIATION RECORDING
+                                # ================================================================
+                                # Record positive/negative valence for object interactions.
+                                # Score increase = positive, object disappeared = context-dependent.
+                                # This builds the "good/bad" vocabulary for objects.
+                                # ================================================================
+                                if score_before is not None and score_after is not None:
+                                    try:
+                                        score_delta = score_after - score_before
+                                        for effect in effects:
+                                            # Score increase after effect = positive valence
+                                            if score_delta > 0:
+                                                valence = 1.0
+                                                consequence = 'score_increased'
+                                            # Object disappeared + no score change = neutral/unknown
+                                            elif effect['change_type'] == 'disappeared':
+                                                valence = 0.0  # Unknown until we see outcome
+                                                consequence = 'object_disappeared'
+                                            else:
+                                                valence = 0.0
+                                                consequence = 'neutral_change'
+                                            
+                                            if valence != 0.0:  # Only record significant valences
+                                                self.agent_self_model.record_valence_association(
+                                                    game_type=game_type,
+                                                    level=current_level,
+                                                    trigger_type=trigger_type,
+                                                    object_color=effect['object_color'],
+                                                    consequence=consequence,
+                                                    valence=valence,
+                                                    confidence=0.7 if score_delta > 0 else 0.3
+                                                )
+                                                logger.debug(
+                                                    f"[VALENCE] Object {effect['object_color']}: "
+                                                    f"{consequence} -> valence={valence:.1f}"
+                                                )
+                                    except Exception as e:
+                                        logger.debug(f"Valence recording failed: {e}")
                             
                             # ================================================================
                             # AUTONOMOUS OBJECT DETECTION (Added 2025-01-XX)

@@ -668,6 +668,431 @@ class AgentSelfModel:
             CREATE INDEX IF NOT EXISTS idx_property_changes_game 
             ON object_property_changes(game_id, level_number)
         """)
+        
+        # =====================================================================
+        # PERCEPTUAL PRIMITIVE 1: SELF-OBJECT IDENTITY
+        # =====================================================================
+        # Tracks "I am THIS object" with confidence scoring.
+        # Critical distinction:
+        # - self_object_identity: Who am I RIGHT NOW in this level?
+        # - control_transfer_events: I WAS object X, now I AM object Y
+        # - indirect_causation: I control X, which AFFECTS Y (but I don't control Y)
+        #
+        # The difference between control transfer and indirect causation:
+        # - Control Transfer: ACTION1-4 now move a DIFFERENT object
+        # - Indirect Causation: ACTION1-4 still move the same object, but
+        #   that object's movement CAUSED a change in another object
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS self_object_identity (
+                identity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Current controlled object
+                self_object_color INTEGER NOT NULL,       -- Color ID of controlled object
+                self_object_signature TEXT,               -- Shape hash for stable identification
+                self_object_center_x REAL,                -- Center of mass at identification
+                self_object_center_y REAL,
+                
+                -- Confidence and evidence
+                confidence REAL DEFAULT 0.5,              -- 0.0 to 1.0
+                correlation_score REAL DEFAULT 0.0,       -- Action-direction correlation
+                sample_count INTEGER DEFAULT 0,           -- Number of action samples
+                
+                -- Singularity check (should be exactly 1 controlled object)
+                total_candidate_objects INTEGER DEFAULT 1,  -- How many objects responded?
+                is_ambiguous INTEGER DEFAULT 0,             -- 1 = multiple objects respond equally
+                
+                -- When was this identity established?
+                established_at_action INTEGER DEFAULT 0,    -- Action number when identified
+                still_valid INTEGER DEFAULT 1,              -- 0 = object lost/changed
+                
+                -- Timestamps
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_id, level_number, established_at_action)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_self_object_identity_game 
+            ON self_object_identity(game_id, level_number, still_valid)
+        """)
+        
+        # =====================================================================
+        # CONTROL TRANSFER EVENTS
+        # =====================================================================
+        # "I WAS controlling object X, now I AM controlling object Y"
+        #
+        # This happens when:
+        # - Clicking (ACTION6) on a different object to select it
+        # - Some trigger causes control to switch automatically
+        # - Reaching a checkpoint that gives control of a new character
+        #
+        # NOT the same as indirect causation - here, ACTION1-4 now move Y, not X.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS control_transfer_events (
+                transfer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                action_number INTEGER NOT NULL,
+                
+                -- What was controlled before
+                previous_object_color INTEGER,
+                previous_object_signature TEXT,
+                previous_object_center_x REAL,
+                previous_object_center_y REAL,
+                
+                -- What is controlled now
+                new_object_color INTEGER NOT NULL,
+                new_object_signature TEXT,
+                new_object_center_x REAL,
+                new_object_center_y REAL,
+                
+                -- What caused the transfer?
+                transfer_trigger_action TEXT,             -- ACTION6 click, automatic, etc.
+                transfer_trigger_coords TEXT,             -- Click coords if ACTION6
+                transfer_trigger_reason TEXT,             -- 'selection', 'automatic', 'collision', 'unknown'
+                
+                -- Confidence that this is a real control transfer (not just indirect causation)
+                transfer_confidence REAL DEFAULT 0.5,
+                verified_by_movement INTEGER DEFAULT 0,   -- 1 = confirmed new object responds to ACTION1-4
+                
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_control_transfer_game 
+            ON control_transfer_events(game_id, level_number)
+        """)
+        
+        # =====================================================================
+        # CONTROL TRANSFER PATTERNS (Network Knowledge)
+        # =====================================================================
+        # Learned patterns: "In game X level Y, clicking color 5 transfers control to it"
+        # Shared across agents for faster learning.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS control_transfer_patterns (
+                pattern_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Transfer pattern
+                transfer_trigger_action TEXT NOT NULL,    -- Usually ACTION6
+                target_object_color INTEGER,              -- Color of object that becomes controlled
+                target_object_signature TEXT,             -- Shape of object (for non-color identification)
+                transfer_conditions TEXT,                 -- JSON: what conditions enable this transfer
+                
+                -- Validation
+                occurrence_count INTEGER DEFAULT 1,
+                success_count INTEGER DEFAULT 1,          -- Times transfer was verified
+                confidence REAL DEFAULT 0.5,
+                
+                -- Timestamps
+                discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, transfer_trigger_action, target_object_color)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_control_transfer_patterns_game 
+            ON control_transfer_patterns(game_type, level_number)
+        """)
+        
+        # =====================================================================
+        # INDIRECT CAUSATION EFFECTS
+        # =====================================================================
+        # "I control object X. When X does something, it CAUSES object Y to change.
+        #  But I still control X, not Y."
+        #
+        # Examples:
+        # - I push X into Y -> Y moves (but I still control X)
+        # - I move X over a trigger -> a wall Y disappears (but I still control X)
+        # - X collides with Y -> Y changes color (but I still control X)
+        #
+        # The key difference from control_transfer:
+        # - Control Transfer: ACTION1-4 now move Y instead of X
+        # - Indirect Causation: ACTION1-4 still move X, X's actions affect Y
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS indirect_causation_events (
+                causation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                action_number INTEGER NOT NULL,
+                
+                -- The controlled object (I still control this)
+                controlled_object_color INTEGER NOT NULL,
+                controlled_action TEXT NOT NULL,          -- What action I took (ACTION1-4)
+                controlled_movement_x REAL,               -- How controlled object moved
+                controlled_movement_y REAL,
+                
+                -- The affected object (I DON'T control this, but my action affected it)
+                affected_object_color INTEGER NOT NULL,
+                affected_effect_type TEXT,                -- 'moved', 'disappeared', 'appeared', 'color_changed', 'transformed'
+                affected_movement_x REAL,                 -- If moved, how much?
+                affected_movement_y REAL,
+                affected_details TEXT,                    -- JSON with before/after details
+                
+                -- Causation type
+                causation_type TEXT,                      -- 'collision', 'trigger', 'push', 'remote'
+                causation_distance REAL,                  -- Distance between controlled and affected
+                
+                -- Confidence this is indirect causation (not control transfer)
+                -- High if controlled object still responds to subsequent actions
+                confidence REAL DEFAULT 0.5,
+                verified_still_controlled INTEGER DEFAULT 0,  -- 1 = confirmed I still control original
+                
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_indirect_causation_game 
+            ON indirect_causation_events(game_id, level_number)
+        """)
+        
+        # =====================================================================
+        # PERCEPTUAL PRIMITIVE 2: GRID REGION CLASSIFICATION
+        # =====================================================================
+        # Not all pixels are gameplay. Some are UI (lives, score, move counter).
+        # Classification:
+        # - 'playfield': Interactive area where gameplay happens
+        # - 'ui': Information display (counters, status)
+        # - 'decoration': Static elements that never change
+        # - 'unknown': Not yet classified
+        #
+        # Heuristics:
+        # - Never changes across actions -> decoration or ui
+        # - Changes only symbolically (numbers) -> ui
+        # - Responds to actions -> playfield
+        # - Contains self-object -> definitely playfield
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS grid_region_classification (
+                classification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Region bounds (divide grid into macro-regions)
+                region_x INTEGER NOT NULL,                -- 0-7 (divides into 8x8 regions)
+                region_y INTEGER NOT NULL,                -- 0-7
+                region_min_pixel_x INTEGER,               -- Actual pixel bounds
+                region_max_pixel_x INTEGER,
+                region_min_pixel_y INTEGER,
+                region_max_pixel_y INTEGER,
+                
+                -- Classification
+                classification TEXT DEFAULT 'unknown',    -- 'playfield', 'ui', 'decoration', 'unknown'
+                classification_reason TEXT,               -- Why this classification
+                
+                -- Evidence tracking
+                total_observations INTEGER DEFAULT 0,     -- How many times observed
+                times_changed INTEGER DEFAULT 0,          -- How many times content changed
+                times_responded_to_action INTEGER DEFAULT 0,  -- Changes correlated with actions
+                times_symbolic_change INTEGER DEFAULT 0,  -- Small isolated changes (counters)
+                contains_self_object INTEGER DEFAULT 0,   -- Ever contained the controlled object
+                
+                -- Confidence
+                confidence REAL DEFAULT 0.5,
+                
+                -- Timestamps
+                first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, region_x, region_y)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_grid_region_classification_game 
+            ON grid_region_classification(game_type, level_number, classification)
+        """)
+        
+        # =====================================================================
+        # PERCEPTUAL PRIMITIVE 3: RESOURCE COUNTER DETECTION
+        # =====================================================================
+        # Small isolated objects with changing numbers = finite resources
+        # Examples: Lives (hearts), moves remaining, energy, ammo
+        #
+        # Detection:
+        # - Small object (1-5 cells) in UI region
+        # - Changes value after actions
+        # - Depletion correlates with game over or level fail
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS detected_resource_counters (
+                counter_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Location (should be in UI region)
+                region_x INTEGER NOT NULL,
+                region_y INTEGER NOT NULL,
+                pixel_x INTEGER,                          -- Exact location
+                pixel_y INTEGER,
+                
+                -- Counter characteristics
+                counter_type TEXT DEFAULT 'unknown',      -- 'lives', 'moves', 'score', 'energy', 'unknown'
+                initial_value INTEGER,                    -- Value at level start
+                current_value INTEGER,                    -- Last observed value
+                min_observed INTEGER,                     -- Lowest value seen
+                max_observed INTEGER,                     -- Highest value seen
+                
+                -- Change behavior
+                change_direction TEXT,                    -- 'decreasing', 'increasing', 'both'
+                change_trigger TEXT,                      -- 'per_action', 'per_collision', 'per_time', 'unknown'
+                change_amount INTEGER DEFAULT 1,          -- Typical change per event
+                
+                -- Depletion consequence
+                depletion_consequence TEXT,               -- 'game_over', 'level_fail', 'lose_ability', 'unknown'
+                depletion_observed INTEGER DEFAULT 0,     -- Have we seen it hit 0?
+                
+                -- Validation
+                observation_count INTEGER DEFAULT 1,
+                confidence REAL DEFAULT 0.5,
+                
+                -- Timestamps
+                first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, region_x, region_y)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_resource_counters_game 
+            ON detected_resource_counters(game_type, level_number)
+        """)
+        
+        # =====================================================================
+        # PERCEPTUAL PRIMITIVE 4: VALENCE ASSOCIATIONS
+        # =====================================================================
+        # Every change gets tagged with positive/negative valence:
+        # - Score increase -> positive
+        # - Score decrease -> negative
+        # - Level completion -> strong positive
+        # - Game over -> strong negative
+        # - Counter decrease -> context-dependent
+        #
+        # This grounds the sensation engine with OUTCOME-based feelings.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS valence_associations (
+                association_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- What triggered this valence?
+                trigger_type TEXT NOT NULL,               -- 'collision', 'action', 'proximity', 'selection'
+                trigger_action TEXT,                      -- ACTION1-7 if applicable
+                trigger_object_color INTEGER,             -- Object color if applicable
+                trigger_target_color INTEGER,             -- Target of interaction if applicable
+                
+                -- What was the consequence?
+                consequence_type TEXT NOT NULL,           -- 'score_change', 'counter_change', 'game_end', 'level_end'
+                consequence_details TEXT,                 -- JSON with specifics
+                
+                -- Valence: -1.0 (very bad) to +1.0 (very good)
+                valence REAL NOT NULL,
+                valence_magnitude REAL DEFAULT 0.5,       -- How strong is this association?
+                
+                -- Validation
+                observation_count INTEGER DEFAULT 1,
+                consistent_count INTEGER DEFAULT 1,       -- Times this valence was confirmed
+                confidence REAL DEFAULT 0.5,
+                
+                -- Timestamps
+                first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, trigger_type, trigger_object_color, 
+                       trigger_target_color, consequence_type)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_valence_associations_game 
+            ON valence_associations(game_type, level_number)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_valence_associations_valence 
+            ON valence_associations(valence)
+        """)
+        
+        # =====================================================================
+        # PERCEPTUAL PRIMITIVE 5: INFERRED GOAL STATES
+        # =====================================================================
+        # Goals aren't always visible objects. They can be abstract states:
+        # - "Clear all objects of color X"
+        # - "Reach position (X, Y)"
+        # - "Match a specific pattern"
+        # - "Survive N actions"
+        #
+        # Inference: Analyze what grid state existed when level ended successfully.
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS inferred_goal_states (
+                goal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Goal type
+                goal_type TEXT NOT NULL,                  -- 'clear_color', 'reach_position', 'match_pattern', 
+                                                          -- 'survive', 'collect_all', 'transform', 'unknown'
+                
+                -- Goal parameters (depends on goal_type)
+                goal_params TEXT,                         -- JSON: {color_to_clear, position_to_reach, pattern_hash, etc.}
+                
+                -- How was this goal inferred?
+                inference_method TEXT,                    -- 'level_end_analysis', 'score_correlation', 'network_wisdom'
+                inference_evidence TEXT,                  -- JSON: evidence supporting this inference
+                
+                -- Goal progress tracking (for agents to use)
+                progress_metric TEXT,                     -- How to measure progress toward this goal
+                                                          -- e.g., "count of color X remaining" or "distance to position"
+                
+                -- Validation
+                times_validated INTEGER DEFAULT 1,        -- Times this goal was confirmed by level wins
+                confidence REAL DEFAULT 0.5,
+                
+                -- Is the goal visible or abstract?
+                is_visible INTEGER DEFAULT 0,             -- 1 = goal object exists on grid
+                goal_object_color INTEGER,                -- If visible, what color is the goal?
+                
+                -- Timestamps
+                discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, goal_type, goal_params)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_inferred_goals_game 
+            ON inferred_goal_states(game_type, level_number)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_inferred_goals_confidence 
+            ON inferred_goal_states(confidence DESC)
+        """)
     
     def _get_current_generation(self) -> int:
         """Get current generation from evolutionary_state for deprecation tracking."""
@@ -3900,6 +4325,1089 @@ class AgentSelfModel:
         key = f"{game_id}:{level_number}"
         if hasattr(self, '_active_sequences') and key in self._active_sequences:
             del self._active_sequences[key]
+    
+    # =========================================================================
+    # PERCEPTUAL PRIMITIVE 1: SELF-OBJECT IDENTITY METHODS
+    # =========================================================================
+    
+    def update_self_object_identity(
+        self,
+        game_id: str,
+        level_number: int,
+        action_number: int,
+        self_object_color: int,
+        self_object_signature: Optional[str],
+        center_x: float,
+        center_y: float,
+        confidence: float,
+        correlation_score: float,
+        sample_count: int,
+        total_candidates: int = 1
+    ) -> None:
+        """
+        Update or create self-object identity for this game/level.
+        
+        This is "I am THIS object" - the core self-model.
+        Should be called when we've identified what object responds to our actions.
+        
+        Args:
+            game_id: Current game
+            level_number: Current level
+            action_number: When this identity was established
+            self_object_color: Color ID of the controlled object
+            self_object_signature: Shape hash for stable identification
+            center_x, center_y: Center of mass of the object
+            confidence: 0.0 to 1.0 confidence in this identification
+            correlation_score: Action-direction correlation score
+            sample_count: Number of action samples used
+            total_candidates: How many objects responded (should be 1)
+        """
+        is_ambiguous = 1 if total_candidates > 1 else 0
+        
+        # First, mark any previous identity as no longer valid
+        self.db.execute_query("""
+            UPDATE self_object_identity
+            SET still_valid = 0
+            WHERE game_id = ? AND level_number = ? AND still_valid = 1
+        """, (game_id, level_number))
+        
+        # Insert new identity
+        self.db.execute_query("""
+            INSERT INTO self_object_identity
+            (game_id, level_number, self_object_color, self_object_signature,
+             self_object_center_x, self_object_center_y, confidence,
+             correlation_score, sample_count, total_candidate_objects,
+             is_ambiguous, established_at_action, still_valid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """, (game_id, level_number, self_object_color, self_object_signature,
+              center_x, center_y, confidence, correlation_score, sample_count,
+              total_candidates, is_ambiguous, action_number))
+        
+        logger.debug(
+            f"[SELF-MODEL] Identity established: game={game_id} L{level_number} "
+            f"color={self_object_color} confidence={confidence:.2f} "
+            f"{'(AMBIGUOUS)' if is_ambiguous else ''}"
+        )
+    
+    def get_current_self_object(
+        self,
+        game_id: str,
+        level_number: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the current self-object identity for this game/level.
+        
+        Returns:
+            Dict with self_object_color, confidence, center_x/y, etc.
+            or None if no identity established yet.
+        """
+        result = self.db.execute_query("""
+            SELECT self_object_color, self_object_signature,
+                   self_object_center_x, self_object_center_y,
+                   confidence, correlation_score, sample_count,
+                   total_candidate_objects, is_ambiguous,
+                   established_at_action
+            FROM self_object_identity
+            WHERE game_id = ? AND level_number = ? AND still_valid = 1
+            ORDER BY established_at_action DESC
+            LIMIT 1
+        """, (game_id, level_number))
+        
+        if result:
+            row = result[0]
+            return {
+                'self_object_color': row['self_object_color'],
+                'self_object_signature': row['self_object_signature'],
+                'center_x': row['self_object_center_x'],
+                'center_y': row['self_object_center_y'],
+                'confidence': row['confidence'],
+                'correlation_score': row['correlation_score'],
+                'sample_count': row['sample_count'],
+                'is_ambiguous': bool(row['is_ambiguous']),
+                'total_candidates': row['total_candidate_objects']
+            }
+        return None
+    
+    def detect_control_transfer(
+        self,
+        game_id: str,
+        level_number: int,
+        action_number: int,
+        previous_color: Optional[int],
+        previous_signature: Optional[str],
+        previous_center: Optional[Tuple[float, float]],
+        new_color: int,
+        new_signature: Optional[str],
+        new_center: Tuple[float, float],
+        trigger_action: str,
+        trigger_coords: Optional[str] = None,
+        trigger_reason: str = 'unknown'
+    ) -> str:
+        """
+        Record a control transfer event: "I WAS object X, now I AM object Y"
+        
+        This is different from indirect causation - here, ACTION1-4 now move
+        a DIFFERENT object than before.
+        
+        Args:
+            game_id: Current game
+            level_number: Current level
+            action_number: When transfer occurred
+            previous_color/signature/center: Old controlled object (if known)
+            new_color/signature/center: New controlled object
+            trigger_action: What caused the transfer (usually ACTION6)
+            trigger_coords: Click coordinates if ACTION6
+            trigger_reason: 'selection', 'automatic', 'collision', 'unknown'
+        
+        Returns:
+            transfer_id as string
+        """
+        prev_cx, prev_cy = previous_center if previous_center else (None, None)
+        new_cx, new_cy = new_center
+        
+        self.db.execute_query("""
+            INSERT INTO control_transfer_events
+            (game_id, level_number, action_number,
+             previous_object_color, previous_object_signature,
+             previous_object_center_x, previous_object_center_y,
+             new_object_color, new_object_signature,
+             new_object_center_x, new_object_center_y,
+             transfer_trigger_action, transfer_trigger_coords,
+             transfer_trigger_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (game_id, level_number, action_number,
+              previous_color, previous_signature, prev_cx, prev_cy,
+              new_color, new_signature, new_cx, new_cy,
+              trigger_action, trigger_coords, trigger_reason))
+        
+        # Also update self_object_identity
+        self.update_self_object_identity(
+            game_id, level_number, action_number,
+            new_color, new_signature, new_cx, new_cy,
+            confidence=0.7,  # Medium confidence until verified
+            correlation_score=0.0,  # Not yet measured
+            sample_count=0,
+            total_candidates=1
+        )
+        
+        # Learn this transfer pattern for the network
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        self._learn_control_transfer_pattern(
+            game_type, level_number, trigger_action, new_color, new_signature
+        )
+        
+        logger.info(
+            f"[CONTROL-TRANSFER] {game_id} L{level_number}: "
+            f"color {previous_color} -> color {new_color} "
+            f"via {trigger_action} ({trigger_reason})"
+        )
+        
+        return f"{game_id}:{level_number}:{action_number}"
+    
+    def _learn_control_transfer_pattern(
+        self,
+        game_type: str,
+        level_number: int,
+        trigger_action: str,
+        target_color: int,
+        target_signature: Optional[str]
+    ) -> None:
+        """Learn and share a control transfer pattern with the network."""
+        # Check if pattern exists
+        existing = self.db.execute_query("""
+            SELECT pattern_id, occurrence_count
+            FROM control_transfer_patterns
+            WHERE game_type = ? AND level_number = ?
+                  AND transfer_trigger_action = ? AND target_object_color = ?
+        """, (game_type, level_number, trigger_action, target_color))
+        
+        if existing:
+            # Update existing pattern
+            self.db.execute_query("""
+                UPDATE control_transfer_patterns
+                SET occurrence_count = occurrence_count + 1,
+                    confidence = MIN(0.95, confidence + 0.05),
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE pattern_id = ?
+            """, (existing[0]['pattern_id'],))
+        else:
+            # Create new pattern
+            self.db.execute_query("""
+                INSERT INTO control_transfer_patterns
+                (game_type, level_number, transfer_trigger_action,
+                 target_object_color, target_object_signature)
+                VALUES (?, ?, ?, ?, ?)
+            """, (game_type, level_number, trigger_action, target_color, target_signature))
+    
+    def get_known_control_transfers(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Get known control transfer patterns for a game/level.
+        
+        Returns list of patterns with target colors and trigger actions.
+        """
+        results = self.db.execute_query("""
+            SELECT transfer_trigger_action, target_object_color,
+                   target_object_signature, confidence, occurrence_count
+            FROM control_transfer_patterns
+            WHERE game_type = ? AND level_number = ? AND confidence >= 0.5
+            ORDER BY confidence DESC
+        """, (game_type, level_number))
+        
+        return [
+            {
+                'trigger_action': r['transfer_trigger_action'],
+                'target_color': r['target_object_color'],
+                'target_signature': r['target_object_signature'],
+                'confidence': r['confidence'],
+                'occurrences': r['occurrence_count']
+            }
+            for r in (results or [])
+        ]
+    
+    def record_indirect_causation(
+        self,
+        game_id: str,
+        level_number: int,
+        action_number: int,
+        controlled_color: int,
+        controlled_action: str,
+        controlled_movement: Tuple[float, float],
+        affected_color: int,
+        affected_effect: str,
+        affected_movement: Optional[Tuple[float, float]] = None,
+        affected_details: Optional[Dict] = None,
+        causation_type: str = 'unknown',
+        causation_distance: float = 0.0
+    ) -> None:
+        """
+        Record an indirect causation event: "I control X, X affected Y"
+        
+        This is when my controlled object causes a change in another object,
+        but I still control the original object (not a transfer).
+        
+        Args:
+            game_id: Current game
+            level_number: Current level
+            action_number: When this happened
+            controlled_color: Color of object I control
+            controlled_action: What action I took (ACTION1-4)
+            controlled_movement: How my object moved (dx, dy)
+            affected_color: Color of affected object
+            affected_effect: 'moved', 'disappeared', 'appeared', 'color_changed', 'transformed'
+            affected_movement: If moved, (dx, dy) of affected object
+            affected_details: Additional details as dict
+            causation_type: 'collision', 'trigger', 'push', 'remote'
+            causation_distance: Distance between controlled and affected objects
+        """
+        ctrl_dx, ctrl_dy = controlled_movement
+        aff_dx, aff_dy = affected_movement if affected_movement else (None, None)
+        
+        self.db.execute_query("""
+            INSERT INTO indirect_causation_events
+            (game_id, level_number, action_number,
+             controlled_object_color, controlled_action,
+             controlled_movement_x, controlled_movement_y,
+             affected_object_color, affected_effect_type,
+             affected_movement_x, affected_movement_y,
+             affected_details, causation_type, causation_distance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (game_id, level_number, action_number,
+              controlled_color, controlled_action, ctrl_dx, ctrl_dy,
+              affected_color, affected_effect, aff_dx, aff_dy,
+              json.dumps(affected_details) if affected_details else None,
+              causation_type, causation_distance))
+        
+        logger.debug(
+            f"[INDIRECT-CAUSE] {game_id} L{level_number}: "
+            f"color {controlled_color} {controlled_action} -> "
+            f"color {affected_color} {affected_effect} ({causation_type})"
+        )
+    
+    def verify_still_controlled(
+        self,
+        game_id: str,
+        level_number: int,
+        expected_color: int,
+        frame_before: Dict,
+        frame_after: Dict,
+        action_taken: str
+    ) -> Tuple[bool, Optional[int]]:
+        """
+        Verify that we still control the expected object after an action.
+        
+        This distinguishes control transfer from indirect causation:
+        - If expected_color moved in action direction: still controlled
+        - If expected_color didn't move but another did: control transferred
+        - If nothing moved: ambiguous
+        
+        Args:
+            game_id: Current game
+            level_number: Current level
+            expected_color: The color we think we control
+            frame_before: Grid state before action
+            frame_after: Grid state after action
+            action_taken: ACTION1-4 that was taken
+        
+        Returns:
+            (still_controlled: bool, new_controlled_color: Optional[int])
+        """
+        ACTION_DIRECTION = {
+            'ACTION1': (0, -1), 'action_1': (0, -1),
+            'ACTION2': (0, 1), 'action_2': (0, 1),
+            'ACTION3': (-1, 0), 'action_3': (-1, 0),
+            'ACTION4': (1, 0), 'action_4': (1, 0),
+        }
+        
+        expected_dir = ACTION_DIRECTION.get(action_taken)
+        if not expected_dir:
+            return (True, None)  # Non-directional action, assume still controlled
+        
+        grid_before = frame_before.get('grid', [])
+        grid_after = frame_after.get('grid', [])
+        
+        if not grid_before or not grid_after:
+            return (True, None)
+        
+        objects_before = self._find_objects_in_grid(grid_before)
+        objects_after = self._find_objects_in_grid(grid_after)
+        
+        dx_expected, dy_expected = expected_dir
+        
+        # Check if expected_color moved in the right direction
+        expected_key = f"color_{expected_color}"
+        if expected_key in objects_before and expected_key in objects_after:
+            pos_before = objects_before[expected_key]
+            pos_after = objects_after[expected_key]
+            
+            cx_before = sum(p[0] for p in pos_before) / len(pos_before)
+            cy_before = sum(p[1] for p in pos_before) / len(pos_before)
+            cx_after = sum(p[0] for p in pos_after) / len(pos_after)
+            cy_after = sum(p[1] for p in pos_after) / len(pos_after)
+            
+            dx_actual = cx_after - cx_before
+            dy_actual = cy_after - cy_before
+            
+            # Check if movement matches expected direction
+            moved_correctly = False
+            if dx_expected != 0:
+                moved_correctly = (dx_expected > 0 and dx_actual > 0.3) or (dx_expected < 0 and dx_actual < -0.3)
+            if dy_expected != 0:
+                moved_correctly = (dy_expected > 0 and dy_actual > 0.3) or (dy_expected < 0 and dy_actual < -0.3)
+            
+            if moved_correctly:
+                return (True, None)  # Still control expected object
+        
+        # Expected object didn't move correctly - check if something else did
+        for obj_id, pos_before in objects_before.items():
+            if obj_id == expected_key:
+                continue
+            if obj_id not in objects_after:
+                continue
+            
+            pos_after = objects_after[obj_id]
+            
+            cx_before = sum(p[0] for p in pos_before) / len(pos_before)
+            cy_before = sum(p[1] for p in pos_before) / len(pos_before)
+            cx_after = sum(p[0] for p in pos_after) / len(pos_after)
+            cy_after = sum(p[1] for p in pos_after) / len(pos_after)
+            
+            dx_actual = cx_after - cx_before
+            dy_actual = cy_after - cy_before
+            
+            moved_correctly = False
+            if dx_expected != 0:
+                moved_correctly = (dx_expected > 0 and dx_actual > 0.3) or (dx_expected < 0 and dx_actual < -0.3)
+            if dy_expected != 0:
+                moved_correctly = (dy_expected > 0 and dy_actual > 0.3) or (dy_expected < 0 and dy_actual < -0.3)
+            
+            if moved_correctly:
+                # Found a different object that moved - control transferred!
+                # obj_id can be 'color_N' string or just N as int
+                if isinstance(obj_id, str) and obj_id.startswith('color_'):
+                    new_color = int(obj_id.replace('color_', ''))
+                else:
+                    new_color = int(obj_id)
+                return (False, new_color)
+        
+        # Nothing moved in expected direction - ambiguous
+        return (True, None)
+    
+    # =========================================================================
+    # PERCEPTUAL PRIMITIVE 2: GRID REGION CLASSIFICATION METHODS
+    # =========================================================================
+    
+    def classify_grid_regions(
+        self,
+        game_id: str,
+        level_number: int,
+        frame: Dict,
+        action_history: Optional[List[Dict]] = None,
+        frame_history: Optional[List[Dict]] = None
+    ) -> Dict[Tuple[int, int], str]:
+        """
+        Classify grid regions as 'playfield', 'ui', 'decoration', or 'unknown'.
+        
+        Divides the 64x64 grid into 8x8 macro-regions and classifies each.
+        
+        Args:
+            game_id: Current game
+            level_number: Current level
+            frame: Current frame with 'grid' field
+            action_history: Optional list of actions taken
+            frame_history: Optional list of frame snapshots
+        
+        Returns:
+            Dict mapping (region_x, region_y) to classification
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        grid = frame.get('grid', [])
+        
+        if not grid:
+            return {}
+        
+        # First, check if we have existing classifications
+        existing = self.db.execute_query("""
+            SELECT region_x, region_y, classification, confidence
+            FROM grid_region_classification
+            WHERE game_type = ? AND level_number = ? AND confidence >= 0.6
+        """, (game_type, level_number))
+        
+        if existing and len(existing) >= 32:  # At least half the regions classified
+            return {
+                (r['region_x'], r['region_y']): r['classification']
+                for r in existing
+            }
+        
+        # Otherwise, analyze current frame
+        height = len(grid)
+        width = len(grid[0]) if height > 0 else 0
+        
+        region_size_y = max(1, height // 8)
+        region_size_x = max(1, width // 8)
+        
+        classifications = {}
+        
+        for ry in range(8):
+            for rx in range(8):
+                min_y = ry * region_size_y
+                max_y = min((ry + 1) * region_size_y, height)
+                min_x = rx * region_size_x
+                max_x = min((rx + 1) * region_size_x, width)
+                
+                # Analyze region content
+                region_pixels = []
+                for y in range(min_y, max_y):
+                    for x in range(min_x, max_x):
+                        if y < len(grid) and x < len(grid[y]):
+                            region_pixels.append(grid[y][x])
+                
+                if not region_pixels:
+                    classifications[(rx, ry)] = 'unknown'
+                    continue
+                
+                # Heuristics for classification
+                unique_colors = len(set(region_pixels))
+                non_zero = sum(1 for p in region_pixels if p != 0)
+                total_pixels = len(region_pixels)
+                
+                # Mostly empty -> likely decoration or playfield
+                if non_zero < total_pixels * 0.1:
+                    classification = 'playfield'  # Empty playfield area
+                # Very few unique colors, small area with content -> likely UI
+                elif unique_colors <= 2 and non_zero < total_pixels * 0.3:
+                    classification = 'ui'
+                # Edge regions with little activity -> likely decoration
+                elif (rx in [0, 7] or ry in [0, 7]) and unique_colors <= 2:
+                    classification = 'decoration'
+                else:
+                    classification = 'playfield'
+                
+                classifications[(rx, ry)] = classification
+                
+                # Store/update in database
+                self._update_region_classification(
+                    game_type, level_number, rx, ry,
+                    min_x, max_x, min_y, max_y,
+                    classification, 'initial_heuristic',
+                    confidence=0.5
+                )
+        
+        return classifications
+    
+    def _update_region_classification(
+        self,
+        game_type: str,
+        level_number: int,
+        region_x: int,
+        region_y: int,
+        min_px: int,
+        max_px: int,
+        min_py: int,
+        max_py: int,
+        classification: str,
+        reason: str,
+        confidence: float
+    ) -> None:
+        """Update or insert a region classification."""
+        existing = self.db.execute_query("""
+            SELECT classification_id, total_observations, classification
+            FROM grid_region_classification
+            WHERE game_type = ? AND level_number = ? AND region_x = ? AND region_y = ?
+        """, (game_type, level_number, region_x, region_y))
+        
+        if existing:
+            # Update - increase confidence if same classification, decrease if different
+            old_class = existing[0]['classification']
+            observations = existing[0]['total_observations'] + 1
+            
+            if old_class == classification:
+                new_confidence = min(0.95, confidence + 0.05)
+            else:
+                new_confidence = max(0.1, confidence - 0.1)
+            
+            self.db.execute_query("""
+                UPDATE grid_region_classification
+                SET classification = ?, classification_reason = ?,
+                    total_observations = ?, confidence = ?,
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE classification_id = ?
+            """, (classification, reason, observations, new_confidence,
+                  existing[0]['classification_id']))
+        else:
+            self.db.execute_query("""
+                INSERT INTO grid_region_classification
+                (game_type, level_number, region_x, region_y,
+                 region_min_pixel_x, region_max_pixel_x,
+                 region_min_pixel_y, region_max_pixel_y,
+                 classification, classification_reason, confidence,
+                 total_observations)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """, (game_type, level_number, region_x, region_y,
+                  min_px, max_px, min_py, max_py,
+                  classification, reason, confidence))
+    
+    def get_playfield_bounds(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> Tuple[int, int, int, int]:
+        """
+        Get the bounding box of the playfield (non-UI/decoration regions).
+        
+        Returns:
+            (min_x, min_y, max_x, max_y) in pixel coordinates
+        """
+        playfield_regions = self.db.execute_query("""
+            SELECT region_min_pixel_x, region_max_pixel_x,
+                   region_min_pixel_y, region_max_pixel_y
+            FROM grid_region_classification
+            WHERE game_type = ? AND level_number = ? AND classification = 'playfield'
+        """, (game_type, level_number))
+        
+        if not playfield_regions:
+            return (0, 0, 63, 63)  # Default to full grid
+        
+        min_x = min(r['region_min_pixel_x'] for r in playfield_regions)
+        min_y = min(r['region_min_pixel_y'] for r in playfield_regions)
+        max_x = max(r['region_max_pixel_x'] for r in playfield_regions)
+        max_y = max(r['region_max_pixel_y'] for r in playfield_regions)
+        
+        return (min_x, min_y, max_x, max_y)
+    
+    def is_ui_region(self, game_type: str, level_number: int, x: int, y: int) -> bool:
+        """
+        Check if a pixel coordinate is in a UI region.
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            x, y: Pixel coordinates
+        
+        Returns:
+            True if in UI region, False otherwise
+        """
+        # Convert pixel to region
+        region_x = min(x // 8, 7)
+        region_y = min(y // 8, 7)
+        
+        result = self.db.execute_query("""
+            SELECT classification
+            FROM grid_region_classification
+            WHERE game_type = ? AND level_number = ? 
+                  AND region_x = ? AND region_y = ?
+        """, (game_type, level_number, region_x, region_y))
+        
+        if result:
+            return result[0]['classification'] == 'ui'
+        return False
+    
+    # =========================================================================
+    # PERCEPTUAL PRIMITIVE 3: RESOURCE COUNTER DETECTION METHODS
+    # =========================================================================
+    
+    def detect_resource_counters(
+        self,
+        game_id: str,
+        level_number: int,
+        frame: Dict,
+        previous_frame: Optional[Dict] = None,
+        score_change: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect potential resource counters in the frame.
+        
+        Looks for small isolated objects in UI regions that might be counters.
+        
+        Args:
+            game_id: Current game
+            level_number: Current level
+            frame: Current frame
+            previous_frame: Previous frame for change detection
+            score_change: If score changed, helps validate counters
+        
+        Returns:
+            List of detected counters with type and value estimates
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        grid = frame.get('grid', [])
+        
+        if not grid:
+            return []
+        
+        # First check for known counters
+        known = self.db.execute_query("""
+            SELECT region_x, region_y, counter_type, current_value, confidence
+            FROM detected_resource_counters
+            WHERE game_type = ? AND level_number = ? AND confidence >= 0.5
+        """, (game_type, level_number))
+        
+        if known:
+            # Update known counters with current values
+            counters = []
+            for k in known:
+                counters.append({
+                    'region': (k['region_x'], k['region_y']),
+                    'type': k['counter_type'],
+                    'value': k['current_value'],
+                    'confidence': k['confidence']
+                })
+            return counters
+        
+        # Scan for new counters in UI regions
+        detected = []
+        
+        for ry in range(8):
+            for rx in range(8):
+                if not self.is_ui_region(game_type, level_number, rx * 8, ry * 8):
+                    continue
+                
+                # Analyze this UI region for counter-like objects
+                region_pixels = self._extract_region_pixels(grid, rx, ry)
+                
+                if not region_pixels:
+                    continue
+                
+                # Count non-zero pixels (potential counter indicator)
+                non_zero = [p for p in region_pixels if p != 0]
+                
+                # Counters are typically small (1-5 cells) with distinctive colors
+                if 1 <= len(non_zero) <= 10:
+                    detected.append({
+                        'region': (rx, ry),
+                        'type': 'unknown',
+                        'value': len(non_zero),  # Rough estimate
+                        'confidence': 0.3
+                    })
+        
+        return detected
+    
+    def _extract_region_pixels(
+        self,
+        grid: List[List[int]],
+        region_x: int,
+        region_y: int
+    ) -> List[int]:
+        """Extract all pixels from a region."""
+        height = len(grid)
+        width = len(grid[0]) if height > 0 else 0
+        
+        region_size_y = max(1, height // 8)
+        region_size_x = max(1, width // 8)
+        
+        min_y = region_y * region_size_y
+        max_y = min((region_y + 1) * region_size_y, height)
+        min_x = region_x * region_size_x
+        max_x = min((region_x + 1) * region_size_x, width)
+        
+        pixels = []
+        for y in range(min_y, max_y):
+            for x in range(min_x, max_x):
+                if y < len(grid) and x < len(grid[y]):
+                    pixels.append(grid[y][x])
+        
+        return pixels
+    
+    # =========================================================================
+    # PERCEPTUAL PRIMITIVE 4: VALENCE ASSOCIATION METHODS
+    # =========================================================================
+    
+    def record_valence_association(
+        self,
+        game_id: str,
+        level_number: int,
+        trigger_type: str,
+        trigger_action: Optional[str],
+        trigger_object_color: Optional[int],
+        trigger_target_color: Optional[int],
+        consequence_type: str,
+        consequence_details: Optional[Dict],
+        valence: float
+    ) -> None:
+        """
+        Record a valence association: "This interaction = good/bad"
+        
+        Args:
+            game_id: Current game
+            level_number: Current level
+            trigger_type: 'collision', 'action', 'proximity', 'selection'
+            trigger_action: ACTION1-7 if applicable
+            trigger_object_color: Object color involved
+            trigger_target_color: Target of interaction
+            consequence_type: 'score_change', 'counter_change', 'game_end', 'level_end'
+            consequence_details: Additional info
+            valence: -1.0 (very bad) to +1.0 (very good)
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Check for existing association
+        existing = self.db.execute_query("""
+            SELECT association_id, valence, observation_count, consistent_count
+            FROM valence_associations
+            WHERE game_type = ? AND level_number = ?
+                  AND trigger_type = ? AND consequence_type = ?
+                  AND (trigger_object_color = ? OR (trigger_object_color IS NULL AND ? IS NULL))
+                  AND (trigger_target_color = ? OR (trigger_target_color IS NULL AND ? IS NULL))
+        """, (game_type, level_number, trigger_type, consequence_type,
+              trigger_object_color, trigger_object_color,
+              trigger_target_color, trigger_target_color))
+        
+        if existing:
+            row = existing[0]
+            new_obs = row['observation_count'] + 1
+            
+            # Check if this observation is consistent with previous
+            valence_matches = (row['valence'] > 0 and valence > 0) or (row['valence'] < 0 and valence < 0)
+            new_consistent = row['consistent_count'] + (1 if valence_matches else 0)
+            
+            # Average valence with exponential moving average
+            new_valence = row['valence'] * 0.8 + valence * 0.2
+            new_confidence = new_consistent / new_obs
+            
+            self.db.execute_query("""
+                UPDATE valence_associations
+                SET valence = ?, observation_count = ?, consistent_count = ?,
+                    confidence = ?, last_observed = CURRENT_TIMESTAMP
+                WHERE association_id = ?
+            """, (new_valence, new_obs, new_consistent, new_confidence,
+                  row['association_id']))
+        else:
+            self.db.execute_query("""
+                INSERT INTO valence_associations
+                (game_type, level_number, trigger_type, trigger_action,
+                 trigger_object_color, trigger_target_color,
+                 consequence_type, consequence_details, valence, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)
+            """, (game_type, level_number, trigger_type, trigger_action,
+                  trigger_object_color, trigger_target_color,
+                  consequence_type, json.dumps(consequence_details) if consequence_details else None,
+                  valence))
+    
+    def get_object_valence(
+        self,
+        game_type: str,
+        level_number: int,
+        object_color: int
+    ) -> float:
+        """
+        Get the overall valence associated with an object color.
+        
+        Returns average valence across all interactions involving this object.
+        """
+        results = self.db.execute_query("""
+            SELECT valence, confidence
+            FROM valence_associations
+            WHERE game_type = ? AND level_number = ?
+                  AND (trigger_object_color = ? OR trigger_target_color = ?)
+                  AND confidence >= 0.4
+        """, (game_type, level_number, object_color, object_color))
+        
+        if not results:
+            return 0.0  # Neutral if unknown
+        
+        # Weighted average by confidence
+        total_weight = sum(r['confidence'] for r in results)
+        if total_weight == 0:
+            return 0.0
+        
+        weighted_sum = sum(r['valence'] * r['confidence'] for r in results)
+        return weighted_sum / total_weight
+    
+    def get_all_object_valences(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> Dict[int, float]:
+        """
+        Get valence for all known objects in a level.
+        
+        Returns dict mapping object_color to valence.
+        """
+        results = self.db.execute_query("""
+            SELECT trigger_object_color, trigger_target_color, valence, confidence
+            FROM valence_associations
+            WHERE game_type = ? AND level_number = ? AND confidence >= 0.4
+        """, (game_type, level_number))
+        
+        valences: Dict[int, List[Tuple[float, float]]] = {}  # color -> [(valence, confidence)]
+        
+        for r in (results or []):
+            for color in [r['trigger_object_color'], r['trigger_target_color']]:
+                if color is not None:
+                    if color not in valences:
+                        valences[color] = []
+                    valences[color].append((r['valence'], r['confidence']))
+        
+        # Compute weighted averages
+        result = {}
+        for color, vals in valences.items():
+            total_weight = sum(v[1] for v in vals)
+            if total_weight > 0:
+                result[color] = sum(v[0] * v[1] for v in vals) / total_weight
+        
+        return result
+    
+    # =========================================================================
+    # PERCEPTUAL PRIMITIVE 5: GOAL STATE INFERENCE METHODS
+    # =========================================================================
+    
+    def infer_goal_from_level_end(
+        self,
+        game_id: str,
+        level_number: int,
+        final_frame: Dict,
+        initial_frame: Optional[Dict],
+        action_history: List[Dict],
+        final_score: float,
+        level_won: bool
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Infer the goal state from analyzing a level completion.
+        
+        Compares initial and final states to determine what changed
+        that caused the level to end.
+        
+        Args:
+            game_id: Game that was played
+            level_number: Level that was completed
+            final_frame: Frame at level end
+            initial_frame: Frame at level start
+            action_history: Actions taken during level
+            final_score: Score at level end
+            level_won: Whether the level was won
+        
+        Returns:
+            Goal hypothesis dict, or None if couldn't infer
+        """
+        if not level_won:
+            return None  # Only infer from wins
+        
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        final_grid = final_frame.get('grid', [])
+        initial_grid = initial_frame.get('grid', []) if initial_frame else []
+        
+        if not final_grid:
+            return None
+        
+        # Analyze what's different between initial and final
+        final_objects = self._find_objects_in_grid(final_grid)
+        initial_objects = self._find_objects_in_grid(initial_grid) if initial_grid else {}
+        
+        # Check for "clear all of color X" pattern
+        cleared_colors = []
+        for obj_id, positions in initial_objects.items():
+            if obj_id not in final_objects:
+                # obj_id can be 'color_N' string or just N as int
+                if isinstance(obj_id, str) and obj_id.startswith('color_'):
+                    color = int(obj_id.replace('color_', ''))
+                else:
+                    color = int(obj_id)
+                cleared_colors.append(color)
+        
+        if cleared_colors:
+            # Goal might be "clear all of these colors"
+            goal = {
+                'goal_type': 'clear_color',
+                'goal_params': json.dumps({'colors_to_clear': cleared_colors}),
+                'inference_method': 'level_end_analysis',
+                'confidence': 0.6
+            }
+            self._save_goal_inference(game_type, level_number, goal)
+            return goal
+        
+        # Check for "reach position" pattern - where did self-object end up?
+        self_obj = self.get_current_self_object(game_id, level_number)
+        if self_obj:
+            self_color = self_obj['self_object_color']
+            self_key = f"color_{self_color}"
+            
+            if self_key in final_objects:
+                final_positions = final_objects[self_key]
+                cx = sum(p[0] for p in final_positions) / len(final_positions)
+                cy = sum(p[1] for p in final_positions) / len(final_positions)
+                
+                goal = {
+                    'goal_type': 'reach_position',
+                    'goal_params': json.dumps({
+                        'target_x': round(cx),
+                        'target_y': round(cy)
+                    }),
+                    'inference_method': 'level_end_analysis',
+                    'confidence': 0.5
+                }
+                self._save_goal_inference(game_type, level_number, goal)
+                return goal
+        
+        # Default: unknown goal type
+        goal = {
+            'goal_type': 'unknown',
+            'goal_params': json.dumps({'frame_hash': hash(str(final_grid))}),
+            'inference_method': 'level_end_analysis',
+            'confidence': 0.3
+        }
+        self._save_goal_inference(game_type, level_number, goal)
+        return goal
+    
+    def _save_goal_inference(
+        self,
+        game_type: str,
+        level_number: int,
+        goal: Dict[str, Any]
+    ) -> None:
+        """Save a goal inference to the database."""
+        # Check for existing
+        existing = self.db.execute_query("""
+            SELECT goal_id, times_validated
+            FROM inferred_goal_states
+            WHERE game_type = ? AND level_number = ? AND goal_type = ?
+        """, (game_type, level_number, goal['goal_type']))
+        
+        if existing:
+            self.db.execute_query("""
+                UPDATE inferred_goal_states
+                SET times_validated = times_validated + 1,
+                    confidence = MIN(0.95, confidence + 0.1),
+                    last_validated = CURRENT_TIMESTAMP
+                WHERE goal_id = ?
+            """, (existing[0]['goal_id'],))
+        else:
+            self.db.execute_query("""
+                INSERT INTO inferred_goal_states
+                (game_type, level_number, goal_type, goal_params,
+                 inference_method, confidence)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (game_type, level_number, goal['goal_type'],
+                  goal['goal_params'], goal['inference_method'],
+                  goal['confidence']))
+    
+    def get_goal_hypothesis(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the best goal hypothesis for a game/level.
+        
+        Returns the highest confidence goal inference, or None.
+        """
+        result = self.db.execute_query("""
+            SELECT goal_type, goal_params, confidence, times_validated,
+                   inference_method, progress_metric
+            FROM inferred_goal_states
+            WHERE game_type = ? AND level_number = ?
+            ORDER BY confidence DESC, times_validated DESC
+            LIMIT 1
+        """, (game_type, level_number))
+        
+        if result:
+            row = result[0]
+            return {
+                'goal_type': row['goal_type'],
+                'goal_params': json.loads(row['goal_params']) if row['goal_params'] else {},
+                'confidence': row['confidence'],
+                'times_validated': row['times_validated'],
+                'inference_method': row['inference_method'],
+                'progress_metric': row['progress_metric']
+            }
+        return None
+    
+    def get_goal_progress(
+        self,
+        game_type: str,
+        level_number: int,
+        current_frame: Dict
+    ) -> float:
+        """
+        Estimate progress toward the inferred goal (0.0 to 1.0).
+        
+        Based on the goal type and current frame state.
+        """
+        goal = self.get_goal_hypothesis(game_type, level_number)
+        
+        if not goal:
+            return 0.0
+        
+        grid = current_frame.get('grid', [])
+        if not grid:
+            return 0.0
+        
+        current_objects = self._find_objects_in_grid(grid)
+        
+        if goal['goal_type'] == 'clear_color':
+            colors_to_clear = goal['goal_params'].get('colors_to_clear', [])
+            if not colors_to_clear:
+                return 0.0
+            
+            # Count how many are still present
+            remaining = 0
+            for color in colors_to_clear:
+                if f"color_{color}" in current_objects:
+                    remaining += 1
+            
+            progress = 1.0 - (remaining / len(colors_to_clear))
+            return progress
+        
+        elif goal['goal_type'] == 'reach_position':
+            target_x = goal['goal_params'].get('target_x', 0)
+            target_y = goal['goal_params'].get('target_y', 0)
+            
+            # Find self-object position
+            for obj_id, positions in current_objects.items():
+                cx = sum(p[0] for p in positions) / len(positions)
+                cy = sum(p[1] for p in positions) / len(positions)
+                
+                # Assuming grid is 64x64, max distance is ~90
+                distance = ((cx - target_x) ** 2 + (cy - target_y) ** 2) ** 0.5
+                max_distance = 90.0
+                progress = 1.0 - min(1.0, distance / max_distance)
+                
+                return progress
+        
+        return 0.0  # Unknown goal type
 
 
 # ============================================================================
