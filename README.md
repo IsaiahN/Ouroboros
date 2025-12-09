@@ -13,6 +13,7 @@ These documents trace the theoretical foundations behind Ouroboros:
 
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
+| **Answering Gödel's Incompleteness** | Why no single unit can have all understanding - and how networks are evolution's workaround | [DOCS/answering for Godels Incompleteness Problem.md](DOCS/answering%20for%20Godels%20Incompleteness%20Problem.md) |
 | **Two-Streams** | Why individual AGI is impossible (plasticity-stability dilemma) and how collective intelligence solves it | [DOCS/two-streams.md](DOCS/two-streams.md) |
 | **AGI Unified Theory** | The complete framework: 5 foundational principles, consciousness as weighted stream integration, evolutionary dynamics | [DOCS/agi_unified_theory.md](DOCS/agi_unified_theory.md) |
 | **Biome Theory** | Why the virus-bacteria network is the true model for AGI - 4 billion years of distributed intelligence | [DOCS/ouroboros - biome theory.md](DOCS/ouroboros%20-%20biome%20theory.md) |
