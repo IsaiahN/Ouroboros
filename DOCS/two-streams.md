@@ -1,4 +1,4 @@
-tell me your thoughts on this: I have been spending the past few months developing side projects and have taken an active interest in the ARC 3-AGI test.
+I have been spending the past few months developing side projects and have taken an active interest in the ARC 3-AGI test.
 
 Working on my own cognitive system really got me thinking about where consciousness emerges from. This line of study and model training has taken me down some interesting paths across several fields of study (continuity, consciousness, etc).
 
