@@ -4,7 +4,8 @@
 
 Ouroboros is an evolutionary system designed to solve the ARC-AGI-3 challenge. Unlike traditional agents, it treats the entire population as a single learning network, preserving knowledge across generations through a centralized database.
 
-Thesis: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
+Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
+Thought Experiment: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
 ### My Process of Discovery
 
