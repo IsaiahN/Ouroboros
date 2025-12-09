@@ -5631,3 +5631,150 @@ class FrustrationDetector:
 ---
 
 **END OF SESSION 27: December 9, 2025 - 5:35:00 AM**
+
+---
+
+## Session 28: Critical Level Skip Bug Fix
+**Date**: December 9, 2025  
+**Time Started**: 7:55:00 AM  
+**Focus**: Fix critical bug where agents attempted to skip levels after max actions reached
+
+---
+
+### Approach
+
+Evolution run revealed a critical logic bug where agents were attempting to "skip" to the next level after exhausting max actions, which is impossible in ARC games.
+
+---
+
+### Phase 1: Bug Discovery (7:55:00 AM)
+
+**Error Log**:
+```
+2025-12-09 07:54:42,033 - core_gameplay - WARNING - [TIME] Reached max actions (200) for level 2
+2025-12-09 07:54:42,035 - core_gameplay - INFO - No score progress on level 2, trying next level anyway
+```
+
+**User Observation**: "how is this possible? it shouldnt be"
+
+**Root Cause Analysis**:
+
+In ARC games:
+- Levels are **SEQUENTIAL** - you MUST complete level N before starting level N+1
+- Score increases when you complete a level
+- You cannot "skip" a level that wasn't completed
+
+The buggy code was artificially incrementing `current_level` when max actions were exhausted:
+```python
+# BUGGY CODE (before fix)
+if game_state.score > previous_score:
+    logger.info(f"Score improved, moving to next level")
+    current_level += 1  # This is OK - score improved means level completed
+else:
+    logger.info(f"No score progress on level {current_level}, trying next level anyway")
+    current_level += 1  # THIS IS WRONG - can't skip without completing!
+```
+
+**Impact**: 
+- Internal tracking (`current_level`) didn't match actual game state
+- Agent wasted actions thinking it was on level 3 when game was still on level 2
+- False data recorded in database
+
+---
+
+### Phase 2: Bug Fix (7:58:00 AM)
+
+**Location**: `core_gameplay.py` lines ~2266-2285
+
+**Before (broken)**:
+```python
+# Check if exceeded max actions for this level
+if level_action_count >= self.game_config['max_actions_per_level']:
+    logger.warning(f"[TIME] Reached max actions for level {current_level}")
+    
+    # BUGFIX: Move to next level instead of ending game
+    # Agent may have made progress but not completed level
+    if game_state.score > previous_score:
+        logger.info(f"Score improved, moving to next level")
+        current_level += 1
+        level_action_count = 0
+        level_start_action = action_count
+        previous_score = game_state.score
+    else:
+        logger.info(f"No score progress on level {current_level}, trying next level anyway")
+        current_level += 1  # <-- BUG: Can't skip levels!
+        level_action_count = 0
+        level_start_action = action_count
+    # Continue until total action budget exhausted
+```
+
+**After (fixed)**:
+```python
+# Check if exceeded max actions for this level
+if level_action_count >= self.game_config['max_actions_per_level']:
+    logger.warning(f"[TIME] Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
+    
+    # FIX: In ARC games, you CANNOT skip levels. Levels are sequential.
+    # If max actions reached without completing the level, the game is over.
+    # The agent either:
+    # 1. Made partial progress (score improved) - record what we have
+    # 2. Made no progress (stuck) - end the game
+    
+    if game_state.score > previous_score:
+        logger.info(f"[TIME] Score improved ({previous_score} -> {game_state.score}) but level not completed. Ending game with partial progress.")
+    else:
+        logger.info(f"[TIME] No score progress on level {current_level}. Agent stuck - ending game.")
+    
+    # End game - can't continue without completing current level
+    break
+```
+
+**Key Changes**:
+1. Removed false level increment when no progress made
+2. Added `break` to properly end game when max actions reached
+3. Improved logging to distinguish partial progress vs stuck
+4. Comments explain WHY this is the correct behavior
+
+---
+
+### Phase 3: Verification (8:00:00 AM)
+
+| Check | Result |
+|-------|--------|
+| `python -m py_compile core_gameplay.py` | [OK] Syntax valid |
+| Logic review | [OK] Now correctly ends game when level not completed |
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `core_gameplay.py` | Fixed max actions level skip bug (lines ~2266-2285) |
+
+---
+
+### Current Status (8:00:00 AM)
+
+**Approach**: Fixing critical game logic bugs discovered during evolution runs
+
+**Completed This Session**:
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | Identified level skip bug from evolution logs | [DONE] |
+| 2 | Analyzed root cause (false level increment) | [DONE] |
+| 3 | Fixed logic to properly end game when max actions reached | [DONE] |
+| 4 | Verified syntax | [DONE] |
+
+**Current Failure Being Worked On**:
+- **None** - Ready to continue evolution
+
+**Next Steps**:
+1. Run evolution and verify agents no longer "skip" levels
+2. Monitor for other game logic issues
+3. Continue tracking level progression
+
+---
+
+**END OF SESSION 28: December 9, 2025 - 8:00:00 AM**

@@ -2266,21 +2266,19 @@ class GameplayEngine:
                     if level_action_count >= self.game_config['max_actions_per_level']:
                         logger.warning(f"[TIME] Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
                         
-                        # BUGFIX: Move to next level instead of ending game
-                        # Agent may have made progress but not completed level
-                        # Only end if no score progress at all
+                        # FIX: In ARC games, you CANNOT skip levels. Levels are sequential.
+                        # If max actions reached without completing the level, the game is over.
+                        # The agent either:
+                        # 1. Made partial progress (score improved) - record what we have
+                        # 2. Made no progress (stuck) - end the game
+                        
                         if game_state.score > previous_score:
-                            logger.info(f"Score improved ({previous_score} → {game_state.score}), moving to next level")
-                            current_level += 1
-                            level_action_count = 0
-                            level_start_action = action_count
-                            previous_score = game_state.score
+                            logger.info(f"[TIME] Score improved ({previous_score} -> {game_state.score}) but level not completed. Ending game with partial progress.")
                         else:
-                            logger.info(f"No score progress on level {current_level}, trying next level anyway")
-                            current_level += 1
-                            level_action_count = 0
-                            level_start_action = action_count
-                        # Continue until total action budget exhausted
+                            logger.info(f"[TIME] No score progress on level {current_level}. Agent stuck - ending game.")
+                        
+                        # End game - can't continue without completing current level
+                        break
                     
                     logger.debug(f"Action {action_count} (Level {current_level}-{level_action_count}): State={game_state.state}, Score={game_state.score}")
 
