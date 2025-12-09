@@ -49,3 +49,22 @@ But the theory also suggests that with more generations the network should get s
 
 Because the retention of knowledge is in the network and not in one human brain the human knoweldge on the agent level is incomplete, but the network intelligence is generalized. (godels theory proven - and evolutions workaround)
 That generalized knowledge is queryable and hardware agnostic, which means it can exist in machines too.
+
+
+But why arent LLMS working?
+
+basically LLMs up until recently havent been multi modal (ie a networked intelligence)
+
+did you notice how when they became mutli modal they got smarter but people couldnt explain how? 
+
+the problem is the metatheory that the LLM (the action hacker) leverages as its filter of reference. 
+
+If it does not have one its a horse with no rider with random statistical noise. You need RLVR plus the horse to get to the right destination
+
+
+i explain this in the "cold start problem" Doc
+. ( TLDR: you still need a horse and its rider to get the pair somewhere the horse has never been, and somewhere that the rider understands but doesnt have the strength (horsepower - network intel (the horsepower coming from the number of agents in the network)) to get to the destination safely)
+the rider knows how to get to virginia but the horse only knows how to get from the saloon back home
+the rider might get lucky if hes drunk but the horse takes him home because thats where the horses food and water are located (insight: correlation does not mean casuality)
+thats why llms seem smart but arent
+they are random noise statistically weighted but the guys who arranged the weights dont know the right recipe. This is that recip
