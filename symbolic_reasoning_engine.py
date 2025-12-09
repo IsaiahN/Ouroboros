@@ -1259,9 +1259,18 @@ class SymbolicReasoningEngine:
             self.plan_index += 1
             return action
         else:
-            # No plan or plan exhausted - random exploration
-            import random
-            return random.choice([1, 2, 3, 4])
+            # No plan or plan exhausted - use network-informed exploration
+            # METATHEORY: Even during exploration, query network for guidance
+            try:
+                from multi_stage_matching_pipeline import get_network_informed_action
+                from database_interface import DatabaseInterface
+                db = DatabaseInterface()
+                game_id = getattr(self, 'current_game_id', 'unknown')
+                level = getattr(self, 'current_level', 1)
+                return get_network_informed_action(db, game_id, level)
+            except Exception:
+                import random
+                return random.choice([1, 2, 3, 4])
     
     def update(self, action: int, new_frame: np.ndarray):
         """Update world model with action result and observed frame."""

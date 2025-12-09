@@ -7243,6 +7243,35 @@ class GameplayEngine:
                     pattern_tags, efficiency
                 )
                 
+                # ================================================================
+                # FORMULA EXTRACTION (Metatheory: Store WHY, not just WHAT)
+                # ================================================================
+                # When a Pioneer discovers a new sequence, extract the "formula"
+                # (inferred beliefs) immediately - not just when others replay it.
+                # This captures the discoverer's understanding while it's fresh.
+                # ================================================================
+                try:
+                    inferred_beliefs = self._extract_inferred_beliefs_from_sequence(
+                        sequence_id=sequence_id,
+                        game_id=game_id,
+                        level_number=level_number,
+                        action_sequence=actions,
+                        initial_frame=initial_frame,
+                        final_score=int(final_score),
+                        agent_id=agent_id
+                    )
+                    
+                    if inferred_beliefs:
+                        self._store_inferred_beliefs(
+                            sequence_id=sequence_id,
+                            beliefs=inferred_beliefs,
+                            agent_id=agent_id
+                        )
+                        logger.info(f"[FORMULA] Extracted discoverer beliefs for {sequence_id[:12]} "
+                                   f"(Q1-Q5 inferences: {len(inferred_beliefs.get('inferences', {}))})")
+                except Exception as e:
+                    logger.debug(f"Formula extraction during discovery failed (non-critical): {e}")
+                
                 # Phase 1: Record discovery for prestige tracking
                 if agent_id != 'unknown':
                     try:

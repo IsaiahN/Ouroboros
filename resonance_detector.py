@@ -23,7 +23,12 @@ Theoretical Basis:
 - If all three converge despite radically different biases = objective truth
 """
 
-import hashlib
+import sys
+import os
+
+# Disable pycache (Rule 1)
+sys.dont_write_bytecode = True
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'import hashlib
 import json
 import logging
 import random

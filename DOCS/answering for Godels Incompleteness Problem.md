@@ -67,4 +67,14 @@ i explain this in the "cold start problem" Doc
 the rider knows how to get to virginia but the horse only knows how to get from the saloon back home
 the rider might get lucky if hes drunk but the horse takes him home because thats where the horses food and water are located (insight: correlation does not mean casuality)
 thats why llms seem smart but arent
-they are random noise statistically weighted but the guys who arranged the weights dont know the right recipe. This is that recip
+they are random noise statistically weighted but the guys who arranged the weights dont know the right recipe. 
+
+agi unified theory is that recipe, and im mainly explaining in metaphors, because the riders(experts) will have to understand this through their own problem domains to validate this (RLVR)
+
+If you would like a understanding of this concept in video format check out Star trek Season 5 Episode 2 (Darmok)
+
+https://en.wikipedia.org/wiki/Darmok
+
+(side note - all media/art - movies, tv shows are viral information packets that share ideas across brains (author/creator) to the audience and because the fandom exist, it makes a harmonic network too - which is why you connect so well with other fellow fans)
+
+If you want to understand the Metatheory problem explained in film, watch the movie Arrival. explains it pretty well.

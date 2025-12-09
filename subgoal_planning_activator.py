@@ -223,9 +223,13 @@ class SubgoalPlanningActivator:
         
         # Type 3: Region exploration
         if subgoal_type == 'explore_region':
-            # Simple heuristic: try different movement actions
-            import random
-            return random.choice([1, 2, 3, 4])
+            # METATHEORY: Use network-informed exploration instead of pure random
+            try:
+                from multi_stage_matching_pipeline import get_network_informed_action
+                return get_network_informed_action(self.db, game_id, level_number)
+            except Exception:
+                import random
+                return random.choice([1, 2, 3, 4])
         
         return None
     

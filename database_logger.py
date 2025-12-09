@@ -118,7 +118,7 @@ class DatabaseLogHandler(logging.Handler):
         """Create database using the schema file."""
         from pathlib import Path
 
-        schema_path = Path(__file__).parent / "core_database_schema.sql"
+        schema_path = Path(__file__).parent / "complete_database_schema.sql"
 
         if not os.path.exists(schema_path):
             return  # Gracefully handle missing schema, logs table will be created below

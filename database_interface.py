@@ -61,7 +61,7 @@ class DatabaseInterface:
 
     def _create_database_from_schema(self):
         """Create database using the schema file."""
-        schema_path = Path(__file__).parent / "core_database_schema.sql"
+        schema_path = Path(__file__).parent / "complete_database_schema.sql"
 
         if not os.path.exists(schema_path):
             raise FileNotFoundError(f"Database schema file not found: {schema_path}")
