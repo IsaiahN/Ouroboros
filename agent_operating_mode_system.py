@@ -21,14 +21,13 @@ BIOLOGY-INSPIRED: Ant colonies, bacterial quorum sensing, neural exploration/exp
 """
 
 import os
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 import random
 import logging
 from database_interface import DatabaseInterface
-
-# Suppress pycache
-os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 logger = logging.getLogger(__name__)
 
@@ -572,12 +571,23 @@ class AgentOperatingModeSystem:
             (social_rule_adherence, agent_id)
         )
 
+        # Role Fairness: Capture initial w_B (self_network_bias) for growth-based evaluation
+        # This snapshot records where the agent started when assigned this role
+        initial_w_B = 0.5  # Default if not found
+        w_B_result = self.db.execute_query(
+            "SELECT self_network_bias FROM agents WHERE agent_id = ?",
+            (agent_id,)
+        )
+        if w_B_result and len(w_B_result) > 0 and w_B_result[0][0] is not None:
+            initial_w_B = w_B_result[0][0]
+
         self.db.execute_query(
             """
             INSERT INTO agent_operating_modes
             (mode_id, agent_id, game_id, generation, operating_mode, mode_reason,
-             mutation_multiplier, action_diversity, novelty_seeking)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             mutation_multiplier, action_diversity, novelty_seeking,
+             initial_w_B_for_role, current_w_B, progress_score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 mode_id,
@@ -589,6 +599,9 @@ class AgentOperatingModeSystem:
                 params["mutation_multiplier"],
                 params["action_diversity"],
                 params["novelty_seeking"],
+                initial_w_B,       # Snapshot of w_B when role assigned
+                initial_w_B,       # current_w_B starts same as initial
+                0.0,               # progress_score starts at 0
             ),
         )
 
@@ -611,6 +624,58 @@ class AgentOperatingModeSystem:
         """,
             (actions, score, win, effectiveness, agent_id, generation),
         )
+
+    def update_agent_w_B_progress(self, agent_id: str, generation: int):
+        """
+        Update agent's current_w_B and progress_score for Role Fairness tracking.
+        
+        CRITICAL: This updates the agent_operating_modes table with current w_B
+        from the agents table, and calculates progress since role assignment.
+        
+        This should be called after gameplay to track growth-based evaluation.
+        
+        Args:
+            agent_id: Agent to update
+            generation: Current generation
+        """
+        # Get current w_B from agents table
+        agent = self.db.execute_query("""
+            SELECT self_network_bias FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if not agent or len(agent) == 0:
+            return
+        
+        current_w_B = agent[0].get('self_network_bias', 0.5) or 0.5
+        
+        # Get initial_w_B from the mode assignment
+        mode_info = self.db.execute_query("""
+            SELECT initial_w_B_for_role FROM agent_operating_modes
+            WHERE agent_id = ? AND generation = ?
+            ORDER BY created_at DESC LIMIT 1
+        """, (agent_id, generation))
+        
+        if not mode_info or len(mode_info) == 0:
+            return
+        
+        initial_w_B = mode_info[0].get('initial_w_B_for_role', 0.5) or 0.5
+        
+        # Calculate progress score: growth from initial position
+        progress_score = current_w_B - initial_w_B
+        
+        # Update the agent_operating_modes record
+        self.db.execute_query("""
+            UPDATE agent_operating_modes
+            SET current_w_B = ?,
+                progress_score = ?
+            WHERE agent_id = ? AND generation = ?
+        """, (current_w_B, progress_score, agent_id, generation))
+        
+        # Log significant progress (positive or negative)
+        if abs(progress_score) > 0.1:
+            direction = "grew" if progress_score > 0 else "regressed"
+            logger.info(f"[W_B PROGRESS] Agent {agent_id[:8]} {direction}: "
+                       f"{initial_w_B:.2f} -> {current_w_B:.2f} (delta={progress_score:+.2f})")
 
     def get_population_mode_distribution(self, generation: int) -> Dict[str, int]:
         """Get current distribution of modes in population"""
@@ -1062,6 +1127,124 @@ class AgentOperatingModeSystem:
             
             logger.info(f"[ROLE LOCK] Agent {agent_id[:8]} locked into {best_role} "
                        f"(fit={best_score:.2f}, games={games_in_role})")
+
+    def attempt_soft_role_transition(self, agent_id: str, desired_role: str,
+                                      generation: int) -> Tuple[bool, str, float]:
+        """
+        Attempt a SOFT role transition per Role Fairness Protocol.
+        
+        CRITICAL: This is about ATP (metabolic), NOT prestige (social).
+        Agents are always ALLOWED to try transitions (voluntary choice preserved).
+        Success is probabilistic based on fit score.
+        Failed transitions incur ATP "learning tax" (10% reduction).
+        
+        Philosophy: "Fair but free, incentivized but not coerced"
+        
+        Args:
+            agent_id: Agent ID
+            desired_role: Role agent wants to switch to
+            generation: Current generation
+            
+        Returns:
+            (success, reason, atp_cost) tuple
+            - success: Whether transition was successful
+            - reason: Explanation
+            - atp_cost: ATP learning tax (0.0 if success, 0.1 if failure)
+        """
+        import uuid
+        
+        # Get agent's current role and w_B
+        current_role_info = self.db.execute_query("""
+            SELECT operating_mode, initial_w_B_for_role
+            FROM agent_operating_modes
+            WHERE agent_id = ? AND generation = ?
+            ORDER BY created_at DESC LIMIT 1
+        """, (agent_id, generation))
+        
+        current_role = 'generalist'
+        if current_role_info and len(current_role_info) > 0:
+            current_role = current_role_info[0].get('operating_mode', 'generalist')
+        
+        # Check if already in desired role
+        if current_role == desired_role:
+            return True, "Already in requested role", 0.0
+        
+        # Check if agent is locked (still allow attempt but lower success)
+        agent = self.db.execute_query("""
+            SELECT role_locked, last_role_switch_gen, role_switch_cooldown, self_network_bias
+            FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if not agent:
+            return False, "Agent not found", 0.0
+        
+        agent_data = agent[0]
+        is_locked = agent_data.get('role_locked', False)
+        current_w_B = agent_data.get('self_network_bias', 0.5) or 0.5
+        
+        # Check cooldown (soft enforcement - reduces success probability)
+        cooldown = agent_data.get('role_switch_cooldown', 2)
+        last_switch = agent_data.get('last_role_switch_gen', 0) or 0
+        cooldown_penalty = 0.0
+        if generation - last_switch < cooldown:
+            cooldown_penalty = 0.3  # 30% success penalty for cooldown violation
+        
+        # Get agent's fit score for desired role
+        fit_result = self.db.execute_query("""
+            SELECT role_fit_score FROM agent_role_performance
+            WHERE agent_id = ? AND role = ?
+        """, (agent_id, desired_role))
+        
+        fit_score = fit_result[0]['role_fit_score'] if fit_result else 0.3
+        
+        # Calculate success probability
+        # Base: fit_score (0.0 to 1.0)
+        # Minus: cooldown penalty (0.0 or 0.3)
+        # Minus: lock penalty (0.0 or 0.4 if locked)
+        lock_penalty = 0.4 if is_locked else 0.0
+        success_probability = max(0.1, fit_score - cooldown_penalty - lock_penalty)
+        
+        # Roll for success
+        roll = random.random()
+        was_successful = roll < success_probability
+        
+        # Record the transition attempt
+        transition_id = f"trans_{uuid.uuid4().hex[:12]}"
+        atp_cost = 0.0 if was_successful else 0.1  # 10% ATP learning tax on failure
+        
+        self.db.execute_query("""
+            INSERT INTO role_transition_attempts
+            (transition_id, agent_id, from_role, to_role, success_probability,
+             was_successful, atp_cost, generation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (transition_id, agent_id, current_role, desired_role,
+              success_probability, was_successful, atp_cost, generation))
+        
+        if was_successful:
+            # Apply the transition
+            self.db.execute_query("""
+                UPDATE agents SET 
+                    preferred_role = ?,
+                    last_role_switch_gen = ?
+                WHERE agent_id = ?
+            """, (desired_role, generation, agent_id))
+            
+            # Record new mode assignment with fresh w_B snapshot
+            self._record_mode_assignment(
+                agent_id=agent_id,
+                game_id='role_transition',  # Special marker
+                generation=generation,
+                mode=desired_role,
+                reason=f"Soft transition from {current_role} (prob={success_probability:.2f})"
+            )
+            
+            logger.info(f"[SOFT TRANSITION] Agent {agent_id[:8]}: {current_role} -> {desired_role} "
+                       f"(success, prob={success_probability:.2f})")
+            return True, f"Transition successful (prob={success_probability:.2f})", 0.0
+        else:
+            logger.info(f"[SOFT TRANSITION] Agent {agent_id[:8]}: {current_role} -> {desired_role} "
+                       f"(failed, prob={success_probability:.2f}, tax=10%)")
+            return False, f"Transition failed (prob={success_probability:.2f}), 10% ATP learning tax", atp_cost
 
     def request_role_change(self, agent_id: str, desired_role: str, 
                            generation: int) -> Tuple[bool, str]:

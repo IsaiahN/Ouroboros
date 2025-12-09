@@ -52,6 +52,29 @@ class AdaptiveActionLimits:
         self.ADJUSTMENT_RATE = 0.15  # 15% adjustment per generation
         self.SUCCESS_THRESHOLD = 0.10  # 10% comprehensive success = good
         self.STAGNATION_THRESHOLD = 0.02  # <2% = reduce limits
+        
+        # ========================================================================
+        # ROLE FAIRNESS PROTOCOL: Role-Based ATP Multipliers
+        # Per AGI Unified Theory: ATP (metabolic) is SEPARATE from Prestige (social)
+        # These multipliers reflect the DIFFICULTY of each role, not agent worth
+        # ========================================================================
+        self.ROLE_BASE_ATP = {
+            'pioneer': 1.5,     # Frontier exploration is HARD - needs more resources
+            'generalist': 1.2,  # Balanced play, moderate bonus
+            'optimizer': 1.0,   # Proven paths, baseline efficiency expected
+            'exploiter': 0.8    # Micro-optimization, efficiency is the point
+        }
+        
+        # Dynamic ATP adjustment range (network role needs can shift by +/- 0.3)
+        self.ROLE_ATP_DYNAMIC_RANGE = 0.3
+        
+        # Progress calculation parameters
+        self.LOW_START_THRESHOLD = 0.4   # w_B below this gets ATP boost
+        self.LOW_START_BOOST_FACTOR = 0.5  # Boost = (threshold - w_B) * factor
+        
+        # Stagnation penalty parameters (graduated curve)
+        self.HIGH_START_THRESHOLD = 0.7  # w_B above this with no growth = penalty
+        self.STAGNATION_PENALTY_MAX = 0.3  # Maximum penalty (30% ATP reduction)
     
     def calculate_generation_performance(self, generation: int) -> Dict[str, float]:
         """
@@ -284,18 +307,19 @@ class AdaptiveActionLimits:
     
     def calculate_agent_salary(self, agent_id: str, generation: int) -> Dict[str, Any]:
         """
-        Calculate per-agent action budget based on PERFORMANCE (not prestige).
+        Calculate per-agent action budget based on PERFORMANCE and ROLE FAIRNESS.
         
-        CRITICAL DISTINCTION:
+        CRITICAL DISTINCTION (AGI Unified Theory - Dual Economy Principle):
         - Prestige = Social Capital (breeding, survival, network contribution)
         - Actions = Economic Capital (metabolic energy, what you can DO)
-        - These are COMPLETELY SEPARATE currencies
+        - These are COMPLETELY SEPARATE currencies - NEVER mix them
         
-        Salary Formula:
-        - Base metabolism: MIN_ACTIONS (survival level)
-        - Performance bonus: Based on percentile rank (0x to 3x multiplier)
-        - High performers get MORE actions (metabolic energy)
-        - Low performers get baseline (limited energy)
+        Role Fairness Protocol Integration:
+        - Role-based ATP multipliers (Pioneer 1.5x, Generalist 1.2x, Optimizer 1.0x, Exploiter 0.8x)
+        - Dynamic ATP adjustment based on network role needs (+/- 0.3)
+        - Progress bonus for w_B growth (growth-based meritocracy)
+        - Low-start ATP boost (compensate for harder journey)
+        - Stagnation penalty for high-starters who coast
         
         Args:
             agent_id: Agent to calculate salary for
@@ -305,7 +329,9 @@ class AdaptiveActionLimits:
             Dictionary with:
                 - action_allowance_per_level: Actions per level
                 - action_allowance_total: Total actions per game
-                - budget_multiplier: Performance multiplier (0.5x to 3.0x)
+                - budget_multiplier: Combined performance/role multiplier
+                - role_multiplier: Role-specific ATP component
+                - progress_bonus: Growth-based bonus
         """
         # Get agent's comprehensive success (performance-based, NOT prestige)
         agent = self.db.execute_query("""
@@ -320,12 +346,30 @@ class AdaptiveActionLimits:
             WHERE agent_id = ?
         """, (agent_id,))
         
+        # Get role fairness info (role, initial_w_B, current_w_B, progress)
+        role_info = self._get_agent_role_info(agent_id, generation)
+        role = role_info['role']
+        initial_w_B = role_info['initial_w_B']
+        current_w_B = role_info['current_w_B']
+        progress_score = role_info['progress_score']
+        
         if not agent or agent[0]['total_games_played'] == 0:
-            # New agent, give baseline budget
+            # New agent - give role-adjusted baseline budget
+            role_base = self.ROLE_BASE_ATP.get(role, 1.0)
+            network_adjustment = self._get_network_role_need(role)
+            role_multiplier = role_base + network_adjustment
+            
+            # Low-start boost for new agents starting below threshold
+            low_start_boost = self._calculate_low_start_boost(initial_w_B)
+            
             return {
-                'action_allowance_per_level': self.current_actions_per_level,
-                'action_allowance_total': self.current_total_actions,
-                'budget_multiplier': 1.0
+                'action_allowance_per_level': int(self.current_actions_per_level * role_multiplier * (1 + low_start_boost)),
+                'action_allowance_total': int(self.current_total_actions * role_multiplier * (1 + low_start_boost)),
+                'budget_multiplier': role_multiplier * (1 + low_start_boost),
+                'role_multiplier': role_multiplier,
+                'progress_bonus': 0.0,
+                'low_start_boost': low_start_boost,
+                'stagnation_penalty': 0.0
             }
         
         # Calculate comprehensive success for THIS agent
@@ -335,21 +379,57 @@ class AdaptiveActionLimits:
         # Get performance percentile (where does this agent rank?)
         percentile = self._get_agent_performance_percentile(agent_id, generation)
         
-        # Calculate budget multiplier based on percentile
-        # Bottom 25%: 0.5x to 1.0x (limited metabolism)
-        # Middle 50%: 1.0x to 1.5x (normal metabolism)
-        # Top 25%: 1.5x to 3.0x (high metabolism)
+        # ====================================================================
+        # ROLE FAIRNESS: Calculate role-based ATP multiplier
+        # ====================================================================
+        role_base = self.ROLE_BASE_ATP.get(role, 1.0)
+        network_adjustment = self._get_network_role_need(role)
+        role_multiplier = role_base + network_adjustment
+        
+        # ====================================================================
+        # ROLE FAIRNESS: Calculate progress bonus (growth-based meritocracy)
+        # ====================================================================
+        efficiency = agent_data.get('score_efficiency', 1.0) or 1.0
+        progress_bonus = self._calculate_progress_score(initial_w_B, current_w_B, efficiency)
+        # Convert progress to multiplier bonus (cap at 0.3)
+        progress_multiplier_bonus = max(0.0, min(0.3, progress_bonus * 0.5))
+        
+        # ====================================================================
+        # ROLE FAIRNESS: Low-start boost and stagnation penalty
+        # ====================================================================
+        low_start_boost = self._calculate_low_start_boost(initial_w_B)
+        stagnation_penalty = self._calculate_stagnation_penalty(initial_w_B, progress_score, 1)
+        
+        # ====================================================================
+        # ROLE FAIRNESS: Transition learning tax (failed role switch penalty)
+        # ====================================================================
+        transition_tax = self._get_transition_learning_tax(agent_id, generation)
+        
+        # ====================================================================
+        # COMBINED BUDGET MULTIPLIER
+        # ====================================================================
+        # Base: role multiplier (1.0 to 1.8 with dynamic range)
+        # Plus: progress bonus (0.0 to 0.3)
+        # Plus: low-start boost (0.0 to 0.2)
+        # Minus: stagnation penalty (0.0 to 0.3)
+        # Minus: transition tax (0.0 to 0.3 for failed role switches)
+        combined_multiplier = role_multiplier + progress_multiplier_bonus + low_start_boost - stagnation_penalty - transition_tax
+        
+        # Ensure minimum multiplier of 0.5 (survival floor)
+        combined_multiplier = max(0.5, combined_multiplier)
+        
+        # Apply percentile scaling on top (rewards absolute performance too)
+        # But scaled down to not dominate role fairness adjustments
         if percentile < 0.25:
-            # Bottom quartile: 0.5x to 1.0x
-            budget_multiplier = 0.5 + (percentile / 0.25) * 0.5
+            percentile_factor = 0.9 + (percentile / 0.25) * 0.1  # 0.9 to 1.0
         elif percentile < 0.75:
-            # Middle 50%: 1.0x to 1.5x
-            budget_multiplier = 1.0 + ((percentile - 0.25) / 0.50) * 0.5
+            percentile_factor = 1.0 + ((percentile - 0.25) / 0.50) * 0.2  # 1.0 to 1.2
         else:
-            # Top quartile: 1.5x to 3.0x
-            budget_multiplier = 1.5 + ((percentile - 0.75) / 0.25) * 1.5
+            percentile_factor = 1.2 + ((percentile - 0.75) / 0.25) * 0.3  # 1.2 to 1.5
             
-        # NEW: Check for unbeaten game bonus (2x multiplier for difficult games)
+        budget_multiplier = combined_multiplier * percentile_factor
+            
+        # Check for unbeaten game bonus (2x multiplier for difficult games)
         unbeaten_bonus = self._check_unbeaten_game_bonus(agent_id)
         if unbeaten_bonus > 1.0:
             budget_multiplier *= unbeaten_bonus
@@ -368,7 +448,16 @@ class AdaptiveActionLimits:
             'action_allowance_per_level': action_allowance_per_level,
             'action_allowance_total': action_allowance_total,
             'budget_multiplier': budget_multiplier,
-            'unbeaten_bonus': unbeaten_bonus if 'unbeaten_bonus' in locals() else 1.0
+            'unbeaten_bonus': unbeaten_bonus if 'unbeaten_bonus' in locals() else 1.0,
+            # Role Fairness Protocol fields
+            'role': role,
+            'role_multiplier': role_multiplier,
+            'progress_bonus': progress_multiplier_bonus,
+            'low_start_boost': low_start_boost,
+            'stagnation_penalty': stagnation_penalty,
+            'transition_tax': transition_tax,
+            'initial_w_B': initial_w_B,
+            'current_w_B': current_w_B
         }
     
     def _check_unbeaten_game_bonus(self, agent_id: str) -> float:
@@ -537,6 +626,237 @@ class AdaptiveActionLimits:
         )
         
         return comprehensive_success
+    
+    # ========================================================================
+    # ROLE FAIRNESS PROTOCOL: Growth-Based Evaluation Methods
+    # Per AGI Unified Theory: "Fair but free, incentivized but not coerced"
+    # ========================================================================
+    
+    def _get_agent_role_info(self, agent_id: str, generation: int) -> Dict[str, Any]:
+        """
+        Get agent's current role and w_B tracking info for role fairness calculations.
+        
+        Returns:
+            Dictionary with role, initial_w_B, current_w_B, or defaults if not found
+        """
+        role_info = self.db.execute_query("""
+            SELECT 
+                operating_mode,
+                initial_w_B_for_role,
+                current_w_B,
+                progress_score
+            FROM agent_operating_modes
+            WHERE agent_id = ? AND generation = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (agent_id, generation))
+        
+        if role_info and len(role_info) > 0:
+            return {
+                'role': role_info[0].get('operating_mode', 'generalist'),
+                'initial_w_B': role_info[0].get('initial_w_B_for_role', 0.5),
+                'current_w_B': role_info[0].get('current_w_B', 0.5),
+                'progress_score': role_info[0].get('progress_score', 0.0)
+            }
+        
+        # Fallback: check agents table for role preference
+        agent_role = self.db.execute_query("""
+            SELECT preferred_role, self_network_bias
+            FROM agents WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if agent_role and len(agent_role) > 0:
+            return {
+                'role': agent_role[0].get('preferred_role', 'generalist') or 'generalist',
+                'initial_w_B': agent_role[0].get('self_network_bias', 0.5) or 0.5,
+                'current_w_B': agent_role[0].get('self_network_bias', 0.5) or 0.5,
+                'progress_score': 0.0
+            }
+        
+        return {'role': 'generalist', 'initial_w_B': 0.5, 'current_w_B': 0.5, 'progress_score': 0.0}
+    
+    def _get_network_role_need(self, role: str) -> float:
+        """
+        Query network's current need for this role (dynamic ATP adjustment).
+        
+        When network is saturated with Pioneers but needs Optimizers, adjust ATP:
+        - Role in high demand: +0.3 ATP bonus
+        - Role in low demand: -0.3 ATP reduction
+        - Balanced: 0.0 adjustment
+        
+        Returns:
+            ATP adjustment (-0.3 to +0.3)
+        """
+        # Query regulatory_signals table for population dynamics
+        signals = self.db.execute_query("""
+            SELECT 
+                signal_type,
+                signal_value,
+                signal_metadata
+            FROM regulatory_signals
+            WHERE signal_type IN ('population_balance', 'role_need', 'exploration_ratio')
+            ORDER BY generation DESC
+            LIMIT 5
+        """)
+        
+        if not signals:
+            return 0.0  # No signals, no adjustment
+        
+        # Calculate role need based on exploration/optimization ratio
+        # If mostly unbeaten games -> need pioneers (+)
+        # If mostly beaten games -> need optimizers (+)
+        try:
+            import json
+            for signal in signals:
+                if signal.get('signal_type') == 'role_need':
+                    metadata = json.loads(signal.get('signal_metadata', '{}'))
+                    role_needs = metadata.get('role_needs', {})
+                    if role in role_needs:
+                        # Clamp to dynamic range
+                        return max(-self.ROLE_ATP_DYNAMIC_RANGE,
+                                   min(self.ROLE_ATP_DYNAMIC_RANGE, role_needs[role]))
+        except (json.JSONDecodeError, KeyError, TypeError):
+            pass
+        
+        # Fallback: estimate from game states
+        game_stats = self.db.execute_query("""
+            SELECT 
+                COUNT(CASE WHEN is_fully_beaten = 1 THEN 1 END) as beaten_games,
+                COUNT(CASE WHEN is_fully_beaten = 0 THEN 1 END) as unbeaten_games
+            FROM arc_games WHERE is_active = 1
+        """)
+        
+        if game_stats and len(game_stats) > 0:
+            beaten = game_stats[0].get('beaten_games', 0) or 0
+            unbeaten = game_stats[0].get('unbeaten_games', 0) or 0
+            total = beaten + unbeaten
+            
+            if total > 0:
+                exploration_ratio = unbeaten / total
+                
+                # High exploration need -> boost pioneers, reduce optimizers
+                # Low exploration need -> boost optimizers, reduce pioneers
+                if role == 'pioneer':
+                    return self.ROLE_ATP_DYNAMIC_RANGE * (exploration_ratio - 0.5) * 2
+                elif role == 'optimizer':
+                    return self.ROLE_ATP_DYNAMIC_RANGE * (0.5 - exploration_ratio) * 2
+        
+        return 0.0
+    
+    def _calculate_progress_score(self, initial_w_B: float, current_w_B: float, 
+                                   efficiency: float = 1.0) -> float:
+        """
+        Calculate growth-based progress score for role fairness.
+        
+        Formula: (current_w_B - initial_w_B) * efficiency
+        
+        CRITICAL: This measures GROWTH, not absolute position.
+        An agent going 0.2 -> 0.5 gets higher score than 0.7 -> 0.8
+        
+        Args:
+            initial_w_B: w_B snapshot when role was assigned
+            current_w_B: Current w_B value
+            efficiency: Action efficiency multiplier (score/actions)
+            
+        Returns:
+            Progress score (can be negative if agent regressed)
+        """
+        w_B_growth = current_w_B - initial_w_B
+        
+        # Efficiency matters: same growth with fewer actions = better
+        progress = w_B_growth * max(0.5, min(2.0, efficiency))
+        
+        return progress
+    
+    def _calculate_low_start_boost(self, initial_w_B: float) -> float:
+        """
+        Calculate ATP boost for agents starting with low w_B.
+        
+        Per Role Fairness Protocol: Agents starting below threshold get extra ATP.
+        This compensates for the harder journey they face.
+        
+        Formula: if initial_w_B < threshold: boost = (threshold - initial_w_B) * factor
+        
+        Args:
+            initial_w_B: w_B snapshot when role was assigned
+            
+        Returns:
+            ATP boost multiplier (0.0 to ~0.2)
+        """
+        if initial_w_B >= self.LOW_START_THRESHOLD:
+            return 0.0
+        
+        # Linear boost: starts at 0 when at threshold, increases as w_B decreases
+        boost = (self.LOW_START_THRESHOLD - initial_w_B) * self.LOW_START_BOOST_FACTOR
+        
+        return boost
+    
+    def _calculate_stagnation_penalty(self, initial_w_B: float, progress_score: float,
+                                       generations_in_role: int = 1) -> float:
+        """
+        Calculate ATP penalty for high-start agents who stagnate.
+        
+        Per Role Fairness Protocol: Agents starting with high w_B who don't grow
+        get graduated ATP reduction. This prevents "coasting" on inherited advantage.
+        
+        Graduated curve:
+        - 1 gen stagnation: 10% penalty
+        - 2 gen stagnation: 20% penalty  
+        - 3+ gen stagnation: 30% penalty (max)
+        
+        Args:
+            initial_w_B: w_B snapshot when role was assigned
+            progress_score: Current progress score
+            generations_in_role: How many generations in this role
+            
+        Returns:
+            ATP penalty multiplier (0.0 to 0.3)
+        """
+        # Only applies to high-starters
+        if initial_w_B < self.HIGH_START_THRESHOLD:
+            return 0.0
+        
+        # Check for stagnation (no meaningful progress)
+        if progress_score > 0.05:  # Some progress = no penalty
+            return 0.0
+        
+        # Graduated penalty curve
+        if generations_in_role <= 1:
+            penalty = 0.10
+        elif generations_in_role == 2:
+            penalty = 0.20
+        else:
+            penalty = self.STAGNATION_PENALTY_MAX
+        
+        return penalty
+    
+    def _get_transition_learning_tax(self, agent_id: str, generation: int) -> float:
+        """
+        Get ATP learning tax from failed role transition attempts.
+        
+        Per Role Fairness Protocol: Failed transitions incur 10% ATP penalty.
+        This only applies for the current generation (one-time tax).
+        
+        Args:
+            agent_id: Agent to check
+            generation: Current generation
+            
+        Returns:
+            ATP reduction (0.0 if no failed transitions, up to 0.1 per failure)
+        """
+        # Query failed transitions this generation
+        failed_transitions = self.db.execute_query("""
+            SELECT SUM(atp_cost) as total_tax
+            FROM role_transition_attempts
+            WHERE agent_id = ? AND generation = ? AND was_successful = 0
+        """, (agent_id, generation))
+        
+        if failed_transitions and len(failed_transitions) > 0:
+            total_tax = failed_transitions[0].get('total_tax', 0.0) or 0.0
+            # Cap at 30% total (3 failed attempts max penalty)
+            return min(0.3, total_tax)
+        
+        return 0.0
     
     # ========================================================================
     # PHASE 2: ECOSYSTEM METABOLISM TRACKING (NETWORK-LEVEL RESOURCE FLOW)

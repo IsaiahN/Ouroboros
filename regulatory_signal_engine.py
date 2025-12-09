@@ -13,6 +13,9 @@ Key Principles:
 - Emergent homeostasis, no central control
 """
 
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 import uuid
 import logging
 from typing import Dict, List, Optional, Tuple
@@ -67,6 +70,13 @@ class RegulatorySignalEngine:
                 'adjustment_direction': 'increase',
                 'base_magnitude': 0.25,
                 'description': 'Cross-role pattern agreement detected - amplify exploration'
+            },
+            # Role Fairness Protocol: Dynamic ATP adjustment based on network needs
+            'role_need': {
+                'target_parameter': 'role_atp_adjustment',
+                'adjustment_direction': 'dynamic',  # Can be + or -
+                'base_magnitude': 0.3,  # Max ±0.3 ATP adjustment
+                'description': 'Network role demand signal for ATP rebalancing'
             }
         }
     
@@ -103,6 +113,10 @@ class RegulatorySignalEngine:
         # System-level signals based on failing metrics
         system_signals = self._emit_system_signals(generation, network_health)
         signals_emitted.extend(system_signals)
+        
+        # Role Fairness Protocol: Emit role need signals for ATP adjustment
+        role_signals = self.emit_role_need_signals(generation)
+        signals_emitted.extend(role_signals)
         
         self.logger.info(f"Emitted {len(signals_emitted)} regulatory signals for generation {generation}")
         return signals_emitted
@@ -286,6 +300,79 @@ class RegulatorySignalEngine:
             self.logger.debug("[RESONANCE] Resonance detector not available")
         except Exception as e:
             self.logger.error(f"[RESONANCE] Detection failed: {e}")
+        
+        return signals
+
+    def emit_role_need_signals(self, generation: int) -> List[str]:
+        """
+        Emit signals for network role demand to support Role Fairness Protocol.
+        
+        Analyzes current game state and population distribution to determine
+        which roles are needed more/less. Emits role_need signals with ATP adjustments.
+        
+        When network has mostly unbeaten games -> Pioneer demand ↑
+        When network has mostly beaten games -> Optimizer demand ↑
+        
+        Returns:
+            List of signal IDs emitted
+        """
+        import json
+        signals = []
+        
+        # Get game state distribution
+        game_stats = self.db.execute_query("""
+            SELECT 
+                COUNT(CASE WHEN is_fully_beaten = 1 THEN 1 END) as beaten_games,
+                COUNT(CASE WHEN is_fully_beaten = 0 OR is_fully_beaten IS NULL THEN 1 END) as unbeaten_games
+            FROM arc_games WHERE is_active = 1
+        """)
+        
+        beaten = 0
+        unbeaten = 0
+        if game_stats and len(game_stats) > 0:
+            beaten = game_stats[0].get('beaten_games', 0) or 0
+            unbeaten = game_stats[0].get('unbeaten_games', 0) or 0
+        
+        total = beaten + unbeaten
+        if total == 0:
+            return signals
+        
+        exploration_ratio = unbeaten / total  # 0.0 = all beaten, 1.0 = none beaten
+        
+        # Calculate role adjustments based on exploration ratio
+        # High exploration_ratio -> need pioneers (+), less need for optimizers (-)
+        # Low exploration_ratio -> need optimizers (+), less need for pioneers (-)
+        role_needs = {
+            'pioneer': (exploration_ratio - 0.5) * 0.6,      # -0.3 to +0.3
+            'optimizer': (0.5 - exploration_ratio) * 0.6,    # -0.3 to +0.3
+            'generalist': 0.0,                                # Always balanced
+            'exploiter': (0.3 - exploration_ratio) * 0.3     # Slight boost when mostly beaten
+        }
+        
+        # Clamp all values to [-0.3, +0.3]
+        for role in role_needs:
+            role_needs[role] = max(-0.3, min(0.3, role_needs[role]))
+        
+        # Emit a single role_need signal with all adjustments
+        signal_id = self._create_signal(
+            signal_type='role_need',
+            source_agent=None,  # System signal
+            generation=generation,
+            strength=1.0,
+            context={
+                'role_needs': role_needs,
+                'exploration_ratio': exploration_ratio,
+                'beaten_games': beaten,
+                'unbeaten_games': unbeaten
+            }
+        )
+        signals.append(signal_id)
+        
+        self.logger.info(
+            f"[ROLE NEED] Exploration ratio: {exploration_ratio:.2f} "
+            f"(beaten={beaten}, unbeaten={unbeaten}) -> "
+            f"Pioneer:{role_needs['pioneer']:+.2f}, Optimizer:{role_needs['optimizer']:+.2f}"
+        )
         
         return signals
 

@@ -5200,3 +5200,242 @@ Added 9 new tables to `complete_database_schema.sql`:
 
 **END OF SESSION 25 (Final): December 8, 2025 - 3:00:00 PM**
 
+---
+
+## Session: December 9, 2025 (Afternoon)
+
+---
+
+### Session 26: Role Fairness Protocol Implementation (Time: 2:30:00 PM - 4:15:00 PM)
+
+**Focus**: Implement complete Agent Role Fairness Protocol per `DOCS/balancing the agent role fairness.md`
+
+#### Approach
+
+Following the AGI Unified Theory's Dual Economy Principle, implementing growth-based meritocracy where:
+- **ATP (metabolic) is SEPARATE from Prestige (social)** - CRITICAL, never mix
+- Agents evaluated against their OWN starting w_B position, not absolute performance
+- Role-based ATP multipliers reflect difficulty of each role
+- Soft transitions preserve voluntary choice while incentivizing good fits
+- Progress tracking enables "growth-based meritocracy"
+
+Philosophy: "Fair but free, incentivized but not coerced"
+
+#### Phase 1: Core Role Fairness (2:30:00 PM - 3:15:00 PM)
+
+**Step 1: Schema Changes** (`complete_database_schema.sql`)
+
+Added to `agent_operating_modes` table:
+```sql
+initial_w_B_for_role REAL DEFAULT 0.5,  -- Snapshot of w_B when role assigned
+current_w_B REAL DEFAULT 0.5,           -- Updated w_B for progress tracking
+progress_score REAL DEFAULT 0.0         -- Calculated growth metric
+```
+
+Created new table:
+```sql
+CREATE TABLE role_transition_attempts (
+    transition_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    from_role TEXT NOT NULL,
+    to_role TEXT NOT NULL,
+    success_probability REAL NOT NULL,
+    was_successful BOOLEAN NOT NULL,
+    atp_cost REAL DEFAULT 0.0,
+    generation INTEGER NOT NULL,
+    attempt_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Step 2: Initial w_B Capture** (`agent_operating_mode_system.py`)
+
+Updated `_record_mode_assignment()` to:
+- Query agent's `self_network_bias` from agents table
+- Store as `initial_w_B_for_role` when assigning roles
+- Initialize `current_w_B` and `progress_score` to starting values
+
+**Step 3: Role-Based ATP Constants** (`adaptive_action_limits.py`)
+
+Added constants:
+```python
+ROLE_BASE_ATP = {
+    'pioneer': 1.5,     # Frontier exploration is HARD
+    'generalist': 1.2,  # Balanced play, moderate bonus
+    'optimizer': 1.0,   # Proven paths, baseline expected
+    'exploiter': 0.8    # Micro-optimization, efficiency is the point
+}
+ROLE_ATP_DYNAMIC_RANGE = 0.3  # Network needs can shift +/- 0.3
+```
+
+**Step 4: Progress Tracking Methods** (`adaptive_action_limits.py`)
+
+Added new methods:
+| Method | Purpose |
+|--------|---------|
+| `_get_agent_role_info()` | Get role and w_B tracking data |
+| `_get_network_role_need()` | Query regulatory signals for dynamic ATP |
+| `_calculate_progress_score()` | Growth-based progress: (current - initial) * efficiency |
+| `_calculate_low_start_boost()` | ATP boost for agents starting below threshold |
+| `_calculate_stagnation_penalty()` | Graduated penalty for high-starters who coast |
+
+**Step 5: Updated Salary Calculation** (`adaptive_action_limits.py`)
+
+Rewrote `calculate_agent_salary()` to integrate:
+- Role-based ATP multipliers
+- Progress bonus for w_B growth
+- Low-start boost (if initial_w_B < 0.4)
+- Stagnation penalty for high-starters
+- Percentile scaling (reduced weight, doesn't dominate role fairness)
+
+Returns new fields:
+```python
+{
+    'action_allowance_per_level': int,
+    'action_allowance_total': int,
+    'budget_multiplier': float,
+    'role': str,
+    'role_multiplier': float,
+    'progress_bonus': float,
+    'low_start_boost': float,
+    'stagnation_penalty': float,
+    'initial_w_B': float,
+    'current_w_B': float
+}
+```
+
+#### Phase 2: Soft Transitions (3:15:00 PM - 3:45:00 PM)
+
+**Step 1: Soft Role Transition System** (`agent_operating_mode_system.py`)
+
+Added `attempt_soft_role_transition()` method:
+- Probabilistic success based on fit score
+- Cooldown penalty (30% if switching too soon)
+- Lock penalty (40% if role-locked)
+- Records attempt in `role_transition_attempts` table
+- Returns `(success, reason, atp_cost)`
+
+**Step 2: w_B Update Mechanism** (`agent_operating_mode_system.py`)
+
+Added `update_agent_w_B_progress()` method:
+- Called after gameplay to update `current_w_B`
+- Calculates `progress_score` = current - initial
+- Logs significant progress (> 0.1 delta)
+
+**Step 3: Transition Learning Tax** (`adaptive_action_limits.py`)
+
+Added `_get_transition_learning_tax()` method:
+- Queries failed transitions this generation
+- Returns ATP penalty (10% per failure, capped at 30%)
+
+Integrated into `calculate_agent_salary()`:
+```python
+combined_multiplier = (
+    role_multiplier +
+    progress_bonus +
+    low_start_boost -
+    stagnation_penalty -
+    transition_tax  # NEW: penalty for failed role switches
+)
+```
+
+#### Phase 3: Network-State ATP (3:45:00 PM - 4:00:00 PM)
+
+**Step 1: Role Need Signal Type** (`regulatory_signal_engine.py`)
+
+Added new signal type:
+```python
+'role_need': {
+    'target_parameter': 'role_atp_adjustment',
+    'adjustment_direction': 'dynamic',
+    'base_magnitude': 0.3,
+    'description': 'Network role demand signal for ATP rebalancing'
+}
+```
+
+**Step 2: Role Need Signal Emission** (`regulatory_signal_engine.py`)
+
+Added `emit_role_need_signals()` method:
+- Analyzes game state (beaten vs unbeaten games)
+- Calculates exploration_ratio = unbeaten / total
+- Emits role adjustments:
+  - High exploration_ratio -> Pioneer demand ↑, Optimizer ↓
+  - Low exploration_ratio -> Optimizer demand ↑, Pioneer ↓
+- Stores in regulatory_signals table with JSON metadata
+
+Integrated into `emit_agent_signals()` - automatically called each generation.
+
+#### Pycache Fixes (4:00:00 PM)
+
+Fixed pycache position in files (must be BEFORE imports):
+- `agent_operating_mode_system.py`: Moved `os.environ["PYTHONDONTWRITEBYTECODE"]` before other imports
+- `regulatory_signal_engine.py`: Added pycache suppression before imports
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `complete_database_schema.sql` | +3 columns, +1 table, +2 indexes |
+| `agent_operating_mode_system.py` | +2 methods, updated `_record_mode_assignment()`, pycache fix |
+| `adaptive_action_limits.py` | +7 methods, +constants, rewrote salary calculation |
+| `regulatory_signal_engine.py` | +1 signal type, +1 method, integrated emission, pycache fix |
+
+#### Verification
+
+- [OK] All files pass `py_compile` syntax check
+- [OK] No Pylance errors
+- [OK] Pycache suppression in correct position
+
+#### Key Design Decisions
+
+1. **Dual Economy Protection**: ATP calculations use only performance data + role info. **NO queries to prestige fields.**
+
+2. **Growth-Based Formula**: `progress_score = (current_w_B - initial_w_B) * efficiency`
+   - Rewards GROWTH, not absolute position
+   - Agent going 0.2 -> 0.5 beats agent going 0.7 -> 0.8
+
+3. **Soft Transitions Preserve Choice**: Agents can always attempt transitions
+   - Success is probabilistic based on fit
+   - Failed attempts cost 10% ATP (learning tax)
+   - Never blocks voluntary choice
+
+4. **Percentile Matters Less**: Old system was 0.5x to 3.0x based on percentile
+   - New system: 0.9x to 1.5x percentile factor
+   - Role fairness adjustments dominate (+/- 0.5 from role, progress, boosts)
+
+---
+
+### Current Status (4:15:00 PM)
+
+**Approach**: Implementing Agent Role Fairness Protocol for growth-based meritocracy
+
+**Completed This Session**:
+
+| Phase | Tasks | Status |
+|-------|-------|--------|
+| Phase 1 | Schema changes (w_B tracking) | [DONE] |
+| Phase 1 | Initial w_B capture | [DONE] |
+| Phase 1 | Role-based ATP multipliers | [DONE] |
+| Phase 1 | Progress score calculation | [DONE] |
+| Phase 1 | Low-start boost | [DONE] |
+| Phase 1 | Stagnation penalty | [DONE] |
+| Phase 1 | Updated salary calculation | [DONE] |
+| Phase 2 | Soft role transitions | [DONE] |
+| Phase 2 | w_B update mechanism | [DONE] |
+| Phase 2 | Transition learning tax | [DONE] |
+| Phase 3 | Role need signal type | [DONE] |
+| Phase 3 | Role need signal emission | [DONE] |
+| Fixes | Pycache position fixes | [DONE] |
+
+**Current Failure Being Worked On**:
+- **None** - Role Fairness Protocol fully implemented
+
+**Next Steps**:
+1. Run evolution test to verify role fairness working
+2. Monitor ATP distribution across roles
+3. Verify progress tracking is updating correctly
+4. Check regulatory signals being emitted
+
+---
+
+**END OF SESSION 26: December 9, 2025 - 4:15:00 PM**
+
