@@ -37,7 +37,7 @@ from action_handler import ActionHandler
 from arc_api_client import GameState
 from database_interface import DatabaseInterface
 from prestige_engine import PrestigeEngine
-from sensation_engine import SensationEngine
+from sensation_engine import SensationEngine, get_sensation_mode
 from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
@@ -2780,20 +2780,22 @@ class GameplayEngine:
         sensation_biases = {}
         navigation_state = 0.0
         
-        # Get agent mode to determine if sensation is allowed
+        # Get agent mode to determine sensation configuration
         agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
         
-        # SENSATION ACCESS BY ROLE (Phase 4.5 - per Master Ruleset):
-        # - Pioneers: NO (pure exploration, no emotional biases)
-        # - Optimizers: YES (need sensation to make efficiency decisions)
-        # - Generalists: YES (feelings restored - need emotional intelligence)
-        # - Exploiters: YES (can use sensation when replaying sequences)
-        sensation_allowed = (agent_mode != 'pioneer')
+        # Determine if this is a frontier level (no network data exists)
+        current_level = int(game_state.score) + 1
+        current_game_id = self.session_manager.current_game_id
+        is_frontier = self._is_frontier_level(current_game_id, current_level) if current_game_id else True
+        
+        # Get sensation mode based on role and frontier status
+        # Per AGI Unified Theory: Pioneers have network sensation isolated but personal sensation active
+        sensation_mode = get_sensation_mode(agent_mode or 'generalist', is_frontier)
         
         if agent_id and self.game_config.get('enable_sensation_navigation', True):
-            if not sensation_allowed:
-                # Pioneers restricted from sensation - must use pure exploration
-                logger.debug(f" Pioneer mode: Sensation navigation disabled (pure exploration)")
+            if not sensation_mode['personal_sensation_active']:
+                # Sensation completely disabled (shouldn't happen with new design)
+                logger.debug(f" Sensation disabled for agent")
             else:
                 try:
                     # Analyze frame for emotional context using tetrahedral perception
@@ -2810,6 +2812,9 @@ class GameplayEngine:
                     
                     # Store sensation context for use in self-model building
                     self._last_sensation_context = sensation_context
+                    
+                    # Store sensation mode in context for payload
+                    self._sensation_mode = sensation_mode
                     
                     navigation_state = self.sensation_engine.update_navigation_state(
                         agent_id, 
@@ -5886,6 +5891,187 @@ class GameplayEngine:
             return None
 
     # ========================================================================
+    # STATUS CODES FOR NULL VALUES (Payload Restructure v3.1)
+    # ========================================================================
+    
+    # Status code mapping for NULL values in payload
+    NULL_STATUS_CODES = {
+        # 1xx - Informational
+        100: "Data collection in progress",
+        102: "Computation pending",
+        103: "Early hints available",
+        # 2xx - Success (valid empty)
+        204: "No Content",
+        206: "Partial Content",
+        # 3xx - Redirection
+        301: "Moved Permanently",
+        304: "Not Modified",
+        307: "Temporary Redirect",
+        # 4xx - Agent/Data Error
+        404: "Not Found",
+        408: "Timeout",
+        409: "Conflict",
+        410: "Gone",
+        412: "Precondition Failed",
+        422: "Unprocessable",
+        424: "Failed Dependency",
+        425: "Too Early",
+        450: "Network Sensation Isolated",
+        451: "Frontier Level",
+        # 5xx - System Error
+        500: "Internal Error",
+        503: "Service Unavailable",
+        507: "Insufficient Storage",
+        508: "Loop Detected"
+    }
+    
+    def _null_status(self, code: int) -> str:
+        """
+        Get formatted NULL status string for payload.
+        
+        Args:
+            code: HTTP-style status code (e.g., 404, 425)
+            
+        Returns:
+            Formatted string like "NULL - 425 Too Early"
+        """
+        meaning = self.NULL_STATUS_CODES.get(code, "Unknown")
+        return f"NULL - {code} {meaning}"
+    
+    def _build_delta_section(
+        self,
+        current_frame: Optional[List],
+        previous_frame: Optional[List],
+        last_action: str,
+        score_change: int = 0,
+        level_change: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Build the delta section showing what changed since last action.
+        
+        Provides natural language descriptions of frame changes for
+        human-readable understanding of game dynamics.
+        
+        Args:
+            current_frame: Current game frame (2D grid)
+            previous_frame: Previous game frame
+            last_action: Last action taken (e.g., "ACTION1")
+            score_change: Change in score
+            level_change: Whether level changed
+            
+        Returns:
+            Delta section dict with frame changes in natural language
+        """
+        delta = {
+            'last_action': last_action,
+            'frame_changes': [],
+            'score_change': score_change,
+            'level_change': level_change,
+            'self_model_update': self._null_status(425),  # Updated by caller if available
+            'world_model_update': self._null_status(425),
+            'theory_validation': self._null_status(425)
+        }
+        
+        if current_frame is None or previous_frame is None:
+            delta['frame_changes'] = [self._null_status(424)]  # Failed Dependency
+            return delta
+        
+        try:
+            current_arr = np.array(current_frame) if not isinstance(current_frame, np.ndarray) else current_frame
+            previous_arr = np.array(previous_frame) if not isinstance(previous_frame, np.ndarray) else previous_frame
+            
+            if current_arr.shape != previous_arr.shape:
+                delta['frame_changes'] = ["Grid size changed"]
+                return delta
+            
+            # Find differences
+            diff_mask = current_arr != previous_arr
+            
+            if not np.any(diff_mask):
+                delta['frame_changes'] = [self._null_status(304)]  # Not Modified
+                return delta
+            
+            # Analyze changes
+            changes = []
+            diff_coords = np.argwhere(diff_mask)
+            
+            # Group by color changes
+            color_movements = {}  # old_color -> list of movements
+            
+            for coord in diff_coords[:20]:  # Limit to 20 changes
+                y, x = coord
+                old_color = int(previous_arr[y, x])
+                new_color = int(current_arr[y, x])
+                
+                if old_color != 0 and new_color == 0:
+                    # Object disappeared
+                    changes.append(f"color_{old_color} object disappeared from ({x}, {y})")
+                elif old_color == 0 and new_color != 0:
+                    # Object appeared
+                    changes.append(f"color_{new_color} object appeared at ({x}, {y})")
+                else:
+                    # Color changed
+                    changes.append(f"position ({x}, {y}) changed from color_{old_color} to color_{new_color}")
+            
+            # Try to detect movement patterns
+            movement_summary = self._detect_movement_pattern(previous_arr, current_arr)
+            if movement_summary:
+                changes.insert(0, movement_summary)
+            
+            delta['frame_changes'] = changes if changes else [self._null_status(304)]
+            
+        except Exception as e:
+            delta['frame_changes'] = [f"Analysis error: {str(e)[:50]}"]
+        
+        return delta
+    
+    def _detect_movement_pattern(
+        self,
+        previous: np.ndarray,
+        current: np.ndarray
+    ) -> Optional[str]:
+        """
+        Detect if an object moved in a recognizable pattern.
+        
+        Returns natural language description of movement if detected.
+        """
+        try:
+            # Find non-zero colors in both frames
+            prev_colors = set(np.unique(previous)) - {0}
+            curr_colors = set(np.unique(current)) - {0}
+            
+            # Check each color for movement
+            for color in prev_colors & curr_colors:
+                prev_positions = np.argwhere(previous == color)
+                curr_positions = np.argwhere(current == color)
+                
+                if len(prev_positions) == len(curr_positions) and len(prev_positions) > 0:
+                    # Same number of pixels - might be movement
+                    prev_center = prev_positions.mean(axis=0)
+                    curr_center = curr_positions.mean(axis=0)
+                    
+                    dy = curr_center[0] - prev_center[0]
+                    dx = curr_center[1] - prev_center[1]
+                    
+                    if abs(dx) > 0.5 or abs(dy) > 0.5:
+                        direction = []
+                        if dy < -0.5:
+                            direction.append("up")
+                        elif dy > 0.5:
+                            direction.append("down")
+                        if dx < -0.5:
+                            direction.append("left")
+                        elif dx > 0.5:
+                            direction.append("right")
+                        
+                        if direction:
+                            return f"color_{int(color)} object moved {' and '.join(direction)}"
+            
+            return None
+        except Exception:
+            return None
+
+    # ========================================================================
     # AGENT OPERATING MODE HELPERS
     # ========================================================================
     
@@ -5894,9 +6080,21 @@ class GameplayEngine:
         """
         Format reasoning as JSON object for ARC API (<=16 KB).
         
-        Converts human-readable reasoning text into structured JSON metadata
-        for transmission to ARC API. Includes agent context, game state,
-        self-model, world-model, and Two-Streams self-reflection.
+        PAYLOAD v3.1 - 7-TIER STRUCTURE:
+        ================================
+        1. Identity - Who am I, what do I believe (working_theory embedded)
+        2. Delta - What changed since last action (natural language)
+        3. Understanding - Q1-Q5 cognitive state
+        4. Network Wisdom - Collective knowledge 
+        5. Context - Game state and exploration mode
+        6. Environment - World around me (world_model)
+        7. Action - What I'm doing
+        
+        Status codes follow HTTP semantics for NULL values:
+        - 425 Too Early: Data not yet available
+        - 404 Not Found: Data expected but missing
+        - 450 Network Sensation Isolated: Pioneer on frontier
+        - 451 Frontier Level: First exploration of level
         
         Args:
             action: Action being taken (e.g., "ACTION6")
@@ -5910,94 +6108,281 @@ class GameplayEngine:
         agent_id = self.game_config.get('agent_id')
         game_id = self.game_config.get('current_game_id', '')
         agent_mode = self._get_agent_operating_mode(agent_id) if agent_id else None
-        
-        reasoning_obj = {
-            'action': action,
-            'reasoning': reasoning_text,
-            'level': current_level,
-            'score': game_state.score,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        # Add agent context if available
-        if agent_id:
-            reasoning_obj['agent_id'] = agent_id
-        if agent_mode:
-            reasoning_obj['agent_mode'] = agent_mode
-        
-        # Add generation if available
         generation = self.game_config.get('current_generation')
-        if generation is not None:
-            reasoning_obj['generation'] = generation
+        genome = self.game_config.get('genome')
         
-        # Add SELF-DIRECTED MODE context if active
-        # This tells the API/LLM that the agent broke out of a stuck state
-        # and is now exploring on its own, not following network sequences
-        if getattr(self, '_self_directed_mode', False):
-            reasoning_obj['exploration_mode'] = 'self_directed'
-            reasoning_obj['exploration_context'] = {
-                'reason': 'Broke out of stuck state, now exploring independently',
-                'trust_self': True,
-                'network_sequences_invalid': True,
-                'start_action': getattr(self, '_self_directed_start_action', 0)
-            }
+        # Determine if on frontier (for status codes)
+        is_frontier = self._is_frontier_level(game_id, current_level)
         
-        # Add self-model context (what objects agent controls)
-        # Task 3: Now passes frame for aggregation of controlled objects
-        # McGuffin Grammar: Now includes tetrahedral perception context
-        reasoning_obj['self_model'] = self._build_self_model_context(
+        # Get previous frame for delta calculation
+        previous_frame = getattr(self, '_previous_frame', None)
+        last_action = getattr(self, '_last_action_taken', action)
+        score_change = game_state.score - getattr(self, '_previous_score', game_state.score)
+        level_change = current_level != getattr(self, '_previous_level', current_level)
+        
+        # ===================================================================
+        # TIER 1: IDENTITY - Who am I, what do I believe
+        # ===================================================================
+        self_model = self._build_self_model_context(
             agent_id, game_id, current_level, frame=game_state.frame,
             sensation_context=getattr(self, '_last_sensation_context', None)
         )
         
-        # Add world-model context (obstacles, goals, hypotheses)
-        reasoning_obj['world_model'] = self._build_world_model_context(game_id, current_level, game_state.frame)
+        # Extract or build working theory
+        working_theory = self._null_status(425)  # Default: Too Early
+        if self_model and 'working_theory' in self_model:
+            working_theory = self_model.get('working_theory')
+        elif self_model and self_model.get('controlled_object_type'):
+            # Infer theory from self-model
+            ctrl_obj = self_model.get('controlled_object_type')
+            working_theory = f"I control the {ctrl_obj} and can move it through actions"
         
-        # Two-Streams: Add self-reflection weaving data
-        self_reflection = self._build_self_reflection_context(agent_id, agent_mode, action, game_state)
-        if self_reflection:
-            reasoning_obj['self_reflection'] = self_reflection
+        identity = {
+            'agent_id': agent_id or self._null_status(404),
+            'role': agent_mode or self._null_status(425),
+            'generation': generation if generation is not None else self._null_status(425),
+            'working_theory': working_theory,
+            'self_model': self_model or {'status': self._null_status(425)},
+            'genome': {
+                'agent_type': genome.get('agent_type') if genome else self._null_status(404),
+                'exploration_rate': genome.get('exploration_rate') if genome else self._null_status(425),
+                'learning_rate': genome.get('learning_rate') if genome else self._null_status(425)
+            } if genome else {'status': self._null_status(404)}
+        }
         
-        # Emergent Reasoning: Four Core Questions (Q1-Q4)
-        # This surfaces the cognitive loop that drives intelligent exploration
+        # ===================================================================
+        # TIER 2: DELTA - What changed since last action (natural language)
+        # ===================================================================
+        delta = self._build_delta_section(
+            current_frame=game_state.frame,
+            previous_frame=previous_frame,
+            last_action=last_action,
+            score_change=score_change,
+            level_change=level_change
+        )
+        
+        # Update self/world model change status if applicable
+        if self_model and 'controlled_objects' in self_model:
+            prev_controlled = getattr(self, '_previous_controlled_objects', set())
+            curr_controlled = set(self_model.get('controlled_objects', []))
+            if curr_controlled != prev_controlled:
+                delta['self_model_update'] = f"Now control: {list(curr_controlled)}"
+                self._previous_controlled_objects = curr_controlled
+        
+        # ===================================================================
+        # TIER 3: UNDERSTANDING - Q1-Q5 cognitive state
+        # ===================================================================
         emergent_reasoning = getattr(self, '_last_emergent_reasoning', None)
-        if emergent_reasoning:
-            reasoning_obj['emergent_reasoning'] = emergent_reasoning
+        understanding = {
+            'Q1_what_is_happening': emergent_reasoning.get('Q1') if emergent_reasoning else self._null_status(425),
+            'Q2_how_does_this_feel': emergent_reasoning.get('Q2') if emergent_reasoning else (
+                self._null_status(450) if agent_mode == 'pioneer' and is_frontier else self._null_status(425)
+            ),
+            'Q3_what_worked_before': emergent_reasoning.get('Q3') if emergent_reasoning else self._null_status(425),
+            'Q4_what_should_i_try': emergent_reasoning.get('Q4') if emergent_reasoning else self._null_status(425),
+            'Q5_how_confident': emergent_reasoning.get('confidence', 0.5) if emergent_reasoning else self._null_status(425)
+        }
         
-        # Add genome config if available
-        genome = self.game_config.get('genome')
-        if genome:
-            # Include key genome parameters (not full genome to stay under 16 KB)
-            reasoning_obj['genome'] = {
-                'agent_type': genome.get('agent_type'),
-                'exploration_rate': genome.get('exploration_rate'),
-                'learning_rate': genome.get('learning_rate')
+        # ===================================================================
+        # TIER 4: NETWORK WISDOM - Collective knowledge
+        # ===================================================================
+        self_reflection = self._build_self_reflection_context(agent_id, agent_mode, action, game_state)
+        
+        network_wisdom = {
+            'private_memory': self_reflection.get('private_memory') if self_reflection else self._null_status(425),
+            'network_strength': self_reflection.get('network_wisdom') if self_reflection else (
+                self._null_status(450) if agent_mode == 'pioneer' and is_frontier else self._null_status(425)
+            ),
+            'self_trust_bias': self_reflection.get('self_trust_bias') if self_reflection else self._null_status(425),
+            'decision_weight': self_reflection.get('decision_weight') if self_reflection else self._null_status(425),
+            'conflict_detected': self_reflection.get('conflict', False) if self_reflection else False,
+            'two_streams_narrative': self_reflection.get('narrative') if self_reflection else self._null_status(425)
+        }
+        
+        # ===================================================================
+        # TIER 4.5: RESONANCE - Cross-role pattern agreement
+        # ===================================================================
+        # Resonance detection: Do different agent roles agree on this pattern?
+        # This is the "objective truth" detector - when pioneers, generalists,
+        # and exploiters all converge on the same pattern, it's likely true.
+        resonance = self._build_resonance_context(agent_id, agent_mode, game_id, current_level)
+        
+        # ===================================================================
+        # TIER 5: CONTEXT - Game state and exploration mode
+        # ===================================================================
+        context = {
+            'game_id': game_id or self._null_status(404),
+            'level': current_level,
+            'score': game_state.score,
+            'timestamp': datetime.now().isoformat(),
+            'strategy': self.game_config.get('strategy', 'balanced'),
+            'learning_mode': self.game_config.get('learning_mode', 'smart_exploration'),
+            'is_frontier': is_frontier,
+            'frontier_status': self._null_status(451) if is_frontier else "explored"
+        }
+        
+        # Add self-directed mode context
+        if getattr(self, '_self_directed_mode', False):
+            context['exploration_mode'] = 'self_directed'
+            context['self_directed_context'] = {
+                'reason': 'Broke out of stuck state, exploring independently',
+                'trust_self': True,
+                'network_invalid': True,
+                'start_action': getattr(self, '_self_directed_start_action', 0)
             }
+        else:
+            context['exploration_mode'] = 'network_guided' if not is_frontier else 'frontier_exploration'
         
-        # Add strategy context
-        reasoning_obj['strategy'] = self.game_config.get('strategy', 'balanced')
-        reasoning_obj['learning_mode'] = self.game_config.get('learning_mode', 'smart_exploration')
+        # ===================================================================
+        # TIER 6: ENVIRONMENT - World around me (world_model)
+        # ===================================================================
+        world_model = self._build_world_model_context(game_id, current_level, game_state.frame)
+        environment = world_model or {'status': self._null_status(425)}
         
-        # Ensure JSON is <=16 KB
+        # ===================================================================
+        # TIER 7: ACTION - What I'm doing
+        # ===================================================================
+        action_tier = {
+            'action_code': action,
+            'reasoning': reasoning_text,
+            'emotional_state': self_reflection.get('emotion') if self_reflection else self._null_status(425)
+        }
+        
+        # ===================================================================
+        # ASSEMBLE PAYLOAD (Priority Order)
+        # ===================================================================
+        reasoning_obj = {
+            '1_identity': identity,
+            '2_delta': delta,
+            '3_understanding': understanding,
+            '4_network_wisdom': network_wisdom,
+            '4.5_resonance': resonance,
+            '5_context': context,
+            '6_environment': environment,
+            '7_action': action_tier
+        }
+        
+        # Store for next delta calculation
+        self._previous_frame = game_state.frame
+        self._previous_score = game_state.score
+        self._previous_level = current_level
+        self._last_action_taken = action
+        
+        # ===================================================================
+        # SIZE ENFORCEMENT (<=16 KB)
+        # ===================================================================
         reasoning_json = json.dumps(reasoning_obj)
-        if len(reasoning_json) > 16384:  # 16 KB limit
-            # Truncate world_model and self_model first to save space
-            reasoning_obj['world_model'] = {'truncated': True}
-            reasoning_obj['self_model'] = {'truncated': True}
-            # Also truncate self_reflection and emergent_reasoning if present
-            if 'self_reflection' in reasoning_obj:
-                reasoning_obj['self_reflection'] = {'truncated': True}
-            if 'emergent_reasoning' in reasoning_obj:
-                reasoning_obj['emergent_reasoning'] = {'truncated': True}
+        if len(reasoning_json) > 16384:
+            # Truncate environment first (largest), then delta
+            reasoning_obj['6_environment'] = {'status': 'truncated', 'reason': 'size_limit'}
+            reasoning_obj['2_delta']['frame_changes'] = ['truncated']
             reasoning_json = json.dumps(reasoning_obj)
             
-            # If still too large, truncate reasoning text
             if len(reasoning_json) > 16384:
-                max_reasoning_len = len(reasoning_text) - (len(reasoning_json) - 16384) - 100
-                reasoning_obj['reasoning'] = reasoning_text[:max(0, max_reasoning_len)] + '...[truncated]'
+                # Truncate understanding and network_wisdom
+                reasoning_obj['3_understanding'] = {'status': 'truncated'}
+                reasoning_obj['4_network_wisdom'] = {'status': 'truncated'}
+                reasoning_json = json.dumps(reasoning_obj)
+                
+                if len(reasoning_json) > 16384:
+                    # Last resort: truncate reasoning text
+                    max_len = len(reasoning_text) - (len(reasoning_json) - 16384) - 100
+                    reasoning_obj['7_action']['reasoning'] = reasoning_text[:max(0, max_len)] + '...[truncated]'
         
         return reasoning_obj
     
+    def _build_resonance_context(
+        self,
+        agent_id: Optional[str],
+        agent_mode: Optional[str],
+        game_id: str,
+        level_number: int
+    ) -> Dict[str, Any]:
+        """
+        Build resonance context for API reasoning payload.
+        
+        Resonance = when different agent roles (pioneers, generalists, exploiters)
+        independently converge on the same abstract pattern. This is evidence of
+        "objective truth" because agents with radically different biases agree.
+        
+        Uses role-based probability gates from harmonies theory:
+        - Pioneer: 1% (only on high-novelty)
+        - Optimizer: 10% (when seeking inspiration)
+        - Generalist: 30% (consistency checks)
+        - Exploiter: 5% (sanity checks)
+        
+        Args:
+            agent_id: Agent making decision
+            agent_mode: Agent's role
+            game_id: Current game
+            level_number: Current level
+            
+        Returns:
+            Resonance context dict with score and roles_that_agree
+        """
+        try:
+            # Import resonance detector
+            from resonance_detector import should_query_resonance, ResonanceDetector
+            
+            # Determine if we should query resonance this action (role-based probability)
+            # Calculate novelty from current state
+            pattern_novelty = getattr(self, '_current_pattern_novelty', 0.0)
+            is_stuck = getattr(self, '_is_stuck', False)
+            
+            if not should_query_resonance(agent_mode or 'generalist', pattern_novelty, is_stuck):
+                # Don't query this action - return status code
+                return {
+                    'queried': False,
+                    'status': self._null_status(102),  # Computation pending
+                    'reason': f"Query gate: {agent_mode} at {pattern_novelty:.2f} novelty"
+                }
+            
+            # Query resonance for current game/level patterns
+            detector = ResonanceDetector(self.db)
+            
+            # Get resonant patterns for this game type
+            game_type = game_id[:4] if game_id else ''
+            resonant = detector.get_resonant_patterns(min_score=0.5, limit=5)
+            
+            # Filter to patterns relevant to this game type
+            relevant_patterns = [
+                p for p in resonant 
+                if game_type in p.get('game_types', [])
+            ]
+            
+            if relevant_patterns:
+                top_pattern = relevant_patterns[0]
+                return {
+                    'queried': True,
+                    'resonance_score': top_pattern['resonance_score'],
+                    'role_diversity': top_pattern['role_diversity'],
+                    'roles_that_agree': top_pattern['roles_found'],
+                    'pattern_type': top_pattern.get('theory_type', 'unknown'),
+                    'is_resonant': top_pattern['role_diversity'] >= 2,
+                    'insight': f"Pattern validated by {top_pattern['roles_found']} independently"
+                }
+            else:
+                return {
+                    'queried': True,
+                    'resonance_score': 0.0,
+                    'status': self._null_status(204),  # No Content
+                    'reason': "No resonant patterns found for this game type"
+                }
+                
+        except ImportError:
+            return {
+                'queried': False,
+                'status': self._null_status(503),  # Service Unavailable
+                'reason': "Resonance detector not available"
+            }
+        except Exception as e:
+            logger.debug(f"Resonance context build failed: {e}")
+            return {
+                'queried': False,
+                'status': self._null_status(500),  # Internal Error
+                'reason': str(e)[:50]
+            }
+
     def _build_self_reflection_context(
         self,
         agent_id: Optional[str],
@@ -6540,6 +6925,42 @@ class GameplayEngine:
             logger.debug(f"Error getting agent operating mode: {e}")
         
         return None
+
+    def _is_frontier_level(self, game_id: str, level: int) -> bool:
+        """
+        Check if this level is a frontier (unexplored by network).
+        
+        A frontier level is one where network_max_level < current_level,
+        meaning no agent has ever solved this level before.
+        
+        Args:
+            game_id: Current game ID
+            level: Current level number
+            
+        Returns:
+            True if frontier (no network data), False if beaten before
+        """
+        if not game_id:
+            return True  # Assume frontier if no game context
+        
+        try:
+            # Query the max level achieved by any sequence for this game
+            result = self.db.execute_query("""
+                SELECT MAX(level_number) as max_level
+                FROM winning_sequences
+                WHERE game_id = ? AND is_active = 1
+            """, (game_id,))
+            
+            if result and result[0] and result[0].get('max_level'):
+                network_max = result[0]['max_level']
+                return level > network_max
+            
+            # No sequences exist - definitely frontier
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Error checking frontier status: {e}")
+            return True  # Assume frontier on error
 
     # ========================================================================
     # PATTERN LEARNING METHODS (Rule 10: Integrated into existing file)
@@ -7766,6 +8187,38 @@ class GameplayEngine:
                     except Exception as e:
                         logger.debug(f"Self-model tracking during replay failed (non-critical): {e}")
                 
+                # ================================================================
+                # INFERRED BELIEFS EXTRACTION (Retroactive Belief Mining)
+                # ================================================================
+                # For successful sequence replays, extract what beliefs the original
+                # discoverer MUST have had to discover this sequence. This enables:
+                # 1. Teaching future agents the "why" behind actions
+                # 2. Building network-level understanding that survives agent death
+                # 3. Abstracting knowledge from "what worked" to "what to believe"
+                # ================================================================
+                try:
+                    inferred_beliefs = self._extract_inferred_beliefs_from_sequence(
+                        sequence_id=sequence_id,
+                        game_id=sequence['game_id'],
+                        level_number=target_level,
+                        action_sequence=json.loads(sequence.get('action_sequence', '[]')),
+                        initial_frame=json.loads(sequence.get('initial_frame', '[]')),
+                        final_score=game_state.score,
+                        agent_id=agent_id
+                    )
+                    
+                    if inferred_beliefs:
+                        # Store inferred beliefs for network learning
+                        self._store_inferred_beliefs(
+                            sequence_id=sequence_id,
+                            beliefs=inferred_beliefs,
+                            agent_id=agent_id
+                        )
+                        logger.debug(f"[BELIEFS] Extracted {len(inferred_beliefs.get('inferences', {}))} inferred beliefs from sequence {sequence_id[:12]}")
+                        
+                except Exception as e:
+                    logger.debug(f"Inferred beliefs extraction during replay failed (non-critical): {e}")
+                
             else:
                 logger.warning(f"[FAIL] Inline replay failed for {sequence_id}. "
                              f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
@@ -7915,6 +8368,367 @@ class GameplayEngine:
             logger.error(f"Error replaying sequence: {e}", exc_info=True)
             return None
     
+    def _extract_inferred_beliefs_from_sequence(
+        self,
+        sequence_id: str,
+        game_id: str,
+        level_number: int,
+        action_sequence: List[int],
+        initial_frame: List,
+        final_score: int,
+        agent_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extract inferred beliefs from a successfully replayed sequence.
+        
+        RETROACTIVE BELIEF MINING: What beliefs did the original discoverer
+        MUST have had to find this solution? This extracts the "why" from
+        successful sequences so future agents learn understanding, not just actions.
+        
+        Maps to 5 core questions (Q1-Q5):
+        - self_model_required: What object(s) must the discoverer have known they controlled?
+        - world_model_required: What obstacles/goals must have been understood?
+        - working_theory_required: What theory about the game must have been active?
+        - Q1-Q5 inferences: What answers to core questions led to this solution?
+        
+        Args:
+            sequence_id: ID of the sequence being analyzed
+            game_id: Game this sequence solves
+            level_number: Level number solved
+            action_sequence: List of action numbers
+            initial_frame: Starting frame
+            final_score: Score achieved by replaying
+            agent_id: Agent who validated this sequence
+            
+        Returns:
+            Dict with inferred beliefs structure, or None if extraction fails
+        """
+        try:
+            # Analyze action patterns to infer what was understood
+            inferences = {}
+            
+            # ----------------------------------------------------------------
+            # Q1: "What is happening?" - Infer perception of game dynamics
+            # ----------------------------------------------------------------
+            # Analyze first 3 actions to infer what agent perceived
+            if len(action_sequence) >= 3:
+                first_actions = action_sequence[:3]
+                if 6 in first_actions:
+                    inferences['Q1_perception'] = "Identified clickable elements early - suggests visual pattern recognition"
+                elif all(a in [1, 2, 3, 4] for a in first_actions):
+                    inferences['Q1_perception'] = "Movement-focused start - suggests object control identification"
+                elif 5 in first_actions:
+                    inferences['Q1_perception'] = "Environment interaction attempted - suggests tool/effect exploration"
+                else:
+                    inferences['Q1_perception'] = self._null_status(425)  # Too Early
+            else:
+                inferences['Q1_perception'] = self._null_status(425)
+            
+            # ----------------------------------------------------------------
+            # Q2: "How does this feel?" - Infer emotional/sensory state
+            # ----------------------------------------------------------------
+            # Short sequences = confident; long sequences = exploratory
+            action_count = len(action_sequence)
+            if action_count <= 5:
+                inferences['Q2_sensation'] = "High confidence - direct solution path (minimal exploration)"
+            elif action_count <= 15:
+                inferences['Q2_sensation'] = "Moderate exploration - some uncertainty in approach"
+            elif action_count <= 30:
+                inferences['Q2_sensation'] = "Extended exploration - problem required investigation"
+            else:
+                inferences['Q2_sensation'] = "Deep exploration - complex problem or suboptimal path"
+            
+            # ----------------------------------------------------------------
+            # Q3: "What worked before?" - Infer pattern usage
+            # ----------------------------------------------------------------
+            # Detect repeated action patterns
+            pattern_counts = {}
+            for i in range(len(action_sequence) - 1):
+                pattern = f"{action_sequence[i]},{action_sequence[i+1]}"
+                pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+            
+            repeated_patterns = {k: v for k, v in pattern_counts.items() if v > 1}
+            if repeated_patterns:
+                most_common = max(repeated_patterns, key=repeated_patterns.get)
+                inferences['Q3_memory'] = f"Relied on pattern {most_common} ({repeated_patterns[most_common]} times) - suggests learned behavior"
+            else:
+                inferences['Q3_memory'] = "No repeated patterns - novel solution or single-path"
+            
+            # ----------------------------------------------------------------
+            # Q4: "What should I try?" - Infer decision strategy
+            # ----------------------------------------------------------------
+            # Analyze action diversity
+            unique_actions = set(action_sequence)
+            if len(unique_actions) == 1:
+                inferences['Q4_strategy'] = f"Single action type (ACTION{list(unique_actions)[0]}) - specialized approach"
+            elif len(unique_actions) <= 3:
+                inferences['Q4_strategy'] = f"Limited action set {unique_actions} - focused strategy"
+            else:
+                inferences['Q4_strategy'] = f"Diverse actions {unique_actions} - adaptive problem solving"
+            
+            # ----------------------------------------------------------------
+            # Q5: "How confident am I?" - Infer confidence level
+            # ----------------------------------------------------------------
+            # Score efficiency as proxy for confidence
+            efficiency = final_score / action_count if action_count > 0 else 0
+            if efficiency > 0.5:
+                inferences['Q5_confidence'] = "High (>0.5 score/action) - efficient solution path"
+            elif efficiency > 0.1:
+                inferences['Q5_confidence'] = "Moderate (0.1-0.5) - some wasted actions but successful"
+            else:
+                inferences['Q5_confidence'] = "Low (<0.1) - many exploration actions before success"
+            
+            # ----------------------------------------------------------------
+            # SELF-MODEL REQUIRED: What object control was needed?
+            # ----------------------------------------------------------------
+            self_model_required = self._null_status(425)
+            if hasattr(self, 'agent_self_model') and initial_frame:
+                try:
+                    # Query existing control maps for this game/level
+                    control_maps = self.db.execute_query("""
+                        SELECT controlled_objects, confidence
+                        FROM agent_object_control_map
+                        WHERE game_id = ? AND level_number = ?
+                        ORDER BY confidence DESC LIMIT 1
+                    """, (game_id, level_number))
+                    
+                    if control_maps and control_maps[0].get('controlled_objects'):
+                        objs = json.loads(control_maps[0]['controlled_objects'])
+                        self_model_required = f"Must control: {objs}"
+                except Exception:
+                    pass
+            
+            # ----------------------------------------------------------------
+            # WORLD-MODEL REQUIRED: What obstacles/goals were understood?
+            # ----------------------------------------------------------------
+            world_model_required = self._null_status(425)
+            try:
+                # Query existing world model for this game
+                world_models = self.db.execute_query("""
+                    SELECT obstacles, goals
+                    FROM agent_world_model
+                    WHERE game_id = ? AND level_number = ?
+                    ORDER BY confidence DESC LIMIT 1
+                """, (game_id, level_number))
+                
+                if world_models:
+                    obstacles = world_models[0].get('obstacles', '[]')
+                    goals = world_models[0].get('goals', '[]')
+                    if obstacles != '[]' or goals != '[]':
+                        world_model_required = f"Obstacles: {obstacles}, Goals: {goals}"
+            except Exception:
+                pass
+            
+            # ----------------------------------------------------------------
+            # WORKING THEORY REQUIRED: What was the agent's theory?
+            # ----------------------------------------------------------------
+            working_theory_required = self._null_status(425)
+            # Infer from action patterns
+            if 6 in action_sequence and len([a for a in action_sequence if a == 6]) > len(action_sequence) * 0.5:
+                working_theory_required = "Click-based puzzle - majority of actions are clicks"
+            elif all(a in [1, 2, 3, 4] for a in action_sequence[:5]):
+                working_theory_required = "Movement puzzle - agent controls movable object"
+            elif 5 in action_sequence[:3]:
+                working_theory_required = "Environment manipulation - special action affects world"
+            
+            return {
+                'sequence_id': sequence_id,
+                'game_id': game_id,
+                'level_number': level_number,
+                'validated_by': agent_id,
+                'self_model_required': self_model_required,
+                'world_model_required': world_model_required,
+                'working_theory_required': working_theory_required,
+                'inferences': inferences,
+                'action_count': action_count,
+                'efficiency': efficiency
+            }
+            
+        except Exception as e:
+            logger.debug(f"Inferred beliefs extraction failed: {e}")
+            return None
+    
+    def _store_inferred_beliefs(
+        self,
+        sequence_id: str,
+        beliefs: Dict[str, Any],
+        agent_id: str
+    ) -> bool:
+        """
+        Store inferred beliefs in database for network learning.
+        
+        These beliefs are attached to sequences so future agents replaying
+        the sequence can "inherit" understanding, not just actions.
+        
+        Now includes pattern_hash for resonance detection - enables matching
+        patterns across different roles for objective truth identification.
+        
+        Args:
+            sequence_id: Sequence these beliefs explain
+            beliefs: Inferred beliefs structure
+            agent_id: Agent who validated/extracted these
+            
+        Returns:
+            True if stored successfully
+        """
+        try:
+            import uuid
+            belief_id = f"belief_{uuid.uuid4().hex[:12]}"
+            
+            # Compute pattern hash for resonance detection
+            pattern_hash = self._compute_belief_hash(beliefs)
+            
+            # Create table if not exists (auto-maintenance)
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS inferred_beliefs (
+                    belief_id TEXT PRIMARY KEY,
+                    sequence_id TEXT NOT NULL,
+                    game_id TEXT NOT NULL,
+                    level_number INTEGER NOT NULL,
+                    
+                    -- Core beliefs
+                    self_model_required TEXT,
+                    world_model_required TEXT,
+                    working_theory_required TEXT,
+                    
+                    -- Q1-Q5 inferences (JSON)
+                    inferences TEXT,
+                    
+                    -- Resonance detection
+                    pattern_hash TEXT,
+                    
+                    -- Metadata
+                    action_count INTEGER,
+                    efficiency REAL,
+                    validated_by TEXT,
+                    validation_count INTEGER DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    
+                    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
+                )
+            """)
+            
+            # Create index for pattern_hash lookups
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_beliefs_pattern_hash 
+                ON inferred_beliefs(pattern_hash)
+            """)
+            
+            # Check if beliefs already exist for this sequence
+            existing = self.db.execute_query("""
+                SELECT belief_id, validation_count FROM inferred_beliefs
+                WHERE sequence_id = ?
+            """, (sequence_id,))
+            
+            if existing:
+                # Update existing beliefs (increment validation count)
+                self.db.execute_query("""
+                    UPDATE inferred_beliefs
+                    SET validation_count = validation_count + 1,
+                        pattern_hash = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE sequence_id = ?
+                """, (pattern_hash, sequence_id))
+                logger.debug(f"[BELIEFS] Reinforced existing beliefs for {sequence_id[:12]} (hash: {pattern_hash[:8]})")
+            else:
+                # Insert new beliefs with pattern_hash
+                self.db.execute_query("""
+                    INSERT INTO inferred_beliefs
+                    (belief_id, sequence_id, game_id, level_number,
+                     self_model_required, world_model_required, working_theory_required,
+                     inferences, pattern_hash, action_count, efficiency, validated_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    belief_id,
+                    sequence_id,
+                    beliefs.get('game_id', ''),
+                    beliefs.get('level_number', 1),
+                    beliefs.get('self_model_required', ''),
+                    beliefs.get('world_model_required', ''),
+                    beliefs.get('working_theory_required', ''),
+                    json.dumps(beliefs.get('inferences', {})),
+                    pattern_hash,
+                    beliefs.get('action_count', 0),
+                    beliefs.get('efficiency', 0.0),
+                    agent_id
+                ))
+                logger.debug(f"[BELIEFS] Stored new beliefs {belief_id} (hash: {pattern_hash[:8]}) for {sequence_id[:12]}")
+            
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Storing inferred beliefs failed: {e}")
+            return False
+    
+    def _compute_belief_hash(self, beliefs: Dict[str, Any]) -> str:
+        """
+        Compute abstract fingerprint from belief structure for resonance detection.
+        
+        Ignores game-specific details, keeps cognitive structure.
+        Two sequences with the same belief hash represent the same
+        "way of thinking" even if the raw actions differ.
+        
+        Args:
+            beliefs: Inferred beliefs dict
+            
+        Returns:
+            16-character hex hash representing abstract pattern
+        """
+        import hashlib
+        
+        # Extract and classify theory type
+        theory = beliefs.get('working_theory_required', '')
+        theory_type = 'unknown'
+        if theory and 'NULL' not in theory:
+            theory_lower = theory.lower()
+            if 'click' in theory_lower:
+                theory_type = 'click_puzzle'
+            elif 'movement' in theory_lower or 'move' in theory_lower:
+                theory_type = 'movement_puzzle'
+            elif 'environment' in theory_lower:
+                theory_type = 'environment_puzzle'
+            else:
+                theory_type = 'general'
+        
+        # Extract and classify control type
+        control = beliefs.get('self_model_required', '')
+        control_type = 'unknown'
+        if control and 'NULL' not in control:
+            control_lower = control.lower()
+            if 'single' in control_lower or 'one' in control_lower:
+                control_type = 'single_object'
+            elif 'multiple' in control_lower:
+                control_type = 'multi_object'
+            else:
+                control_type = 'general'
+        
+        # Extract strategy from Q4 inference
+        inferences = beliefs.get('inferences', {})
+        strategy = inferences.get('Q4_strategy', '')
+        strategy_type = 'unknown'
+        if strategy and 'NULL' not in strategy:
+            strategy_lower = strategy.lower()
+            if 'single action' in strategy_lower:
+                strategy_type = 'specialized'
+            elif 'limited' in strategy_lower or 'focused' in strategy_lower:
+                strategy_type = 'focused'
+            elif 'diverse' in strategy_lower:
+                strategy_type = 'adaptive'
+            else:
+                strategy_type = 'general'
+        
+        # Canonical structure
+        canonical = {
+            'theory': theory_type,
+            'control': control_type,
+            'strategy': strategy_type
+        }
+        
+        # Hash the canonical structure
+        canonical_json = json.dumps(canonical, sort_keys=True)
+        return hashlib.md5(canonical_json.encode()).hexdigest()[:16]
+
     def _record_sequence_validation(self, sequence_id: str, agent_id: str, 
                                    game_id: str, session_id: str,
                                    success: bool, actions_completed: int,

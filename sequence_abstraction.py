@@ -44,7 +44,7 @@ class SequenceAbstraction:
         self,
         game_id: str,
         level_number: int,
-        current_actions: List[int] = None,
+        current_actions: Optional[List[int]] = None,
         pattern_similarity: float = 0.7
     ) -> Optional[Dict]:
         """
@@ -401,7 +401,7 @@ if __name__ == "__main__":
                     c = inv['coordinates']
                     if c['is_fixed']:
                         # Fixed position (within 1 cell)
-                        region = self._coords_to_region(int(c['x_mean']), int(c['y_mean']))
+                        region = abstraction._coords_to_region(int(c['x_mean']), int(c['y_mean']))
                         coord_str = f" at ({c['x_mean']:.0f},{c['y_mean']:.0f}) [{region}]"
                     elif c['is_regional']:
                         # 1-2 regions (regional pattern)

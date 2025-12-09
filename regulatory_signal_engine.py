@@ -61,6 +61,12 @@ class RegulatorySignalEngine:
                 'target_parameter': 'population_size_target',
                 'adjustment_direction': 'decrease',
                 'base_magnitude': 0.05
+            },
+            'resonance_amplification': {
+                'target_parameter': 'resonance_priority_boost',
+                'adjustment_direction': 'increase',
+                'base_magnitude': 0.25,
+                'description': 'Cross-role pattern agreement detected - amplify exploration'
             }
         }
     
@@ -214,8 +220,75 @@ class RegulatorySignalEngine:
             )
             signals.append(signal_id)
         
+        # 4. RESONANCE DETECTION - Cross-role pattern agreement
+        # Run resonance detection every generation to find objective truths
+        resonance_signals = self._emit_resonance_signals(generation)
+        signals.extend(resonance_signals)
+        
         return signals
     
+    def _emit_resonance_signals(self, generation: int) -> List[str]:
+        """
+        Detect resonant patterns and emit signals for network prioritization.
+        
+        Resonance = when different agent roles independently converge on the
+        same abstract pattern. This is evidence of objective truth.
+        
+        When high-resonance patterns are detected, emit signals to:
+        1. Prioritize exploration around resonant patterns
+        2. Share resonant patterns network-wide
+        3. Reduce exploration in low-resonance areas
+        """
+        signals = []
+        
+        try:
+            from resonance_detector import ResonanceDetector
+            detector = ResonanceDetector(self.db)
+            
+            # Run full resonance detection
+            resonant_patterns = detector.detect_resonance(generation)
+            
+            if not resonant_patterns:
+                self.logger.debug("[RESONANCE] No resonant patterns detected this generation")
+                return signals
+            
+            # Get summary for logging
+            summary = detector.get_resonance_summary()
+            self.logger.info(
+                f"[RESONANCE] Detected {summary.get('total_resonant_patterns', 0)} resonant patterns, "
+                f"avg score: {summary.get('average_resonance_score', 0):.2f}"
+            )
+            
+            # Emit signals for high-resonance patterns
+            high_resonance = [p for p in resonant_patterns if p['resonance_score'] >= 2.0]
+            
+            for pattern in high_resonance[:3]:  # Top 3 patterns
+                signal_id = self._create_signal(
+                    signal_type='resonance_amplification',
+                    source_agent=None,  # System signal
+                    generation=generation,
+                    strength=pattern['resonance_score'],
+                    context={
+                        'pattern_hash': pattern['pattern_hash'],
+                        'role_diversity': pattern['role_diversity'],
+                        'roles_found': pattern['roles_found'],
+                        'game_types': pattern['game_types'],
+                        'theory_type': pattern.get('theory_type', 'unknown')
+                    }
+                )
+                signals.append(signal_id)
+                self.logger.info(
+                    f"[RESONANCE] Amplifying pattern {pattern['pattern_hash'][:8]} "
+                    f"(score: {pattern['resonance_score']:.2f}, roles: {pattern['roles_found']})"
+                )
+            
+        except ImportError:
+            self.logger.debug("[RESONANCE] Resonance detector not available")
+        except Exception as e:
+            self.logger.error(f"[RESONANCE] Detection failed: {e}")
+        
+        return signals
+
     def process_signal_responses(self, generation: int) -> Dict[str, float]:
         """
         Process agent responses to active signals and calculate net signal strength.

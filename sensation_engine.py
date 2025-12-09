@@ -38,6 +38,61 @@ def safe_json_parse(json_str, default=None):
     except (json.JSONDecodeError, TypeError):
         return default or {}
 
+
+def get_sensation_mode(agent_role: str, is_frontier: bool) -> dict:
+    """
+    Determine sensation configuration based on role and context.
+    
+    Per AGI Unified Theory: Sensation is a "multiplier" for learning.
+    Q2 (reward/punishment) requires sensation for ALL agents.
+    
+    Pioneers on frontier: Network sensation isolated (no inherited bias),
+    but personal sensation active (can feel rewards/punishments).
+    
+    Args:
+        agent_role: 'pioneer', 'optimizer', 'generalist', 'exploiter'
+        is_frontier: True if on unexplored level (network_max < current_level)
+        
+    Returns:
+        dict with sensation mode configuration:
+        - network_sensation_read: Whether to read from network mappings
+        - personal_sensation_active: Whether to feel rewards/punishments
+        - sensation_write_to_network: Whether to export discoveries
+    """
+    if agent_role == 'pioneer':
+        if is_frontier:
+            # Pioneer on frontier: isolated from network bias, but can feel
+            return {
+                'network_sensation_read': False,   # Don't inherit biases
+                'personal_sensation_active': True,  # Feel rewards/punishments
+                'sensation_write_to_network': True  # Export discoveries when solved
+            }
+        else:
+            # Pioneer on beaten level: acts like generalist
+            return {
+                'network_sensation_read': True,
+                'personal_sensation_active': True,
+                'sensation_write_to_network': True
+            }
+    elif agent_role == 'optimizer':
+        return {
+            'network_sensation_read': True,
+            'personal_sensation_active': True,
+            'sensation_write_to_network': True
+        }
+    elif agent_role == 'exploiter':
+        return {
+            'network_sensation_read': True,
+            'personal_sensation_active': True,
+            'sensation_write_to_network': True
+        }
+    else:  # generalist or unknown
+        return {
+            'network_sensation_read': True,
+            'personal_sensation_active': True,
+            'sensation_write_to_network': True
+        }
+
 class SensationEngine:
     """
     Core engine for sensation-based navigation and emotional learning.

@@ -2,7 +2,421 @@
 
 ---
 
+## Session: December 9, 2025
+
+---
+
+### Session 5: Workspace Error Fixes (Time: 11:45:00 AM - 11:50:00 AM)
+
+**Focus**: Fix Pylance type errors in workspace
+
+#### Errors Found
+
+Two type errors in `sequence_abstraction.py`:
+
+| Line | Error | Description |
+|------|-------|-------------|
+| 47 | Type assignment error | `None` assigned to `List[int]` parameter without `Optional` |
+| 404 | Undefined `self` | Module-level test code used `self` outside class context |
+
+#### Fixes Applied
+
+**1. Line 47**: Added `Optional` wrapper to type hint
+
+**Before**:
+```python
+def get_sequence_by_concept(
+    self,
+    game_id: str,
+    level_number: int,
+    current_actions: List[int] = None,  # ERROR: None not assignable to List[int]
+    pattern_similarity: float = 0.7
+) -> Optional[Dict]:
+```
+
+**After**:
+```python
+def get_sequence_by_concept(
+    self,
+    game_id: str,
+    level_number: int,
+    current_actions: Optional[List[int]] = None,  # FIXED
+    pattern_similarity: float = 0.7
+) -> Optional[Dict]:
+```
+
+**2. Line 404**: Fixed `self` reference in module-level test code
+
+**Before**:
+```python
+# In module-level test code (after class definition)
+region = self._coords_to_region(int(c['x_mean']), int(c['y_mean']))  # ERROR: self not defined
+```
+
+**After**:
+```python
+# Use the instantiated abstraction object instead
+region = abstraction._coords_to_region(int(c['x_mean']), int(c['y_mean']))  # FIXED
+```
+
+#### Current Status
+
+[DONE] All workspace errors resolved. Zero Pylance errors.
+
+---
+
+### Session 4: Resonance Detection Layer Implementation (Time: 10:00:00 AM - 11:30:00 AM)
+
+**Focus**: Implement cross-role pattern resonance detection from harmonies theory
+
+#### Theoretical Background
+
+From `DOCS/how-to-find-harmonies.md`:
+> "Truth amplifies itself through cross-domain resonance, not random search."
+
+In our context, **"cross-domain" means cross-ROLE**:
+- When Pioneers (blind exploration), Generalists (network-guided), and Exploiters (micro-optimization) ALL independently converge on the same abstract pattern, that's **RESONANCE** - evidence of objective truth.
+
+This is powerful because:
+- Pioneers have no network bias (frontier isolation)
+- Generalists follow network consensus
+- Exploiters have 50% sociopathic (ignore network) split
+- If all three converge despite radically different biases → objective truth
+
+#### Implementation
+
+**1. Created `resonance_detector.py`** (~500 lines)
+
+New module implementing:
+```python
+class ResonanceDetector:
+    """
+    Detects patterns that resonate across different agent roles.
+    
+    Resonance = same abstract pattern discovered by >=2 different role types
+    independently. Evidence of objective truth.
+    """
+    
+    def compute_belief_hash(self, beliefs) -> str:
+        """Abstract fingerprint from belief structure."""
+    
+    def detect_resonance(self, generation) -> List[Dict]:
+        """Find patterns with cross-role agreement."""
+    
+    def get_resonant_patterns(self, min_score, limit) -> List[Dict]:
+        """Get high-resonance patterns for prioritization."""
+    
+    def should_query_resonance(self, agent_role, novelty, is_stuck) -> bool:
+        """Role-based probability gate for queries."""
+    
+    def calculate_resonance_score(self, role_diversity, discoverers) -> float:
+        """Formula: role_diversity * log(discoverers + 1)"""
+```
+
+**Role-Specific Query Frequencies** (from harmonies theory):
+| Role | Base Frequency | Notes |
+|------|---------------|-------|
+| Pioneer | 1% | Boosted to 20% on high-novelty patterns |
+| Optimizer | 10% | Boosted when stuck |
+| Generalist | 30% | Consistency checks |
+| Exploiter | 5% | Occasional sanity checks |
+
+**2. Updated `_store_inferred_beliefs()` in `core_gameplay.py`** (+60 lines)
+
+- Added `pattern_hash` column to `inferred_beliefs` table
+- Added `_compute_belief_hash()` method for abstract fingerprints
+- Pattern hash enables grouping sequences by cognitive structure, not raw actions
+
+**Canonical Structure for Hashing**:
+```python
+{
+    'theory': 'movement_puzzle' | 'click_puzzle' | 'environment_puzzle' | 'general',
+    'control': 'single_object' | 'multi_object' | 'cursor_control' | 'general',
+    'strategy': 'specialized' | 'focused' | 'adaptive' | 'general'
+}
+```
+
+**3. Added `_build_resonance_context()` to `core_gameplay.py`** (+85 lines)
+
+New method for building resonance tier in payload:
+- Uses role-based probability gate to decide if querying
+- Returns resonance score, role diversity, roles that agree
+- Status codes for non-queries: `102` (Computation pending), `204` (No Content)
+
+**4. Updated Payload to 8-Tier Structure** (Tier 4.5 added)
+
+```python
+reasoning_obj = {
+    '1_identity': {...},
+    '2_delta': {...},
+    '3_understanding': {...},
+    '4_network_wisdom': {...},
+    '4.5_resonance': {              # NEW
+        'queried': bool,
+        'resonance_score': float,
+        'role_diversity': int,
+        'roles_that_agree': List[str],
+        'pattern_type': str,
+        'is_resonant': bool,
+        'insight': str
+    },
+    '5_context': {...},
+    '6_environment': {...},
+    '7_action': {...}
+}
+```
+
+**5. Integrated into `regulatory_signal_engine.py`** (+70 lines)
+
+- Added `_emit_resonance_signals()` method
+- Runs full resonance detection every generation
+- Emits `resonance_amplification` signals for high-resonance patterns
+- Added new signal type to `signal_types` dict:
+```python
+'resonance_amplification': {
+    'target_parameter': 'resonance_priority_boost',
+    'adjustment_direction': 'increase',
+    'base_magnitude': 0.25,
+    'description': 'Cross-role pattern agreement detected - amplify exploration'
+}
+```
+
+#### Database Changes
+
+**New Table**: `resonance_patterns`
+```sql
+CREATE TABLE resonance_patterns (
+    pattern_hash TEXT PRIMARY KEY,
+    role_diversity INTEGER DEFAULT 1,
+    roles_found TEXT,  -- JSON list
+    independent_discoverers INTEGER DEFAULT 1,
+    resonance_score REAL DEFAULT 0.0,
+    theory_type TEXT,
+    control_type TEXT,
+    strategy_type TEXT,
+    canonical_beliefs TEXT,  -- JSON
+    example_sequences TEXT,  -- JSON list
+    game_types TEXT,  -- JSON list
+    first_detected DATETIME,
+    last_updated DATETIME,
+    times_validated INTEGER DEFAULT 0
+);
+```
+
+**Updated Table**: `inferred_beliefs`
+- Added `pattern_hash TEXT` column
+- Added index: `idx_beliefs_pattern_hash`
+
+#### Files Modified
+
+| File | Lines Added | Summary |
+|------|-------------|---------|
+| `resonance_detector.py` | ~500 | New module for resonance detection |
+| `core_gameplay.py` | ~145 | pattern_hash, _build_resonance_context |
+| `regulatory_signal_engine.py` | ~75 | Resonance signal emission |
+
+#### Resonance Formula
+
+```
+resonance_score = role_diversity * log(independent_discoverers + 1) * game_diversity_bonus
+
+where:
+- role_diversity = number of different roles that found pattern (>=2 for resonance)
+- independent_discoverers = number of agents who found it independently
+- game_diversity_bonus = 1.0 + (game_types - 1) * 0.1
+```
+
+#### Status
+
+[DONE] All implementation complete, no syntax errors. Resonance detector imports verified.
+
+---
+
 ## Session: December 8, 2025
+
+---
+
+### Session 3: 7-Tier Payload Restructure + Pioneer Sensation Fix (Time: 4:00:00 PM - 5:30:00 PM)
+
+**Focus**: Restructure API reasoning payload to 7-tier format with HTTP status codes for NULL values; fix pioneer sensation logic per AGI Unified Theory
+
+#### Background
+
+Following the Tetrahedral Grammar implementation (Session 2), restructured the reasoning log/payload sent to the API to properly prioritize information. Also fixed a critical bug where pioneers had ALL sensation disabled on frontier levels, violating AGI Unified Theory Q2 ("How does this feel?").
+
+#### Changes Made
+
+**1. Added `get_sensation_mode()` to `sensation_engine.py`** (~20 lines)
+```python
+def get_sensation_mode(agent_role: str, is_frontier: bool = False) -> Dict[str, bool]:
+    """
+    Determine sensation mode for agent based on role and frontier status.
+    
+    CRITICAL FIX: Pioneers don't DISABLE sensation - they ISOLATE from network.
+    Per AGI Unified Theory, Q2 (sensation) is essential for all agents.
+    
+    Returns:
+        network_sensation_read: Can read network impressions
+        personal_sensation_active: Personal sensation system active
+        sensation_write_to_network: Can contribute discoveries to network
+    """
+```
+
+**Key Logic**:
+- Pioneers on frontier: Network read DISABLED, personal sensation ENABLED, writes ENABLED
+- This fixes the Q2 violation - pioneers still feel, they just don't read network
+
+**2. Added `NULL_STATUS_CODES` dictionary to `sensation_engine.py`** (~30 lines)
+HTTP-style status codes for NULL values in payload:
+```python
+NULL_STATUS_CODES = {
+    100: "Data collection in progress",
+    102: "Computation pending",
+    103: "Early hints available",
+    204: "No Content",
+    404: "Not Found",
+    425: "Too Early",
+    450: "Network Sensation Isolated",  # Custom: Pioneer on frontier
+    451: "Frontier Level",  # Custom: First exploration
+    # ... etc
+}
+```
+
+**3. Added helper methods to `core_gameplay.py`** (~180 lines)
+- `_null_status(code)`: Returns formatted "NULL - 425 Too Early" strings
+- `_build_delta_section()`: Builds delta with natural language frame changes
+- `_detect_movement_pattern()`: Detects object movement for delta narration
+- `_is_frontier_level()`: Determines if level is unbeaten (for status codes)
+
+**4. Restructured `_format_reasoning_for_api()` to 7-tier format** (~200 lines rewrite)
+
+New payload structure prioritizes information:
+```python
+{
+    '1_identity': {
+        'agent_id': str,
+        'role': str,
+        'generation': int,
+        'working_theory': str,  # NEW: Embedded theory
+        'self_model': {...},
+        'genome': {...}
+    },
+    '2_delta': {
+        'last_action': str,
+        'frame_changes': [...],  # Natural language descriptions
+        'score_change': int,
+        'level_change': bool,
+        'self_model_update': str,
+        'world_model_update': str,
+        'theory_validation': str
+    },
+    '3_understanding': {
+        'Q1_what_is_happening': str,
+        'Q2_how_does_this_feel': str,  # Uses 450 status on frontier
+        'Q3_what_worked_before': str,
+        'Q4_what_should_i_try': str,
+        'Q5_how_confident': float
+    },
+    '4_network_wisdom': {
+        'private_memory': float,
+        'network_strength': float,  # Uses 450 status on frontier
+        'self_trust_bias': float,
+        'decision_weight': float,
+        'conflict_detected': bool,
+        'two_streams_narrative': str
+    },
+    '5_context': {
+        'game_id': str,
+        'level': int,
+        'score': int,
+        'timestamp': str,
+        'is_frontier': bool,
+        'frontier_status': str,  # Uses 451 status if frontier
+        'exploration_mode': str
+    },
+    '6_environment': {...},  # World model
+    '7_action': {
+        'action_code': str,
+        'reasoning': str,
+        'emotional_state': str
+    }
+}
+```
+
+**5. Added Inferred Beliefs Extraction to Sequence Replay** (~250 lines)
+
+New method `_extract_inferred_beliefs_from_sequence()`:
+- Extracts what beliefs original discoverer MUST have had
+- Maps to Q1-Q5 inferences
+- Calculates `self_model_required`, `world_model_required`, `working_theory_required`
+
+New method `_store_inferred_beliefs()`:
+- Creates `inferred_beliefs` table (auto-created if missing)
+- Stores beliefs attached to sequences
+- Increments validation_count on replays
+
+**6. Updated Pioneer Sensation Logic in `_select_action()`**
+Changed from:
+```python
+if agent_mode == 'pioneer' and is_frontier:
+    logger.debug("[PIONEER] Sensation disabled on frontier")
+    sensation_context = None
+```
+To:
+```python
+from sensation_engine import get_sensation_mode
+sensation_mode = get_sensation_mode(agent_mode or 'generalist', is_frontier)
+if not sensation_mode.get('network_sensation_read', True):
+    self.sensation_engine.set_network_read_enabled(False)
+    logger.debug(f"[SENSATION] Network read disabled (mode: {agent_mode}, frontier: {is_frontier})")
+# Personal sensation continues regardless
+sensation_context = self._analyze_sensation_context(...)
+```
+
+#### Files Modified
+
+| File | Lines Added/Changed | Summary |
+|------|---------------------|---------|
+| `sensation_engine.py` | ~50 | `get_sensation_mode()`, `NULL_STATUS_CODES` |
+| `core_gameplay.py` | ~630 | 7-tier payload, helpers, inferred beliefs |
+
+#### Database Changes
+
+New table auto-created on first use:
+```sql
+CREATE TABLE IF NOT EXISTS inferred_beliefs (
+    belief_id TEXT PRIMARY KEY,
+    sequence_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    self_model_required TEXT,
+    world_model_required TEXT,
+    working_theory_required TEXT,
+    inferences TEXT,  -- JSON: Q1-Q5 inferences
+    action_count INTEGER,
+    efficiency REAL,
+    validated_by TEXT,
+    validation_count INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sequence_id) REFERENCES winning_sequences(sequence_id)
+);
+```
+
+#### Status Codes Reference
+
+| Code | Meaning | Usage |
+|------|---------|-------|
+| 425 | Too Early | Data not yet available (default NULL) |
+| 404 | Not Found | Expected data missing |
+| 450 | Network Sensation Isolated | Pioneer on frontier (custom) |
+| 451 | Frontier Level | First exploration of level (custom) |
+| 304 | Not Modified | No frame changes detected |
+| 424 | Failed Dependency | Cannot compute (missing dependency) |
+
+#### Current Status
+
+[DONE] All implementation complete, no syntax errors.
 
 ---
 
