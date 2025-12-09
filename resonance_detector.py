@@ -222,9 +222,9 @@ class ResonanceDetector:
                     ib.working_theory_required,
                     ib.self_model_required,
                     ib.inferences,
-                    COUNT(DISTINCT a.role) as role_diversity,
+                    COUNT(DISTINCT a.preferred_role) as role_diversity,
                     COUNT(DISTINCT ws.discovered_by) as independent_discoverers,
-                    GROUP_CONCAT(DISTINCT a.role) as roles_found,
+                    GROUP_CONCAT(DISTINCT a.preferred_role) as roles_found,
                     GROUP_CONCAT(DISTINCT SUBSTR(ws.game_id, 1, 4)) as game_types,
                     GROUP_CONCAT(DISTINCT ib.sequence_id) as sequence_ids
                 FROM inferred_beliefs ib

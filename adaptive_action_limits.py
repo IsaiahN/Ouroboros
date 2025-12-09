@@ -718,12 +718,14 @@ class AdaptiveActionLimits:
         except (json.JSONDecodeError, KeyError, TypeError):
             pass
         
-        # Fallback: estimate from game states
+        # Fallback: estimate from game states using game_results and winning_sequences
         game_stats = self.db.execute_query("""
             SELECT 
-                COUNT(CASE WHEN is_fully_beaten = 1 THEN 1 END) as beaten_games,
-                COUNT(CASE WHEN is_fully_beaten = 0 THEN 1 END) as unbeaten_games
-            FROM arc_games WHERE is_active = 1
+                COUNT(DISTINCT CASE WHEN ws.is_active = 1 AND ws.success_rate_when_reused > 0.5 THEN SUBSTR(ws.game_id, 1, 4) END) as beaten_games,
+                COUNT(DISTINCT SUBSTR(gr.game_id, 1, 4)) - COUNT(DISTINCT CASE WHEN ws.is_active = 1 AND ws.success_rate_when_reused > 0.5 THEN SUBSTR(ws.game_id, 1, 4) END) as unbeaten_games
+            FROM game_results gr
+            LEFT JOIN winning_sequences ws ON SUBSTR(gr.game_id, 1, 4) = SUBSTR(ws.game_id, 1, 4)
+            WHERE gr.generation >= (SELECT MAX(generation) - 10 FROM game_results)
         """)
         
         if game_stats and len(game_stats) > 0:
