@@ -5439,3 +5439,195 @@ Fixed pycache position in files (must be BEFORE imports):
 
 **END OF SESSION 26: December 9, 2025 - 4:15:00 PM**
 
+---
+
+## Session 27: Database Schema Fixes & Dynamic Frustration Quorum
+**Date**: December 9, 2025  
+**Time Started**: 5:00:00 AM  
+**Focus**: Fix runtime errors blocking evolution, implement dynamic frustration quorum system
+
+---
+
+### Approach
+
+Running evolution revealed multiple runtime errors from missing database columns and incorrect query patterns. Fixing these issues one by one while also implementing an improved frustration detection system based on user feedback.
+
+**Philosophy**: 
+- Generation-based thresholds (not time-based)
+- "Agents with access to N generations of viral wisdom are still stuck" = valuable signal
+- Dynamic quorum: 70-80% threshold based on team size and network maturity
+
+---
+
+### Phase 1: Database Schema Fixes (5:00:00 AM - 5:15:00 AM)
+
+#### Fix 1: Dictionary Access Pattern Error
+
+**Error**:
+```
+KeyError: 0
+File "agent_operating_mode_system.py", line 581, in _record_mode_assignment
+    if w_B_result and len(w_B_result) > 0 and w_B_result[0][0] is not None:
+```
+
+**Root Cause**: `execute_query()` returns `List[Dict[str, Any]]`, not `List[Tuple]`. Code was using tuple-style access `[0][0]` instead of dictionary access.
+
+**Fix**: Changed line 581 in `agent_operating_mode_system.py`:
+```python
+# Before (broken - tuple access)
+if w_B_result and len(w_B_result) > 0 and w_B_result[0][0] is not None:
+    initial_w_B = w_B_result[0][0]
+
+# After (fixed - dictionary access)
+if w_B_result and len(w_B_result) > 0 and w_B_result[0].get("self_network_bias") is not None:
+    initial_w_B = w_B_result[0]["self_network_bias"]
+```
+
+#### Fix 2: Missing Columns in agent_operating_modes Table
+
+**Error**:
+```
+sqlite3.OperationalError: table agent_operating_modes has no column named initial_w_B_for_role
+```
+
+**Root Cause**: Session 26 added columns to `complete_database_schema.sql` but they weren't applied to the live database.
+
+**Fix**: Ran ALTER TABLE statements to add missing columns:
+```sql
+ALTER TABLE agent_operating_modes ADD COLUMN initial_w_B_for_role REAL DEFAULT 0.5;
+ALTER TABLE agent_operating_modes ADD COLUMN current_w_B REAL DEFAULT 0.5;
+ALTER TABLE agent_operating_modes ADD COLUMN progress_score REAL DEFAULT 0.0;
+```
+
+**Verification**: Columns added successfully.
+
+---
+
+### Phase 2: Dynamic Frustration Quorum System (5:15:00 AM - 5:30:00 AM)
+
+#### Problem Identified
+
+User observed frustration quorum triggering at 100% (4/4 agents):
+```
+[!] GAME-SPECIFIC FRUSTRATION QUORUM: 4/4 agents frustrated on game ls20-fa137e247ce6 (100.0%)
+```
+
+**User Insight**: 
+- The log doesn't just say "agents are stuck" — it says "agents with access to N generations of viral wisdom are still stuck"
+- This is valuable data about what the network doesn't know yet
+- Earlier generations have less viral wisdom, so expect more frustration
+- Later generations should have lower threshold to detect subtler gaps
+
+#### Implementation
+
+**Updated `frustration_detector.py`**:
+
+**1. New Constants**:
+```python
+self.min_frustrated_count = 3  # Minimum agents that must be frustrated
+self.base_quorum_threshold = 0.80  # Base threshold for early generations
+self.mature_quorum_threshold = 0.70  # Threshold for later generations with viral wisdom
+self.generation_maturity_threshold = 50  # Generation at which network considered "mature"
+```
+
+**2. New Method: `_calculate_dynamic_quorum_threshold()`**
+
+Calculates threshold based on:
+- **Generation maturity**: 
+  - Early gens (0-50): 80% threshold (avoid false alarms when network still learning)
+  - Mature gens (50+): 70% threshold (more sensitive to subtle gaps)
+- **Team size adjustments**:
+  - Small teams (3-4 agents): Keep threshold high (near-unanimity needed)
+  - Large teams (10+ agents): Can be slightly more sensitive (-2%)
+
+**Formula**:
+```python
+maturity_factor = min(1.0, generation / 50)
+threshold = 0.80 - (maturity_factor * 0.10)  # 80% -> 70% as network matures
+
+# Team size adjustment
+if agents_on_game <= 4:
+    threshold = max(threshold, 0.75)  # Small teams need near-unanimity
+elif agents_on_game >= 10:
+    threshold = threshold - 0.02  # Large teams can be more sensitive
+```
+
+**3. Updated `check_frustration_quorum()`**:
+- Now requires minimum 3 agents frustrated (not just 2)
+- Uses dynamic threshold per game based on team size and generation
+- Log message now includes threshold used:
+  ```
+  [!] GAME-SPECIFIC FRUSTRATION QUORUM: 4/5 agents frustrated on game xyz (80.0% >= 75% threshold at gen 45)
+  ```
+
+**4. Updated Class Docstring**:
+```python
+class FrustrationDetector:
+    """
+    Dynamic Quorum System:
+    - Quorum threshold scales with team size: 70-80% of agents on game
+    - Minimum 3 agents must be frustrated
+    - Later generations (with more viral wisdom) use lower threshold (70%)
+    - Earlier generations use higher threshold (80%) to prevent premature alarms
+    """
+```
+
+---
+
+### Phase 3: Documentation Updates (5:30:00 AM - 5:35:00 AM)
+
+**Updated README.md**:
+- Enhanced "Agent Self-Model" section to include Tetrahedral Perception
+- Added new section 5: "Cross-Role Resonance Detection"
+- Renumbered remaining sections (6-10)
+
+**Updated CODEBASE_INVENTORY.md**:
+- Updated date to 2025-12-09
+- Added Tetrahedral Grammar, Resonance Detection, 7-Tier Payload to Executive Summary
+- Added `resonance_detector.py` to Learning/Knowledge System
+- Added December 9 feature sections (Tetrahedral Grammar, Resonance Detection)
+- Added `ResonanceDetector` to Key Classes
+- Updated Completed items with new features
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `agent_operating_mode_system.py` | Fixed dictionary access pattern (line 581) |
+| `frustration_detector.py` | +1 method, +4 constants, updated quorum logic, updated docstring |
+| `README.md` | +1 section (Resonance Detection), enhanced Self-Model section |
+| `CODEBASE_INVENTORY.md` | Added Dec 9 features, updated date, added ResonanceDetector |
+| `core_data.db` | Added 3 columns to agent_operating_modes table |
+
+---
+
+### Current Status (5:35:00 AM)
+
+**Approach**: Fixing runtime errors and implementing dynamic frustration quorum
+
+**Completed This Session**:
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | Fixed dictionary access pattern in agent_operating_mode_system.py | [DONE] |
+| 2 | Added missing columns to agent_operating_modes table | [DONE] |
+| 3 | Implemented dynamic frustration quorum threshold | [DONE] |
+| 4 | Added generation maturity factor to quorum calculation | [DONE] |
+| 5 | Added team size adjustment to quorum threshold | [DONE] |
+| 6 | Updated README.md with new features | [DONE] |
+| 7 | Updated CODEBASE_INVENTORY.md with Dec 9 changes | [DONE] |
+
+**Current Failure Being Worked On**:
+- **None** - Ready to run evolution
+
+**Next Steps**:
+1. Run evolution with `--max-generations 10`
+2. Monitor frustration quorum behavior with new dynamic threshold
+3. Verify role fairness ATP calculations are working
+4. Check progress tracking updates
+
+---
+
+**END OF SESSION 27: December 9, 2025 - 5:35:00 AM**
