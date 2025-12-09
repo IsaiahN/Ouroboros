@@ -554,7 +554,7 @@ class RegulatorySignalEngine:
         response_id = f"resp_{uuid.uuid4().hex[:12]}"
         
         self.db.execute_query("""
-            INSERT INTO agent_signal_responses (
+            INSERT OR REPLACE INTO agent_signal_responses (
                 response_id, agent_id, signal_id, generation,
                 response_type, response_strength
             ) VALUES (?, ?, ?, ?, 'suppress', ?)
