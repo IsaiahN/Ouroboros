@@ -1,6 +1,6 @@
 # BitterTruth-AI Codebase Inventory
 
-**Updated**: 2025-12-08  
+**Updated**: 2025-12-09  
 **Architecture**: Autonomous ARC-AGI-3 game playing with evolutionary agents
 
 ---
@@ -26,6 +26,9 @@ BitterTruth-AI is an **autonomous evolutionary system** for playing ARC-AGI-3 ga
 - **Three-Layer Architecture**: Genome (static) -> Epigenetic (adaptive) -> Somatic (learned)
 - **Four Agent Roles**: Pioneer, Optimizer, Generalist, Exploiter
 - **Two-Streams Consciousness**: Agents balance private memory vs network wisdom with explicit bias
+- **Tetrahedral Grammar**: 4-axis perception (Structure, Function, Method, Interpretation) for object understanding
+- **Cross-Role Resonance Detection**: Identifies objective truths through pattern convergence across roles
+- **7-Tier API Payload**: Structured reasoning with HTTP status codes for NULL values
 - **Prestige Economy**: Social capital separate from action budgets
 - **Viral Knowledge Transfer**: Horizontal gene transfer between unrelated agents
 - **Network Failure Hypotheses**: Shared learning from failures across agents
@@ -117,7 +120,8 @@ Files for meta-learning, knowledge transfer, and abstract reasoning.
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `sensation_engine.py` | Emotional intelligence, semantic impressions, personal associations | Active |
+| `sensation_engine.py` | Emotional intelligence, semantic impressions, tetrahedral sensation | Active |
+| `resonance_detector.py` | Cross-role pattern resonance detection | Active |
 | `rule_induction_engine.py` | Extract IF-THEN rules from wins | Partial |
 | `meta_learning_curriculum.py` | Curriculum-based learning | Partial |
 | `symbolic_reasoning_engine.py` | Abstract symbolic reasoning, WorldModel | Orphaned |
@@ -196,6 +200,31 @@ Files for database operations and schema management.
 ---
 
 ## Recently Implemented Features
+
+### Tetrahedral Grammar & 7-Tier Payload (Session: Dec 9, 2025)
+4-axis perception model with structured API reasoning:
+
+| Feature | File | Method/Location |
+|---------|------|------------------|
+| Tetrahedral sensation | `sensation_engine.py` | `get_tetrahedral_sensation()` |
+| Interpretation axis | `agent_self_model.py` | `calculate_interpretation_axis()` |
+| 7-tier payload structure | `core_gameplay.py` | `_format_reasoning_for_api()` |
+| HTTP status codes for NULL | `sensation_engine.py` | `NULL_STATUS_CODES` dictionary |
+| Pioneer sensation mode | `sensation_engine.py` | `get_sensation_mode()` |
+| Mood vector calculation | `core_gameplay.py` | `_calculate_mood_from_perceptions()` |
+| Inferred beliefs extraction | `core_gameplay.py` | `_extract_inferred_beliefs_from_sequence()` |
+
+### Cross-Role Resonance Detection (Session: Dec 9, 2025)
+Pattern convergence detection across different agent roles:
+
+| Feature | File | Method/Location |
+|---------|------|------------------|
+| Resonance detector | `resonance_detector.py` | `ResonanceDetector` class |
+| Pattern hashing | `core_gameplay.py` | `_compute_belief_hash()` |
+| Resonance context | `core_gameplay.py` | `_build_resonance_context()` |
+| Resonance signals | `regulatory_signal_engine.py` | `_emit_resonance_signals()` |
+| Database table | `resonance_patterns` | Tracks pattern agreement |
+| Inferred beliefs | `inferred_beliefs` | `pattern_hash` column added |
 
 ### Two-Streams Consciousness (Session: Dec 4, 2025)
 Agents balance private memory (Stream A) vs network wisdom (Stream B):
@@ -355,6 +384,7 @@ run_evolution.py
     |   |   +-- sequence_abstraction.py
     |   |-- subgoal_planning_activator.py
     |   |   +-- subgoal_planner.py
+    |   |-- resonance_detector.py
     |   +-- agent_self_model.py
     |-- evolutionary_engine.py
     |   |-- database_interface.py
@@ -410,7 +440,7 @@ Files that may no longer be actively used in the main execution path:
 
 | Class | File | Purpose |
 |-------|------|---------|
-| `GameplayEngine` | `core_gameplay.py` | Main game loop |
+| `GameplayEngine` | `core_gameplay.py` | Main game loop, 7-tier payload |
 | `AutonomousEvolutionRunner` | `autonomous_evolution_runner.py` | Evolution orchestrator |
 | `ARCClient` | `arc_api_client.py` | API client |
 | `ARCAgent` | `agent_factory.py` | Agent representation |
@@ -418,10 +448,11 @@ Files that may no longer be actively used in the main execution path:
 | `DatabaseInterface` | `database_interface.py` | Database operations |
 | `PrestigeEngine` | `prestige_engine.py` | Prestige calculations |
 | `ViralPackageEngine` | `viral_package_engine.py` | Viral transfer, role reputation |
-| `SensationEngine` | `sensation_engine.py` | Emotional intelligence, semantic impressions |
+| `SensationEngine` | `sensation_engine.py` | Tetrahedral sensation, semantic impressions |
+| `ResonanceDetector` | `resonance_detector.py` | Cross-role pattern resonance |
 | `EvolutionaryEngine` | `evolutionary_engine.py` | Breeding/selection |
 | `AgentOperatingModeSystem` | `agent_operating_mode_system.py` | Role assignment, meta-bias |
-| `AgentSelfModel` | `agent_self_model.py` | Self-model, control hypotheses |
+| `AgentSelfModel` | `agent_self_model.py` | Self-model, interpretation axis |
 | `WeavingReporter` | `agent_self_model.py` | Two-Streams weaving reports |
 | `MultiStageMatchingPipeline` | `multi_stage_matching_pipeline.py` | Sequence matching |
 | `SequenceAbstraction` | `sequence_abstraction.py` | Concept matching |
@@ -442,6 +473,10 @@ Files that may no longer be actively used in the main execution path:
 - [x] Network Failure Hypotheses - Active in action selection
 - [x] Agent Self-Model Network Sharing - Control hypotheses shared
 - [x] Target Win Rate Removal - Simplified stopping criteria
+- [x] Tetrahedral Grammar - 4-axis perception implemented
+- [x] 7-Tier API Payload - Structured reasoning with HTTP status codes
+- [x] Cross-Role Resonance Detection - Pattern convergence tracking
+- [x] Pioneer Sensation Fix - Network read disabled, personal enabled
 
 ---
 

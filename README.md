@@ -59,26 +59,39 @@ The workforce is divided into specialized roles:
 -   **Generalists**: Balanced validators that ensure solution robustness.
 -   **Exploiters**: Post-optimization refiners
 
-### 4. Agent Self-Model
-Agents develop a concept of "Self-Direction" vs "Collective Intelligence" vs "Environment":
+### 4. Agent Self-Model & Perception
+Agents develop a concept of "Self" using 4-axis perception (based on Patrick Cox's Tetrahedral Grammar):
 -   **Self-Recognition**: Tracks which pixels/objects move in response to agent actions.
 -   **Confidence Maps**: Builds a probability map of controlled elements.
--   **Agency**: Allows agents to distinguish between their actions and environmental physics.
--   **Self-Direction**: Agents can choose to act on their own or follow the collective intelligience (The Network) based on their assigned role.    
+-   **Agency**: Distinguishes between agent actions and environmental physics.
+-   **Self-Direction**: Agents balance private reasoning vs network wisdom based on role.
+-   **Tetrahedral Perception**: Each object perceived with 4 axes:
+    - **Structure** (What): Color, position, shape
+    - **Function** (How): How it responds to actions
+    - **Method** (Control): Agent's relationship to it
+    - **Interpretation** (Why): Semantic meaning for goals
+-   **Mood Vector**: Calculated from perception balance (valence, arousal, dominance) to modulate decisions.    
 
-### 5. Abstraction & Symbolic Reasoning
+### 5. Cross-Role Resonance Detection
+The system identifies objective truths through cross-role pattern agreement:
+-   **Resonance Principle**: When Pioneers (blind), Generalists (network-guided), and Exploiters (micro-optimizers) independently discover the same abstract pattern, that's **resonance** - evidence of objective truth.
+-   **Pattern Hashing**: Sequences are fingerprinted by cognitive structure (theory type, complexity, strategy) not raw actions.
+-   **Role Diversity Scoring**: Higher resonance when more different roles independently converge.
+-   **Amplification Signals**: High-resonance patterns trigger network-wide exploration boosts.
+
+### 6. Abstraction & Symbolic Reasoning
 To solve complex tasks, the system moves beyond pixel manipulation:
 -   **Symbolic Reasoning**: Converts grid states into logical symbols (e.g., `Shape(Color.RED, Pos(0,0))`). Agents reason about relationships between these symbols rather than raw pixels.
 -   **Rule Induction**: Derives abstract rules (e.g., "Fill all enclosed areas with blue") from symbolic relationships.
 -   **Counterfactual Analysis**: "What if?" reasoning to test hypotheses before acting.
 
-### 6. Sequence Abstraction
+### 7. Sequence Abstraction
 The system learns and generalizes action sequences:
 -   **Winning Sequences**: Complete solutions stored in the database.
 -   **Sequence Abstraction**: Identifies reusable *patterns* within sequences (e.g., "Move to corner" is a reusable sub-sequence).
 -   **Replay & Refinement**: Agents replay abstract sequences to reach the "frontier" (unsolved levels), allowing them to focus compute on the unknown levels.
 
-### 7. Prestige vs. Action Allowances (The "Sacred Separation")
+### 8. Prestige vs. Action Allowances (The "Sacred Separation")
 The system strictly separates Social Capital from Economic Capital, unlike human societies where they often mix:
 
 | Feature | Prestige (Social Capital) | Action Allowance (Economic Capital) |
@@ -92,7 +105,7 @@ The system strictly separates Social Capital from Economic Capital, unlike human
 **Adaptive Action Allowances**:
 Action allowances are not static, but adaptively meritocratic. The system dynamically adjusts allowances based performance. High-performing agents receive larger allowances, allowing them to tackle deeper, more complex problems.
 
-### 8. Game State Modes
+### 9. Game State Modes
 The system dynamically shifts its strategy based on the state of each game:
 -   **Exploration Mode** (Unbeaten Games):
     -   **60% Pioneers**: Aggressively search for *any* solution.
@@ -103,7 +116,7 @@ The system dynamically shifts its strategy based on the state of each game:
     -   **Transition**: Happens  when the first full game win is achieved for that game type.
 
 
-### 9. System Maintenance & Safety
+### 10. System Maintenance & Safety
 The system includes autonomous maintenance to ensure long-term stability:
 -   **Database Vacuuming**: Automatically optimizes the SQLite database to prevent bloat.
 -   **Sequence Pruning**: Aggressively removes "dead" sequences (low success rate, excessive actions) to keep the knowledge base clean.

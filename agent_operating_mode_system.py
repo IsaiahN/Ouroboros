@@ -578,8 +578,8 @@ class AgentOperatingModeSystem:
             "SELECT self_network_bias FROM agents WHERE agent_id = ?",
             (agent_id,)
         )
-        if w_B_result and len(w_B_result) > 0 and w_B_result[0][0] is not None:
-            initial_w_B = w_B_result[0][0]
+        if w_B_result and len(w_B_result) > 0 and w_B_result[0].get("self_network_bias") is not None:
+            initial_w_B = w_B_result[0]["self_network_bias"]
 
         self.db.execute_query(
             """
