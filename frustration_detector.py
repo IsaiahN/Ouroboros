@@ -33,6 +33,12 @@ class FrustrationDetector:
     - Repeated failures on same game
     - Action diversity collapse (spamming same actions)
     - High action count with low results
+    
+    Dynamic Quorum System:
+    - Quorum threshold scales with team size: 70-80% of agents on game
+    - Minimum 3 agents must be frustrated
+    - Later generations (with more viral wisdom) use lower threshold (70%)
+    - Earlier generations use higher threshold (80%) to prevent premature alarms
     """
     
     def __init__(self, db: DatabaseInterface):
@@ -41,11 +47,53 @@ class FrustrationDetector:
         
         # Frustration thresholds
         self.frustrated_threshold = 5  # Games with 0 progress
-        self.quorum_threshold = 0.30  # 30% of population frustrated triggers desperation
+        self.min_frustrated_count = 3  # Minimum agents that must be frustrated
+        self.base_quorum_threshold = 0.80  # Base threshold for early generations
+        self.mature_quorum_threshold = 0.70  # Threshold for later generations with viral wisdom
+        self.generation_maturity_threshold = 50  # Generation at which network considered "mature"
         self.desperation_signal_strength = 8.0  # Very high priority
         
         # Initialize schema
         self._initialize_schema()
+    
+    def _calculate_dynamic_quorum_threshold(self, generation: int, agents_on_game: int) -> float:
+        """
+        Calculate dynamic quorum threshold based on generation and team size.
+        
+        Philosophy:
+        - Early generations (less viral wisdom) -> higher threshold (80%)
+          to avoid premature alarms when network is still learning
+        - Later generations (more accumulated wisdom) -> lower threshold (70%)
+          to detect subtler gaps in understanding
+        - Small teams require near-unanimity
+        - Large teams require strong majority
+        
+        Args:
+            generation: Current generation number
+            agents_on_game: Number of agents working on this game
+        
+        Returns:
+            Dynamic quorum threshold (0.70 to 0.80)
+        """
+        # Calculate maturity factor: 0.0 at gen 0, 1.0 at gen 50+
+        maturity_factor = min(1.0, generation / self.generation_maturity_threshold)
+        
+        # Interpolate threshold: starts at 80%, moves toward 70% as network matures
+        # Early gens: 80% (more conservative, avoid false alarms)
+        # Mature gens: 70% (more sensitive, detect subtle gaps)
+        threshold = self.base_quorum_threshold - (maturity_factor * (self.base_quorum_threshold - self.mature_quorum_threshold))
+        
+        # Adjust slightly for team size:
+        # - Very small teams (3-4): require near-unanimity, stay at base threshold
+        # - Larger teams (10+): can use the mature threshold more aggressively
+        if agents_on_game <= 4:
+            # Small teams: keep threshold high (near-unanimity needed)
+            threshold = max(threshold, 0.75)
+        elif agents_on_game >= 10:
+            # Large teams: can be slightly more sensitive
+            threshold = threshold - 0.02  # 2% more sensitive
+        
+        return threshold
     
     def _initialize_schema(self):
         """Create frustration tracking tables"""
@@ -296,14 +344,20 @@ class FrustrationDetector:
         desperation mode when multiple agents are stuck on the SAME game,
         not when agents working on different games are frustrated.
         
-        Triggers when >= 50% of agents working on a specific game are frustrated.
+        Dynamic Quorum System:
+        - Threshold: 70-80% of agents working on a specific game are frustrated
+        - Minimum: 3 agents must be frustrated (regardless of percentage)
+        - Generation-aware: Later generations with more viral wisdom use lower threshold
+        
+        The insight: "agents with access to N generations of viral wisdom are still stuck"
+        is valuable data about what the network doesn't know yet.
         
         Returns:
             quorum_event_id if quorum reached for any game, None otherwise
         """
         try:
             # Get per-game frustration statistics
-            # Only consider games where at least 2 agents are working
+            # Only consider games where at least 3 agents are working (meaningful quorum)
             per_game_stats = self.db.execute_query("""
                 SELECT 
                     stuck_on_game_id as game_id,
@@ -314,13 +368,13 @@ class FrustrationDetector:
                 WHERE generation = ? 
                   AND stuck_on_game_id IS NOT NULL
                 GROUP BY stuck_on_game_id
-                HAVING agents_on_game >= 2
+                HAVING agents_on_game >= 3
             """, (generation,))
             
             if not per_game_stats:
                 return None
             
-            # Check each game for quorum
+            # Check each game for quorum with dynamic threshold
             quorum_games = []
             for stat in per_game_stats:
                 game_id = stat['game_id']
@@ -328,13 +382,19 @@ class FrustrationDetector:
                 frustrated = stat['frustrated_on_game']
                 frustration_ratio = frustrated / total if total > 0 else 0.0
                 
-                # Per-game quorum: 50% of agents on THIS game frustrated
-                if frustration_ratio >= 0.50 and frustrated >= 2:
+                # Calculate dynamic threshold for this specific game
+                dynamic_threshold = self._calculate_dynamic_quorum_threshold(generation, total)
+                
+                # Quorum reached if:
+                # 1. frustration_ratio >= dynamic_threshold (70-80% depending on conditions)
+                # 2. AND minimum 3 agents are frustrated (regardless of percentage)
+                if frustration_ratio >= dynamic_threshold and frustrated >= self.min_frustrated_count:
                     quorum_games.append({
                         'game_id': game_id,
                         'total': total,
                         'frustrated': frustrated,
                         'ratio': frustration_ratio,
+                        'threshold_used': dynamic_threshold,
                         'avg_frustration': stat['avg_frustration']
                     })
             
@@ -355,7 +415,8 @@ class FrustrationDetector:
             self.logger.warning(
                 f"[!] GAME-SPECIFIC FRUSTRATION QUORUM: {most_frustrated_game['frustrated']}/"
                 f"{most_frustrated_game['total']} agents frustrated on game "
-                f"{most_frustrated_game['game_id']} ({most_frustrated_game['ratio']*100:.1f}%)"
+                f"{most_frustrated_game['game_id']} ({most_frustrated_game['ratio']*100:.1f}% >= "
+                f"{most_frustrated_game['threshold_used']*100:.0f}% threshold at gen {generation})"
             )
             
             self.db.execute_query("""
