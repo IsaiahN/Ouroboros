@@ -45,7 +45,7 @@ Movies/Popular Media:
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
 | **Answering [Gödel's Incompleteness](https://en.wikipedia.org/wiki/G%C3%B6del%27s_incompleteness_theorems)** | Why no single unit can have all understanding - and how networks are evolution's workaround | [DOCS/answering for Godels Incompleteness Problem.md](DOCS/answering%20for%20Godels%20Incompleteness%20Problem.md) |
-| **Two-Streams** | Why individual AGI is impossible (plasticity-stability dilemma) and how collective intelligence solves it. This also ties in the [uncanny valley effect](https://en.wikipedia.org/wiki/Uncanny_valley). | [DOCS/two-streams.md](DOCS/two-streams.md) |
+| **Two-Streams** | Why individual AGI is impossible (plasticity-stability dilemma) and how collective intelligence solves it. This also ties in the [uncanny valley effect](https://en.wikipedia.org/wiki/Uncanny_valley) via [Schrödinger's cat](https://en.wikipedia.org/wiki/Schr%C3%B6dinger's_cat). | [DOCS/two-streams.md](DOCS/two-streams.md) |
 | **AGI Unified Theory** | The complete framework: 5 foundational principles, consciousness as weighted stream integration, evolutionary dynamics | [DOCS/agi_unified_theory.md](DOCS/agi_unified_theory.md) |
 | **Biome Theory** | Why the virus-bacteria network is the true model for AGI - 4 billion years of distributed intelligence | [DOCS/ouroboros - biome theory.md](DOCS/ouroboros%20-%20biome%20theory.md) |
 | **Understanding Metatheories** | The "99 bottles of beer" analogy - why having the formula beats brute force enumeration | [DOCS/Understanding How MetaTheories Work](DOCS/Understanding%20How%20MetaTheories%20Work) |
