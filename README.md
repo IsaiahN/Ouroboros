@@ -211,5 +211,7 @@ python manual_tools/schema_inspector.py --counts
 -   **Logs**: All logs are stored in `core_data.db` (No log files!).
 -   **Shutdown**: Press `Ctrl+C` ONCE for graceful shutdown (saves state & closes scorecard(s)).
 
+***"The more you know, the more you know you don't know."*** ― Aristotle
+
 ---
 <img width="1325" height="545" alt="image" src="https://github.com/user-attachments/assets/f8b00168-0c93-4161-bc3d-88faa1689ce7" />
