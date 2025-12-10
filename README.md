@@ -31,8 +31,8 @@ Papers/Blog Post That Contributed:
    - **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
 computation are ultimately the most effective, and by a large margin."** (Mind shifting)
 - [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work) (Your Path through the [Graph Theory](https://en.wikipedia.org/wiki/Path_(graph_theory)))
-- [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake) (Distributed Consensus on Pow)
-Our project in a nutshell: Ouoroboros aims to provide distributed consensus on Proof of stake via the network (one level above).
+- [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake) (Distributed Consensus on PoW)
+Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
 
 Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
