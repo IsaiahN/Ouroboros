@@ -23,7 +23,7 @@ Project Collaborators:
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
  
 
-**Side-Note**: Heuristics are mainly useful in retrospect to explore interpretations of the truth.
+**Side-Note**: Heuristics (i.e: Metaphors) are mainly useful in retrospect to explore interpretations of the truth.
 You can only validate their accuracy (and to what to degree they align) if you have the Master Theory (Steve Jobs - [Connect The Dots Speech](https://www.youtube.com/watch?v=5BSbOc5VYY8)).
  
 Papers/Blog Post That Contributed:
