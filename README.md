@@ -263,4 +263,5 @@ python manual_tools/schema_inspector.py --counts
 <img width="1325" height="545" alt="image" src="https://github.com/user-attachments/assets/f8b00168-0c93-4161-bc3d-88faa1689ce7" />
 
 ***"The more you know, the more you know you don't know."*** ― Aristotle
-***"The proof is in the pudding"*** - My mother often said this idiom.
+
+***"The proof is in the pudding"*** - My mother often said this cliche.
