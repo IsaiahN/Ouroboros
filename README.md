@@ -80,14 +80,14 @@ Movies/Popular Media:
   -  [Windsurf (acquired by Cognition AI)](https://en.wikipedia.org/wiki/Cognition_AI)
 
 - API Level:
-   - [Github Copilot](https://github.com/features/copilot/)
+   - [Github Copilot](https://github.com/features/copilot/) (a nice integration that seamlessly blends experimental tech into programmers existing medium (the ide)) 
 
 - MCP Level:
-  - [Serena](https://github.com/oraios/serena)
+  - [Serena](https://github.com/oraios/serena) (tries to compress the data involved and the tokens used by any llm)
     
 - Direct API:
-   - [Claude Code](https://en.wikipedia.org/wiki/Claude_(language_model)) (Opus 4.5, Sonnet (the series))
-   - [Gemini](https://en.wikipedia.org/wiki/Google_Gemini)
+   - [Claude Code](https://en.wikipedia.org/wiki/Claude_(language_model)) (Antrophic - Opus 4.5, Sonnet (the series))
+   - [Gemini](https://en.wikipedia.org/wiki/Google_Gemini) (Google)
    - [GPT-# Series](https://en.wikipedia.org/wiki/OpenAI) (Open AI)
 - We are grateful to our collaborators, acquaintences, friends, family and all connections (past/present/future) who contribute(d).
   
