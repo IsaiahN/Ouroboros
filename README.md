@@ -3,7 +3,7 @@
 **The Network is the Organism.**
 
 - [Proof of Influence] Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
-   - Not to get too too meta, but the concept of repositories are based on graphs too, so the repo history is also the proof of Consensus( of Stake( of work))
+   - Not to get super meta, but the concept of repositories are based on graphs too, so the git repo history is also the proof of Consensus( of Stake( of work))
    
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
