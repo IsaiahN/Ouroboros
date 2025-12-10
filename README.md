@@ -41,6 +41,9 @@ Movies/Popular Media:
 - [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular films of all time with theories about simulations, free will, etc.)
 - [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
 - [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
+- [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work)
+- [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake)
+
 
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
