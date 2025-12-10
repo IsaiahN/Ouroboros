@@ -28,8 +28,9 @@ You can only validate their accuracy (and to what to degree they align) if you h
  
 Papers/Blog Post That Contributed:
 - [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
-- **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
+   - **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
 computation are ultimately the most effective, and by a large margin."** (Mind shifting)
+- [Recursive patterns in online echo chambers](https://journals.aps.org/pre/abstract/10.1103/PhysRevE.111.024302)
 
 Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
