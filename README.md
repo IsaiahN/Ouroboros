@@ -31,7 +31,7 @@ Project Collaborators:
 - **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
 
- -**RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
+- **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
    - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
 
 **Side-Note**: Heuristics (i.e: Metaphors) are mainly useful in retrospect to explore interpretations of the truth.
