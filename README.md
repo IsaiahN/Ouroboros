@@ -30,7 +30,7 @@ Project Collaborators:
 
 - **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
-    - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action. My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will).
+    - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action. My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will). The Problem with misaligned heuristics and algorithms is that they disturb the observees free will (i.e: inundate them with streams of consciousness they wouldnt normally consider, over time changing their life trajectory).
     -    Everything we've changed in this project, every code or word used changed with my understanding of the concept. the more we understood, the better the applications of our understanding expressed in the output.
 
 - **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
@@ -51,6 +51,7 @@ Deep-Domain Interviews that served as inspiration:
 - [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
 
 Movies/Popular Media:
+- [The Giver - Lois Lowry](https://en.wikipedia.org/wiki/The_Giver)
 - [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
 - [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
 - [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
@@ -58,10 +59,28 @@ Movies/Popular Media:
 - [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
 - [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
 
-- Honorable (media) Mentions: [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality) | [FMA/FMAB](https://en.wikipedia.org/wiki/Fullmetal_Alchemist)
-- [The Chain - Fleetwood Mac](https://www.youtube.com/watch?v=xwTPvcPYaOo)
-- [The Accountant Song Trailer - Everything In Its Right Place(Remix of Kid A)](https://www.youtube.com/watch?v=7p9aZ3ijf1c&list=RD7p9aZ3ijf1c)
+- Honorable (media) Mentions:
+   - [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality)
+   - [FMA/FMAB](https://en.wikipedia.org/wiki/Fullmetal_Alchemist)
+   - [The Chain - Fleetwood Mac](https://www.youtube.com/watch?v=xwTPvcPYaOo)
+   - [The Accountant Song Trailer - Everything In Its Right Place(Remix of Kid A)](https://www.youtube.com/watch?v=7p9aZ3ijf1c&list=RD7p9aZ3ijf1c)
+   - [IMPOSE YOUR WILL - Inky Johnson](https://www.youtube.com/watch?v=AVq5lc6sVVo)
+  
+My LLMS (Horses):
 
+IDE Level:
+  -
+  -
+  -
+  -
+  - [Google Antigravity](https://en.wikipedia.org/wiki/Google_Antigravity)
+
+API Level:
+
+Direct:
+- [Claude AI]() (Opus 4.5, Sonnet (the series))
+- [Gemini](https://en.wikipedia.org/wiki/Google_Gemini)
+- [GPT-# Series]([https://openai.com](https://en.wikipedia.org/wiki/OpenAI) (Open AI)
 
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
