@@ -22,8 +22,8 @@ Project Collaborators:
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite_monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
  
 
-***Side-Note: Heuristics are mainly useful in retrospect (Steve Jobs Connect The Dots Speech).
-You can only validate their accuracy (and to what to degree they align) if you have the Master Theory.***
+**Side-Note**: Heuristics are mainly useful in retrospect (Steve Jobs Connect The Dots Speech).
+You can only validate their accuracy (and to what to degree they align) if you have the Master Theory.
  
 Papers/Blog Post That Contributed:
 - [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
