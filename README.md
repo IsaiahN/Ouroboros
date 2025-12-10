@@ -10,7 +10,8 @@
 **We stand on the shoulders of giants.**
 
 These documents trace the theoretical foundations behind Ouroboros.
-These are not my discoveries (whatsoever), but should recieve the credit/attention for any insights that might emerge from the project.
+The distilation of this theory results from all of the hard work of many. Because we are influenced by many interesting works, I want to give the credit to the most notable ones.
+
 This project stems from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
 Without the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
