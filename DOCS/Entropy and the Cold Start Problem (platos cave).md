@@ -16,6 +16,7 @@ Example Prompt:
 
 Instructions: Use this theory as a framework to reorder and organize your thinking for everything in a recursive manner modeled on the concept of fractals where smaller sets of the problem are just compressions of the larger pattern. My query: “how do i xyz /what is x really on a deep level/any hard question “
 
+Bonus: for those of you with local llms or llm vis apos you can add this as a ruleset that always runs (a kernel in os terms) that applies the logic to everything so that you can freely query this unencumbered by needing to apply the filter manually (pretty nifty)
 
 Anything you dont understand (a gap in your knowledge, can be easily crossed).
 Metaphors are powerful in that they cross domains of understanding while keeping the same structural problems they hope to highlight (a meta theory on its own).
