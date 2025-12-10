@@ -7,9 +7,20 @@ Ouroboros is an evolutionary system designed to solve the ARC-AGI-3 challenge. U
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
-### My Process of Discovery
+### The Process of Discovery
 
-These documents trace the theoretical foundations behind Ouroboros:
+These documents trace the theoretical foundations behind Ouroboros.
+They arent my discoveries, but are curated from many different discussions, interviews and media that talk about consciousness.
+With the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
+
+Here are some of the bigger contributors to the project:
+Patrick Cox - Tetrahedral Object architecture (The Self Model/World Model Interactions)
+
+Media that served as inspiration:
+[Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
+[Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
+
+
 
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
