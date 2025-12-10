@@ -1,4 +1,4 @@
-# Ouroboros: Autonomous ARC AGI Evolution
+# Ouroboros: Proof of Influence - Distributed Consensus of Proof of Stake Via Networks
 
 **The Network is the Organism.**
 
@@ -7,19 +7,58 @@ Ouroboros is an evolutionary system designed to solve the ARC-AGI-3 challenge. U
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
-### My Process of Discovery
+### The Process of Discovery
+**We stand on the shoulders of giants.**
 
-These documents trace the theoretical foundations behind Ouroboros:
+These documents trace the theoretical foundations behind Ouroboros.
+These are not my discoveries (whatsoever), but should recieve any/all praise for any insights that might emerge from the project.
+This project stems from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
+Without the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
+
+Here are some of the bigger contributors/resources for the project:
+
+Project Collaborators:
+
+- **Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions)**
+   - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
+ 
+
+**Side-Note**: Heuristics (i.e: Metaphors) are mainly useful in retrospect to explore interpretations of the truth.
+You can only validate their accuracy (and to what to degree they align) if you have the Master Theory (Steve Jobs - [Connect The Dots Speech](https://www.youtube.com/watch?v=5BSbOc5VYY8)).
+ 
+Papers/Blog Post That Contributed:
+- [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
+   - **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
+computation are ultimately the most effective, and by a large margin."** (Mind shifting)
+- [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work) (Your Path through the [Graph Theory](https://en.wikipedia.org/wiki/Path_(graph_theory)))
+- [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake) (Distributed Consensus on PoW)
+   - Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
+   - Not to get too too meta, but the concept of repositories are based on graphs too, so the repo history is also the proof of Consensus( of Stake( of work))
+
+Deep-Domain Interviews that served as inspiration:
+- [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
+- [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
+
+Movies/Popular Media:
+- [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
+- [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
+- [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
+- [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular films of all time with theories about simulations, free will, etc.)
+- [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
+- [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
+
+- Honorable (media) Mentions: [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality) | [FMA/FMAB](https://en.wikipedia.org/wiki/Fullmetal_Alchemist)
+
 
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
-| **Answering Gödel's Incompleteness** | Why no single unit can have all understanding - and how networks are evolution's workaround | [DOCS/answering for Godels Incompleteness Problem.md](DOCS/answering%20for%20Godels%20Incompleteness%20Problem.md) |
-| **Two-Streams** | Why individual AGI is impossible (plasticity-stability dilemma) and how collective intelligence solves it | [DOCS/two-streams.md](DOCS/two-streams.md) |
+| **Answering [Gödel's Incompleteness](https://en.wikipedia.org/wiki/G%C3%B6del%27s_incompleteness_theorems)** | Why no single unit can have all understanding - and how networks are evolution's workaround | [DOCS/answering for Godels Incompleteness Problem.md](DOCS/answering%20for%20Godels%20Incompleteness%20Problem.md) |
+| **Two-Streams** | Why individual AGI is impossible (plasticity-stability dilemma) and how collective intelligence solves it. This also ties in the [uncanny valley effect](https://en.wikipedia.org/wiki/Uncanny_valley) via [Schrödinger's cat](https://en.wikipedia.org/wiki/Schr%C3%B6dinger's_cat). | [DOCS/two-streams.md](DOCS/two-streams.md) |
 | **AGI Unified Theory** | The complete framework: 5 foundational principles, consciousness as weighted stream integration, evolutionary dynamics | [DOCS/agi_unified_theory.md](DOCS/agi_unified_theory.md) |
 | **Biome Theory** | Why the virus-bacteria network is the true model for AGI - 4 billion years of distributed intelligence | [DOCS/ouroboros - biome theory.md](DOCS/ouroboros%20-%20biome%20theory.md) |
 | **Understanding Metatheories** | The "99 bottles of beer" analogy - why having the formula beats brute force enumeration | [DOCS/Understanding How MetaTheories Work](DOCS/Understanding%20How%20MetaTheories%20Work) |
 | **Why Metatheory Requires Experts** | Horse + Rider: why you need RLVR grounding and domain expertise to apply the framework | [DOCS/why the metatheory requires problem space experts.md](DOCS/why%20the%20metatheory%20requires%20problem%20space%20experts.md) |
-| **The Cold Start Problem** | Plato's Cave: why systems must stumble through brute force before extracting formulas | [DOCS/Entropy and the Cold Start Problem (platos cave).md](DOCS/Entropy%20and%20the%20Cold%20Start%20Problem%20(platos%20cave).md) |
+| **The Cold Start Problem** | [Plato's Cave](https://en.wikipedia.org/wiki/Allegory_of_the_cave): why systems must stumble through brute force before extracting formulas | [DOCS/Entropy and the Cold Start Problem (platos cave).md](DOCS/Entropy%20and%20the%20Cold%20Start%20Problem%20(platos%20cave).md) |
 | **Agent Role Fairness** | Asymmetric evaluation: measuring growth from starting point, not absolute position | [DOCS/balancing the agent role fairness.md](DOCS/balancing%20the%20agent%20role%20fairness.md) |
 | **The Problem with Game Mechanics** | Why agents trained from scratch lack cultural context that LLMs inherit | [DOCS/the-problem-with-game-mechanics.md](DOCS/the-problem-with-game-mechanics.md) |
 
@@ -174,3 +213,5 @@ python manual_tools/schema_inspector.py --counts
 
 ---
 <img width="1325" height="545" alt="image" src="https://github.com/user-attachments/assets/f8b00168-0c93-4161-bc3d-88faa1689ce7" />
+
+***"The more you know, the more you know you don't know."*** ― Aristotle

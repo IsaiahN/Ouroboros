@@ -7,7 +7,7 @@ THE RLVR on the human level are experts in their field who can apply the framewo
 
 Since I'm not a master expert of all spaces (ie: a deus), I cant use the metatheory and my own expertise to solve all problems.
 
-But humanity (the network) has built an Action Hacker that is (LLMs).
+But humanity (the network) has built an Action Hacker that has alot of cross-domain knowledge and is good at synergizing concepts (LLMs).
 
 You can use llms to apply my framework and they can then query the domain knowledge of most human fields and give you an answer using the theorem.
 The theorem can also explain any parts of itself (being fractal).
