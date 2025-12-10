@@ -55,7 +55,7 @@ Deep-Domain Interviews that served as inspiration:
 
 Movies/Popular Media:
 - [The Giver - Lois Lowry](https://en.wikipedia.org/wiki/The_Giver)
-- [Limitless](https://en.wikipedia.org/wiki/Limitless_(film))
+- [Limitless](https://en.wikipedia.org/wiki/Limitless_(film)) (explores the concept of "Action" Hacking - i.e cybernetics + LLM + alignment)
 - [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
 - [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
 - [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
