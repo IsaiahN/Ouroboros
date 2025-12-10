@@ -365,7 +365,7 @@ ratpik
 
  — 8:07 AM
 This is one of them, it made them up completely on its own
-Image
+![image](image-1.png)
 That's before the tensors went in
 ViewtifulJoe
 
@@ -739,3 +739,26 @@ ViewtifulJoe
 
  — 9:06 AM
 dont i know the feeling
+l
+ViewtifulJoe
+
+
+ViewtifulJoe
+
+
+ViewtifulJoe
+
+ — 9:16 AM
+https://en.wikipedia.org/wiki/Viewtiful_Joe_(TV_series)  Heres a meta meta meme for you 
+Viewtiful Joe (TV series)
+Viewtiful Joe is an anime series based on the video game series of the same name. The series loosely adapts the first two titles in the series, Viewtiful Joe and Viewtiful Joe 2, while introducing several original characters and scenarios. The series, comprising fifty-one episodes, was shown every Saturday on the Japanese television station TV T...
+Viewtiful Joe (TV series)
+its how i devised my name.
+the plot of the series would interest you
+
+
+ViewtifulJoe
+
+ — 9:26 AM
+those memes i was using in the meme section were meta memes too
+but only few got it was not just a joke 
