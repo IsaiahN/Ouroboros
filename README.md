@@ -1,7 +1,7 @@
 # Ouroboros: Proof of Influence - Distributed Consensus of Proof of Action Via Networks
 
 **Paradigm Shift - The Network is the Organism.**
-- [Proof of Influence] Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
+- Abstract: Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
 
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
@@ -49,20 +49,20 @@ computation are ultimately the most effective, and by a large margin."** (Mind s
 - [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work) (Your Path through the [Graph Theory](https://en.wikipedia.org/wiki/Path_(graph_theory)))
 - [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake) (Distributed Consensus on PoW)
 
-Deep-Domain Interviews that served as inspiration:
-- [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
-- [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
+- Deep-Domain Interviews that served as inspiration:
+ - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
+ - [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
 
-Movies/Popular Media:
-- [The Giver - Lois Lowry](https://en.wikipedia.org/wiki/The_Giver)
-- [Limitless](https://en.wikipedia.org/wiki/Limitless_(film)) (explores the concept of "Action" Hacking - i.e cybernetics + LLM + alignment)
-- [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
-- [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
-- [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
-- [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular films of all time with theories about simulations, free will, etc.)
-- [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
-- [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
-- [Inside Out](https://en.wikipedia.org/wiki/Inside_Out_(2015_film)) (General Vibes)
+- Movies/Popular Media:
+ - [The Giver - Lois Lowry](https://en.wikipedia.org/wiki/The_Giver)
+ - [Limitless](https://en.wikipedia.org/wiki/Limitless_(film)) (explores the concept of "Action" Hacking - i.e cybernetics + LLM + alignment)
+ - [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
+ - [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
+ - [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
+ - [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular series of all time brimming with theories and thought experiments about simulations, free will, etc.)
+ - [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
+ - [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
+ - [Inside Out](https://en.wikipedia.org/wiki/Inside_Out_(2015_film)) (General Vibes)
 
 - Honorable (media) Mentions:
    - [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality)
