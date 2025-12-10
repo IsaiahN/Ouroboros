@@ -14,11 +14,11 @@ They arent my discoveries, but are curated from many different discussions, inte
 With the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
 Here are some of the bigger contributors to the project:
-Patrick Cox - Tetrahedral Object architecture (The Self Model/World Model Interactions)
+- Patrick Cox - Tetrahedral Object architecture (The Self Model/World Model Interactions)
 
 Media that served as inspiration:
-[Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
-[Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
+- [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
+- [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
 
 
 
