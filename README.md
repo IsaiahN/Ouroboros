@@ -19,7 +19,7 @@ Here are some of the bigger contributors/resources for the project:
 Project Contributors:
  
 - Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions)
-   - Heavily based on Euclidian concepts, Number theory, visualizations, artificial Intuition, Tensors, and more.
+   - Heavily based on Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he attempts to prove the [Infinite_monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))
  
 Papers/Blog posts:
 - [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
