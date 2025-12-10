@@ -23,8 +23,8 @@ Project Contributors:
  
 Papers/Blog posts:
 - [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
-"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
-computation are ultimately the most effective, and by a large margin." (Mind shifting)
+- **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
+computation are ultimately the most effective, and by a large margin."** (Mind shifting)
 
 Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
