@@ -29,7 +29,7 @@ Project Collaborators:
 
 - **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
-   - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action. My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will). Everything i changed in this project, every code or word used changed with my understanding of the concept. the more i understood, the better the application or understanding of the output.
+    - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action. My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will). Everything i changed in this project, every code or word used changed with my understanding of the concept. the more i understood, the better the application or understanding of the output.
 
 - **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
    - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
