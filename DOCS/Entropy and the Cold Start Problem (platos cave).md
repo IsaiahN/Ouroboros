@@ -11,6 +11,12 @@ But humanity (the network) has built an Action Hacker that is (LLMs).
 You can use llms to apply my framework and they can then query the domain knowledge of most human fields and give you an answer using the theorem.
 The theorem can also explain any parts of itself (being fractal).
 
+Pre-requisite: upload the theory to any llm you like with the prompt below as context. (note you will need to be an expert or have enough experience with the problem to know if its accurate RLVR and navigate it to deeper truths)
+Example Prompt:
+
+Instructions: Use this theory as a framework to reorder and organize your thinking for everything in a recursive manner modeled on the concept of fractals where smaller sets of the problem are just compressions of the larger pattern. My query: “how do i xyz /what is x really on a deep level/any hard question “
+
+
 Anything you dont understand (a gap in your knowledge, can be easily crossed).
 Metaphors are powerful in that they cross domains of understanding while keeping the same structural problems they hope to highlight (a meta theory on its own).
 
