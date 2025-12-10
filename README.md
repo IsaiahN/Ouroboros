@@ -8,17 +8,22 @@ Ouroboros is an evolutionary system designed to solve the ARC-AGI-3 challenge. U
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
 ### The Process of Discovery
+We stand on the shoulders of giants.
 
 These documents trace the theoretical foundations behind Ouroboros.
-They arent my discoveries, but are curated from many different discussions, interviews and media that talk about consciousness.
+These arent my discoveries (at all), but are curated from many different discussions, interviews and media that talk about consciousness.
 With the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
 Here are some of the bigger contributors to the project:
 - Patrick Cox - Tetrahedral Object architecture (The Self Model/World Model Interactions)
 
-Media that served as inspiration:
+Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
 - [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
+
+Movies/Popular Media:
+[Arrival](https://en.wikipedia.org/wiki/Arrival_(film))
+[Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the Problem with communicating effectively.
 
 
 
