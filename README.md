@@ -1,4 +1,4 @@
-# Ouroboros: Distributed Consensus on Proof of Stake Via Networks
+# Ouroboros: Proof of Influence - Distributed Consensus of Proof of Stake Via Networks
 
 **The Network is the Organism.**
 
