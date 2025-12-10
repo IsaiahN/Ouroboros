@@ -50,7 +50,7 @@ Movies/Popular Media:
 | **Biome Theory** | Why the virus-bacteria network is the true model for AGI - 4 billion years of distributed intelligence | [DOCS/ouroboros - biome theory.md](DOCS/ouroboros%20-%20biome%20theory.md) |
 | **Understanding Metatheories** | The "99 bottles of beer" analogy - why having the formula beats brute force enumeration | [DOCS/Understanding How MetaTheories Work](DOCS/Understanding%20How%20MetaTheories%20Work) |
 | **Why Metatheory Requires Experts** | Horse + Rider: why you need RLVR grounding and domain expertise to apply the framework | [DOCS/why the metatheory requires problem space experts.md](DOCS/why%20the%20metatheory%20requires%20problem%20space%20experts.md) |
-| **The Cold Start Problem** | Plato's Cave: why systems must stumble through brute force before extracting formulas | [DOCS/Entropy and the Cold Start Problem (platos cave).md](DOCS/Entropy%20and%20the%20Cold%20Start%20Problem%20(platos%20cave).md) |
+| **The Cold Start Problem** | [Plato's Cave](https://en.wikipedia.org/wiki/Allegory_of_the_cave): why systems must stumble through brute force before extracting formulas | [DOCS/Entropy and the Cold Start Problem (platos cave).md](DOCS/Entropy%20and%20the%20Cold%20Start%20Problem%20(platos%20cave).md) |
 | **Agent Role Fairness** | Asymmetric evaluation: measuring growth from starting point, not absolute position | [DOCS/balancing the agent role fairness.md](DOCS/balancing%20the%20agent%20role%20fairness.md) |
 | **The Problem with Game Mechanics** | Why agents trained from scratch lack cultural context that LLMs inherit | [DOCS/the-problem-with-game-mechanics.md](DOCS/the-problem-with-game-mechanics.md) |
 
