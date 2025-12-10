@@ -18,8 +18,8 @@ Here are some of the bigger contributors/resources for the project:
 
 Project Collaborators:
 
-- Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions)
-   - Heavily based on Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he attempts to prove the [Infinite_monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))
+- **Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions)**
+   - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite_monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
  
 
 ***Side-Note: Heuristics are mainly useful in retrospect (Steve Jobs Connect The Dots Speech).
