@@ -22,7 +22,7 @@ Project Collaborators:
 **
 https://en.wikipedia.org/wiki/Observer%27s_paradox
 
-- **Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions) [ In my terms, proof of action]**
+- **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
  
 
