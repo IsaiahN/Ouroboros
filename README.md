@@ -2,8 +2,9 @@
 
 **The Network is the Organism.**
 
-Ouroboros is an evolutionary system designed to solve the ARC-AGI-3 challenge. Unlike traditional agents, it treats the entire population as a single learning network, preserving knowledge across generations through a centralized database.
-
+- [Proof of Influence] Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
+   - Not to get too too meta, but the concept of repositories are based on graphs too, so the repo history is also the proof of Consensus( of Stake( of work))
+   
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
@@ -15,9 +16,11 @@ These are not my discoveries (whatsoever), but should recieve any/all praise for
 This project stems from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
 Without the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
-Here are some of the bigger contributors/resources for the project:
+Here are some of the bigger collaborators/influences for the project:
 
 Project Collaborators:
+**
+https://en.wikipedia.org/wiki/Observer%27s_paradox
 
 - **Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions)**
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
@@ -32,8 +35,6 @@ Papers/Blog Post That Contributed:
 computation are ultimately the most effective, and by a large margin."** (Mind shifting)
 - [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work) (Your Path through the [Graph Theory](https://en.wikipedia.org/wiki/Path_(graph_theory)))
 - [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake) (Distributed Consensus on PoW)
-   - Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
-   - Not to get too too meta, but the concept of repositories are based on graphs too, so the repo history is also the proof of Consensus( of Stake( of work))
 
 Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
@@ -61,6 +62,11 @@ Movies/Popular Media:
 | **The Cold Start Problem** | [Plato's Cave](https://en.wikipedia.org/wiki/Allegory_of_the_cave): why systems must stumble through brute force before extracting formulas | [DOCS/Entropy and the Cold Start Problem (platos cave).md](DOCS/Entropy%20and%20the%20Cold%20Start%20Problem%20(platos%20cave).md) |
 | **Agent Role Fairness** | Asymmetric evaluation: measuring growth from starting point, not absolute position | [DOCS/balancing the agent role fairness.md](DOCS/balancing%20the%20agent%20role%20fairness.md) |
 | **The Problem with Game Mechanics** | Why agents trained from scratch lack cultural context that LLMs inherit | [DOCS/the-problem-with-game-mechanics.md](DOCS/the-problem-with-game-mechanics.md) |
+
+
+## Project that encapsulated the work to get the theory
+Ouroboros is an evolutionary system designed to solve the [ARC-AGI-3 challenge](https://arcprize.org/arc-agi/3/), an open source.
+Unlike traditional agents, it treats the entire population as a single learning network, preserving knowledge across generations through a centralized database.
 
 ## Quick Start
 
