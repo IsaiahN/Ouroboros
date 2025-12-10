@@ -1,4 +1,4 @@
-# Ouroboros: Autonomous ARC AGI Evolution
+# Ouroboros: Distributed Consensus on Proof of Stake Via Networks
 
 **The Network is the Organism.**
 
@@ -40,6 +40,7 @@ Deep-Domain Interviews that served as inspiration:
 
 Movies/Popular Media:
 - [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
+- [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
 - [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
 - [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular films of all time with theories about simulations, free will, etc.)
 - [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
