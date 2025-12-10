@@ -30,6 +30,9 @@ Papers/Blog Post That Contributed:
 - [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
    - **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
 computation are ultimately the most effective, and by a large margin."** (Mind shifting)
+- [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work) (Your Path through the [Graph Theory](https://en.wikipedia.org/wiki/Path_(graph_theory)))
+- [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake) (Distributed Consensus on Pow)
+
 
 Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
@@ -41,8 +44,8 @@ Movies/Popular Media:
 - [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular films of all time with theories about simulations, free will, etc.)
 - [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
 - [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
-- [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work)
-- [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake)
+
+- Honorable (media) Mentions: [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality) | [FMA/FMAB](https://en.wikipedia.org/wiki/Fullmetal_Alchemist)
 
 
 | Document | Hard Problem It Addresses | Link |
