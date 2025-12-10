@@ -78,3 +78,7 @@ https://en.wikipedia.org/wiki/Darmok
 (side note - all media/art - movies, tv shows are viral information packets that share ideas across brains (author/creator) to the audience and because the fandom exist, it makes a harmonic network too - which is why you connect so well with other fellow fans)
 
 If you want to understand the Metatheory problem explained in film, watch the movie Arrival. explains it pretty well.
+
+My first attempt at AGI was a heuristic that naively attempted to simulate an agent from scratch: [Tabula Rasa](https://github.com/IsaiahN/Tabula-Rasa-Adaptive-AI/edit/Tabula-Rasa-v4/README.md) at the time i didnt know that i was dealing with a cold start problem, or that godels theory proved it impossible. 
+
+Once I realized this "Bitter Lesson" by not theorizing but consistently proving my theories out in the projects with RLVR to ground me to objective truth I started to understand the truth of the paradox of what Godel suggested. Then the question became "how did any living matter managed to exist if this were true".
