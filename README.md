@@ -16,7 +16,7 @@ With the contribution of each and every one of these individuals in their writin
 
 Here are some of the bigger contributors to the project:
 - Patrick Cox - Tetrahedral Object architecture (The Self Model/World Model Interactions)
-   - Number theory, visualizations, artificial Intuition
+   - Heavily based on Euclidian concepts, Number theory, visualizations, artificial Intuition, Tensors, and more.
 
 Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
