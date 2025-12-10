@@ -8,20 +8,24 @@ Ouroboros is an evolutionary system designed to solve the ARC-AGI-3 challenge. U
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
 ### The Process of Discovery
-We stand on the shoulders of giants.
+**We stand on the shoulders of giants.**
 
 These documents trace the theoretical foundations behind Ouroboros.
-These arent my discoveries (at all), but are curated from many different discussions, interviews and media that talk about consciousness.
-With the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
+These arent my discoveries (at all), but are curated from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
+Without the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
 Here are some of the bigger contributors/resources for the project:
 
-Project Contributors:
- 
+Project Collaborators:
+
 - Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions)
    - Heavily based on Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he attempts to prove the [Infinite_monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))
  
-Papers/Blog posts:
+
+***Side-Note: Heuristics are mainly useful in retrospect (Steve Jobs Connect The Dots Speech).
+You can only validate their accuracy (and to what to degree they align) if you have the Master Theory.***
+ 
+Papers/Blog Post That Contributed:
 - [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
 - **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
 computation are ultimately the most effective, and by a large margin."** (Mind shifting)
