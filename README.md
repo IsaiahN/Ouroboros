@@ -23,7 +23,7 @@ Without the contribution of each and every one of these individuals in their wri
 Solving AGI Alignment in LLMs is a matter of understanding the **<ins>Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).</ins>**
 
 **The Burden of Proof**:
-The Conversation thread of alignment and proof of mutual understanding, allowing us to discuss conversation on a meta level cross-context.
+The Conversation thread of alignment and proof of mutual understanding in total strangers, allowing us to discuss conversation on a meta level cross-context very quickly through our chain of casuality that allowed us to interact.
 
 **The Proof**: [Proof of Influence](https://github.com/IsaiahN/Ouroboros/blob/Ouroboros/DOCS/proof%20of%20influence.md)
 
