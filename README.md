@@ -22,10 +22,10 @@ Deep-Domain Interviews that served as inspiration:
 - [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
 
 Movies/Popular Media:
-[Arrival](https://en.wikipedia.org/wiki/Arrival_(film))
-[Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the Problem with communicating effectively.
-
-
+- [Arrival](https://en.wikipedia.org/wiki/Arrival_(film))
+- [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular films of all time with theories about simulations, free will, etc.)
+- [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the Problem with communicating effectively.
+- [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
 
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
