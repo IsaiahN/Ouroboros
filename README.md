@@ -11,7 +11,8 @@ Ouroboros is an evolutionary system designed to solve the ARC-AGI-3 challenge. U
 **We stand on the shoulders of giants.**
 
 These documents trace the theoretical foundations behind Ouroboros.
-These arent my discoveries (at all), but are curated from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
+These are not my discoveries (whatsoever), but should recieve any/all praise for any insights that might emerge from the project.
+This project stems from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
 Without the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
 Here are some of the bigger contributors/resources for the project:
@@ -19,7 +20,7 @@ Here are some of the bigger contributors/resources for the project:
 Project Collaborators:
 
 - **Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions)**
-   - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite_monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
+   - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
  
 
 **Side-Note**: Heuristics are mainly useful in retrospect (Steve Jobs Connect The Dots Speech).
