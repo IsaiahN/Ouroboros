@@ -5,6 +5,7 @@
 
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
+- Outdated Theory:[Artificial General Intelligence — The Beginnings of Consciousness](https://medium.com/@IsaiahNwukor/artificial-general-intelligence-and-the-beginnings-of-consciousness-thesis-rant-75ecdaf6770a)
 
 ### The Process of Discovery
 **We stand on the shoulders of giants.**
@@ -31,7 +32,8 @@ Project Collaborators:
 - **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
     - How he interprets his portion of the problem: the infinite game of "what if?"
-    - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action. My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will). The Problem with misaligned heuristics and algorithms is that they disturb the observees free will (i.e: inundate them with streams of consciousness they wouldnt normally consider, over time changing their life trajectory - "doomscrolling" to collapse the concept down).
+    - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action.
+      - My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will). The Problem with misaligned heuristics and algorithms is that they disturb the observees free will (i.e: inundate agents with streams of consciousness they wouldnt normally consider, over time changing their life trajectory. e.g:"doomscrolling" to collapse the concept down).
     -    Everything we've changed in this project, every code or word used changed with my understanding of the concept. the more we understood, the better the applications of our understanding expressed in the output.
 
 - **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
@@ -53,6 +55,7 @@ Deep-Domain Interviews that served as inspiration:
 
 Movies/Popular Media:
 - [The Giver - Lois Lowry](https://en.wikipedia.org/wiki/The_Giver)
+- [Limitless](https://en.wikipedia.org/wiki/Limitless_(film))
 - [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
 - [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
 - [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
@@ -63,26 +66,30 @@ Movies/Popular Media:
 - Honorable (media) Mentions:
    - [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality)
    - [FMA/FMAB](https://en.wikipedia.org/wiki/Fullmetal_Alchemist)
+  -  [I AM - WHAT'S YOUR WHY](https://www.youtube.com/watch?v=ylwxuL7R05o)
    - [The Chain - Fleetwood Mac](https://www.youtube.com/watch?v=xwTPvcPYaOo)
    - [The Accountant Song Trailer - Everything In Its Right Place(Remix of Kid A)](https://www.youtube.com/watch?v=7p9aZ3ijf1c&list=RD7p9aZ3ijf1c)
    - [IMPOSE YOUR WILL - Inky Johnson](https://www.youtube.com/watch?v=AVq5lc6sVVo)
+
+***My LLMS (Horses):***
+- IDE Level:
+  -  [Microsoft Visual Studio Code](https://code.visualstudio.com/)
+  -  [Google Antigravity](https://en.wikipedia.org/wiki/Google_Antigravity)
+  -  [Cursor](https://en.wikipedia.org/wiki/Cursor_(code_editor))
+  -  [Windsurf (acquired by Cognition AI)](https://en.wikipedia.org/wiki/Cognition_AI)
+
+- API Level:
+   - [Github Copilot](https://github.com/features/copilot/)
+
+- MCP Level:
+  - [Serena](https://github.com/oraios/serena)
+    
+- Direct API:
+   - [Claude Code](https://en.wikipedia.org/wiki/Claude_(language_model)) (Opus 4.5, Sonnet (the series))
+   - [Gemini](https://en.wikipedia.org/wiki/Google_Gemini)
+   - [GPT-# Series](https://en.wikipedia.org/wiki/OpenAI) (Open AI)
+- We are grateful to our collaborators, acquaintences, friends, and family (past/present/future) who contribute(d).
   
-My LLMS (Horses):
-
-IDE Level:
-  -
-  -
-  -
-  -
-  - [Google Antigravity](https://en.wikipedia.org/wiki/Google_Antigravity)
-
-API Level:
-
-Direct:
-- [Claude AI]() (Opus 4.5, Sonnet (the series))
-- [Gemini](https://en.wikipedia.org/wiki/Google_Gemini)
-- [GPT-# Series]([https://openai.com](https://en.wikipedia.org/wiki/OpenAI) (Open AI)
-
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
 | **Answering [Gödel's Incompleteness](https://en.wikipedia.org/wiki/G%C3%B6del%27s_incompleteness_theorems)** | Why no single unit can have all understanding - and how networks are evolution's workaround | [DOCS/answering for Godels Incompleteness Problem.md](DOCS/answering%20for%20Godels%20Incompleteness%20Problem.md) |
