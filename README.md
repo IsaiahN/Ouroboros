@@ -89,7 +89,7 @@ Movies/Popular Media:
    - [Claude Code](https://en.wikipedia.org/wiki/Claude_(language_model)) (Opus 4.5, Sonnet (the series))
    - [Gemini](https://en.wikipedia.org/wiki/Google_Gemini)
    - [GPT-# Series](https://en.wikipedia.org/wiki/OpenAI) (Open AI)
-- We are grateful to our collaborators, acquaintences, friends, and family (past/present/future) who contribute(d).
+- We are grateful to our collaborators, acquaintences, friends, family and all connections (past/present/future) who contribute(d).
   
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
