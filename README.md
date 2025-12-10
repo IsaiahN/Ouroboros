@@ -16,16 +16,18 @@ With the contribution of each and every one of these individuals in their writin
 
 Here are some of the bigger contributors to the project:
 - Patrick Cox - Tetrahedral Object architecture (The Self Model/World Model Interactions)
+   - Number theory, visualizations, artificial Intuition
 
 Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
 - [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
 
 Movies/Popular Media:
-- [Arrival](https://en.wikipedia.org/wiki/Arrival_(film))
+- [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
+- [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
 - [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular films of all time with theories about simulations, free will, etc.)
-- [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the Problem with communicating effectively.
 - [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
+- [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre explore free will in general, and also explore Nietzsche's void principle)
 
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
