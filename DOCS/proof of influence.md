@@ -767,3 +767,13 @@ ratpik
 
  — 9:58 AM
 Lol yeah that's a great plot arc. I haven't watched it but I'm familiar. And yeah, I had a few good chuckles at your exchange with James Wiles there, I've already spoken to him myself, I was pretty sure he wouldn't be too receptive. Decent guy but he actually works for Wolfram I think and he's got his nose in the air a little about it. I've seen a few softly patronizing comments from him to other people before. He didn't give me that attitude, I just offered him the McGuffin and left it at that, I don't think he even looked at it.
+
+
+ViewtifulJoe
+
+ — 10:00 AM
+thats a shame. I understand that they get too much noise like " job recruiters get with applications"
+ratpik
+
+ — 10:01 AM
+Totally. Constant abuse of daydreaming noise. They hear it all from every angle every day from people who don't even know what a reference frame is
