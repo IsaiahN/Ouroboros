@@ -16,11 +16,16 @@ These are not my discoveries (whatsoever), but should recieve any/all praise for
 This project stems from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
 Without the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
+**The Nature of the Problem (from this viewpoint)**
+Its a [Nested Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).
+
+The Burden of Proof:
+The Conversation thread of alignment and proof of mutual understanding, allowing us to discuss conversation on a meta level cross-context.
+The Proof: [Proof of Influence](https://github.com/IsaiahN/Ouroboros/blob/Ouroboros/DOCS/proof%20of%20influence.md)
+
 Here are some of the bigger collaborators/influences for the project:
 
 Project Collaborators:
-**
-https://en.wikipedia.org/wiki/Observer%27s_paradox
 
 - **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
