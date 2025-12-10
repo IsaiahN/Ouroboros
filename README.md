@@ -1,10 +1,8 @@
-# Ouroboros: Proof of Influence - Distributed Consensus of Proof of Stake Via Networks
+# Ouroboros: Proof of Influence - Distributed Consensus of Proof of Action Via Networks
 
 **The Network is the Organism.**
-
 - [Proof of Influence] Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
-   - Not to get too too meta, but the concept of repositories are based on graphs too, so the repo history is also the proof of Consensus( of Stake( of work))
-   
+
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 - Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
@@ -16,15 +14,25 @@ These are not my discoveries (whatsoever), but should recieve any/all praise for
 This project stems from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
 Without the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
+**The Nature of the REAL Problem (from this viewpoint):**
+
+Solving AGI Alignment in LLMs is a matter of understanding the Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).
+
+**The Burden of Proof**:
+The Conversation thread of alignment and proof of mutual understanding, allowing us to discuss conversation on a meta level cross-context.
+
+**The Proof**: [Proof of Influence](https://github.com/IsaiahN/Ouroboros/blob/Ouroboros/DOCS/proof%20of%20influence.md)
+
 Here are some of the bigger collaborators/influences for the project:
 
 Project Collaborators:
-**
-https://en.wikipedia.org/wiki/Observer%27s_paradox
 
 - **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
    - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
- 
+    - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action. My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will). Everything i changed in this project, every code or word used changed with my understanding of the concept. the more i understood, the better the application or understanding of the output.
+
+- **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
+   - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
 
 **Side-Note**: Heuristics (i.e: Metaphors) are mainly useful in retrospect to explore interpretations of the truth.
 You can only validate their accuracy (and to what to degree they align) if you have the Master Theory (Steve Jobs - [Connect The Dots Speech](https://www.youtube.com/watch?v=5BSbOc5VYY8)).
@@ -221,3 +229,4 @@ python manual_tools/schema_inspector.py --counts
 <img width="1325" height="545" alt="image" src="https://github.com/user-attachments/assets/f8b00168-0c93-4161-bc3d-88faa1689ce7" />
 
 ***"The more you know, the more you know you don't know."*** ― Aristotle
+***"The proof is in the pudding"*** - My mother often said this idiom.
