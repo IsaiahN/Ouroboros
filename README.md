@@ -59,6 +59,8 @@ Movies/Popular Media:
 - [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
 
 - Honorable (media) Mentions: [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality) | [FMA/FMAB](https://en.wikipedia.org/wiki/Fullmetal_Alchemist)
+- [The Chain - Fleetwood Mac](https://www.youtube.com/watch?v=xwTPvcPYaOo)
+- [The Accountant Song Trailer - Everything In Its Right Place(Remix of Kid A)](https://www.youtube.com/watch?v=7p9aZ3ijf1c&list=RD7p9aZ3ijf1c)
 
 
 | Document | Hard Problem It Addresses | Link |
