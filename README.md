@@ -14,9 +14,17 @@ These documents trace the theoretical foundations behind Ouroboros.
 These arent my discoveries (at all), but are curated from many different discussions, interviews and media that talk about consciousness.
 With the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
 
-Here are some of the bigger contributors to the project:
-- Patrick Cox - Tetrahedral Object architecture (The Self Model/World Model Interactions)
+Here are some of the bigger contributors/resources for the project:
+
+Project Contributors:
+ 
+- Patrick Cox - Tetrahedral Object architecture (Helped Quantify the Self Model/World Model Interactions)
    - Heavily based on Euclidian concepts, Number theory, visualizations, artificial Intuition, Tensors, and more.
+ 
+Papers/Blog posts:
+- [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
+"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
+computation are ultimately the most effective, and by a large margin." (Mind shifting)
 
 Deep-Domain Interviews that served as inspiration:
 - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
