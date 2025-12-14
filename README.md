@@ -9,11 +9,6 @@
 
 Solving Alignment is a matter of understanding the **<ins>Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).</ins>**
 
-**The Burden of Proof**:
-The Conversation thread of alignment and proof of mutual understanding in total strangers, allowing us to discuss conversation on a meta level cross-context very quickly through our chain of casuality that allowed us to interact.
-
-**The Proof**: [Proof of Influence](https://github.com/IsaiahN/Ouroboros/blob/Ouroboros/DOCS/proof%20of%20influence.md)
-
 Here are some of the bigger collaborators/influences for the project:
 
 - **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
