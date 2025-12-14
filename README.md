@@ -1,11 +1,9 @@
 # Ouroboros: Proof of Influence - Distributed Consensus of Proof of Action Via Networks
 
 **Paradigm Shift - The Network is the Organism.**
-- Abstract: Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
+- Abstract: this project aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
 
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
-- Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
-- Outdated Theory:[Artificial General Intelligence — The Beginnings of Consciousness](https://medium.com/@IsaiahNwukor/artificial-general-intelligence-and-the-beginnings-of-consciousness-thesis-rant-75ecdaf6770a)
 
 ### The Process of Discovery
 **We stand on the shoulders of giants.**
