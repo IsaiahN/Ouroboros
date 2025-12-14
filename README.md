@@ -21,10 +21,8 @@ Here are some of the bigger collaborators/influences for the project:
 - **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
    - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
 
-**Side-Note**: Heuristics (i.e: Metaphors) are mainly useful in retrospect to explore interpretations of the truth.
-You can only validate their accuracy (and to what to degree they align) if you have the Master Theory (Steve Jobs - [Connect The Dots Speech](https://www.youtube.com/watch?v=5BSbOc5VYY8)).
 
-- We are grateful to our collaborators, acquaintences, friends, family and all connections (past/present/future) who contribute(d).
+- We are grateful to our collaborators, acquaintences, friends, family and all connections (past/present/future) who contribute.
   
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
