@@ -29,68 +29,14 @@ The Conversation thread of alignment and proof of mutual understanding in total 
 
 Here are some of the bigger collaborators/influences for the project:
 
-Project Collaborators:
-
 - **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
-   - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
-    - How he interprets his portion of the problem: the infinite game of "what if?"
-    - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action.
-      - My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will). The Problem with misaligned heuristics and algorithms is that they disturb the observees free will (i.e: inundate agents with streams of consciousness they wouldnt normally consider, over time changing their life trajectory. e.g:"doomscrolling" to collapse the concept down).
-    -    Everything we've changed in this project, every code or word used changed with my understanding of the concept. the more we understood, the better the applications of our understanding expressed in the output.
 
 - **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
    - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
 
 **Side-Note**: Heuristics (i.e: Metaphors) are mainly useful in retrospect to explore interpretations of the truth.
 You can only validate their accuracy (and to what to degree they align) if you have the Master Theory (Steve Jobs - [Connect The Dots Speech](https://www.youtube.com/watch?v=5BSbOc5VYY8)).
- 
-Papers/Blog Post That Contributed:
-- [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
-   - **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
-computation are ultimately the most effective, and by a large margin."** (Mind shifting)
-- [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work) (Your Path through the [Graph Theory](https://en.wikipedia.org/wiki/Path_(graph_theory)))
-- [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake) (Distributed Consensus on PoW)
 
-- Deep-Domain Interviews that served as inspiration:
- - [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
- - [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
-
-- Movies/Popular Media:
- - [The Giver - Lois Lowry](https://en.wikipedia.org/wiki/The_Giver)
- - [Limitless](https://en.wikipedia.org/wiki/Limitless_(film)) (explores the concept of "Action" Hacking - i.e cybernetics + LLM + alignment)
- - [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
- - [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
- - [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
- - [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular series of all time brimming with theories and thought experiments about simulations, free will, etc.)
- - [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
- - [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
- - [Inside Out](https://en.wikipedia.org/wiki/Inside_Out_(2015_film)) (General Vibes)
-
-- Honorable (media) Mentions:
-   - [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality)
-   - [FMA/FMAB](https://en.wikipedia.org/wiki/Fullmetal_Alchemist)
-  -  [I AM - WHAT'S YOUR WHY](https://www.youtube.com/watch?v=ylwxuL7R05o)
-   - [The Chain - Fleetwood Mac](https://www.youtube.com/watch?v=xwTPvcPYaOo)
-   - [The Accountant Song Trailer - Everything In Its Right Place(Remix of Kid A)](https://www.youtube.com/watch?v=7p9aZ3ijf1c&list=RD7p9aZ3ijf1c)
-   - [IMPOSE YOUR WILL - Inky Johnson](https://www.youtube.com/watch?v=AVq5lc6sVVo)
-
-***My LLMS (Horses):***
-- IDE Level:
-  -  [Microsoft Visual Studio Code](https://code.visualstudio.com/)
-  -  [Google Antigravity](https://en.wikipedia.org/wiki/Google_Antigravity)
-  -  [Cursor](https://en.wikipedia.org/wiki/Cursor_(code_editor))
-  -  [Windsurf (acquired by Cognition AI)](https://en.wikipedia.org/wiki/Cognition_AI)
-
-- API Level:
-   - [Github Copilot](https://github.com/features/copilot/) (a nice integration that seamlessly blends experimental tech into programmers existing medium (the ide)) 
-
-- MCP Level:
-  - [Serena](https://github.com/oraios/serena) (tries to compress the data involved and the tokens used by any llm)
-    
-- Direct API:
-   - [Claude Code](https://en.wikipedia.org/wiki/Claude_(language_model)) (Antrophic - Opus 4.5, Sonnet (the series))
-   - [Gemini](https://en.wikipedia.org/wiki/Google_Gemini) (Google)
-   - [GPT-# Series](https://en.wikipedia.org/wiki/OpenAI) (Open AI)
 - We are grateful to our collaborators, acquaintences, friends, family and all connections (past/present/future) who contribute(d).
   
 | Document | Hard Problem It Addresses | Link |
