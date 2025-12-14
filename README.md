@@ -1,4 +1,4 @@
-# Ouroboros: Proof of Influence - Distributed Consensus of Proof of Action Via Networks
+# Ouroboros: Generalized learning via distributed networks
 
 **Paradigm Shift - The Network is the Organism.**
 - Abstract: this project aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
@@ -6,9 +6,9 @@
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 
 ### The Process of Discovery
-**The Nature of the REAL Problem (from this viewpoint):**
+**The Nature of the Problem**
 
-Solving AGI Alignment in LLMs is a matter of understanding the **<ins>Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).</ins>**
+Solving Alignment is a matter of understanding the **<ins>Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).</ins>**
 
 **The Burden of Proof**:
 The Conversation thread of alignment and proof of mutual understanding in total strangers, allowing us to discuss conversation on a meta level cross-context very quickly through our chain of casuality that allowed us to interact.
