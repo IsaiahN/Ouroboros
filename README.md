@@ -1,4 +1,4 @@
-# Ouroboros: Generalized learning via distributed networks
+## Ouroboros: Generalized learning via distributed networks
 
 **Paradigm Shift - The Network is the Organism.**
 - Abstract: this project aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
