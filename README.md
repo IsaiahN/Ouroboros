@@ -11,7 +11,7 @@ Solving Alignment is a matter of understanding the **<ins>Nested [Observer Parad
 
 Here are some of the bigger collaborators/influences for the project:
 
-- **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
+- **Patrick Cox - Tetrahedral Object architecture (Math based Storytelling for characters)**
 
 - **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
    - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
