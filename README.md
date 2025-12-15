@@ -7,7 +7,8 @@
 ### The Process of Discovery
 **The Nature of the Problem**
 
-Solving Alignment is a matter of understanding the **<ins>Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).</ins>**
+Taming Alignment is a matter of understanding the **<ins>Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).</ins>**
+This system explains some of the underlying mechanisms behind the butterfly effect.
 
 Here are some of the bigger collaborators/influences for the project:
 
