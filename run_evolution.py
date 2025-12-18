@@ -47,6 +47,8 @@ def main():
                        help='Diversity mode: Diverse games, anti-overfitting, generalization focus')
     parser.add_argument('--specialist', action='store_true',
                        help='Specialist mode: Narrow agents, deep mastery, repetition-based learning')
+    parser.add_argument('--game', type=str, default=None,
+                       help='Focus on specific game (e.g., --game as66). All agents play only this game.')
     
     args = parser.parse_args()
     
@@ -115,6 +117,8 @@ def main():
         print(f"  Diversity Mode: ENABLED (generalization focus)")
     if args.specialist:
         print(f"  Specialist Mode: ENABLED (deep mastery focus)")
+    if args.game:
+        print(f"  Target Game: {args.game} (focused mastery)")
     if config.get('ensure_game_type_coverage'):
         print(f"  Game Type Coverage: ENABLED (one game per type guaranteed)")
     print(f"{'='*60}\n")
@@ -126,6 +130,10 @@ def main():
     # Add specialist mode to config if requested
     if args.specialist:
         config['specialist_mode'] = True
+    
+    # Add target game filter if specified
+    if args.game:
+        config['target_game'] = args.game
     
     # Create and run
     runner = AutonomousEvolutionRunner(**config)

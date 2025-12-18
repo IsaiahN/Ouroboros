@@ -94,7 +94,8 @@ class AutonomousEvolutionRunner:
         agi_mode: bool = False,  # Enable diversity-focused evolution
         specialist_mode: bool = False,  # NEW: Enable specialist-focused evolution
         skip_cleanup: bool = False,  # Skip database cleanup on startup (for test mode)
-        ensure_game_type_coverage: bool = False  # Force one game per unique game type
+        ensure_game_type_coverage: bool = False,  # Force one game per unique game type
+        target_game: str = None  # NEW: Focus on specific game (e.g., "as66")
     ):
         """
         Initialize autonomous runner.
@@ -109,6 +110,7 @@ class AutonomousEvolutionRunner:
             agi_mode: Enable diversity-focused generalization and anti-overfitting
             specialist_mode: Enable specialist-focused deep mastery (NEW)
             ensure_game_type_coverage: Force one game per unique game type (good when games_per_gen = num_types)
+            target_game: Focus all agents on specific game prefix (e.g., "as66")
         """
         self.db = DatabaseInterface(db_path)
         self.coordinator = OuroborosCoordinator(self.db)
@@ -175,6 +177,7 @@ class AutonomousEvolutionRunner:
         self.specialist_mode = specialist_mode  # NEW: Specialist mode flag
         self.skip_cleanup = skip_cleanup  # Skip database cleanup on startup
         self.ensure_game_type_coverage = ensure_game_type_coverage  # Force one game per type
+        self.target_game = target_game  # Focus on specific game (e.g., "as66")
         
         self.current_generation = 0
         self.total_games_played = 0
@@ -984,6 +987,18 @@ class AutonomousEvolutionRunner:
                 if not available_games:
                     print("[?] No games available from API")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
+                
+                # FOCUSED GAME MASTERY: Filter to target game if specified
+                if self.target_game:
+                    original_count = len(available_games)
+                    available_games = [
+                        g for g in available_games 
+                        if (g.get('id', g.get('game_id', '')) or '').startswith(self.target_game)
+                    ]
+                    if not available_games:
+                        print(f"[!] No games matching '{self.target_game}' found (had {original_count} games)")
+                        return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
+                    print(f"[TARGET] Focused on {len(available_games)} game(s) matching '{self.target_game}'")
                 
                 # ADAPTIVE SCALING: Extract unique game types from available games
                 # Dynamically determine game types instead of hardcoding
