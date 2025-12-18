@@ -28,7 +28,9 @@ import os
 
 # Disable pycache (Rule 1)
 sys.dont_write_bytecode = True
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'import hashlib
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+import hashlib
 import json
 import logging
 import random

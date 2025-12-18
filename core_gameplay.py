@@ -1995,18 +1995,19 @@ class GameplayEngine:
                                     consecutive_no_frame_change = STUCK_STATE_THRESHOLD - 10  # Allow 10 more tries
                                 else:
                                     # Exhausted escape attempts - truly stuck
-                                    # For pioneers: break immediately to save actions
-                                    # For others: reset and try again (they have sequences to follow)
+                                    # Break for ANY agent at frontier level (not just pioneers)
+                                    # Only non-pioneers on NON-frontier levels should reset and continue
                                     logger.warning(
                                         f"[ESCAPE] All {ESCAPE_ATTEMPTS_MAX} escape attempts failed. Game truly stuck on level {current_level}."
                                     )
-                                    if agent_mode == 'pioneer' and is_frontier_level:
-                                        logger.info(f"   Terminating pioneer exploration to avoid wasting actions")
-                                        break  # Exit game loop for pioneers at frontier
+                                    if is_frontier_level:
+                                        # ANYONE at frontier should stop wasting actions when truly stuck
+                                        logger.info(f"   Terminating exploration at frontier L{current_level} to avoid wasting actions")
+                                        break  # Exit game loop for ANY agent at frontier
                                     else:
-                                        # Non-pioneers: reset escape mode and continue
-                                        # Maybe the sequence will recover, or they'll hit a different path
-                                        logger.info(f"   {agent_mode or 'Agent'}: Resetting escape mode, continuing exploration")
+                                        # Non-frontier levels: reset escape mode and continue
+                                        # They have sequences to follow that might work on next cycle
+                                        logger.info(f"   {agent_mode or 'Agent'}: Resetting escape mode, continuing (non-frontier level)")
                                         in_escape_mode = False
                                         escape_attempts = 0
                                         consecutive_no_frame_change = 0  # Full reset
