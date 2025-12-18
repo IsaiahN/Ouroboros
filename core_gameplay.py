@@ -7659,8 +7659,62 @@ class GameplayEngine:
             if current:
                 failures = (current[0].get('consecutive_failures') or 0) + 1
                 
-                # Deactivate after 7 consecutive failures (less aggressive to allow for cosmetic variations)
-                if failures >= 7:
+                # REDUNDANCY-BASED SEQUENCE PROTECTION:
+                # - Only deactivate L3+ if sufficient redundancy exists (10+ active sequences)
+                # - Increase threshold to 15 for lower levels (allow for game variations)
+                # - Sequences are REFERENCE DATA, not exact scripts - failures expected
+                
+                # Get level number and game_id for this sequence
+                seq_info = self.db.execute_query("""
+                    SELECT level_number, game_id FROM winning_sequences WHERE sequence_id = ?
+                """, (sequence_id,))
+                level_num = seq_info[0].get('level_number', 1) if seq_info else 1
+                seq_game_id = seq_info[0].get('game_id', '') if seq_info else ''
+                
+                # For L3+ sequences, check redundancy before deactivating
+                if level_num >= 3 and failures >= 10:
+                    # Count other active sequences at same level for same game
+                    redundancy = self.db.execute_query("""
+                        SELECT COUNT(*) as cnt FROM winning_sequences 
+                        WHERE game_id = ? AND level_number = ? AND is_active = 1 AND sequence_id != ?
+                    """, (seq_game_id, level_num, sequence_id))
+                    same_level_count = redundancy[0].get('cnt', 0) if redundancy else 0
+                    
+                    # Count sequences at higher levels (means this level is no longer frontier)
+                    higher_levels = self.db.execute_query("""
+                        SELECT COUNT(*) as cnt FROM winning_sequences 
+                        WHERE game_id = ? AND level_number > ? AND is_active = 1
+                    """, (seq_game_id, level_num))
+                    higher_level_count = higher_levels[0].get('cnt', 0) if higher_levels else 0
+                    
+                    # Deactivate if: 10+ same-level sequences OR 5+ higher-level sequences exist
+                    if same_level_count >= 10 or higher_level_count >= 5:
+                        self.db.execute_query("""
+                            UPDATE winning_sequences 
+                            SET is_active = 0, quick_flagged = 1, 
+                                consecutive_failures = ?, flag_reason = ?
+                            WHERE sequence_id = ?
+                        """, (failures, f"redundant_L{level_num}: {same_level_count} same, {higher_level_count} higher", sequence_id))
+                        logger.info(f"[REDUNDANT] L{level_num} {sequence_id[:12]} deactivated - {same_level_count} same-level, {higher_level_count} higher-level sequences exist")
+                    else:
+                        # Not enough redundancy - keep active but track failures
+                        self.db.execute_query("""
+                            UPDATE winning_sequences 
+                            SET consecutive_failures = ?, flag_reason = ?,
+                                quick_flagged = CASE WHEN ? >= 10 THEN 1 ELSE quick_flagged END
+                            WHERE sequence_id = ?
+                        """, (failures, f"protected_L{level_num}: {failure_reason} (only {same_level_count} redundant)", failures, sequence_id))
+                        logger.info(f"[PROTECTED] L{level_num} {sequence_id[:12]} kept active - only {same_level_count} same-level sequences (need 10+)")
+                elif level_num >= 3:
+                    # L3+ but under 10 failures - just track
+                    self.db.execute_query("""
+                        UPDATE winning_sequences 
+                        SET consecutive_failures = ?, flag_reason = ?
+                        WHERE sequence_id = ?
+                    """, (failures, f"L{level_num}_tracking: {failure_reason}", sequence_id))
+                    logger.debug(f"[TRACK] L{level_num} {sequence_id[:12]} failure #{failures}")
+                elif failures >= 15:
+                    # Only deactivate L1-L2 after 15 consecutive failures
                     self.db.execute_query("""
                         UPDATE winning_sequences 
                         SET is_active = 0, quick_flagged = 1, 
@@ -7669,13 +7723,13 @@ class GameplayEngine:
                     """, (failures, f"3try_deactivate: {failure_reason}", sequence_id))
                     logger.warning(f"[DEACTIVATE] {sequence_id[:12]} after {failures} consecutive failures: {failure_reason}")
                 else:
-                    # Just increment failure count
+                    # Just increment failure count - sequence still useful as reference
                     self.db.execute_query("""
                         UPDATE winning_sequences 
                         SET consecutive_failures = ?, flag_reason = ?
                         WHERE sequence_id = ?
                     """, (failures, failure_reason, sequence_id))
-                    logger.info(f"[FLAG] {sequence_id[:12]} failure #{failures}: {failure_reason}")
+                    logger.info(f"[FLAG] {sequence_id[:12]} failure #{failures}: {failure_reason} (ref data still valid)")
                     
         except Exception as e:
             logger.debug(f"Error flagging sequence failure: {e}")
@@ -7974,6 +8028,75 @@ class GameplayEngine:
             actions = json.loads(sequence['action_sequence'])
             coordinates = json.loads(sequence.get('coordinate_sequence', '[]'))
             
+            # ================================================================
+            # ADAPTIVE REPLAY MODE: Use sequence as REFERENCE, not script
+            # ================================================================
+            # Instead of blindly replaying, track progress and adapt:
+            # 1. Execute actions but monitor if they're having expected effect
+            # 2. If score improves, keep following sequence
+            # 3. If stuck (no progress for N actions), try hypothesis variations
+            # 4. If variation works, continue; if not, return to sequence
+            # ================================================================
+            adaptive_mode = True  # Enable adaptive replay
+            stuck_threshold = 15  # Actions without score change before trying variations
+            last_score = game_state.score
+            actions_since_progress = 0
+            variation_attempts = 0
+            max_variations = 3  # Max times to try variations before giving up
+            
+            # IMPROVED STUCK DETECTION: Track frame novelty, not just score
+            # Stuck = no score improvement AND low frame novelty (repeated frames)
+            recent_frame_hashes = []  # Track last N frame hashes
+            max_frame_history = 10  # How many frames to remember
+            
+            def compute_frame_hash(frame):
+                """Simple frame hash for novelty detection."""
+                try:
+                    if isinstance(frame, list):
+                        return hash(str(frame))
+                    return hash(str(frame))
+                except:
+                    return 0
+            
+            # Ensure variation patterns table exists (for learning)
+            try:
+                self.db.execute_query("""
+                    CREATE TABLE IF NOT EXISTS sequence_variation_patterns (
+                        game_type TEXT NOT NULL,
+                        level_number INTEGER NOT NULL,
+                        original_sequence_id TEXT NOT NULL,
+                        variation_actions TEXT NOT NULL,
+                        trigger_action_index INTEGER,
+                        success_count INTEGER DEFAULT 1,
+                        last_used TEXT,
+                        discovered_at TEXT,
+                        PRIMARY KEY (game_type, level_number, original_sequence_id)
+                    )
+                """)
+            except Exception:
+                pass  # Table might already exist
+            
+            # Check for known successful variations for this game type
+            known_variations = {}
+            try:
+                game_type = sequence.get('game_id', '').split('-')[0] if sequence.get('game_id') else 'unknown'
+                var_results = self.db.execute_query("""
+                    SELECT variation_actions, success_count 
+                    FROM sequence_variation_patterns 
+                    WHERE game_type = ? AND level_number = ? AND success_count >= 2
+                    ORDER BY success_count DESC LIMIT 3
+                """, (game_type, sequence.get('level_number', 1)))
+                if var_results:
+                    for vr in var_results:
+                        try:
+                            known_variations[tuple(json.loads(vr['variation_actions']))] = vr['success_count']
+                        except:
+                            pass
+                    if known_variations:
+                        logger.info(f"[ADAPTIVE] Found {len(known_variations)} proven variation patterns for {game_type}")
+            except Exception as e:
+                logger.debug(f"Could not load known variations: {e}")
+            
             action_count = 0
             coord_index = start_index  # Start from checkpoint for coordinates
             
@@ -8032,6 +8155,248 @@ class GameplayEngine:
                     action = f"ACTION{action_num}"
                     # Use actual_level (score-based) not sequence's level_number
                     game_state = await self._execute_action(action, game_state, "", actual_level)
+                
+                # ================================================================
+                # ADAPTIVE REPLAY: Track progress and adapt if stuck
+                # ================================================================
+                if adaptive_mode:
+                    # Track frame novelty for improved stuck detection
+                    current_frame_hash = compute_frame_hash(game_state.frame)
+                    recent_frame_hashes.append(current_frame_hash)
+                    if len(recent_frame_hashes) > max_frame_history:
+                        recent_frame_hashes.pop(0)
+                    
+                    # Calculate frame novelty: how many unique frames in recent history?
+                    unique_frames = len(set(recent_frame_hashes))
+                    frame_novelty = unique_frames / max(len(recent_frame_hashes), 1)
+                    low_novelty = frame_novelty < 0.3  # Less than 30% unique = stuck in loop
+                    
+                    if game_state.score > last_score:
+                        # Progress! Reset stuck counter
+                        actions_since_progress = 0
+                        last_score = game_state.score
+                        recent_frame_hashes.clear()  # Reset frame history on progress
+                        logger.debug(f"[ADAPTIVE] Score improved to {game_state.score} - sequence on track")
+                    else:
+                        actions_since_progress += 1
+                        
+                        # IMPROVED STUCK DETECTION: score stagnant AND low frame novelty
+                        # This prevents bailing out during setup phases where frames change but score doesn't
+                        is_truly_stuck = (actions_since_progress >= stuck_threshold and 
+                                         (low_novelty or actions_since_progress >= stuck_threshold + 5))
+                        
+                        if is_truly_stuck and variation_attempts < max_variations:
+                            variation_attempts += 1
+                            logger.info(f"[ADAPTIVE] STUCK: {actions_since_progress} actions, novelty={frame_novelty:.1%} - trying variation {variation_attempts}/{max_variations}")
+                            
+                            # ================================================================
+                            # SMART HYPOTHESIS VARIATION: Use sequence pattern to guide recovery
+                            # ================================================================
+                            # 0. FIRST: Try known successful variations from other agents
+                            # 1. Analyze remaining sequence actions to understand general intent
+                            # 2. Try compensating based on sequence bias (if mostly UP, goal is likely up)
+                            # 3. Try opposite of recent actions (break oscillation)
+                            # 4. Visual-target ACTION6 clicks (saliency-based)
+                            # 5. ACTION7 undo as escape hatch
+                            # ================================================================
+                            
+                            import random
+                            from collections import Counter
+                            
+                            # ACTION MEANINGS for logging
+                            action_meanings = {1: 'UP', 2: 'DOWN', 3: 'RIGHT', 4: 'LEFT', 5: 'SPECIAL', 6: 'CLICK', 7: 'UNDO'}
+                            direction_opposites = {1: 2, 2: 1, 3: 4, 4: 3}  # UP<->DOWN, RIGHT<->LEFT
+                            
+                            # PRIORITY 0: Try known successful variations first!
+                            if known_variations and variation_attempts == 1:
+                                # Sort by success count and try the best one
+                                best_variation = max(known_variations.items(), key=lambda x: x[1])
+                                proven_actions = list(best_variation[0])
+                                logger.info(f"[ADAPTIVE] Trying PROVEN variation (success={best_variation[1]}): {[action_meanings.get(a, str(a)) for a in proven_actions]}")
+                                
+                                for var_action in proven_actions:
+                                    if game_state.state != "NOT_FINISHED":
+                                        break
+                                    game_state = await self._execute_action(f"ACTION{var_action}", game_state, "", actual_level)
+                                    if game_state.score > last_score:
+                                        logger.info(f"[ADAPTIVE] PROVEN variation worked! Score now {game_state.score}")
+                                        actions_since_progress = 0
+                                        last_score = game_state.score
+                                        
+                                        # Update success count
+                                        try:
+                                            self.db.execute_query("""
+                                                UPDATE sequence_variation_patterns 
+                                                SET success_count = success_count + 1, last_used = ?
+                                                WHERE game_type = ? AND level_number = ?
+                                            """, (datetime.now().isoformat(), game_type, actual_level))
+                                        except:
+                                            pass
+                                        break
+                                
+                                actions_since_progress = 0
+                                continue  # Skip to next iteration, don't generate new variations
+                            
+                            # Count directional bias in full sequence (excluding clicks)
+                            directional_actions = [a for a in actions if a in [1, 2, 3, 4]]
+                            if directional_actions:
+                                action_counts = Counter(directional_actions)
+                                dominant_direction = action_counts.most_common(1)[0][0] if action_counts else None
+                                
+                                # Calculate net movement intent
+                                vertical_bias = action_counts.get(1, 0) - action_counts.get(2, 0)  # UP - DOWN
+                                horizontal_bias = action_counts.get(3, 0) - action_counts.get(4, 0)  # RIGHT - LEFT
+                                
+                                logger.info(f"[ADAPTIVE] Sequence bias: V={vertical_bias:+d} (UP-DOWN), H={horizontal_bias:+d} (RIGHT-LEFT)")
+                            else:
+                                vertical_bias = 0
+                                horizontal_bias = 0
+                                dominant_direction = None
+                            
+                            # Get recent actions (last 10 executed) to detect oscillation
+                            recent_actions = self.game_config.get('current_actions', [])[-10:]
+                            recent_directional = [a for a in recent_actions if a in [1, 2, 3, 4]]
+                            
+                            # Build smart variation strategy
+                            variation_actions = []
+                            
+                            # Strategy 1: Try reinforcing the dominant sequence direction (2-3 moves)
+                            if dominant_direction:
+                                variation_actions.extend([dominant_direction] * 3)
+                                logger.debug(f"[ADAPTIVE] Strategy 1: Reinforce {action_meanings.get(dominant_direction, '?')} x3")
+                            
+                            # Strategy 2: If sequence has strong directional bias, push that way
+                            if abs(vertical_bias) > 3:
+                                push_dir = 1 if vertical_bias > 0 else 2  # UP if positive, DOWN if negative
+                                variation_actions.extend([push_dir] * 2)
+                                logger.debug(f"[ADAPTIVE] Strategy 2: Push {action_meanings.get(push_dir, '?')} x2 (bias={vertical_bias})")
+                            if abs(horizontal_bias) > 3:
+                                push_dir = 3 if horizontal_bias > 0 else 4  # RIGHT if positive, LEFT if negative
+                                variation_actions.extend([push_dir] * 2)
+                                logger.debug(f"[ADAPTIVE] Strategy 2: Push {action_meanings.get(push_dir, '?')} x2 (bias={horizontal_bias})")
+                            
+                            # Strategy 3: Break oscillation - if recent has lots of back-forth, try perpendicular
+                            if len(recent_directional) >= 4:
+                                recent_counts = Counter(recent_directional)
+                                # Detect UP-DOWN oscillation
+                                if recent_counts.get(1, 0) >= 2 and recent_counts.get(2, 0) >= 2:
+                                    # Try horizontal instead
+                                    variation_actions.extend([3, 4, 3])  # RIGHT, LEFT, RIGHT
+                                    logger.debug(f"[ADAPTIVE] Strategy 3: Break V oscillation with H moves")
+                                # Detect LEFT-RIGHT oscillation
+                                elif recent_counts.get(3, 0) >= 2 and recent_counts.get(4, 0) >= 2:
+                                    # Try vertical instead
+                                    variation_actions.extend([1, 2, 1])  # UP, DOWN, UP
+                                    logger.debug(f"[ADAPTIVE] Strategy 3: Break H oscillation with V moves")
+                            
+                            # Strategy 4: Interaction escalation - ACTION5 → ACTION6 → ACTION7
+                            # ACTION5 is game-specific (rotate/toggle), ACTION6 is click, ACTION7 is undo
+                            if 5 in actions and random.random() < 0.4:
+                                variation_actions.append(5)
+                                logger.debug(f"[ADAPTIVE] Strategy 4a: Try ACTION5 (game-specific interaction)")
+                            
+                            # Strategy 5: Visual-target ACTION6 (click) - find salient region
+                            # Only try if ACTION6 is in the sequence (game supports clicking)
+                            if 6 in actions and len(variation_actions) < 6:
+                                try:
+                                    # Simple saliency: find most distinct color region
+                                    click_coords = self._find_salient_click_target(game_state.frame)
+                                    if click_coords:
+                                        # Store coords for ACTION6 execution
+                                        variation_actions.append(('CLICK', click_coords[0], click_coords[1]))
+                                        logger.debug(f"[ADAPTIVE] Strategy 5: Visual-target ACTION6 at ({click_coords[0]}, {click_coords[1]})")
+                                except Exception as e:
+                                    logger.debug(f"[ADAPTIVE] Saliency detection failed: {e}")
+                            
+                            # Strategy 6: If still need more, add biased random (favor sequence direction)
+                            while len(variation_actions) < 6:
+                                if dominant_direction and random.random() < 0.6:
+                                    variation_actions.append(dominant_direction)
+                                else:
+                                    variation_actions.append(random.choice([1, 2, 3, 4]))
+                            
+                            # Limit to 8 variation actions max
+                            variation_actions = variation_actions[:8]
+                            
+                            # Format for logging (handle click tuples)
+                            def format_action(a):
+                                if isinstance(a, tuple) and a[0] == 'CLICK':
+                                    return f"CLICK({a[1]},{a[2]})"
+                                return action_meanings.get(a, str(a))
+                            logger.info(f"[ADAPTIVE] Smart variation: {[format_action(a) for a in variation_actions]}")
+                            
+                            # Execute variation actions and track which worked
+                            successful_variation = None
+                            actions_tried = []
+                            pre_variation_score = game_state.score
+                            
+                            for var_action in variation_actions:
+                                if game_state.state != "NOT_FINISHED":
+                                    break
+                                
+                                # Handle ACTION6 click with coordinates
+                                if isinstance(var_action, tuple) and var_action[0] == 'CLICK':
+                                    x, y = var_action[1], var_action[2]
+                                    actions_tried.append(6)
+                                    click_reasoning = {
+                                        'action': 'ACTION6',
+                                        'reasoning': 'Adaptive saliency-based click variation',
+                                        'coordinate': {'x': x, 'y': y}
+                                    }
+                                    game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=click_reasoning, level_number=actual_level)
+                                else:
+                                    actions_tried.append(var_action)
+                                    game_state = await self._execute_action(f"ACTION{var_action}", game_state, "", actual_level)
+                                
+                                if game_state.score > last_score:
+                                    successful_variation = actions_tried.copy()
+                                    logger.info(f"[ADAPTIVE] Variation worked! Score now {game_state.score} after {format_action(var_action)}")
+                                    actions_since_progress = 0
+                                    last_score = game_state.score
+                                    
+                                    # LEARN: Store successful variation pattern for this game type
+                                    try:
+                                        game_type = sequence.get('game_id', '').split('-')[0] if sequence.get('game_id') else 'unknown'
+                                        self.db.execute_query("""
+                                            INSERT OR REPLACE INTO sequence_variation_patterns
+                                            (game_type, level_number, original_sequence_id, variation_actions, 
+                                             trigger_action_index, success_count, last_used, discovered_at)
+                                            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+                                            ON CONFLICT(game_type, level_number, original_sequence_id) DO UPDATE SET
+                                                success_count = success_count + 1,
+                                                last_used = excluded.last_used,
+                                                variation_actions = CASE 
+                                                    WHEN length(excluded.variation_actions) < length(variation_actions) 
+                                                    THEN excluded.variation_actions 
+                                                    ELSE variation_actions 
+                                                END
+                                        """, (game_type, actual_level, sequence_id, json.dumps(successful_variation),
+                                              idx, datetime.now().isoformat(), datetime.now().isoformat()))
+                                        logger.debug(f"[LEARN] Stored successful variation pattern for {game_type} L{actual_level}")
+                                    except Exception as learn_err:
+                                        logger.debug(f"[LEARN] Could not store variation (table may not exist): {learn_err}")
+                                    break
+                            
+                            # ================================================================
+                            # ACTION7 UNDO: Escape hatch if variation made things worse
+                            # ================================================================
+                            # If we tried variations but score didn't improve and we might have
+                            # toggled something bad (via ACTION5 or click), try ACTION7 to undo
+                            if successful_variation is None and game_state.score <= pre_variation_score:
+                                # Check if we used any interaction actions (5 or 6) that might need undoing
+                                used_interactions = any(a in [5, 6] or (isinstance(a, tuple) and a[0] == 'CLICK') for a in actions_tried)
+                                if used_interactions and game_state.state == "NOT_FINISHED":
+                                    try:
+                                        logger.info(f"[ADAPTIVE] Trying ACTION7 (undo) to escape bad toggle/click")
+                                        game_state = await self._execute_action("ACTION7", game_state, "", actual_level)
+                                        # Try one more undo if available (some games support multi-undo)
+                                        if game_state.state == "NOT_FINISHED":
+                                            game_state = await self._execute_action("ACTION7", game_state, "", actual_level)
+                                    except Exception as undo_err:
+                                        logger.debug(f"[ADAPTIVE] ACTION7 undo failed (may not be available): {undo_err}")
+                            
+                            # Reset stuck counter regardless - we tried something
+                            actions_since_progress = 0
                 
                 # Track action for abstraction engine WITH MEMORY LEAK PROTECTION
                 if 'current_actions' in self.game_config:
@@ -8855,8 +9220,56 @@ class GameplayEngine:
                         # Increment consecutive failures
                         new_failures = current_failures + 1
                         
-                        # Deactivate if frame mismatch (immediate) or 5+ consecutive failures
-                        if frame_mismatch or new_failures >= 5:
+                        # REDUNDANCY-BASED PROTECTION: Get level and game for this sequence
+                        seq_info = self.db.execute_query("""
+                            SELECT level_number, game_id FROM winning_sequences WHERE sequence_id = ?
+                        """, (sequence_id,))
+                        seq_level = seq_info[0].get('level_number', 1) if seq_info else 1
+                        seq_game = seq_info[0].get('game_id', '') if seq_info else ''
+                        
+                        # HIGH-LEVEL SEQUENCES (L3+): Only deactivate if sufficient redundancy
+                        if seq_level >= 3 and new_failures >= 8:
+                            # Check redundancy at same level
+                            redundancy = self.db.execute_query("""
+                                SELECT COUNT(*) as cnt FROM winning_sequences 
+                                WHERE game_id = ? AND level_number = ? AND is_active = 1 AND sequence_id != ?
+                            """, (seq_game, seq_level, sequence_id))
+                            same_level_count = redundancy[0].get('cnt', 0) if redundancy else 0
+                            
+                            # Check higher levels
+                            higher = self.db.execute_query("""
+                                SELECT COUNT(*) as cnt FROM winning_sequences 
+                                WHERE game_id = ? AND level_number > ? AND is_active = 1
+                            """, (seq_game, seq_level))
+                            higher_count = higher[0].get('cnt', 0) if higher else 0
+                            
+                            # Deactivate if: 10+ same-level OR 5+ higher-level exist
+                            if same_level_count >= 10 or higher_count >= 5:
+                                self.db.execute_query("""
+                                    UPDATE winning_sequences 
+                                    SET is_active = 0, quick_flagged = 1,
+                                        consecutive_failures = ?, flag_reason = ?
+                                    WHERE sequence_id = ?
+                                """, (new_failures, f'redundant_L{seq_level}_{same_level_count}same_{higher_count}higher', sequence_id))
+                                logger.info(f"[REDUNDANT] L{seq_level} {sequence_id[:12]} deactivated - sufficient coverage exists")
+                            else:
+                                # Keep active - not enough redundancy
+                                self.db.execute_query("""
+                                    UPDATE winning_sequences 
+                                    SET consecutive_failures = ?, flag_reason = ?,
+                                        quick_flagged = 1
+                                    WHERE sequence_id = ?
+                                """, (new_failures, f'protected_L{seq_level}_need_redundancy', sequence_id))
+                                logger.info(f"[PROTECTED] L{seq_level} {sequence_id[:12]} kept - only {same_level_count} same-level (need 10+)")
+                        elif seq_level >= 3:
+                            # L3+ but under threshold - just track failures
+                            self.db.execute_query("""
+                                UPDATE winning_sequences 
+                                SET consecutive_failures = ?, flag_reason = ?
+                                WHERE sequence_id = ?
+                            """, (new_failures, f'L{seq_level}_tracking_{new_failures}', sequence_id))
+                        # Deactivate L1-L2 only after 12+ failures (not 5)
+                        elif frame_mismatch or new_failures >= 12:
                             flag_reason = 'frame_mismatch' if frame_mismatch else f'{new_failures}_consecutive_failures'
                             self.db.execute_query("""
                                 UPDATE winning_sequences 
@@ -8867,8 +9280,8 @@ class GameplayEngine:
                                 WHERE sequence_id = ?
                             """, (new_failures, flag_reason, sequence_id))
                             logger.warning(f"[QUICK DEACTIVATE] {sequence_id[:12]} - {flag_reason}")
-                        elif new_failures >= 3 and not already_flagged:
-                            # Flag for review at 3+ failures
+                        elif new_failures >= 6 and not already_flagged:
+                            # Flag for review at 6+ failures (was 3)
                             self.db.execute_query("""
                                 UPDATE winning_sequences 
                                 SET quick_flagged = 1,
@@ -8878,7 +9291,7 @@ class GameplayEngine:
                             """, (new_failures, f'{new_failures}_failures_review', sequence_id))
                             logger.info(f"[WARN] QUICK FLAG: {sequence_id[:12]} - {new_failures} consecutive failures")
                         else:
-                            # Just increment failures
+                            # Just increment failures - sequence still valid as reference
                             self.db.execute_query("""
                                 UPDATE winning_sequences 
                                 SET consecutive_failures = ?
@@ -9004,6 +9417,80 @@ class GameplayEngine:
             
         except Exception as e:
             logger.error(f"Error updating sequence reputation: {e}")
+    
+    def _find_salient_click_target(self, frame) -> Optional[Tuple[int, int]]:
+        """
+        Find a salient click target using simple computer vision heuristics.
+        
+        Strategies (cheap CV, no deep model needed):
+        1. Saliency click: centroid of most distinct color blob vs background
+        2. Contrast click: brightest/darkest region
+        3. Center click: if all else fails, click near center
+        
+        Args:
+            frame: Current game frame (2D grid of color values)
+            
+        Returns:
+            (x, y) coordinates in [0..63] range, or None if can't determine
+        """
+        try:
+            # Normalize frame format
+            if not isinstance(frame, list) or len(frame) == 0:
+                return None
+            
+            # Handle nested frames
+            if isinstance(frame[0], list) and len(frame[0]) > 0:
+                if isinstance(frame[0][0], list):
+                    frame = frame[0]  # Unwrap one level
+            
+            height = len(frame)
+            width = len(frame[0]) if height > 0 and isinstance(frame[0], list) else 0
+            
+            if height == 0 or width == 0:
+                return None
+            
+            # Strategy 1: Find most common color (background) and distinct colors
+            from collections import Counter
+            all_cells = []
+            for row in frame:
+                if isinstance(row, list):
+                    all_cells.extend(row)
+            
+            if not all_cells:
+                return None
+            
+            color_counts = Counter(all_cells)
+            background_color = color_counts.most_common(1)[0][0]
+            
+            # Find cells that are NOT background (salient)
+            salient_positions = []
+            for y, row in enumerate(frame):
+                if isinstance(row, list):
+                    for x, cell in enumerate(row):
+                        if cell != background_color:
+                            salient_positions.append((x, y))
+            
+            if salient_positions:
+                # Return centroid of salient region
+                avg_x = sum(p[0] for p in salient_positions) // len(salient_positions)
+                avg_y = sum(p[1] for p in salient_positions) // len(salient_positions)
+                
+                # Scale to 0-63 range (ARC grids are typically small, API expects 0-63)
+                # ARC grids are usually 3-30 cells, so scale up
+                scale_x = 64 // max(width, 1)
+                scale_y = 64 // max(height, 1)
+                
+                target_x = min(63, max(0, avg_x * scale_x + scale_x // 2))
+                target_y = min(63, max(0, avg_y * scale_y + scale_y // 2))
+                
+                return (target_x, target_y)
+            
+            # Strategy 2: No salient region, click center
+            return (32, 32)
+            
+        except Exception as e:
+            logger.debug(f"Saliency detection error: {e}")
+            return None
     
     def _calculate_frame_similarity(self, frame1, frame2) -> float:
         """
