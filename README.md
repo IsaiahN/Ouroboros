@@ -1,64 +1,25 @@
-# Ouroboros: Proof of Influence - Distributed Consensus of Proof of Action Via Networks
+## Ouroboros: Generalized learning via distributed networks
 
-**The Network is the Organism.**
-- [Proof of Influence] Our project in a nutshell aims to highlight the concepts behind distributed consensus on Proof-of-Stake via the network (one level above).
+**Paradigm Shift - The Network is the Organism.**
 
 - Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
-- Why Society is a Network: [AGI is not a brain - It's a Network](https://adventuresinml.substack.com/p/agi-is-not-a-brain-its-a-society)
 
 ### The Process of Discovery
-**We stand on the shoulders of giants.**
+**The Nature of the Problem**
 
-These documents trace the theoretical foundations behind Ouroboros.
-These are not my discoveries (whatsoever), but should recieve any/all praise for any insights that might emerge from the project.
-This project stems from many different discussions, interviews and media from the world top domain experts that talk about conscioussness, free will, theory of mind, etc.
-Without the contribution of each and every one of these individuals in their writings, in their teachings in their lectures - this theory would not have legs.
-
-**The Nature of the REAL Problem (from this viewpoint):**
-
-Solving AGI Alignment in LLMs is a matter of understanding the Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).
-
-**The Burden of Proof**:
-The Conversation thread of alignment and proof of mutual understanding, allowing us to discuss conversation on a meta level cross-context.
-
-**The Proof**: [Proof of Influence](https://github.com/IsaiahN/Ouroboros/blob/Ouroboros/DOCS/proof%20of%20influence.md)
+Taming Alignment is a matter of understanding the **<ins>Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).</ins>**
+This system explains some of the underlying mechanisms behind the butterfly effect.
 
 Here are some of the bigger collaborators/influences for the project:
 
-Project Collaborators:
-
-- **Patrick Cox - Tetrahedral Object architecture (Self Model/World Model Interactions "Proof of Action")**
-   - ***Heavily influenced by Euclidian concepts, rounding mechanics, Number theory, visualizations, artificial Intuition, Tensors, and more. (in laymans terms' he works to prove the [Infinite monkey_theorem](https://en.wikipedia.org/wiki/Infinite_monkey_theorem))***
-    - Not to get super meta, but the concept of repositories are based on graphs too, so the github repo history this is posted in is also the proof of Action. My Part of this equation proves that whatever influenced you to become the way you are (nature), you only remain that way because you choose it (free will). Everything i changed in this project, every code or word used changed with my understanding of the concept. the more i understood, the better the application or understanding of the output.
+- **Patrick Cox - Tetrahedral Object architecture (Math based Storytelling for characters)**
 
 - **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
    - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
 
-**Side-Note**: Heuristics (i.e: Metaphors) are mainly useful in retrospect to explore interpretations of the truth.
-You can only validate their accuracy (and to what to degree they align) if you have the Master Theory (Steve Jobs - [Connect The Dots Speech](https://www.youtube.com/watch?v=5BSbOc5VYY8)).
- 
-Papers/Blog Post That Contributed:
-- [Rich Sutton - The Bitter Lesson](https://www.cs.utexas.edu/~eunsol/courses/data/bitter_lesson.pdf)
-   - **"The biggest lesson that can be read from 70 years of AI research is that general methods that leverage
-computation are ultimately the most effective, and by a large margin."** (Mind shifting)
-- [Proof of Work](https://en.wikipedia.org/wiki/Proof_of_work) (Your Path through the [Graph Theory](https://en.wikipedia.org/wiki/Path_(graph_theory)))
-- [Proof of Stake](https://en.wikipedia.org/wiki/Proof_of_stake) (Distributed Consensus on PoW)
 
-Deep-Domain Interviews that served as inspiration:
-- [Alex Garland: Ex Machina, Devs, Annihilation, and the Poetry of Science | Lex Fridman Podcast #77](https://www.youtube.com/watch?v=gU-mkuMU428)
-- [Stephen Wolfram's Radical Theory of Everything](https://www.youtube.com/watch?v=FkYer0xP37E)
-
-Movies/Popular Media:
-- [Star Trek Season 5 Episode 2 (Darmak)](https://en.wikipedia.org/wiki/Darmok) Explains the problem of communication.
-- [Devs (TV series)](https://en.wikipedia.org/wiki/Devs_(TV_series)) (It takes the concept of Finding alignment to the Nth Degree - but through a Deterministic lens)
-- [Arrival](https://en.wikipedia.org/wiki/Arrival_(film)) (although very sci fi, tries to explore the concept of deciphering language)
-- [The Matrix](https://en.wikipedia.org/wiki/The_Matrix) (all four films - one of the most popular films of all time with theories about simulations, free will, etc.)
-- [Ex Machina (film) - Wikipedia](https://en.wikipedia.org/wiki/Ex_Machina_(film)) discusses observer theory, the turing test and other notable philosophical thought experiments
-- [M3GAN](https://en.wikipedia.org/wiki/M3GAN) (Both films, although they change genre - explore free will in general, and also explore Nietzsche's void principle)
-
-- Honorable (media) Mentions: [Bleach](https://en.wikipedia.org/wiki/Bleach_(manga)) (duality) | [FMA/FMAB](https://en.wikipedia.org/wiki/Fullmetal_Alchemist)
-
-
+- We are grateful to our collaborators, acquaintences, friends, family and all connections (past/present/future) who contribute.
+  
 | Document | Hard Problem It Addresses | Link |
 |----------|---------------------------|------|
 | **Answering [Gödel's Incompleteness](https://en.wikipedia.org/wiki/G%C3%B6del%27s_incompleteness_theorems)** | Why no single unit can have all understanding - and how networks are evolution's workaround | [DOCS/answering for Godels Incompleteness Problem.md](DOCS/answering%20for%20Godels%20Incompleteness%20Problem.md) |
@@ -229,4 +190,5 @@ python manual_tools/schema_inspector.py --counts
 <img width="1325" height="545" alt="image" src="https://github.com/user-attachments/assets/f8b00168-0c93-4161-bc3d-88faa1689ce7" />
 
 ***"The more you know, the more you know you don't know."*** ― Aristotle
-***"The proof is in the pudding"*** - My mother often said this idiom.
+
+***"The proof is in the pudding"*** - My mother often said this cliche.
