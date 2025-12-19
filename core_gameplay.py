@@ -689,6 +689,12 @@ class GameplayEngine:
                         viral_engine = ViralPackageEngine(self.db)
                         generation = self.game_config.get('generation', 0)
                         
+                        # GAP 5 FIX: Track improvement for all packages agent carries
+                        # They contributed to this level win
+                        improved = viral_engine.track_agent_packages_improvement(agent_id)
+                        if improved > 0:
+                            logger.debug(f"[VIRAL] {improved} packages tracked as helpful for L{level_for_storage} win")
+                        
                         package_id = viral_engine.create_viral_package_from_sequence(
                             sequence_id, agent_id, generation
                         )
@@ -1690,7 +1696,12 @@ class GameplayEngine:
             
             # STUCK STATE DETECTION (for games like ls20 that finish but don't report it)
             consecutive_no_frame_change = 0  # Track actions with no frame change
-            STUCK_STATE_THRESHOLD = 100  # If 100 consecutive actions have no frame change and no score increase, game is likely stuck/finished
+            STUCK_STATE_THRESHOLD = 100  # Default for non-frontier levels
+            STUCK_STATE_THRESHOLD_FRONTIER = 30  # Frontier levels: detect stuck faster (was 100, wasted budget)
+            
+            # Cycle detection for early stuck detection
+            recent_action_hashes = []  # Track last N action patterns for cycle detection
+            CYCLE_DETECTION_WINDOW = 8  # Check last 8 actions for cycles
             
             # STUCK STATE ESCAPE: Before giving up, try intelligent escape actions
             # Increased from 5 to 10 since we now use intelligent action selection
@@ -1698,6 +1709,9 @@ class GameplayEngine:
             ESCAPE_ATTEMPTS_MAX = 10  # Try 10 different intelligent escape actions before giving up
             escape_attempts = 0  # Track escape attempts
             in_escape_mode = False  # Flag for escape mode
+            
+            # Track queried hypotheses for later contradiction if they don't help
+            queried_hypothesis_ids = []  # IDs of hypotheses used this game
 
             # API ERROR TRACKING (to prevent spam when API is having issues)
             consecutive_api_errors = 0  # Track consecutive API errors
@@ -1852,6 +1866,13 @@ class GameplayEngine:
                             except Exception as e:
                                 logger.debug(f"World model action update failed: {e}")
                         
+                        # CYCLE DETECTION: Track action for oscillation detection
+                        action_num = action if isinstance(action, int) else 0
+                        recent_action_hashes.append(action_num)
+                        # Keep sliding window for cycle detection
+                        if len(recent_action_hashes) > CYCLE_DETECTION_WINDOW:
+                            recent_action_hashes.pop(0)
+                        
                         # Self-model: Track controlled objects on every exploration action
                         if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
                             try:
@@ -1942,7 +1963,26 @@ class GameplayEngine:
                         if not frame_changed and score_increase == 0:
                             consecutive_no_frame_change += 1
                             
-                            if consecutive_no_frame_change >= STUCK_STATE_THRESHOLD:
+                            # ADAPTIVE THRESHOLD: Lower threshold at frontier (30) vs non-frontier (100)
+                            current_stuck_threshold = STUCK_STATE_THRESHOLD_FRONTIER if is_frontier_level else STUCK_STATE_THRESHOLD
+                            
+                            # CYCLE DETECTION: Check if recent actions form a repeating pattern
+                            cycle_detected = False
+                            if len(recent_action_hashes) >= CYCLE_DETECTION_WINDOW:
+                                # Check for 2-action or 3-action cycles (e.g., up-down-up-down)
+                                last_4 = recent_action_hashes[-4:]
+                                if len(last_4) >= 4:
+                                    if last_4[0] == last_4[2] and last_4[1] == last_4[3]:  # AB-AB pattern
+                                        cycle_detected = True
+                                        logger.debug(f"[CYCLE] Detected 2-action oscillation: {last_4}")
+                                last_6 = recent_action_hashes[-6:]
+                                if len(last_6) >= 6:
+                                    if last_6[0] == last_6[3] and last_6[1] == last_6[4] and last_6[2] == last_6[5]:  # ABC-ABC
+                                        cycle_detected = True
+                                        logger.debug(f"[CYCLE] Detected 3-action oscillation: {last_6}")
+                            
+                            # Trigger escape if threshold hit OR cycle detected
+                            if consecutive_no_frame_change >= current_stuck_threshold or (cycle_detected and consecutive_no_frame_change >= 10):
                                 # ================================================================
                                 # STUCK STATE ESCAPE: Try different actions before giving up
                                 # Instead of immediately breaking, try escape actions first
@@ -2196,6 +2236,11 @@ class GameplayEngine:
                         # VALIDATE HYPOTHESES: Mark previous failure hypotheses as validated
                         # Since we completed this level, any hypotheses about earlier levels were helpful
                         self._validate_hypothesis_by_win(game_id, int(game_state.score))
+                        
+                        # GAP 6 FIX: Clear queried hypothesis IDs since they helped us win
+                        if hasattr(self, '_queried_hypothesis_ids') and self._queried_hypothesis_ids:
+                            logger.debug(f"[HYPOTHESIS] {len(self._queried_hypothesis_ids)} hypotheses contributed to L{int(game_state.score)} win")
+                            self._queried_hypothesis_ids = []  # Reset for next level
                         
                         # NOTE: World model now updates on every action (see action_succeeded block above)
                         # No need for redundant level completion update
@@ -2465,7 +2510,43 @@ class GameplayEngine:
                         if spread_count > 0:
                             logger.info(f"[VIRAL] Viral package spread to {spread_count} agents")
                 
-                # If LOSS: Create pariah from failure pattern
+                # FRONTIER PARTIAL PROGRESS: Create temporary viral package from partial progress
+                # These help future agents reach frontier faster, cleaned up once sequences exist
+                elif not results['win'] and game_state.score >= 1.0 and current_level > int(game_state.score):
+                    # Agent made progress (completed some levels) but failed at frontier
+                    # Check if the failed level is actually a frontier (no sequences exist)
+                    game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                    frontier_check = self.db.execute_query("""
+                        SELECT COUNT(*) as seq_count FROM winning_sequences
+                        WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
+                    """, (f"{game_type}-%", current_level))
+                    
+                    is_frontier = not frontier_check or frontier_check[0]['seq_count'] == 0
+                    
+                    if is_frontier:
+                        # Create frontier exploration package with the actions taken on this frontier level
+                        action_traces = self.db.execute_query("""
+                            SELECT action_number, coordinates, score_after
+                            FROM action_traces
+                            WHERE game_id = ? AND session_id = ? AND level_number = ?
+                            ORDER BY timestamp ASC
+                        """, (game_id, self.session_manager.current_session_id, current_level))
+                        
+                        if action_traces and len(action_traces) >= 5:
+                            # Create frontier package with is_frontier_temp=True flag
+                            frontier_pkg_id = viral_engine.create_frontier_exploration_package(
+                                game_type=game_type,
+                                level_number=current_level,
+                                agent_id=agent_id,
+                                action_traces=action_traces,
+                                final_score=game_state.score,
+                                generation=generation
+                            )
+                            if frontier_pkg_id:
+                                results['frontier_package_created'] = frontier_pkg_id
+                                logger.info(f"[FRONTIER] Created temp viral package {frontier_pkg_id[:12]} for L{current_level} exploration")
+                
+                # If LOSS with no progress: Create pariah from failure pattern
                 elif not results['win'] and game_state.score < 1.0:
                     # Get failed action sequence
                     action_traces = self.db.execute_query("""
@@ -2530,6 +2611,14 @@ class GameplayEngine:
                 if hypothesis_id:
                     results['failure_hypothesis_id'] = hypothesis_id
                     logger.info(f"[HYPOTHESIS] Generated failure hypothesis {hypothesis_id[:12]} for level {current_level}")
+                
+                # GAP 6 FIX: Contradict queried hypotheses that didn't help
+                # If we queried hypotheses and still failed, they weren't useful
+                if hasattr(self, '_queried_hypothesis_ids') and self._queried_hypothesis_ids:
+                    for hyp_id in self._queried_hypothesis_ids:
+                        self._contradict_hypothesis(hyp_id, f'game_failed_at_level_{current_level}')
+                    logger.debug(f"[HYPOTHESIS] Contradicted {len(self._queried_hypothesis_ids)} unhelpful hypotheses")
+                    self._queried_hypothesis_ids = []  # Reset for next game
 
             # ROLE SELF-DETERMINATION: Update agent's role fit score after game
             # This enables agents to self-determine their preferred roles based on performance
@@ -2881,6 +2970,15 @@ class GameplayEngine:
             try:
                 failure_hypotheses = self._get_network_failure_hypotheses(current_game_id, current_level)
                 
+                # TRACK queried hypothesis IDs for later contradiction if they don't help
+                if failure_hypotheses:
+                    for hyp in failure_hypotheses:
+                        hyp_id = hyp.get('hypothesis_id')
+                        if hyp_id and not hasattr(self, '_queried_hypothesis_ids'):
+                            self._queried_hypothesis_ids = []
+                        if hyp_id:
+                            self._queried_hypothesis_ids.append(hyp_id)
+                
                 if failure_hypotheses:
                     # Parse hypotheses to extract action biases
                     for hyp in failure_hypotheses:
@@ -3123,8 +3221,11 @@ class GameplayEngine:
                 from viral_package_engine import ViralPackageEngine
                 viral_engine = ViralPackageEngine(self.db)
                 
-                # Get positive influence from viral packages
-                action_weights = viral_engine.get_package_action_weights(agent_id)
+                # Get current generation for tracking
+                generation = self.game_config.get('generation', 0)
+                
+                # Get positive influence from viral packages (now tracks retrievals)
+                action_weights = viral_engine.get_package_action_weights(agent_id, generation=generation)
                 
                 # Get negative influence from pariahs WITH ROLE-ADJUSTED TOLERANCE
                 # Per agi_unified_theory.md: Exploiters/Optimizers have pariah immunity
@@ -6764,6 +6865,9 @@ class GameplayEngine:
         Returns the most useful hypotheses (highest confidence, most validated)
         to include in the world model reasoning context.
         
+        SOFT RETIREMENT: Hypotheses with confidence < 0.2 or net downvotes > 5
+        are excluded from queries but kept in database for history.
+        
         Args:
             game_id: Current game
             level_number: Current level
@@ -6776,9 +6880,12 @@ class GameplayEngine:
             game_type = game_id[:4] if game_id else ''
             
             # Get top hypotheses for this game type and level
-            # Prefer: validated_by_win > high upvotes > recent
+            # SOFT RETIREMENT: Exclude hypotheses that have been contradicted too much
+            # - confidence < 0.2 = effectively retired
+            # - net downvotes > 5 = community rejected
             hypotheses = self.db.execute_query("""
                 SELECT 
+                    hypothesis_id,
                     failure_reason,
                     win_strategy,
                     confidence,
@@ -6789,7 +6896,8 @@ class GameplayEngine:
                 FROM network_failure_hypotheses
                 WHERE game_type = ? 
                   AND level_number <= ?
-                  AND (upvotes - downvotes) >= -2
+                  AND confidence >= 0.2
+                  AND (upvotes - downvotes) >= -5
                 ORDER BY 
                     validated_by_win DESC,
                     (upvotes - downvotes) DESC,
@@ -6803,16 +6911,20 @@ class GameplayEngine:
             
             result = []
             for h in hypotheses:
-                # Calculate effective confidence
+                # Calculate effective confidence with decay from downvotes
                 vote_score = (h['upvotes'] or 0) - (h['downvotes'] or 0)
+                base_confidence = h['confidence'] or 0.5
+                
                 if h.get('validated_by_win'):
-                    effective_confidence = min(1.0, (h['confidence'] or 0.5) + 0.3)
+                    effective_confidence = min(1.0, base_confidence + 0.3)
                 elif vote_score > 0:
-                    effective_confidence = min(1.0, (h['confidence'] or 0.5) + vote_score * 0.05)
+                    effective_confidence = min(1.0, base_confidence + vote_score * 0.05)
                 else:
-                    effective_confidence = max(0.1, (h['confidence'] or 0.5) + vote_score * 0.1)
+                    # Decay confidence when contradicted
+                    effective_confidence = max(0.1, base_confidence + vote_score * 0.1)
                 
                 result.append({
+                    'hypothesis_id': h['hypothesis_id'],  # For tracking
                     'level': h['hypothesis_level'],
                     'failure': h['failure_reason'][:100],  # Truncate for JSON size
                     'strategy': h['win_strategy'][:150],
@@ -6871,6 +6983,29 @@ class GameplayEngine:
             
         except Exception as e:
             logger.debug(f"Failed to validate hypotheses: {e}")
+
+    def _contradict_hypothesis(self, hypothesis_id: str, reason: str = 'failed_to_help') -> None:
+        """
+        Downvote a hypothesis when it's proven wrong or unhelpful.
+        
+        SOFT RETIREMENT: Hypotheses that accumulate too many contradictions
+        will have their confidence decay and eventually be excluded from queries.
+        The row is kept for history but effectively retired.
+        
+        Args:
+            hypothesis_id: The hypothesis to contradict
+            reason: Why it's being contradicted
+        """
+        try:
+            self.db.execute_query("""
+                UPDATE network_failure_hypotheses
+                SET downvotes = downvotes + 1,
+                    confidence = MAX(0.0, confidence - 0.1)
+                WHERE hypothesis_id = ?
+            """, (hypothesis_id,))
+            logger.debug(f"Contradicted hypothesis {hypothesis_id[:12]}: {reason}")
+        except Exception as e:
+            logger.debug(f"Failed to contradict hypothesis: {e}")
 
     def _get_agent_operating_mode(self, agent_id: Optional[str]) -> Optional[str]:
         """

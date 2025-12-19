@@ -350,30 +350,99 @@ class DatabaseInterface:
         if not all(field in trace_data for field in required_fields):
             raise ValueError(f"Missing required fields: {required_fields}")
 
+        # Generate frame hash for state-aware queries
+        frame_hash = None
+        if trace_data.get('frame_before'):
+            try:
+                import hashlib
+                frame_data = trace_data['frame_before']
+                if isinstance(frame_data, list):
+                    # Create a simple hash from frame data
+                    frame_str = str(frame_data)[:1000]  # Truncate for performance
+                    frame_hash = hashlib.md5(frame_str.encode()).hexdigest()[:16]
+            except Exception:
+                pass
+
         with self._get_connection() as conn:
-            conn.execute("""
-                INSERT INTO action_traces (
-                    session_id, game_id, action_number, coordinates,
-                    timestamp, frame_before, frame_after, frame_changed,
-                    score_before, score_after, score_change, response_data,
-                    level_number, resulted_in_game_over
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                trace_data['session_id'],
-                trace_data['game_id'],
-                trace_data.get('action_number', 0),
-                json.dumps(trace_data.get('coordinates')) if trace_data.get('coordinates') else None,
-                trace_data['timestamp'],
-                json.dumps(trace_data.get('frame_before')) if trace_data.get('frame_before') else None,
-                json.dumps(trace_data.get('frame_after')) if trace_data.get('frame_after') else None,
-                trace_data.get('frame_changed', False),
-                trace_data.get('score_before', 0.0),
-                trace_data.get('score_after', 0.0),
-                trace_data.get('score_change', 0.0),
-                json.dumps(trace_data.get('response_data')) if trace_data.get('response_data') else None,
-                trace_data.get('level_number', 1),  # Default to level 1 if not specified
-                trace_data.get('resulted_in_game_over', False)  # Q5: terminal failure tracking
-            ))
+            # Try with frame_hash column (new schema)
+            try:
+                conn.execute("""
+                    INSERT INTO action_traces (
+                        session_id, game_id, action_number, coordinates,
+                        timestamp, frame_before, frame_after, frame_changed,
+                        score_before, score_after, score_change, response_data,
+                        level_number, resulted_in_game_over, frame_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    trace_data['session_id'],
+                    trace_data['game_id'],
+                    trace_data.get('action_number', 0),
+                    json.dumps(trace_data.get('coordinates')) if trace_data.get('coordinates') else None,
+                    trace_data['timestamp'],
+                    json.dumps(trace_data.get('frame_before')) if trace_data.get('frame_before') else None,
+                    json.dumps(trace_data.get('frame_after')) if trace_data.get('frame_after') else None,
+                    trace_data.get('frame_changed', False),
+                    trace_data.get('score_before', 0.0),
+                    trace_data.get('score_after', 0.0),
+                    trace_data.get('score_change', 0.0),
+                    json.dumps(trace_data.get('response_data')) if trace_data.get('response_data') else None,
+                    trace_data.get('level_number', 1),  # Default to level 1 if not specified
+                    trace_data.get('resulted_in_game_over', False),  # Q5: terminal failure tracking
+                    frame_hash  # State signature for context-aware queries
+                ))
+            except sqlite3.OperationalError:
+                # Column doesn't exist yet - add it and retry
+                try:
+                    conn.execute("ALTER TABLE action_traces ADD COLUMN frame_hash TEXT")
+                    conn.execute("""
+                        INSERT INTO action_traces (
+                            session_id, game_id, action_number, coordinates,
+                            timestamp, frame_before, frame_after, frame_changed,
+                            score_before, score_after, score_change, response_data,
+                            level_number, resulted_in_game_over, frame_hash
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        trace_data['session_id'],
+                        trace_data['game_id'],
+                        trace_data.get('action_number', 0),
+                        json.dumps(trace_data.get('coordinates')) if trace_data.get('coordinates') else None,
+                        trace_data['timestamp'],
+                        json.dumps(trace_data.get('frame_before')) if trace_data.get('frame_before') else None,
+                        json.dumps(trace_data.get('frame_after')) if trace_data.get('frame_after') else None,
+                        trace_data.get('frame_changed', False),
+                        trace_data.get('score_before', 0.0),
+                        trace_data.get('score_after', 0.0),
+                        trace_data.get('score_change', 0.0),
+                        json.dumps(trace_data.get('response_data')) if trace_data.get('response_data') else None,
+                        trace_data.get('level_number', 1),
+                        trace_data.get('resulted_in_game_over', False),
+                        frame_hash
+                    ))
+                except Exception:
+                    # Fall back to old schema without frame_hash
+                    conn.execute("""
+                        INSERT INTO action_traces (
+                            session_id, game_id, action_number, coordinates,
+                            timestamp, frame_before, frame_after, frame_changed,
+                            score_before, score_after, score_change, response_data,
+                            level_number, resulted_in_game_over
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        trace_data['session_id'],
+                        trace_data['game_id'],
+                        trace_data.get('action_number', 0),
+                        json.dumps(trace_data.get('coordinates')) if trace_data.get('coordinates') else None,
+                        trace_data['timestamp'],
+                        json.dumps(trace_data.get('frame_before')) if trace_data.get('frame_before') else None,
+                        json.dumps(trace_data.get('frame_after')) if trace_data.get('frame_after') else None,
+                        trace_data.get('frame_changed', False),
+                        trace_data.get('score_before', 0.0),
+                        trace_data.get('score_after', 0.0),
+                        trace_data.get('score_change', 0.0),
+                        json.dumps(trace_data.get('response_data')) if trace_data.get('response_data') else None,
+                        trace_data.get('level_number', 1),
+                        trace_data.get('resulted_in_game_over', False)
+                    ))
             conn.commit()
 
     def get_action_traces(self, session_id: Optional[str] = None, game_id: Optional[str] = None,

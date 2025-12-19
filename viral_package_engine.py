@@ -36,12 +36,39 @@ class ViralPackageEngine:
     
     def __init__(self, db: DatabaseInterface):
         self.db = db
+        self._ensure_frontier_columns()
         
         # Phase 4.5: Initialize sensation engine if available
         if SENSATION_AVAILABLE:
             self.sensation_engine = SensationEngine(db)
         else:
             self.sensation_engine = None
+    
+    def _ensure_frontier_columns(self):
+        """Ensure frontier package columns exist in viral_information_packages table."""
+        try:
+            # Check if columns exist, add if missing
+            columns_to_add = [
+                ("is_frontier_temp", "BOOLEAN DEFAULT FALSE"),
+                ("frontier_level", "INTEGER"),
+                ("frontier_game_type", "TEXT"),
+                ("deactivated_reason", "TEXT"),
+                # USEFULNESS TRACKING: Track if package actually helps agents
+                ("retrieval_count", "INTEGER DEFAULT 0"),
+                ("improvement_count", "INTEGER DEFAULT 0"),  # Times retrieval led to score improvement
+                ("last_retrieval_generation", "INTEGER")
+            ]
+            
+            for col_name, col_def in columns_to_add:
+                try:
+                    self.db.execute_query(f"SELECT {col_name} FROM viral_information_packages LIMIT 1")
+                except Exception:
+                    # Column doesn't exist, add it
+                    self.db.execute_query(f"ALTER TABLE viral_information_packages ADD COLUMN {col_name} {col_def}")
+                    print(f"[SCHEMA] Added column {col_name} to viral_information_packages")
+        except Exception as e:
+            # Table might not exist yet, will be created later
+            pass
     
     # ========================================================================
     # VIRAL PACKAGE CREATION (Positive Selection)
@@ -627,6 +654,232 @@ class ViralPackageEngine:
             print(f"[PARIAH] Error updating avoidance: {e}")
     
     # ========================================================================
+    # FRONTIER EXPLORATION PACKAGES (Temporary - auto-cleaned when sequences exist)
+    # ========================================================================
+    
+    def create_frontier_exploration_package(
+        self,
+        game_type: str,
+        level_number: int,
+        agent_id: str,
+        action_traces: List[Dict],
+        final_score: float,
+        generation: int
+    ) -> Optional[str]:
+        """
+        Create a temporary viral package from frontier exploration.
+        
+        These packages capture partial progress at frontier levels where no
+        winning sequences exist yet. They help future agents reach the frontier
+        faster by sharing what actions were tried.
+        
+        IMPORTANT: These are TEMPORARY and will be auto-cleaned once enough
+        winning sequences exist for this level (see cleanup_obsolete_frontier_packages).
+        
+        Args:
+            game_type: Game type (e.g., 'as66')
+            level_number: The frontier level number
+            agent_id: Agent who explored
+            action_traces: List of action traces from frontier exploration
+            final_score: Final score achieved
+            generation: Current generation
+            
+        Returns:
+            package_id if created, None if failed
+        """
+        package_id = f"frontier_{uuid.uuid4().hex[:12]}"
+        
+        try:
+            # Extract action sequence from traces
+            actions = []
+            coords = []
+            for trace in action_traces:
+                action_type = trace.get('action_type', '')
+                if isinstance(action_type, str) and action_type.startswith('ACTION'):
+                    try:
+                        actions.append(int(action_type.replace('ACTION', '')))
+                    except:
+                        pass
+                if trace.get('coordinates'):
+                    try:
+                        coord = json.loads(trace['coordinates']) if isinstance(trace['coordinates'], str) else trace['coordinates']
+                        coords.append(coord)
+                    except:
+                        pass
+            
+            if not actions:
+                return None
+            
+            # Generate meta-strategy description
+            meta_strategy = f"Frontier L{level_number} exploration: {len(actions)} actions tried. "
+            
+            # Analyze action distribution
+            from collections import Counter
+            action_counts = Counter(actions)
+            dominant = action_counts.most_common(1)[0] if action_counts else (0, 0)
+            action_names = {1: 'up', 2: 'down', 3: 'left', 4: 'right', 5: 'toggle', 6: 'click', 7: 'undo'}
+            meta_strategy += f"Dominant: {action_names.get(dominant[0], 'unknown')} ({dominant[1]}x). "
+            meta_strategy += f"Score at failure: {final_score:.1f}"
+            
+            self.db.execute_query("""
+                INSERT INTO viral_information_packages (
+                    package_id, package_name, package_type,
+                    action_sequence, coordinate_pattern,
+                    virulence, transmission_rate, mutation_rate,
+                    discovery_generation, generation_discovered,
+                    is_active, is_frontier_temp, frontier_level, frontier_game_type,
+                    meta_strategy_description
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                package_id,
+                f"Frontier_{game_type}_L{level_number}_{generation}",
+                'frontier_exploration',
+                json.dumps(actions),
+                json.dumps(coords) if coords else None,
+                0.3,  # Lower virulence (temporary package)
+                0.2,  # Lower transmission
+                0.1,  # Higher mutation (encourage variation)
+                generation,
+                generation,
+                True,  # is_active
+                True,  # is_frontier_temp - FLAG FOR CLEANUP
+                level_number,
+                game_type,
+                meta_strategy
+            ))
+            
+            return package_id
+            
+        except Exception as e:
+            print(f"[FRONTIER] Error creating frontier package: {e}")
+            return None
+    
+    def cleanup_obsolete_frontier_packages(self, min_sequences_to_cleanup: int = 3) -> int:
+        """
+        Clean up frontier exploration packages that are no longer needed.
+        
+        Called periodically (e.g., start of each generation) to remove temporary
+        frontier packages once real winning sequences exist for that level.
+        
+        Args:
+            min_sequences_to_cleanup: Minimum active sequences required before cleanup
+            
+        Returns:
+            Number of packages cleaned up
+        """
+        try:
+            # Find frontier packages where sequences now exist
+            obsolete = self.db.execute_query("""
+                SELECT vip.package_id, vip.frontier_game_type, vip.frontier_level
+                FROM viral_information_packages vip
+                WHERE vip.is_frontier_temp = 1 AND vip.is_active = 1
+                AND EXISTS (
+                    SELECT 1 FROM winning_sequences ws
+                    WHERE ws.game_id LIKE vip.frontier_game_type || '-%'
+                    AND ws.level_number = vip.frontier_level
+                    AND ws.is_active = 1
+                    GROUP BY ws.level_number
+                    HAVING COUNT(*) >= ?
+                )
+            """, (min_sequences_to_cleanup,))
+            
+            # ALSO find useless packages: retrieved 10+ times but 0 improvements
+            useless = self.db.execute_query("""
+                SELECT package_id, frontier_game_type, frontier_level, retrieval_count, improvement_count
+                FROM viral_information_packages
+                WHERE is_frontier_temp = 1 AND is_active = 1
+                  AND retrieval_count >= 10
+                  AND improvement_count = 0
+            """)
+            
+            if not obsolete and not useless:
+                return 0
+            
+            cleaned = 0
+            
+            # Clean obsolete (sequences exist)
+            for pkg in (obsolete or []):
+                self.db.execute_query("""
+                    UPDATE viral_information_packages
+                    SET is_active = 0, deactivated_reason = 'sequences_exist'
+                    WHERE package_id = ?
+                """, (pkg['package_id'],))
+                cleaned += 1
+                print(f"[CLEANUP] Deactivated frontier package {pkg['package_id'][:12]} "
+                      f"for {pkg['frontier_game_type']} L{pkg['frontier_level']} (sequences exist)")
+            
+            # Clean useless (retrieved but never helped)
+            for pkg in (useless or []):
+                self.db.execute_query("""
+                    UPDATE viral_information_packages
+                    SET is_active = 0, deactivated_reason = 'useless_no_improvement'
+                    WHERE package_id = ?
+                """, (pkg['package_id'],))
+                cleaned += 1
+                print(f"[CLEANUP] Deactivated useless frontier package {pkg['package_id'][:12]} "
+                      f"(retrieved {pkg['retrieval_count']}x, 0 improvements)")
+            
+            return cleaned
+            
+        except Exception as e:
+            print(f"[CLEANUP] Error cleaning frontier packages: {e}")
+            return 0
+    
+    def track_package_retrieval(self, package_id: str, generation: int) -> None:
+        """Track that a package was retrieved for use."""
+        try:
+            self.db.execute_query("""
+                UPDATE viral_information_packages
+                SET retrieval_count = COALESCE(retrieval_count, 0) + 1,
+                    last_retrieval_generation = ?
+                WHERE package_id = ?
+            """, (generation, package_id))
+        except Exception:
+            pass
+    
+    def track_package_improvement(self, package_id: str) -> None:
+        """Track that a package retrieval led to score improvement."""
+        try:
+            self.db.execute_query("""
+                UPDATE viral_information_packages
+                SET improvement_count = COALESCE(improvement_count, 0) + 1
+                WHERE package_id = ?
+            """, (package_id,))
+        except Exception:
+            pass
+    
+    def track_agent_packages_improvement(self, agent_id: str) -> int:
+        """
+        Track improvement for all packages an agent carries.
+        
+        Called when agent completes a level - all packages they carry
+        contributed to that success.
+        
+        Args:
+            agent_id: The agent who just succeeded
+            
+        Returns:
+            Number of packages that received improvement tracking
+        """
+        try:
+            # Get all active packages for this agent
+            infections = self.db.execute_query("""
+                SELECT package_id FROM agent_viral_infections
+                WHERE agent_id = ? AND is_active = TRUE
+            """, (agent_id,))
+            
+            if not infections:
+                return 0
+            
+            # Track improvement for each package
+            for infection in infections:
+                self.track_package_improvement(infection['package_id'])
+            
+            return len(infections)
+        except Exception:
+            return 0
+    
+    # ========================================================================
     # ACTION SELECTION (Bidirectional Influence)
     # ========================================================================
     
@@ -703,12 +956,19 @@ class ViralPackageEngine:
         else:
             return f"Unknown failure pattern, score {final_score:.2f}, {len(failed_actions)} actions"
     
-    def get_package_action_weights(self, agent_id: str) -> Dict[int, float]:
+    def get_package_action_weights(self, agent_id: str, generation: int = 0, track_retrieval: bool = True) -> Dict[int, float]:
         """
         Get action weights from viral packages this agent carries.
         
         Phase 4.5 Enhancement: Includes emotional context compatibility.
         Packages with emotional context matching agent's current state get boosted weights.
+        
+        Also tracks package retrieval for usefulness metrics (Gap 5/6 fix).
+        
+        Args:
+            agent_id: The agent to get weights for
+            generation: Current generation for tracking
+            track_retrieval: Whether to track this retrieval (default True)
         
         Returns:
             Dict mapping action_id -> weight (higher = prefer this action)
@@ -728,6 +988,11 @@ class ViralPackageEngine:
         """, (agent_id,))
         
         action_weights = {}
+        
+        # Track which packages were retrieved (Gap 5 fix: wire up tracking)
+        if track_retrieval and generation > 0:
+            for infection in infections:
+                self.track_package_retrieval(infection['package_id'], generation)
         
         # Phase 4.5: Get agent's current emotional state for compatibility
         agent_navigation_state = 0.0
@@ -1190,6 +1455,77 @@ class ViralPackageEngine:
             LIMIT ?
         """, (limit,))
     
+    def cleanup_obsolete_pariahs(self, current_generation: int) -> int:
+        """
+        Soft-retire pariahs that are no longer valid traps.
+        
+        A pariah should be retired when:
+        1. High avoidance success rate (90%+) - agents easily avoid it, not a real trap
+        2. Very old without recent triggers (50+ generations stale)
+        3. Only triggered once (single failure, not a pattern)
+        
+        SOFT RETIREMENT: We don't delete, just deactivate (is_active = FALSE).
+        This preserves history while removing from active queries.
+        
+        Returns:
+            Number of pariahs soft-retired
+        """
+        try:
+            retired = 0
+            
+            # 1. High avoidance success = not a real trap
+            high_avoidance = self.db.execute_query("""
+                SELECT pariah_id FROM pariahs
+                WHERE is_active = TRUE
+                  AND avoidance_success_rate >= 0.9
+                  AND total_awareness >= 5
+            """)
+            for p in (high_avoidance or []):
+                self.db.execute_query("""
+                    UPDATE pariahs SET is_active = FALSE, obsolescence_score = 1.0
+                    WHERE pariah_id = ?
+                """, (p['pariah_id'],))
+                retired += 1
+            
+            # 2. Stale pariahs (50+ generations without trigger)
+            stale_threshold = current_generation - 50
+            stale = self.db.execute_query("""
+                SELECT pariah_id FROM pariahs
+                WHERE is_active = TRUE
+                  AND last_triggered_generation < ?
+                  AND discovery_generation < ?
+            """, (stale_threshold, stale_threshold))
+            for p in (stale or []):
+                self.db.execute_query("""
+                    UPDATE pariahs SET is_active = FALSE, obsolescence_score = 0.8
+                    WHERE pariah_id = ?
+                """, (p['pariah_id'],))
+                retired += 1
+            
+            # 3. Single-trigger pariahs older than 20 generations (not a pattern, just noise)
+            noise_threshold = current_generation - 20
+            noise = self.db.execute_query("""
+                SELECT pariah_id FROM pariahs
+                WHERE is_active = TRUE
+                  AND trigger_count <= 1
+                  AND discovery_generation < ?
+            """, (noise_threshold,))
+            for p in (noise or []):
+                self.db.execute_query("""
+                    UPDATE pariahs SET is_active = FALSE, obsolescence_score = 0.5
+                    WHERE pariah_id = ?
+                """, (p['pariah_id'],))
+                retired += 1
+            
+            if retired > 0:
+                print(f"[CLEANUP] Soft-retired {retired} obsolete pariahs")
+            
+            return retired
+            
+        except Exception as e:
+            print(f"[CLEANUP] Error retiring pariahs: {e}")
+            return 0
+
     # Phase 4.5: Emotional compatibility methods
     
     def _calculate_emotional_compatibility(self, package_id: str, agent_navigation_state: float) -> float:

@@ -1932,6 +1932,21 @@ class AutonomousEvolutionRunner:
                 except Exception as e:
                     print(f"  [WARN] Revival system failed: {e}")
             
+            # Frontier package cleanup (remove temp packages when sequences exist)
+            try:
+                from viral_package_engine import ViralPackageEngine
+                viral_engine = ViralPackageEngine(self.db)
+                cleaned = viral_engine.cleanup_obsolete_frontier_packages(min_sequences_to_cleanup=3)
+                if cleaned > 0:
+                    print(f"  [OK] Cleaned {cleaned} obsolete frontier packages (sequences now exist)")
+                
+                # Also cleanup obsolete pariahs (soft retirement)
+                pariah_retired = viral_engine.cleanup_obsolete_pariahs(self.current_generation)
+                if pariah_retired > 0:
+                    print(f"  [OK] Soft-retired {pariah_retired} obsolete pariahs")
+            except Exception as e:
+                print(f"  [WARN] Frontier package cleanup failed: {e}")
+            
             # Safe database cleanup (comprehensive - replaces HistoricalDataCleaner)
             try:
                 cleaner = SafeDatabaseCleaner()
