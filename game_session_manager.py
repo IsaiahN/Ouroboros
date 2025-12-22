@@ -447,6 +447,23 @@ class GameSessionManager:
             # Extract level_number from kwargs (CRITICAL for multi-level sequence capture)
             level_number = kwargs.get('level_number', 1)
             
+            # FIX: Compute frame_changed HERE where we have both frame_before and frame_after
+            # Previously, frame_changed was computed in action_handler AFTER send_action returned,
+            # so it was never passed in kwargs and always defaulted to False.
+            # This caused stuck detection to think frames never changed, triggering false escapes.
+            frame_before = kwargs.get('frame_before')
+            frame_after = game_state.frame
+            frame_changed = False
+            if frame_before and frame_after:
+                # Compare frames to detect changes
+                if len(frame_before) != len(frame_after):
+                    frame_changed = True
+                else:
+                    for i, row in enumerate(frame_after):
+                        if i >= len(frame_before) or row != frame_before[i]:
+                            frame_changed = True
+                            break
+            
             # Save ALL action traces to enable sequence capture
             # MUST log every action for _capture_winning_sequence() to reconstruct full sequences
             # Without complete action history, breakthrough discoveries are permanently lost
@@ -458,9 +475,9 @@ class GameSessionManager:
                 'level_number': level_number,  # CRITICAL: Must save level_number for sequence capture
                 'coordinates': kwargs.get('coordinates') if action == 'ACTION6' else None,
                 'timestamp': action_start_time,
-                'frame_before': kwargs.get('frame_before'),  # CRITICAL for viral package extraction
-                'frame_after': game_state.frame,             # CRITICAL for pariah failure checkpoints
-                'frame_changed': kwargs.get('frame_changed', False),
+                'frame_before': frame_before,  # CRITICAL for viral package extraction
+                'frame_after': frame_after,    # CRITICAL for pariah failure checkpoints
+                'frame_changed': frame_changed,  # Now computed correctly above
                 'score_before': kwargs.get('score_before', 0.0),
                 'score_after': game_state.score,
                 'score_change': score_change,
@@ -480,8 +497,8 @@ class GameSessionManager:
                     game_state.score
                 )
 
-            # Update action effectiveness
-            success = score_change > 0 or kwargs.get('frame_changed', False)
+            # Update action effectiveness - now using correctly computed frame_changed
+            success = score_change > 0 or frame_changed
 
             self.db.update_action_effectiveness(
                 self.current_game_id,

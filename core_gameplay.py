@@ -1981,8 +1981,11 @@ class GameplayEngine:
                                         cycle_detected = True
                                         logger.debug(f"[CYCLE] Detected 3-action oscillation: {last_6}")
                             
-                            # Trigger escape if threshold hit OR cycle detected
-                            if consecutive_no_frame_change >= current_stuck_threshold or (cycle_detected and consecutive_no_frame_change >= 10):
+                            # Trigger escape if threshold hit OR cycle detected with enough stagnation
+                            # With frame_changed now computed correctly in game_session_manager.py,
+                            # we can use a moderate threshold of 15 for cycle-triggered escape
+                            cycle_trigger_threshold = 15  # Must have 15 no-frame-change + cycle to trigger early
+                            if consecutive_no_frame_change >= current_stuck_threshold or (cycle_detected and consecutive_no_frame_change >= cycle_trigger_threshold):
                                 # ================================================================
                                 # STUCK STATE ESCAPE: Try different actions before giving up
                                 # Instead of immediately breaking, try escape actions first
@@ -8174,7 +8177,11 @@ class GameplayEngine:
             # 4. If variation works, continue; if not, return to sequence
             # ================================================================
             adaptive_mode = True  # Enable adaptive replay
-            stuck_threshold = 15  # Actions without score change before trying variations
+            # FIX: stuck_threshold must be > sequence length, otherwise we interrupt
+            # proven sequences that have late score changes (e.g., sp80: 23 actions, score at end)
+            # Use sequence length + 10 as buffer, minimum 30 for short sequences
+            sequence_length = len(actions)
+            stuck_threshold = max(30, sequence_length + 10)  # Actions without score change before trying variations
             last_score = game_state.score
             actions_since_progress = 0
             variation_attempts = 0
