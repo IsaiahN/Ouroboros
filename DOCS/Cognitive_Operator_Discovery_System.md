@@ -1,9 +1,86 @@
 # Cognitive Operator Discovery System (CODS)
 
-**Version**: 1.0  
+**Version**: 3.0  
 **Date**: 2025-12-23  
-**Purpose**: Self-evolving cognitive vocabulary through compositional primitives and RLVR validation  
+**Purpose**: Self-evolving cognitive vocabulary through compositional primitives, RLVR validation, and recursive self-improvement  
 **Status**: Implementation Guide
+
+---
+
+## Changelog v3.0
+
+### Added (Meta-Representation & Self-Extension)
+
+1. **Tier 5: Discovery Strategies (Meta-Meta Layer)**
+   - Strategies are discoverable, not hardcoded
+   - System learns HOW to discover, not just WHAT to discover
+   - `DiscoveryStrategyLibrary` for reusable meta-patterns
+   - `SelfExtendingCODS` wrapper for autonomous primitive generation
+
+2. **Operator Introspection Primitives** (Locked - for self-programming)
+   - `serialize_operator`, `deserialize_operator` - Operators as data
+   - `extract_operator_pattern`, `identify_operator_family` - Analyze operators
+   - `instantiate_operator_template`, `compose_operators` - Generate operators
+   - `specialize_operator`, `generalize_operator` - Modify operators
+   - `predict_operator_utility`, `explain_operator_success` - Reason about operators
+
+3. **Self-Extension Loop**
+   - Failure analysis → Knowledge gap identification → Hypothesis generation
+   - RLVR validation → Primitive addition → Meta-learning extraction
+   - Discovery patterns become reusable strategies
+
+4. **Victory Conditions** (AGI Milestones)
+   - Self-Discovery: Novel primitive without Oracle
+   - Meta-Discovery: Discovery strategy discovered from pattern
+   - Self-Teaching: System explains discovery in viral package
+   - Surprise: System discovers primitive YOU didn't think of
+
+5. **Five-Tier Architecture** (Updated from Four-Tier)
+   - Tier 1: Seed Primitives (Given)
+   - Tier 2: Operators (Compositions)
+   - Tier 3: Locked/Novel Primitives (Earned)
+   - Tier 4: Concepts (Semantic Models - Emerged)
+   - Tier 5: Discovery Strategies (Meta-Patterns - Self-Discovered)
+
+6. **Total Locked Primitives**: 70+ → 80+
+
+---
+
+## Changelog v2.0
+
+### Added (Based on Failure Pattern Analysis)
+
+1. **Physical Simulation Primitives** (Locked)
+   - `flow_simulation`, `containment_check`, `capacity_estimate`, `boundary_seal_check`
+   - `implicit_wall_detect`, `overflow_predict`, `conservation_tracking`, `gravity_direction`
+   - Addresses containment-class problems (bounded regions, overflow, boundaries)
+
+2. **Meta-Representational Primitives** (Locked)
+   - `identify_reference_object`, `extract_schema`, `create_variable_mapping`, `apply_template`
+   - `validate_binding`, `detect_legend_object`, `schema_instantiation`, `context_dependent_meaning`
+   - Addresses reference-class problems (objects representing rules about other objects)
+
+3. **Constraint Satisfaction Primitives** (Locked)
+   - `identify_constraints`, `check_constraint_satisfaction`, `find_minimal_changes`
+   - `resolve_overlapping_constraints`, `priority_order_constraints`, `detect_contradiction`
+
+4. **Inverse/Optimization Primitives** (Locked)
+   - `calculate_goal_distance`, `identify_preserved_properties`, `find_inverse_action`
+   - `optimize_action_sequence`, `cyclic_space_distance`, `already_correct_detection`
+
+5. **Tier 4: Concept Emergence Layer**
+   - Semantic models that organize which operators are relevant
+   - Discovered through cross-game pattern recognition
+   - `ConceptDiscoveryEngine` implementation
+   - `CounterfactualToConceptPipeline` for failure-driven concept discovery
+
+6. **Four-Tier Architecture** (Updated from Three-Tier)
+   - Tier 1: Seed Primitives (Given)
+   - Tier 2: Operators (Compositions)
+   - Tier 3: Locked/Novel Primitives (Earned)
+   - Tier 4: Concepts (Semantic Models - Emerged)
+
+7. **Total Locked Primitives**: 40+ → 70+
 
 ---
 
@@ -238,7 +315,65 @@ Future primitives that humans know about but system hasn't earned yet:
 | `loop_until` | Repeat until condition satisfied | System discovers while-loop pattern |
 | `parallel_execute` | Run multiple primitives simultaneously | System discovers parallel execution pattern |
 
-**Total Locked Primitives: 40+**
+#### Physical Simulation (Containment/Flow Problems)
+| Primitive | What It Does | Unlock Condition |
+|-----------|--------------|------------------|
+| `flow_simulation` | Predict where dynamic content (liquid, particles) will go | System discovers path-of-least-resistance patterns |
+| `containment_check` | Check if region is fully sealed/bounded | System discovers that unsealed edges cause failures |
+| `capacity_estimate` | Calculate volume/capacity of bounded region | System discovers volume correlates with success |
+| `boundary_seal_check` | Verify all edges of container are blocked | System discovers sealing-before-filling pattern |
+| `implicit_wall_detect` | Recognize grid edges as implicit boundaries | System discovers edge-of-grid = wall constraint |
+| `overflow_predict` | Predict if content will exceed container capacity | System discovers overflow causes failure |
+| `conservation_tracking` | Track if quantity is preserved through transformation | System discovers quantity conservation patterns |
+| `gravity_direction` | Determine dominant "down" direction in game | System discovers directional bias in content flow |
+
+#### Meta-Representational (Reference/Template Problems)
+| Primitive | What It Does | Unlock Condition |
+|-----------|--------------|------------------|
+| `identify_reference_object` | Detect objects that define rules for other objects | System discovers some objects are "keys" or "legends" |
+| `extract_schema` | Get abstract structure independent of specific values | System discovers pattern structure vs. content separation |
+| `create_variable_mapping` | Bind placeholders to concrete values | System discovers white/gray → actual colors pattern |
+| `apply_template` | Instantiate schema with variable bindings | System discovers template application pattern |
+| `validate_binding` | Check if variable assignment is consistent | System discovers binding consistency matters |
+| `detect_legend_object` | Find object that serves as key/map/template | System discovers central reference patterns |
+| `schema_instantiation` | Apply abstract schema to concrete region | System discovers schema → instance transformation |
+| `context_dependent_meaning` | Same symbol means different things in different contexts | System discovers context-dependent interpretation |
+
+#### Constraint Satisfaction
+| Primitive | What It Does | Unlock Condition |
+|-----------|--------------|------------------|
+| `identify_constraints` | Extract all active constraints/rules from state | System discovers game states have implicit rules |
+| `check_constraint_satisfaction` | Verify if constraint is currently met | System discovers constraint checking patterns |
+| `find_minimal_changes` | Minimum edits to satisfy constraint | System discovers optimization over constraint space |
+| `resolve_overlapping_constraints` | Handle regions with multiple constraints | System discovers constraint intersection handling |
+| `priority_order_constraints` | Which constraints to satisfy first | System discovers constraint ordering matters |
+| `detect_contradiction` | Identify unsatisfiable constraint combinations | System discovers dead-end constraint states |
+
+#### Inverse/Optimization Reasoning
+| Primitive | What It Does | Unlock Condition |
+|-----------|--------------|------------------|
+| `calculate_goal_distance` | How far from target state in arbitrary space | System discovers distance-to-goal heuristics |
+| `identify_preserved_properties` | What should NOT change during solution | System discovers "don't fix what isn't broken" |
+| `find_inverse_action` | What undoes a given action | System discovers action reversal patterns |
+| `optimize_action_sequence` | Minimize steps to achieve goal | System discovers sequence optimization |
+| `cyclic_space_distance` | Distance in cyclic/modular space (color cycles, etc.) | System discovers modular arithmetic patterns |
+| `already_correct_detection` | Identify elements already in target state | System discovers skip-correct-elements pattern |
+
+#### Operator Introspection (Self-Programming)
+| Primitive | What It Does | Unlock Condition |
+|-----------|--------------|------------------|
+| `serialize_operator` | Convert operator to inspectable data structure | System discovers operators can be represented as data |
+| `deserialize_operator` | Convert data structure back to executable operator | System discovers data can become executable |
+| `extract_operator_pattern` | Find common structure across multiple operators | System discovers operators have reusable patterns |
+| `identify_operator_family` | Group operators by structural similarity | System discovers operators form families |
+| `instantiate_operator_template` | Create new operator from pattern + bindings | System discovers parameterized operator creation |
+| `compose_operators` | Combine multiple operators into single operator | System discovers operator composition |
+| `specialize_operator` | Add constraints to make operator more specific | System discovers specialization pattern |
+| `generalize_operator` | Remove constraints to make operator more general | System discovers generalization pattern |
+| `predict_operator_utility` | Estimate if operator will help on problem | System discovers utility prediction |
+| `explain_operator_success` | Analyze WHY an operator worked | System discovers causal explanation of success |
+
+**Total Locked Primitives: 80+**
 
 **These exist in human knowledge but system can't use them until earned.**
 
@@ -1201,6 +1336,337 @@ operator_512 = [
 
 ---
 
+## Concept Emergence Layer (Tier 4)
+
+### The Missing Layer: Semantic Models Above Operators
+
+The existing architecture has three tiers:
+- **Tier 1: Seed Primitives** - Raw data access (get_pixel, add, for_each)
+- **Tier 2: Operators** - Compositions of primitives that work
+- **Tier 3: Locked/Novel Primitives** - Earned or discovered capabilities
+
+But there's a critical missing tier:
+- **Tier 4: Concepts** - Semantic models that organize which operators are relevant
+
+### What Are Concepts?
+
+Concepts are **not primitives** - they are **organizing principles** that tell the system which category of operators to even consider.
+
+| Concept | What It Represents | Operators It Organizes |
+|---------|-------------------|------------------------|
+| **Containment** | Bounded regions with finite capacity, edges leak | `boundary_seal_check`, `flow_simulation`, `capacity_estimate` |
+| **Reference Semantics** | Objects that represent rules about other objects | `identify_reference_object`, `extract_schema`, `apply_template` |
+| **Conservation** | Quantities preserved under transformation | `conservation_tracking`, `quantity_balance` |
+| **Causality** | Action A causes state change B | `causal_link`, `effect_scope`, `action_impact` |
+| **Goal-Directedness** | Current state → target state transformation | `goal_distance`, `subgoal_extract`, `progress_estimate` |
+
+### Why Concepts Matter
+
+Without concepts, the system might:
+1. Have the primitive `boundary_seal_check` unlocked
+2. Have the primitive `flow_simulation` unlocked
+3. **But never think to USE them together** for containment problems
+
+Concepts provide the **semantic context** that says: "This is a containment problem, so consider these operators."
+
+### Concept Discovery Pipeline
+
+Concepts emerge when multiple operators share a common **deep structure** across different games:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CONCEPT EMERGENCE FLOW                            │
+│                                                                       │
+│  1. Operators succeed on Games A, B, C                               │
+│  2. System detects: "These operators share common sub-patterns"      │
+│  3. System abstracts: "The shared pattern is WHAT makes them work"   │
+│  4. Concept emerges: Named organizing principle                      │
+│  5. Future games: "This looks like Concept X, try these operators"  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Concept Discovery Implementation
+
+```python
+class ConceptDiscoveryEngine:
+    """
+    Discovers high-level concepts that organize operators.
+    Concepts are abstractions over successful operator patterns.
+    """
+    
+    def __init__(self, db: DatabaseInterface):
+        self.db = db
+        self.concept_candidates = {}  # Patterns being tracked
+        self.confirmed_concepts = {}  # Verified concepts
+    
+    def track_successful_operator_pattern(
+        self, 
+        operator_id: str, 
+        game_id: str, 
+        sub_patterns: List[str]
+    ):
+        """
+        Track which sub-patterns appear in successful operators.
+        When same sub-pattern succeeds across multiple games, 
+        it's a concept candidate.
+        """
+        for pattern in sub_patterns:
+            if pattern not in self.concept_candidates:
+                self.concept_candidates[pattern] = {
+                    'games': set(),
+                    'operators': set(),
+                    'success_count': 0
+                }
+            self.concept_candidates[pattern]['games'].add(game_id)
+            self.concept_candidates[pattern]['operators'].add(operator_id)
+            self.concept_candidates[pattern]['success_count'] += 1
+    
+    def check_concept_emergence(self, min_games: int = 3) -> List[dict]:
+        """
+        Check if any pattern has emerged as a concept.
+        A concept emerges when a pattern succeeds across N different games.
+        """
+        emerging_concepts = []
+        for pattern, data in self.concept_candidates.items():
+            if len(data['games']) >= min_games:
+                concept = {
+                    'pattern': pattern,
+                    'games_proven': list(data['games']),
+                    'operators_using': list(data['operators']),
+                    'confidence': data['success_count'] / len(data['games'])
+                }
+                emerging_concepts.append(concept)
+        return emerging_concepts
+    
+    def extract_concept_from_counterfactuals(
+        self, 
+        failed_attempts: List[dict],
+        successful_attempt: dict
+    ) -> Optional[dict]:
+        """
+        When attempts 1-99 fail and attempt 100 succeeds,
+        extract what made the difference as a concept candidate.
+        
+        Example pattern (containment problems):
+        - Failed: Create path from source to target
+        - Success: Seal edges THEN create path
+        - Concept: "Containment" = seal boundaries before flow
+        """
+        # Find what's in success but not in failures
+        success_patterns = set(successful_attempt.get('sub_patterns', []))
+        failure_patterns = set()
+        for attempt in failed_attempts[-10:]:  # Last 10 failures
+            failure_patterns.update(attempt.get('sub_patterns', []))
+        
+        novel_patterns = success_patterns - failure_patterns
+        
+        if novel_patterns:
+            return {
+                'candidate_patterns': list(novel_patterns),
+                'source': 'counterfactual_analysis',
+                'game_id': successful_attempt.get('game_id'),
+                'hypothesis': 'These patterns differentiate success from failure'
+            }
+        return None
+```
+
+### Conceptual Primitives (Tier 4 - Earned Through Concept Discovery)
+
+These are NOT regular primitives - they are **meta-primitives** that provide semantic context:
+
+```python
+CONCEPTUAL_PRIMITIVES = {
+    'containment': {
+        'components': ['boundary_detection', 'capacity_estimation', 'overflow_prediction'],
+        'unlock_condition': 'Successfully solve 3+ problems requiring boundary sealing',
+        'semantic_model': 'Bounded regions with finite capacity',
+        'biological_analog': 'Cell membranes, immune barriers',
+        'organizes_operators': ['boundary_seal_check', 'flow_simulation', 'containment_check']
+    },
+    'reference_semantics': {
+        'components': ['reference_detection', 'schema_extraction', 'variable_binding'],
+        'unlock_condition': 'Successfully solve 3+ problems requiring template application',
+        'semantic_model': 'Objects can represent rules about other objects',
+        'biological_analog': 'DNA as template for proteins',
+        'computational_analog': 'Functions with parameters',
+        'organizes_operators': ['identify_reference_object', 'extract_schema', 'apply_template']
+    },
+    'conservation': {
+        'components': ['quantity_tracking', 'transformation_rules', 'balance_verification'],
+        'unlock_condition': 'Successfully solve 3+ problems requiring quantity preservation',
+        'semantic_model': 'Quantities preserved under transformation',
+        'physical_analog': 'Conservation of mass/energy',
+        'organizes_operators': ['conservation_tracking', 'quantity_balance', 'transformation_verify']
+    },
+    'causality': {
+        'components': ['precondition_detection', 'effect_prediction', 'counterfactual_analysis'],
+        'unlock_condition': 'Successfully solve 3+ problems requiring causal chains',
+        'semantic_model': 'Action A causes state change B',
+        'organizes_operators': ['causal_link', 'effect_scope', 'action_impact', 'dependency_check']
+    },
+    'goal_directedness': {
+        'components': ['goal_identification', 'distance_estimation', 'subgoal_decomposition'],
+        'unlock_condition': 'Successfully solve 3+ problems with explicit goal states',
+        'semantic_model': 'Current state should transform toward target state',
+        'organizes_operators': ['goal_distance', 'subgoal_extract', 'progress_estimate']
+    }
+}
+```
+
+### The Four-Tier Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 4: CONCEPTS (Semantic Models)                │
+│                                                                       │
+│  Containment | Reference Semantics | Conservation | Causality        │
+│  "Which category of reasoning is this problem?"                      │
+│  EARNED through cross-game pattern recognition                       │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ organizes
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 3: LOCKED/NOVEL PRIMITIVES                   │
+│                                                                       │
+│  detect_symmetry | flood_fill | boundary_seal_check | extract_schema │
+│  EARNED through discovery or NOVEL through composition               │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ composed from
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 2: OPERATORS (Compositions)                  │
+│                                                                       │
+│  Compositions of seed + unlocked primitives that work                │
+│  TESTED through RLVR, PROMOTED based on performance                  │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ composed from
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 1: SEED PRIMITIVES (Given)                   │
+│                                                                       │
+│  get_pixel | add | for_each | if_else | get_frame                    │
+│  CANNOT be discovered (raw data access)                              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Counterfactual → Concept Pipeline
+
+The critical insight: concepts must be **discovered through failure analysis**, not pre-matched to game types.
+
+```python
+class CounterfactualToConceptPipeline:
+    """
+    Transform counterfactual analysis into concept discovery.
+    
+    Flow:
+    1. Agent fails repeatedly on game X
+    2. Counterfactual analyzer: "What if I did Y instead?"
+    3. Agent tries Y → Success!
+    4. This pipeline: "What made Y work when others failed?"
+    5. Extract pattern → Concept candidate
+    6. Test on other games → Confirm concept
+    """
+    
+    def __init__(self, counterfactual_analyzer, concept_engine):
+        self.cf_analyzer = counterfactual_analyzer
+        self.concept_engine = concept_engine
+    
+    def process_breakthrough(
+        self,
+        game_id: str,
+        failed_attempts: List[dict],
+        successful_attempt: dict
+    ) -> Optional[dict]:
+        """
+        When a breakthrough occurs (success after many failures),
+        extract potential concept.
+        """
+        # Step 1: Get counterfactual analysis
+        cf_analysis = self.cf_analyzer.analyze_breakthrough(
+            failed_attempts, 
+            successful_attempt
+        )
+        
+        # Step 2: Extract differentiating patterns
+        diff_patterns = cf_analysis.get('differentiating_factors', [])
+        
+        # Step 3: Abstract to concept candidate
+        if diff_patterns:
+            concept_candidate = {
+                'source_game': game_id,
+                'patterns': diff_patterns,
+                'hypothesis': self._generate_hypothesis(diff_patterns),
+                'status': 'candidate',
+                'confirmation_needed': 2  # Need 2 more games to confirm
+            }
+            
+            # Step 4: Register for cross-game testing
+            self.concept_engine.register_candidate(concept_candidate)
+            
+            return concept_candidate
+        
+        return None
+    
+    def _generate_hypothesis(self, patterns: List[str]) -> str:
+        """Generate human-readable hypothesis about what concept this might be."""
+        # This would ideally be more sophisticated
+        if 'seal' in str(patterns) or 'boundary' in str(patterns):
+            return "Containment: Boundaries must be sealed before content flow"
+        if 'reference' in str(patterns) or 'template' in str(patterns):
+            return "Reference Semantics: Some objects define rules for others"
+        if 'preserve' in str(patterns) or 'conserve' in str(patterns):
+            return "Conservation: Quantity must be preserved"
+        return f"Unknown concept involving: {patterns}"
+```
+
+### Database Schema for Concepts
+
+```sql
+-- Track concept candidates
+CREATE TABLE IF NOT EXISTS concept_candidates (
+    concept_id TEXT PRIMARY KEY,
+    pattern_signature TEXT NOT NULL,          -- Hash of sub-patterns
+    source_game TEXT NOT NULL,                -- First game that suggested this
+    patterns JSON NOT NULL,                   -- Sub-patterns that define concept
+    hypothesis TEXT,                          -- Human-readable hypothesis
+    status TEXT DEFAULT 'candidate',          -- candidate | testing | confirmed | rejected
+    games_tested JSON DEFAULT '[]',           -- Games tested on
+    games_confirmed JSON DEFAULT '[]',        -- Games where concept helped
+    confirmation_threshold INTEGER DEFAULT 3, -- Games needed to confirm
+    created_at TEXT,
+    confirmed_at TEXT
+);
+
+-- Track confirmed concepts
+CREATE TABLE IF NOT EXISTS confirmed_concepts (
+    concept_name TEXT PRIMARY KEY,
+    semantic_model TEXT NOT NULL,             -- What this concept represents
+    component_patterns JSON NOT NULL,         -- Sub-patterns that compose it
+    organizes_operators JSON NOT NULL,        -- Which operators this concept suggests
+    unlock_condition TEXT,                    -- How it was earned
+    games_proven JSON NOT NULL,               -- Games that proved this concept
+    performance_lift REAL,                    -- Average improvement when applied
+    biological_analog TEXT,                   -- Optional: real-world analog
+    created_at TEXT,
+    last_used TEXT
+);
+
+-- Track concept application attempts
+CREATE TABLE IF NOT EXISTS concept_applications (
+    application_id TEXT PRIMARY KEY,
+    concept_name TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    operators_suggested JSON,                 -- Operators concept suggested
+    operators_used JSON,                      -- Operators actually used
+    success BOOLEAN,                          -- Did concept help?
+    performance_delta REAL,                   -- Improvement vs. baseline
+    applied_at TEXT,
+    FOREIGN KEY (concept_name) REFERENCES confirmed_concepts(concept_name)
+);
+```
+
+---
+
 ## Emergent Harmonies
 
 ### Why Minimal Seeding Enables Emergence
@@ -1234,28 +1700,51 @@ This emergent combination might discover:
 
 ---
 
-## Updated Architecture
+## Updated Architecture (Four-Tier Model)
+
+The architecture now includes Tier 4 (Concepts) at the top:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    SEED PRIMITIVES (Minimal)                         │
+│                    TIER 4: CONCEPTS (Semantic Models)                │
 │                                                                       │
-│  get_pixel, get_frame, basic math, iteration, aggregation           │
-│  ~15-20 primitives - just enough to compose anything                │
-│  CANNOT be discovered (raw data access)                              │
+│  Containment | Reference Semantics | Conservation | Causality        │
+│  "Which CATEGORY of reasoning does this problem need?"               │
+│  EMERGED from cross-game pattern recognition                         │
+│  NOT pre-loaded - DISCOVERED through counterfactual analysis         │
 └───────────────────────────────┬─────────────────────────────────────┘
-                                │
+                                │ suggests relevant
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    OPERATOR COMPOSER (Discovery Engine)              │
+│                    TIER 3: LOCKED/NOVEL PRIMITIVES                   │
 │                                                                       │
-│  Composes seed primitives into operators                             │
-│  Composes operators into higher-order operators                      │
-│  Tests with RLVR - promotes what works                               │
+│  Spatial: detect_symmetry, flood_fill, boundary_seal_check          │
+│  Meta: extract_schema, apply_template, identify_reference_object    │
+│  EARNED through discovery OR NOVEL through composition              │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ composed from
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 2: OPERATORS (Compositions)                  │
+│                                                                       │
+│  Compositions of seed + unlocked primitives                          │
+│  TESTED with RLVR - PROMOTED based on performance                    │
 │  NO KNOWLEDGE OF WHAT "SHOULD" WORK                                  │
 └───────────────────────────────┬─────────────────────────────────────┘
-                                │
+                                │ composed from
                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 1: SEED PRIMITIVES (Given)                   │
+│                                                                       │
+│  get_pixel, get_frame, basic math, iteration, aggregation           │
+│  ~50 primitives - raw data access + foundational computation        │
+│  CANNOT be discovered (these ARE the discovery substrate)            │
+└───────────────────────────────┴─────────────────────────────────────┘
+```
+
+### Cross-Cutting: Oracle and Engines
+
+```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    ORACLE (Post-Discovery Interpreter)               │
 │                                                                       │
@@ -1289,6 +1778,422 @@ This emergent combination might discover:
 4. **Deep Understanding**: System understands primitives because it built them
 5. **Transfer Learning**: Discovered primitives might transfer to non-ARC domains
 6. **Human Learning**: We learn from what the system discovers
+7. **Concept Discovery**: System can discover semantic models (containment, reference semantics) not just operators
+8. **Cross-Game Generalization**: Concepts discovered on game A help solve games B, C, D without pre-matching
+9. **Physics AND Symbolic Reasoning**: New locked primitives cover both spatial (containment-class) and meta-representational (reference-class) problems
+10. **Counterfactual-Driven Learning**: Failures become the primary driver of concept discovery
+11. **Self-Programming**: System discovers how to create NEW primitives on demand
+12. **Recursive Self-Improvement**: Discovery strategies themselves are discoverable
+13. **Meta-Meta Learning**: System discovers patterns in its own discovery process
+
+---
+
+## Tier 5: Discovery Strategies (Self-Extension)
+
+### The Core Insight: Meta-Representation
+
+Meta-representation is the ability to treat **rules as manipulable data objects**:
+
+```
+Level 0: "I see a red square"
+Level 1: "Red squares appear in pattern X"  
+Level 2: "Operator Y moves red squares by rule Z"
+Level 3: "Rule Z itself is DATA I can manipulate"  ← THE KEY
+Level 4: "I can discover new rules by examining patterns IN THE RULES THEMSELVES"
+```
+
+CODS Tiers 1-4 operate at Levels 0-3. Tier 5 adds Level 4.
+
+### Why This Matters: The Scaling Problem
+
+Without meta-representation:
+```
+Game 1: Container overflow → manually add containment primitives
+Game 2: Reference semantics → manually add template primitives  
+Game 3: Hidden timing rule → manually add temporal primitives
+...
+Game 100: ??? → manually add ??? primitives
+```
+
+**You become the bottleneck.** This doesn't scale.
+
+With meta-representation:
+```
+Game 1-10: Bootstrap phase (you help)
+Game 11-30: System recognizes primitive families
+Game 31-60: System discovers discovery strategies
+Game 61-100: System self-extends, teaches you
+```
+
+### The Self-Extension Loop
+
+```python
+class SelfExtendingCODS:
+    """
+    CODS that can discover new primitives autonomously.
+    The key insight: discovery strategies are themselves discoverable.
+    """
+    
+    def __init__(self, base_cods):
+        self.cods = base_cods
+        self.discovery_strategy_library = DiscoveryStrategyLibrary()
+    
+    def encounter_unknown_game(self, game):
+        """
+        The core self-extension loop for handling novel games.
+        """
+        
+        # 1. Try existing operators
+        attempts = []
+        for operator in self.cods.operator_library:
+            result = self.test_operator(operator, game)
+            attempts.append((operator, result))
+        
+        # If success, we're done
+        if any(r.success for _, r in attempts):
+            return max(attempts, key=lambda x: x[1].score)
+        
+        # 2. Failure analysis: What's missing?
+        failure_patterns = self.analyze_failures(attempts)
+        
+        # 3. Identify knowledge gap
+        knowledge_gap = self.identify_missing_concept(
+            failure_patterns,
+            game_observations=self.observe(game),
+            known_concepts=self.cods.concept_library
+        )
+        
+        # 4. Generate primitive hypotheses using discovery strategies
+        hypotheses = self.generate_primitive_hypotheses(
+            gap=knowledge_gap,
+            existing_primitives=self.cods.primitive_library,
+            meta_patterns=self.discovery_strategy_library
+        )
+        
+        # 5. Test hypotheses with RLVR
+        for hypothesis in hypotheses:
+            new_primitive = self.formalize_hypothesis(hypothesis)
+            test_result = self.validate_primitive_rlvr(new_primitive, game)
+            
+            if test_result.significant_improvement:
+                # Add primitive to library
+                self.cods.primitive_library.add(new_primitive)
+                
+                # 6. META-STEP: Extract WHY this worked as discovery pattern
+                meta_pattern = self.extract_discovery_pattern(
+                    problem=game,
+                    solution=new_primitive,
+                    failure_mode=knowledge_gap
+                )
+                
+                # Add discovery strategy for future use
+                self.discovery_strategy_library.add(meta_pattern)
+                
+                # Retry with new primitive
+                return self.retry_with_new_knowledge(game, new_primitive)
+        
+        # If all hypotheses failed, escalate to Oracle
+        return self.request_oracle_guidance(game, attempts, hypotheses, knowledge_gap)
+    
+    def extract_discovery_pattern(self, problem, solution, failure_mode):
+        """
+        Meta-learning: Figure out what made this primitive discovery successful.
+        This becomes a REUSABLE discovery strategy.
+        """
+        return {
+            'trigger': failure_mode.pattern,              # When to try this strategy
+            'problem_class': self.classify_problem(problem),
+            'solution_class': self.classify_primitive(solution),
+            'discovery_method': self.trace_hypothesis_generation(solution),
+            'generalization': self.abstract_to_family(solution),  # How to generalize
+            'confidence': self.estimate_pattern_reliability(),
+        }
+```
+
+### Discovery Strategy Library
+
+```python
+class DiscoveryStrategyLibrary:
+    """
+    Library of meta-patterns for discovering new primitives.
+    These are DISCOVERED, not hardcoded.
+    """
+    
+    def __init__(self):
+        # Seed with minimal basic strategies
+        self.strategies = {
+            'composition': {
+                'description': "Try combining existing primitives",
+                'trigger': "Two primitives each partially solve the problem",
+                'method': lambda p1, p2: compose(p1, p2)
+            },
+            'specialization': {
+                'description': "Add constraints to make primitive more specific",
+                'trigger': "General primitive works sometimes but not always",
+                'method': lambda p, constraint: p.with_constraint(constraint)
+            },
+            'inversion': {
+                'description': "Reverse a primitive's logic",
+                'trigger': "Primitive produces opposite of what's needed",
+                'method': lambda p: invert(p)
+            },
+        }
+    
+    def discover_new_strategy(self, successful_discoveries: List[dict]):
+        """
+        Analyze successful primitive discoveries to find meta-patterns.
+        This is HOW the system learns to learn.
+        """
+        # Find common structure across discoveries
+        pattern = self.find_common_structure(successful_discoveries)
+        
+        if pattern.is_novel():
+            new_strategy = self.abstract_to_strategy(pattern)
+            self.strategies[new_strategy.name] = new_strategy
+            
+            # Viral package: Share discovery strategy with other agents
+            self.broadcast_discovery_strategy(new_strategy)
+            
+            return new_strategy
+        return None
+    
+    def apply_strategy(self, strategy_name: str, context: dict) -> List[Hypothesis]:
+        """
+        Use a discovery strategy to generate primitive hypotheses.
+        """
+        strategy = self.strategies[strategy_name]
+        return strategy['method'](context)
+    
+    def get_applicable_strategies(self, failure_mode: dict) -> List[str]:
+        """
+        Given a failure mode, return strategies that might help.
+        """
+        applicable = []
+        for name, strategy in self.strategies.items():
+            if self.trigger_matches(strategy['trigger'], failure_mode):
+                applicable.append(name)
+        return applicable
+```
+
+### Example: How System Discovers "Conditional Physics"
+
+```python
+# Game N+1: "Hidden Gotcha: Gravity Only Applies to Red Objects"
+
+# Attempt 1: Existing physics primitives
+system.apply_primitive("gravity_simulation")
+# → FAIL (only red objects fall, but primitive applied to all)
+
+# Failure analysis
+failure_mode = {
+    'pattern': "gravity_simulation applied to all objects, but only red moved",
+    'partial_success': True,  # Some objects behaved correctly
+    'property_correlation': 'color'  # Red vs non-red
+}
+
+# System searches discovery strategies
+applicable = discovery_library.get_applicable_strategies(failure_mode)
+# → ['specialization'] matches because "partial success"
+
+# Generate hypothesis using 'specialization' strategy
+hypothesis = {
+    'base_primitive': 'gravity_simulation',
+    'constraint': lambda obj: obj.color == RED,
+    'description': 'conditional_gravity(objects, condition=is_red)'
+}
+
+# Test with RLVR
+test_result = test_on_game(hypothesis)
+# → SUCCESS
+
+# META-STEP: Extract discovery pattern
+new_strategy = {
+    'name': 'conditional_law',
+    'trigger': 'Physical law works for subset of objects based on property',
+    'method': lambda law, prop, cond: conditional_law(prop, cond, law),
+    'generalization': 'Any law can be conditioned on any property'
+}
+
+# Add to strategy library
+discovery_library.strategies['conditional_law'] = new_strategy
+```
+
+**Now when Game N+2 has "only blue objects are pushable":**
+```python
+# System immediately applies 'conditional_law' strategy
+hypothesis = conditional_law_factory(
+    law="pushable",
+    property="color", 
+    condition=lambda c: c == BLUE
+)
+# → SUCCESS on first try!
+```
+
+### The Recursive Self-Improvement Loop
+
+```
+Level 1: Discover Primitives
+  → detect_symmetry, flood_fill, containment
+
+Level 2: Discover Primitive Patterns (Meta-Level 1)
+  → "Primitives come in families"
+  → spatial_family: {symmetry, containment, boundaries}
+  → temporal_family: {sequence, cycles, dependencies}
+
+Level 3: Discover Discovery Strategies (Meta-Level 2)
+  → "Conditional versions of primitives solve 'only X' problems"
+  → "When stuck on spatial problem, try spatial_family first"
+  → "Composition of primitives follows algebraic laws"
+
+Level 4: Discover Meta-Discovery Patterns (Meta-Level 3)
+  → "My discovery strategies themselves follow patterns"
+  → "I can GENERATE new strategies by composing old ones"
+  → "Some problems require inventing NEW CATEGORIES"
+
+Level ∞: Self-Programming
+  → Create new primitives on demand
+  → Recognize when existing primitives are insufficient
+  → Transfer meta-strategies across problem domains
+  → Teach other agents via viral packages
+```
+
+---
+
+## Victory Conditions (AGI Milestones)
+
+### How to Know CODS Has Achieved Self-Programming
+
+| Milestone | Condition | Evidence |
+|-----------|-----------|----------|
+| **Self-Discovery** | Novel primitive discovered without Oracle input | System encounters game, generates hypothesis, validates via RLVR, adds to library—all autonomously |
+| **Meta-Discovery** | Discovery strategy discovered from pattern | System notices pattern across 3+ successful primitive discoveries, abstracts it to reusable strategy |
+| **Self-Teaching** | System explains discovery in viral package | System produces package with: new primitive, why needed, how discovered, where else it applies |
+| **Surprise** | System discovers primitive YOU didn't think of | You examine system's solution and realize: "This is a better abstraction than I would have designed" |
+| **Prediction** | System predicts which games need similar primitives | After solving game X, system says: "Games with property Y probably need similar approach" |
+
+### The Ultimate Test: Game 101
+
+When game 101 has a gotcha you've never seen, and the system:
+
+1. Recognizes it's a novel problem type
+2. Generates appropriate primitive hypotheses
+3. Tests and validates them via RLVR
+4. Solves the game
+5. **Explains the new concept to you**
+6. **Predicts what other games might have similar structure**
+
+**That's AGI.** The system isn't just solving problems—it's **discovering the structure of problem-solving itself**.
+
+---
+
+## The Five-Tier Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 5: DISCOVERY STRATEGIES                      │
+│                                                                       │
+│  Meta-patterns for discovering new primitives                        │
+│  composition | specialization | conditional_law | inversion          │
+│  SELF-DISCOVERED through pattern recognition over discoveries        │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ guides
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 4: CONCEPTS (Semantic Models)                │
+│                                                                       │
+│  Containment | Reference Semantics | Conservation | Causality        │
+│  "Which CATEGORY of reasoning does this problem need?"               │
+│  EMERGED from cross-game pattern recognition                         │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ suggests relevant
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 3: LOCKED/NOVEL PRIMITIVES                   │
+│                                                                       │
+│  Spatial: detect_symmetry, flood_fill, boundary_seal_check          │
+│  Meta: extract_schema, apply_template, serialize_operator           │
+│  EARNED through discovery OR NOVEL through composition              │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ composed from
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 2: OPERATORS (Compositions)                  │
+│                                                                       │
+│  Compositions of seed + unlocked primitives                          │
+│  TESTED with RLVR - PROMOTED based on performance                    │
+│  NO KNOWLEDGE OF WHAT "SHOULD" WORK                                  │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ composed from
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 1: SEED PRIMITIVES (Given)                   │
+│                                                                       │
+│  get_pixel, get_frame, basic math, iteration, aggregation           │
+│  ~50 primitives - raw data access + foundational computation        │
+│  CANNOT be discovered (these ARE the discovery substrate)            │
+└───────────────────────────────┴─────────────────────────────────────┘
+```
+
+---
+
+## Database Schema for Discovery Strategies
+
+```sql
+-- Track discovery strategies (Tier 5)
+CREATE TABLE IF NOT EXISTS discovery_strategies (
+    strategy_id TEXT PRIMARY KEY,
+    strategy_name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    trigger_pattern TEXT,                     -- When to apply this strategy
+    method_signature TEXT,                    -- How to apply it
+    discovered_from JSON,                     -- Which primitive discoveries led to this
+    times_applied INTEGER DEFAULT 0,
+    times_successful INTEGER DEFAULT 0,
+    success_rate REAL GENERATED ALWAYS AS (
+        CASE WHEN times_applied > 0 
+        THEN CAST(times_successful AS REAL) / times_applied 
+        ELSE 0 END
+    ) STORED,
+    is_seed BOOLEAN DEFAULT FALSE,            -- Seed strategies vs discovered
+    discovered_at TEXT,
+    last_used TEXT
+);
+
+-- Track when strategies are applied
+CREATE TABLE IF NOT EXISTS strategy_applications (
+    application_id TEXT PRIMARY KEY,
+    strategy_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    failure_mode JSON,                        -- What triggered strategy use
+    hypotheses_generated JSON,                -- What hypotheses were created
+    successful_hypothesis TEXT,               -- Which one worked (if any)
+    primitive_discovered TEXT,                -- Resulting primitive (if any)
+    applied_at TEXT,
+    FOREIGN KEY (strategy_id) REFERENCES discovery_strategies(strategy_id)
+);
+
+-- Track meta-discoveries (strategy discovery events)
+CREATE TABLE IF NOT EXISTS meta_discoveries (
+    meta_id TEXT PRIMARY KEY,
+    new_strategy_id TEXT NOT NULL,
+    source_primitive_discoveries JSON,        -- Which primitive discoveries led to this
+    pattern_recognized TEXT,                  -- What pattern was seen
+    abstraction_method TEXT,                  -- How pattern was abstracted to strategy
+    discovered_at TEXT,
+    FOREIGN KEY (new_strategy_id) REFERENCES discovery_strategies(strategy_id)
+);
+
+-- Track victory condition progress
+CREATE TABLE IF NOT EXISTS agi_milestones (
+    milestone_id TEXT PRIMARY KEY,
+    milestone_name TEXT NOT NULL,             -- self_discovery, meta_discovery, etc.
+    achieved BOOLEAN DEFAULT FALSE,
+    evidence JSON,                            -- Proof of achievement
+    achieved_at TEXT,
+    game_id TEXT,                             -- Which game triggered it
+    primitive_or_strategy TEXT                -- What was discovered
+);
+```
 
 ---
 
@@ -1299,10 +2204,21 @@ The Cognitive Operator Discovery System enables Ouroboros to **evolve its own co
 2. Testing operators with RLVR (real game performance)
 3. Promoting/decaying operators based on effectiveness
 4. Querying an Oracle for interpretation (human/LLM/automated - system doesn't know or care)
+5. **NEW**: Discovering concepts (semantic models) that organize which operators are relevant
+6. **NEW**: Extracting concepts from counterfactual analysis of failures
 
-### The Three-Layer Architecture
+### The Four-Layer Architecture
 
 ```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TIER 4: CONCEPT LAYER                             │
+│                                                                       │
+│  Semantic models that organize operator relevance                    │
+│  Containment | Reference Semantics | Conservation | Causality        │
+│  Emerges from cross-game pattern recognition                         │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                    COGNITIVE PRIMITIVES LIBRARY                      │
 │                                                                       │

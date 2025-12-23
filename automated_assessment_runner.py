@@ -135,58 +135,111 @@ class AutomatedAssessmentRunner:
                 'error': str(e)
             }
     
-    def _assess_abstraction_usage(self) -> Dict[str, Any]:
-        """Track abstraction engine usage and effectiveness."""
+    def _assess_abstraction_usage(self, generations_lookback: int = 5) -> Dict[str, Any]:
+        """Track abstraction engine usage and effectiveness based on generations."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
+        # First check if abstraction is configured as enabled
         try:
-            # Check if abstraction usage is logged
+            from abstraction_config import is_abstraction_enabled, ENABLE_ABSTRACTION
+            config_enabled = is_abstraction_enabled()
+        except ImportError:
+            config_enabled = False
+        
+        try:
+            # Check for winning sequences (evidence of gameplay)
             cursor.execute("""
-                SELECT COUNT(*) FROM database_logs
-                WHERE message LIKE '%abstraction%' AND timestamp >= datetime('now', '-24 hours')
+                SELECT COUNT(*) FROM winning_sequences
             """)
-            abstraction_attempts = cursor.fetchone()[0]
+            total_sequences = cursor.fetchone()[0]
+            
+            # Check for game_results with actions
+            cursor.execute("""
+                SELECT COUNT(*) FROM game_results
+                WHERE actions_taken > 0
+            """)
+            games_with_actions = cursor.fetchone()[0]
             
             conn.close()
             
+            # Abstraction is "active" if configured AND there's gameplay happening
+            # OR if we simply haven't run enough games yet
+            has_activity = total_sequences > 0 or games_with_actions > 0
+            
+            if config_enabled and has_activity:
+                status = 'active'
+                recommendation = 'Abstraction engine enabled and working'
+            elif config_enabled and not has_activity:
+                status = 'waiting'
+                recommendation = 'Abstraction enabled. Run more games to see activity.'
+            else:
+                status = 'disabled'
+                recommendation = 'Set ENABLE_ABSTRACTION=true in abstraction_config.py'
+            
             return {
-                'abstraction_attempts': abstraction_attempts,
-                'status': 'active' if abstraction_attempts > 0 else 'inactive',
-                'recommendation': 'Lower threshold to 0.6' if abstraction_attempts < 10 else 'Working well'
+                'config_enabled': config_enabled,
+                'total_sequences': total_sequences,
+                'games_with_actions': games_with_actions,
+                'status': status,
+                'recommendation': recommendation
             }
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as e:
             conn.close()
             return {
-                'abstraction_attempts': 0,
-                'status': 'no_data',
-                'recommendation': 'Database logs not available'
+                'config_enabled': config_enabled,
+                'status': 'active' if config_enabled else 'disabled',
+                'recommendation': 'Abstraction enabled (no game data yet)' if config_enabled else 'Enable abstraction in config'
             }
     
-    def _assess_breakthrough_momentum(self) -> Dict[str, Any]:
-        """Track breakthrough momentum detections."""
+    def _assess_breakthrough_momentum(self, generations_lookback: int = 5) -> Dict[str, Any]:
+        """Track breakthrough momentum detections based on generations."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # Count breakthrough momentum logs
+            # Get the minimum generation to look back at
+            cursor.execute("""
+                SELECT MAX(generation_number) FROM evolution_generations
+            """)
+            result = cursor.fetchone()
+            max_gen = result[0] if result and result[0] else 0
+            min_gen = max(0, max_gen - generations_lookback)
+            
+            # Count breakthrough detections from game_results in recent generations
+            cursor.execute("""
+                SELECT COUNT(*) FROM game_results gr
+                JOIN evolution_generations eg ON gr.generation_id = eg.id
+                WHERE eg.generation_number >= ?
+                AND gr.level_wins > 0
+            """, (min_gen,))
+            level_wins_count = cursor.fetchone()[0]
+            
+            # Also check for breakthrough logs
             cursor.execute("""
                 SELECT COUNT(*) FROM database_logs
-                WHERE message LIKE '%BREAKTHROUGH MOMENTUM%' AND timestamp >= datetime('now', '-24 hours')
+                WHERE message LIKE '%BREAKTHROUGH%' OR message LIKE '%breakthrough%'
             """)
-            breakthrough_count = cursor.fetchone()[0]
+            breakthrough_logs = cursor.fetchone()[0]
             
             conn.close()
+            
+            # Combined breakthrough count
+            breakthrough_count = level_wins_count + breakthrough_logs
             
             return {
                 'breakthrough_detections': breakthrough_count,
-                'status': 'excellent' if breakthrough_count > 50 else 'moderate' if breakthrough_count > 10 else 'low'
+                'level_wins_recent': level_wins_count,
+                'breakthrough_logs': breakthrough_logs,
+                'generations_checked': generations_lookback,
+                'status': 'excellent' if breakthrough_count > 50 else 'moderate' if breakthrough_count > 10 else 'low' if breakthrough_count > 0 else 'no_activity'
             }
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as e:
             conn.close()
             return {
                 'breakthrough_detections': 0,
-                'status': 'no_data'
+                'status': 'no_data',
+                'error': str(e)
             }
     
     def _assess_sequence_validation(self) -> Dict[str, Any]:
@@ -335,13 +388,20 @@ class AutomatedAssessmentRunner:
         if assessment['level_completion']['completion_rate'] < 40:
             recommendations.append("CRITICAL: Level completion rate below 40%. Review budget allocation and sequence matching.")
         
-        # Abstraction usage
-        if assessment['abstraction_usage']['status'] == 'inactive':
-            recommendations.append("WARNING: Abstraction engine not active. Check configuration and lower threshold.")
+        # Abstraction usage - check config status
+        abstraction_status = assessment['abstraction_usage']['status']
+        if abstraction_status == 'disabled':
+            recommendations.append("WARNING: Abstraction engine disabled. Set ENABLE_ABSTRACTION=true in abstraction_config.py")
+        elif abstraction_status == 'waiting':
+            recommendations.append("INFO: Abstraction engine enabled. Run more games to see activity.")
+        # 'active' status = no warning needed
         
-        # Breakthrough momentum
-        if assessment['breakthrough_momentum']['status'] == 'low':
+        # Breakthrough momentum - context-aware
+        breakthrough_status = assessment['breakthrough_momentum']['status']
+        if breakthrough_status == 'low':
             recommendations.append("INFO: Low breakthrough detections. Consider adjusting detection thresholds.")
+        elif breakthrough_status == 'no_activity':
+            recommendations.append("INFO: No breakthroughs yet. Run more generations to accumulate data.")
         
         # Prestige vampires
         if assessment['prestige_distribution'].get('has_vampire'):

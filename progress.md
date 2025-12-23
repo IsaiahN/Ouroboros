@@ -1,5 +1,132 @@
 # Ouroboros Progress Log
 
+## Session: December 23, 2025 (Morning)
+
+---
+
+### Session: Cognitive Operator Discovery System (CODS) Design (10:08:01 AM)
+
+**Focus**: Design meta-layer for cognitive operator discovery to break the Level 2 plateau
+
+---
+
+#### Problem Identified
+
+Games plateau at Level 2 except as66 and vc33. The system lacks a mechanism to:
+1. Invent new cognitive operators
+2. Discover vocabulary without being handed a dictionary
+3. Learn HOW to learn, not just WHAT to learn
+
+---
+
+#### Approach: Earn-to-Unlock Primitive System
+
+**Philosophy**: The system doesn't get handed knowledge - it must **earn** it through verifiable discovery.
+
+**Three Primitive Categories**:
+| Category | Status | How System Gets Access |
+|----------|--------|------------------------|
+| **Seed** (~50) | Always available | Given at birth (can't be discovered) |
+| **Locked** (40+) | Must be earned | Discover similar pattern → RLVR validates → Oracle unlocks |
+| **Novel** | System-created | Discover pattern with no human analog |
+
+**Key Design Decisions**:
+1. **Oracle-Agnostic**: System queries Oracle without knowing if it's human/LLM/automated
+2. **Competition**: Discovered versions compete with human-refined versions (both kept!)
+3. **Simplification Pressure**: Winning operators spawn simplified variants (Occam's Razor)
+4. **Cross-Game Transfer**: 40% weight on cross-game validation for unlock
+
+---
+
+#### Steps Completed
+
+**1. Created Implementation Guide**: `DOCS/Cognitive_Operator_Discovery_System.md`
+
+**2. Defined Seed Primitives (~50)**:
+- Raw Data Access: `get_pixel`, `get_frame`, `get_previous_frame`, `get_frame_size`
+- Basic Math: `add`, `subtract`, `multiply`, `divide`, `equals`, comparisons
+- Control Flow: `if_else`, `select` (branching - critical!)
+- Data Structures: `make_list`, `append`, `len`, `get_at`, `slice`, `concat`, `contains`
+- Iteration: `for_each_pixel`, `for_range`, `map`, `filter`, `reduce`, `any`, `all`
+- Aggregation: `sum`, `max`, `min`, `average`, `median`
+- Time/Episode: `get_step_index`, `get_episode_id`, `get_action_count`
+- Action Introspection: `get_action_space`, `get_last_action`, `get_action_history`
+- RNG: `rand`, `rand_int`, `rand_choice`, `seed_rng`
+- Hashing: `hash`, `hash_frame`, `signature`
+
+**3. Defined Locked Primitives (40+ by category)**:
+- Spatial/Perceptual: `detect_edges`, `is_enclosed`, `motion_vector`, `gravity_simulation`
+- Temporal/Predictive: `predict_next_state`, `detect_cycles`, `rate_of_change`, `stability_score`
+- Relational/Logical: `causal_link`, `dependency_check`, `logical_and/or/not`, `count_condition`
+- Structural/Topological: `path_exists`, `distance_transform`, `convex_hull`, `skeletonize`
+- Statistical/Probabilistic: `entropy_calc`, `correlation`, `outlier_detection`, `distribution_fit`
+- Comparative/Analogical: `structural_alignment`, `analogy_score`, `transfer_mapping`
+- Goal-Oriented: `goal_distance`, `subgoal_extract`, `progress_estimate`, `dead_end_detect`
+- Meta-Cognitive: `uncertainty_estimate`, `complexity_estimate`, `novelty_score`, `learning_progress`
+- Agent-Centric: `control_test`, `effect_scope`, `self_location`, `action_impact`
+- Compositional: `pipe_output`, `conditional_execute`, `loop_until`, `parallel_execute`
+
+**4. Designed Remix Engine (Cobbled → Solid → Canonical)**:
+- Primitive lifecycle: `cobbled → tested → validated → solid → canonical`
+- Remix operations: `compose`, `parallel`, `conditional`, `parameter_shift`, `invert`, `amplify`, `threshold`, `delay`, `diff`, `accumulate`
+- Confidence thresholds for status transitions
+
+**5. Designed Competition System**:
+- Dual-Track: Discovered AND human versions both kept
+- Thompson sampling with complexity penalty
+- Discovered can outperform human (learning opportunity!)
+- `analyze_superior_discovery()` extracts insights when system beats human
+
+**6. Designed Simplification Pressure**:
+- After 100 wins, spawn simplified variants
+- 4 strategies: step removal, pair removal, sub-composition collapse, parameter simplification
+- `PrimitiveArena` tracks multi-version competition
+- Sweet spot example: "98% of discovered performance with 43% less complexity"
+
+**7. Designed Database Schema**:
+- `primitive_unlock_status` - Track seed/locked/unlocked/novel status
+- `unlock_attempts` - Track unlock attempt history
+- `primitive_theories` - Track theories as they solidify
+- `primitive_competition` - Track discovered vs human performance
+- `discovery_insights` - Log when discovered outperforms human
+- `remix_history` - Track genealogy of remixed primitives
+- `simplification_attempts` - Track simplification outcomes
+- `primitive_arena` - Track multi-version competition
+
+**8. Defined Three Victory Conditions**:
+1. **Unlock Success**: System earns access to locked primitive through discovery
+2. **Novel Primitive**: System discovers something humans didn't formalize
+3. **Novel Surpasses Human**: System's novel primitive outperforms human alternatives
+
+---
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `DOCS/Cognitive_Operator_Discovery_System.md` | **CREATED** - Full implementation guide (~1800 lines) |
+
+---
+
+#### Current Status: DESIGN COMPLETE, IMPLEMENTATION NOT STARTED
+
+**Next Steps (Code Implementation)**:
+1. `seed_primitives.py` - Minimal seed primitives (~50)
+2. `primitive_unlock_manager.py` - Track locked/unlocked/novel status
+3. `operator_composer.py` - Composition, evolution, and discovery
+4. `oracle_interface.py` - Oracle-agnostic unlock gatekeeper
+5. Database schema additions to `complete_database_schema.sql`
+
+---
+
+#### Current Failure
+
+**Exit Code 1** on `python run_evolution.py --max-generations 5`
+
+This is unrelated to CODS (not yet implemented). Need to investigate the evolution runner failure.
+
+---
+
 ## Session: December 5, 2025 (Afternoon)
 
 ---
