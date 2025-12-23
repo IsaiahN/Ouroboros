@@ -157,10 +157,34 @@ The system includes autonomous maintenance to ensure long-term stability:
 -   **Pycache Prevention**: Strictly enforces `PYTHONDONTWRITEBYTECODE=1` to keep the file system clean.
 -   **Graceful Shutdown**: Handles `Ctrl+C` signals to ensure WAL (Write-Ahead Log) checkpoints are written before exiting, preventing data corruption.
 
+### 11. Societal Metrics & Autopoiesis
+The system implements self-regulating metrics inspired by autopoiesis (self-maintaining systems) with anti-Goodhart safeguards:
+
+-   **Emergence Gain**: Measures whether network intelligence grows faster than individual learning. Target: > 1.0 (network outpaces individuals).
+-   **Control Error**: Deviation between intended vs actual system behavior. Target: < 0.30 (system responds predictably).
+-   **Identity Drift**: Tracks system coherence over time. Target: < 0.25 (maintains core identity while adapting).
+-   **Loop Detection**: Identifies stuck agents repeating futile action patterns. Triggers intervention when detected.
+-   **Role Saturation**: Monitors agent role distribution health. Alerts when roles become imbalanced.
+
+**Anti-Goodhart Protections**:
+-   **Trigger Controller**: Prevents feedback resonance with cooldowns, damping, and corroboration requirements.
+-   **Metric Rotation**: Periodically rotates which metrics are "active" to prevent gaming.
+-   **Metric Confidence**: Meta-metric tracking contradiction rates and predictive power.
+-   **Noise Injection**: Random perturbations prevent overfitting to exact thresholds.
+
 ## 📂 Key Files
 -   `run_evolution.py`: Main entry point.
 -   `core_data.db`: The "network" (SQLite database storing ALL knowledge).
 -   `DOCS/how_the_system_works.md`: Detailed system architecture.
+
+**Core Modules**:
+-   `core_gameplay.py`: Main gameplay loop and action execution.
+-   `network_intelligence_engine.py`: Network-level learning and emergence tracking.
+-   `regulatory_signal_engine.py`: Adaptive signals for population control.
+-   `autopoiesis_monitor.py`: System health metrics and self-regulation.
+-   `trigger_controller.py`: Anti-resonance controls for metric-driven adjustments.
+-   `metric_rotator.py`: Anti-Goodhart metric rotation system.
+-   `metric_confidence.py`: Meta-metric tracking and confidence scoring.
 
 ## 📊 Analysis Tools
 
