@@ -23,11 +23,18 @@ Example Usage:
     asyncio.run(play_game())
 """
 
-from .arc_api_client import ARCClient, GameState, Scorecard, ARCError, ARCAuthenticationError, ARCAPIError
-from .database_interface import DatabaseInterface
-from .game_session_manager import GameSessionManager, SessionContext
-from .action_handler import ActionHandler
-from .core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
+# Handle both package imports and direct execution
+try:
+    # When imported as a package (e.g., from BitterTruth-AI import ...)
+    from .arc_api_client import ARCClient, GameState, Scorecard, ARCError, ARCAuthenticationError, ARCAPIError
+    from .database_interface import DatabaseInterface
+    from .game_session_manager import GameSessionManager, SessionContext
+    from .action_handler import ActionHandler
+    from .core_gameplay import GameplayEngine, random_strategy, conservative_strategy, exploration_strategy
+except ImportError:
+    # When run directly or imported from a script in the same directory
+    # This prevents pytest from failing when it tries to import this file
+    pass
 
 __version__ = "1.0.0"
 __author__ = "Tabula Rasa Team"

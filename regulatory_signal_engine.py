@@ -702,3 +702,122 @@ class RegulatorySignalEngine:
             'recent_regulations': {r['parameter_name']: {'changes': r['changes'], 'avg_change': r['avg_change']} 
                                   for r in recent_regulations}
         }
+
+
+# ============================================================================
+# SOCIETAL METRICS SYSTEM - CONTROL ERROR
+# Part of autopoiesis monitoring for self-regulation
+# ============================================================================
+
+def calculate_control_error(db: DatabaseInterface, generation: int) -> float:
+    """
+    Calculate divergence between intended vs actual population ratios.
+    
+    Control Error measures how well the system achieves its targets.
+    Higher error = system struggling to maintain homeostasis.
+    
+    Formula:
+        mean(|actual_role_ratio - target_role_ratio|) for all roles
+    
+    Ideal: < 0.05 (5% deviation)
+    Concerning: > 0.15 (15% deviation)
+    Critical: > 0.30 (30% deviation)
+    
+    Args:
+        db: DatabaseInterface instance
+        generation: Current evolution generation
+        
+    Returns:
+        Mean absolute control error across all role ratios
+        
+    Part of the Societal Metrics System.
+    See DOCS/Societal_Metrics_Implementation_Analysis.md for design rationale.
+    """
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Target ratios from role system design
+        # These can be mode-dependent but defaults are:
+        target_ratios = {
+            'PIONEER': 0.60,      # Frontier explorers
+            'OPTIMIZER': 0.30,    # Efficiency refiners
+            'GENERALIST': 0.10,   # Balanced players
+            'EXPLOITER': 0.05     # Post-optimization (varies by mode)
+        }
+        
+        # Get actual population counts
+        population_result = db.execute_query("""
+            SELECT 
+                COALESCE(role, 'UNKNOWN') as role,
+                COUNT(*) as count
+            FROM agents
+            WHERE is_active = TRUE
+            GROUP BY role
+        """)
+        
+        if not population_result:
+            logger.warning("No active agents for control error calculation")
+            return 0.0
+        
+        # Calculate total and actual ratios
+        total_agents = sum(r['count'] for r in population_result)
+        if total_agents == 0:
+            return 0.0
+            
+        actual_ratios = {
+            r['role']: r['count'] / total_agents 
+            for r in population_result
+        }
+        
+        # Calculate control error (mean absolute deviation)
+        errors = []
+        for role, target in target_ratios.items():
+            actual = actual_ratios.get(role, 0.0)
+            errors.append(abs(target - actual))
+        
+        control_error = sum(errors) / len(errors) if errors else 0.0
+        
+        # Store metric in ecosystem_metrics table
+        _store_control_error_metric(db, generation, control_error, actual_ratios)
+        
+        logger.info(f"[CONTROL] Generation {generation}: "
+                   f"error={control_error:.3f} "
+                   f"(ratios: {actual_ratios})")
+        
+        return control_error
+        
+    except Exception as e:
+        logger.error(f"Error calculating control error: {e}")
+        return 0.0
+
+
+def _store_control_error_metric(db: DatabaseInterface, generation: int,
+                                 control_error: float, actual_ratios: dict):
+    """Store control error in ecosystem_metrics table for tracking."""
+    import json
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Ensure table exists
+        db.execute_query("""
+            CREATE TABLE IF NOT EXISTS ecosystem_metrics (
+                metric_name TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                value REAL NOT NULL,
+                measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metadata TEXT,
+                PRIMARY KEY (metric_name, generation)
+            )
+        """)
+        
+        db.execute_query("""
+            INSERT INTO ecosystem_metrics (metric_name, generation, value, metadata)
+            VALUES ('control_error', ?, ?, ?)
+            ON CONFLICT(metric_name, generation) DO UPDATE SET 
+                value = excluded.value,
+                metadata = excluded.metadata,
+                measured_at = CURRENT_TIMESTAMP
+        """, (generation, control_error, json.dumps(actual_ratios)))
+        
+    except Exception as e:
+        logger.error(f"Error storing control error metric: {e}")

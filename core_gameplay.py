@@ -11311,3 +11311,246 @@ async def exploration_strategy(game_state: GameState, action_handler: ActionHand
             'strategy': 'exploration'
         }
         return await method(reasoning=exploration_reasoning)
+
+
+# ============================================================================
+# SOCIETAL METRICS SYSTEM - LOOP DETECTION
+# Part of autopoiesis monitoring for self-regulation
+# ============================================================================
+
+def calculate_loop_detection_score(db: DatabaseInterface, generation: int, 
+                                   window_generations: int = 5) -> float:
+    """
+    Calculate a score measuring system oscillation/feedback loops.
+    
+    Loop Detection Score identifies harmful feedback oscillations where:
+    - Same parameters adjusted repeatedly in opposite directions
+    - Metrics oscillating without convergence
+    - Adjustments cancel each other out (wasted compute)
+    
+    Formula:
+        oscillation_count / total_adjustments
+        
+    Where oscillation = parameter changed direction within window
+    
+    Ideal: < 0.10 (very few oscillations, stable convergence)
+    Warning: > 0.25 (significant oscillation, may need damping)
+    Critical: > 0.50 (half of adjustments are oscillations!)
+    
+    Args:
+        db: DatabaseInterface instance
+        generation: Current evolution generation
+        window_generations: How many generations back to look
+        
+    Returns:
+        Loop detection score (0.0 = no loops, 1.0 = all oscillating)
+        
+    Part of the Societal Metrics System.
+    See DOCS/Societal_Metrics_Implementation_Analysis.md for design rationale.
+    """
+    import json
+    
+    try:
+        # Get parameter adjustment history
+        adjustments = db.execute_query("""
+            SELECT parameter_name, generation, adjustment_magnitude
+            FROM network_regulation_history
+            WHERE generation BETWEEN ? AND ?
+            ORDER BY parameter_name, generation ASC
+        """, (generation - window_generations, generation))
+        
+        if not adjustments or len(adjustments) < 2:
+            logger.debug(f"[LOOP] Generation {generation}: Insufficient data for loop detection")
+            return 0.0
+        
+        # Group by parameter
+        param_adjustments = {}
+        for adj in adjustments:
+            param = adj['parameter_name']
+            if param not in param_adjustments:
+                param_adjustments[param] = []
+            param_adjustments[param].append(adj['adjustment_magnitude'])
+        
+        # Count direction changes (oscillations)
+        oscillation_count = 0
+        total_adjustments = 0
+        
+        for param, magnitudes in param_adjustments.items():
+            if len(magnitudes) < 2:
+                continue
+                
+            for i in range(1, len(magnitudes)):
+                total_adjustments += 1
+                # Oscillation = sign change (positive to negative or vice versa)
+                if magnitudes[i] * magnitudes[i-1] < 0:
+                    oscillation_count += 1
+        
+        if total_adjustments == 0:
+            return 0.0
+            
+        loop_score = oscillation_count / total_adjustments
+        
+        # Store metric
+        _store_loop_detection_metric(db, generation, loop_score, 
+                                     oscillation_count, total_adjustments)
+        
+        # Log with severity indicator
+        if loop_score > 0.5:
+            logger.warning(f"[LOOP][CRITICAL] Generation {generation}: "
+                          f"score={loop_score:.2f} "
+                          f"({oscillation_count}/{total_adjustments} oscillating)")
+        elif loop_score > 0.25:
+            logger.warning(f"[LOOP][WARN] Generation {generation}: "
+                          f"score={loop_score:.2f} "
+                          f"({oscillation_count}/{total_adjustments} oscillating)")
+        else:
+            logger.info(f"[LOOP] Generation {generation}: "
+                       f"score={loop_score:.2f} "
+                       f"({oscillation_count}/{total_adjustments} oscillating)")
+        
+        return loop_score
+        
+    except Exception as e:
+        logger.error(f"Error calculating loop detection score: {e}")
+        return 0.0
+
+
+def _store_loop_detection_metric(db: DatabaseInterface, generation: int,
+                                  loop_score: float, oscillation_count: int,
+                                  total_adjustments: int):
+    """Store loop detection score in ecosystem_metrics table."""
+    import json
+    
+    try:
+        # Ensure table exists
+        db.execute_query("""
+            CREATE TABLE IF NOT EXISTS ecosystem_metrics (
+                metric_name TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                value REAL NOT NULL,
+                measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metadata TEXT,
+                PRIMARY KEY (metric_name, generation)
+            )
+        """)
+        
+        metadata = {
+            'oscillation_count': oscillation_count,
+            'total_adjustments': total_adjustments,
+            'severity': 'critical' if loop_score > 0.5 else 'warning' if loop_score > 0.25 else 'normal'
+        }
+        
+        db.execute_query("""
+            INSERT INTO ecosystem_metrics (metric_name, generation, value, metadata)
+            VALUES ('loop_detection_score', ?, ?, ?)
+            ON CONFLICT(metric_name, generation) DO UPDATE SET 
+                value = excluded.value,
+                metadata = excluded.metadata,
+                measured_at = CURRENT_TIMESTAMP
+        """, (generation, loop_score, json.dumps(metadata)))
+        
+    except Exception as e:
+        logger.error(f"Error storing loop detection metric: {e}")
+
+
+def detect_agent_action_loops(action_history: List[str], window_size: int = 10) -> Dict[str, Any]:
+    """
+    Detect if an agent is stuck in an action loop during gameplay.
+    
+    This is a real-time helper for the game loop to detect stuck agents.
+    
+    Patterns detected:
+    1. Simple oscillation: A-B-A-B-A-B (back and forth)
+    2. Short cycles: A-B-C-A-B-C (repeating sequence)
+    3. Single action spam: A-A-A-A (same action)
+    
+    Args:
+        action_history: Recent actions taken by agent
+        window_size: How many recent actions to analyze
+        
+    Returns:
+        Dict with:
+            - is_looping: bool
+            - loop_type: str ('oscillation', 'cycle', 'spam', 'none')
+            - pattern: str (the detected pattern)
+            - confidence: float (0.0-1.0)
+            - suggested_escape: str (action to try to escape)
+    """
+    if len(action_history) < window_size:
+        return {
+            'is_looping': False,
+            'loop_type': 'none',
+            'pattern': '',
+            'confidence': 0.0,
+            'suggested_escape': None
+        }
+    
+    recent = action_history[-window_size:]
+    
+    # Check for single action spam
+    if len(set(recent)) == 1:
+        return {
+            'is_looping': True,
+            'loop_type': 'spam',
+            'pattern': recent[0],
+            'confidence': 1.0,
+            'suggested_escape': _get_escape_action(recent[0])
+        }
+    
+    # Check for oscillation (A-B-A-B pattern)
+    if len(set(recent)) == 2:
+        # Check if alternating
+        pairs = list(zip(recent[::2], recent[1::2]))
+        if len(set(pairs)) == 1:
+            return {
+                'is_looping': True,
+                'loop_type': 'oscillation',
+                'pattern': f"{recent[0]}-{recent[1]}",
+                'confidence': 0.9,
+                'suggested_escape': _get_escape_action(recent[0], recent[1])
+            }
+    
+    # Check for short cycles (length 2-4)
+    for cycle_len in [2, 3, 4]:
+        if len(recent) >= cycle_len * 2:
+            potential_cycle = recent[:cycle_len]
+            is_cycle = True
+            for i in range(0, len(recent) - cycle_len + 1, cycle_len):
+                if recent[i:i+cycle_len] != potential_cycle:
+                    is_cycle = False
+                    break
+            if is_cycle:
+                return {
+                    'is_looping': True,
+                    'loop_type': 'cycle',
+                    'pattern': '-'.join(potential_cycle),
+                    'confidence': 0.85,
+                    'suggested_escape': _get_escape_action(*potential_cycle)
+                }
+    
+    return {
+        'is_looping': False,
+        'loop_type': 'none',
+        'pattern': '',
+        'confidence': 0.0,
+        'suggested_escape': None
+    }
+
+
+def _get_escape_action(*current_actions) -> str:
+    """Suggest an action not in the current loop to escape it."""
+    all_actions = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION6', 'ACTION7']
+    
+    # Find actions not in the current pattern
+    escape_candidates = [a for a in all_actions if a not in current_actions]
+    
+    if escape_candidates:
+        # Prefer ACTION6 (usually interesting) or ACTION7 (submit)
+        for preferred in ['ACTION6', 'ACTION7', 'ACTION5']:
+            if preferred in escape_candidates:
+                return preferred
+        return escape_candidates[0]
+    
+    # All actions in loop, suggest random
+    import random
+    return random.choice(all_actions)

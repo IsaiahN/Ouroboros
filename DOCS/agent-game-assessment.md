@@ -11,6 +11,8 @@
 - DOCS\arc_api_actions_rules.md
 - DOCS\how_arc_api_works.md
 - DOCS\agent-game-assessment.md
+- DOCS\Societal_Metrics_Implementation_Analysis.md (NEW - Metrics System Design)
+- DOCS\Metrics_Implementation_Plan.md (NEW - Implementation Guide)
 
 **Previous Human Role:**
 - Monitor ARC 3 AGI scorecards after run_evolution cycles (typically 5 generations)
@@ -38,12 +40,16 @@ Beat every level of every game in ARC 3 AGI system to prove the Ouroboros theory
 - Zero-score detection (sequence system health)
 - Level completion rate improvements
 - Collective intelligence efficacy
+- **Emergence Gain** - Is network smarter than sum of agents? (NEW)
+- **Control Error** - Role ratio divergence from targets (NEW)
+- **Loop Detection Score** - Parameter oscillation detection (NEW)
 
 ### System Optimization Domains
 1. **Agent Role Balancing** - Pioneer, Optimizer, Generalist, Exploiter mixes
 2. **Rule Refinement** - Behavioral parameters and interaction rules
 3. **Sequence Systems** - Storage, retrieval, and propagation efficiency
 4. **Collective Intelligence** - Cross-agent knowledge sharing and reasoning
+5. **Autopoiesis Monitoring** - System self-regulation and identity maintenance (NEW)
 
 ## Autonomous Operation Protocol
 
@@ -156,6 +162,55 @@ python manual_tools/schema_inspector.py --full              # Full schema dump
 - Row counts for all tables
 - Sample data preview
 
+### Societal Metrics System (NEW - December 2025)
+
+A comprehensive self-regulation system implementing autopoiesis principles.
+
+#### Core Modules
+
+| Module | Purpose | Key Features |
+|--------|---------|--------------|
+| `trigger_controller.py` | Feedback resonance prevention | 3-gen cooldowns, 0.5x damping, 2+ corroboration, 10% max adjustment |
+| `metric_confidence.py` | Meta-metric tracking | Confidence scoring, decay multipliers, contradiction detection |
+| `metric_rotator.py` | Anti-Goodhart rotation | 10-gen rotation, 20% skip probability, 5% one-time metrics, noise injection |
+| `autopoiesis_monitor.py` | Self-regulation monitoring | Emergence gain, identity drift, control error, loop detection |
+
+#### Key Metrics
+
+| Metric | Location | Formula | Healthy Value |
+|--------|----------|---------|---------------|
+| Emergence Gain | `network_intelligence_engine.py` | network_wins / solo_discoveries | > 1.0 |
+| Control Error | `regulatory_signal_engine.py` | mean(\|actual - target\| role ratios) | < 0.05 |
+| Role Saturation | `agent_operating_mode_system.py` | actual_count / target_count per role | 0.8 - 1.2 |
+| Loop Detection | `core_gameplay.py` | oscillation_count / total_adjustments | < 0.10 |
+
+#### Usage
+
+```python
+from autopoiesis_monitor import AutopoiesisMonitor
+from trigger_controller import TriggerController
+
+# Get system health at end of generation
+monitor = AutopoiesisMonitor(db)
+health = monitor.get_system_health(generation)
+print(f"Status: {health['status']}, Health: {health['overall_health']:.2f}")
+
+# Use trigger controller for safe parameter adjustments
+controller = TriggerController(db)
+if controller.fire_with_safeguards('mutation_rate', generation, 0.05, []):
+    print("Adjustment applied with safeguards")
+```
+
+#### Database Tables
+
+| Table | Purpose |
+|-------|---------|
+| `ecosystem_metrics` | Central metric storage (metric_name, generation, value) |
+| `trigger_history` | Trigger event tracking with consecutive counts |
+| `metric_confidence` | Confidence scores over time |
+| `metric_rotation_history` | Rotation events and active metrics |
+| `autopoiesis_snapshots` | System health snapshots |
+
 ### Hypothesis Generation Framework
 - Analyze performance patterns across games and agent types
 - Identify bottlenecks in level progression
@@ -242,12 +297,17 @@ cleaner.verify_critical_data()
 - Level progression consistency
 - Reduction in sequence system failures
 - Improvement in collective intelligence efficacy
+- **Emergence Gain > 1.0** - Collective intelligence emerging (NEW)
+- **Control Error < 0.05** - Good homeostasis (NEW)
+- **Loop Score < 0.10** - Stable convergence (NEW)
 
 ### Optimization Validation
 - Hypothesis testing success rates
 - Parameter adjustment effectiveness
 - Agent role mix performance impact
 - Knowledge transfer efficiency gains
+- **Metric Confidence** - Trust in metrics themselves (NEW)
+- **Identity Drift < 0.3** - System maintaining coherent goals (NEW)
 
 
 

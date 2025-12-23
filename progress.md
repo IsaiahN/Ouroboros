@@ -3746,3 +3746,214 @@ trace_data = {
 ---
 
 **SESSION COMPLETE: December 22, 2025 - 3:45:00 PM**
+
+---
+
+## Session: December 23, 2025
+
+### Session 38: Societal Metrics System Implementation
+
+**Focus**: Implement the Metrics System as designed in DOCS/Metrics_Implementation_Plan.md
+
+#### Phase 1: Core Infrastructure Created
+
+**New Files Created**:
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `trigger_controller.py` | ~200 | Feedback resonance prevention with cooldowns, damping, corroboration |
+| `metric_confidence.py` | ~180 | Meta-metric tracking for Goodhart's Law defense |
+| `metric_rotator.py` | ~220 | Anti-Goodhart rotation system with noise injection |
+| `autopoiesis_monitor.py` | ~300 | Core autopoiesis metrics for self-regulation |
+
+**Test Files Created**:
+
+| File | Tests | Purpose |
+|------|-------|---------|
+| `tests/test_trigger_controller.py` | 15 | Cooldown, damping, corroboration, workflow tests |
+| `tests/test_metric_confidence.py` | 11 | Confidence calculation, decay, history tests |
+| `tests/test_metric_rotator.py` | 13 | Rotation, caching, skip mechanism, noise tests |
+| `tests/test_autopoiesis.py` | 22 | Emergence, drift, control error, health tests |
+
+**Total: 61 unit tests, all passing**
+
+#### Phase 2: Tier 1 Metrics Added to Existing Files
+
+**Enhancements to Existing Files**:
+
+1. **network_intelligence_engine.py**:
+   - Added `calculate_emergence_gain()` function
+   - Tracks network wins vs solo discoveries
+   - Stores in `ecosystem_metrics` table
+
+2. **regulatory_signal_engine.py**:
+   - Added `calculate_control_error()` function
+   - Measures divergence between actual vs target role ratios
+   - Thresholds: < 0.05 ideal, > 0.15 concerning, > 0.30 critical
+
+3. **agent_operating_mode_system.py**:
+   - Added `calculate_role_saturation()` function
+   - Per-role saturation tracking
+   - Phase-aware (exploration vs optimization)
+
+4. **core_gameplay.py**:
+   - Added `calculate_loop_detection_score()` function
+   - Detects oscillation in parameter adjustments
+   - Added `detect_agent_action_loops()` for real-time stuck detection
+
+#### Testing Infrastructure Fixes
+
+**Issue**: Root `__init__.py` used relative imports, breaking pytest
+
+**Fixes Applied**:
+1. Updated `__init__.py` to use try/except for import handling
+2. Created `tests/conftest.py` for proper sys.path setup
+3. Updated `pytest.ini` with `--import-mode=importlib`
+4. Removed sys.path manipulation from individual test files
+
+#### Key Design Decisions
+
+**TriggerController Constants**:
+- `COOLDOWN_GENERATIONS = 3` - Prevents rapid re-triggering
+- `DAMPING_FACTOR = 0.5` - Each consecutive fire is half strength
+- `MAX_ADJUSTMENT = 0.10` - Caps any single adjustment at 10%
+- `CORROBORATION_THRESHOLD = 2` - Needs 2+ confirming signals
+
+**MetricRotator Constants**:
+- `ROTATION_PERIOD = 10` - Metrics rotate every 10 generations
+- `SKIP_ROTATION_PROBABILITY = 0.20` - 20% unpredictability
+- `ONE_TIME_METRIC_PROBABILITY = 0.05` - 5% unique metrics
+- `NOISE_INJECTION_RANGE = 0.1` - +/- 10% noise on values
+
+**AutopoiesisMonitor Thresholds**:
+- Emergence Gain > 1.0 = collective intelligence working
+- Identity Drift < 0.3 = healthy stability
+- Control Error < 0.05 = good homeostasis
+- Loop Score < 0.10 = stable convergence
+
+#### Database Schema Additions
+
+New table `ecosystem_metrics`:
+```sql
+CREATE TABLE ecosystem_metrics (
+    metric_name TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    value REAL NOT NULL,
+    measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata TEXT,
+    PRIMARY KEY (metric_name, generation)
+);
+```
+
+New table `trigger_history`:
+```sql
+CREATE TABLE trigger_history (
+    trigger_id TEXT PRIMARY KEY,
+    trigger_type TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    magnitude REAL NOT NULL,
+    consecutive_count INTEGER DEFAULT 1,
+    fired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+New table `metric_confidence`:
+```sql
+CREATE TABLE metric_confidence (
+    metric_name TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    confidence_score REAL NOT NULL,
+    contradiction_rate REAL,
+    adaptation_speed REAL,
+    predictive_power REAL,
+    influence_concentration REAL,
+    decay_multiplier REAL,
+    measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (metric_name, generation)
+);
+```
+
+New table `metric_rotation_history`:
+```sql
+CREATE TABLE metric_rotation_history (
+    rotation_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    active_metrics TEXT NOT NULL,
+    rotation_phase INTEGER NOT NULL,
+    skipped BOOLEAN DEFAULT FALSE,
+    rotated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+New table `autopoiesis_snapshots`:
+```sql
+CREATE TABLE autopoiesis_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    emergence_gain REAL,
+    identity_drift REAL,
+    control_error REAL,
+    loop_detection_score REAL,
+    overall_health REAL,
+    status TEXT,
+    warnings TEXT,
+    taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+#### Current Status (6:59:54 AM)
+
+**Implementation Complete**:
+- [x] TriggerController with cooldown, damping, corroboration
+- [x] MetricConfidenceTracker with decay multiplier
+- [x] MetricRotator with anti-Goodhart features
+- [x] AutopoiesisMonitor with health scoring
+- [x] emergence_gain in network_intelligence_engine
+- [x] control_error in regulatory_signal_engine
+- [x] role_saturation in agent_operating_mode_system
+- [x] loop detection in core_gameplay
+- [x] All 61 tests passing
+- [x] Fixed Pylance type annotation warnings (Optional types)
+
+**Current Failure Being Worked On**:
+- **None** - Phase 1 and Phase 2 implementation complete
+
+**Approach Taken**:
+
+1. **Start from the Plan**: Used `DOCS/Metrics_Implementation_Plan.md` as the implementation guide
+2. **Core Infrastructure First**: Built the 4 foundational modules before enhancing existing files
+3. **Test-Driven**: Created test files alongside each module with MockDatabase pattern
+4. **Dependency Injection**: All classes receive `db` parameter, never instantiate inside
+5. **Pycache Enforcement**: Every file starts with `os.environ['PYTHONDONTWRITEBYTECODE'] = '1'`
+6. **No Orphaned Code**: Enhanced existing files rather than creating new standalone modules for metrics
+
+**Steps Completed**:
+
+| Step | Time | Description |
+|------|------|-------------|
+| 1 | Start | Read implementation plan from DOCS |
+| 2 | +10min | Created `trigger_controller.py` with TriggerController class |
+| 3 | +15min | Created `metric_confidence.py` with MetricConfidenceTracker class |
+| 4 | +20min | Created `metric_rotator.py` with MetricRotator and AntiGoodhartRotator classes |
+| 5 | +25min | Created `autopoiesis_monitor.py` with AutopoiesisMonitor class |
+| 6 | +35min | Created 4 test files with 61 total tests |
+| 7 | +40min | Added `calculate_emergence_gain()` to network_intelligence_engine.py |
+| 8 | +45min | Added `calculate_control_error()` to regulatory_signal_engine.py |
+| 9 | +50min | Added `calculate_role_saturation()` to agent_operating_mode_system.py |
+| 10 | +55min | Added loop detection functions to core_gameplay.py |
+| 11 | +60min | Fixed pytest import issues (root __init__.py, conftest.py, pytest.ini) |
+| 12 | +65min | Fixed MockDatabase query handling for test_get_history_returns_records |
+| 13 | +70min | Fixed Pylance type warnings (Optional types) |
+| 14 | Now | All 61 tests passing, no errors |
+
+**Next Steps for Integration**:
+1. Integrate TriggerController into regulatory_signal_engine's fire mechanism
+2. Call AutopoiesisMonitor.get_system_health() at end of each generation
+3. Use MetricRotator to rotate active metrics
+4. Dashboard for human spot-checks (future)
+
+---
+
+**SESSION IN PROGRESS: December 23, 2025 - 6:59:54 AM**

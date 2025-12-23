@@ -1524,3 +1524,159 @@ class AgentOperatingModeSystem:
             result['recommended_bias'] = 0.5
         
         return result
+
+
+# ============================================================================
+# SOCIETAL METRICS SYSTEM - ROLE SATURATION
+# Part of autopoiesis monitoring for self-regulation
+# ============================================================================
+
+def calculate_role_saturation(db: DatabaseInterface, generation: int) -> Dict[str, float]:
+    """
+    Calculate saturation level for each role (approaching target limits).
+    
+    Role Saturation measures how close each role is to its target population.
+    Useful for detecting when roles are under/over-filled and need rebalancing.
+    
+    Formula per role:
+        actual_count / target_count
+        
+    Values:
+        < 0.8 = Under-filled (need more agents in this role)
+        0.8-1.2 = Healthy range
+        > 1.2 = Over-filled (too many agents, wasted resources)
+    
+    Args:
+        db: DatabaseInterface instance
+        generation: Current evolution generation
+        
+    Returns:
+        Dict mapping role -> saturation ratio
+        
+    Part of the Societal Metrics System.
+    See DOCS/Societal_Metrics_Implementation_Analysis.md for design rationale.
+    """
+    try:
+        # Default target ratios
+        # Adjust based on whether in exploration or optimization phase
+        full_wins = db.execute_query("""
+            SELECT COUNT(DISTINCT game_id) as count
+            FROM winning_sequences
+            WHERE is_full_game_win = 1 AND is_valid = 1
+        """)
+        has_full_wins = (full_wins and full_wins[0]['count'] > 0)
+        
+        if has_full_wins:
+            # OPTIMIZATION PHASE ratios
+            target_ratios = {
+                'pioneer': 0.10,
+                'optimizer': 0.50,
+                'generalist': 0.25,
+                'exploiter': 0.15
+            }
+        else:
+            # EXPLORATION PHASE ratios
+            target_ratios = {
+                'pioneer': 0.60,
+                'optimizer': 0.10,
+                'generalist': 0.20,
+                'exploiter': 0.10
+            }
+        
+        # Get actual population counts per role
+        population_result = db.execute_query("""
+            SELECT 
+                LOWER(COALESCE(role, 'generalist')) as role,
+                COUNT(*) as count
+            FROM agents
+            WHERE is_active = TRUE
+            GROUP BY role
+        """)
+        
+        if not population_result:
+            logger.warning("No active agents for role saturation calculation")
+            return {role: 0.0 for role in target_ratios}
+        
+        total_agents = sum(r['count'] for r in population_result)
+        if total_agents == 0:
+            return {role: 0.0 for role in target_ratios}
+        
+        actual_counts = {
+            r['role']: r['count'] 
+            for r in population_result
+        }
+        
+        # Calculate saturation per role
+        saturations = {}
+        for role, target_ratio in target_ratios.items():
+            target_count = max(total_agents * target_ratio, 1)
+            actual_count = actual_counts.get(role, 0)
+            saturations[role] = actual_count / target_count
+        
+        # Store metrics in ecosystem_metrics table
+        _store_role_saturation_metrics(db, generation, saturations, has_full_wins)
+        
+        # Calculate overall saturation health
+        mean_saturation = sum(saturations.values()) / len(saturations)
+        max_deviation = max(abs(s - 1.0) for s in saturations.values())
+        
+        logger.info(f"[SATURATION] Generation {generation}: "
+                   f"mean={mean_saturation:.2f} max_dev={max_deviation:.2f} "
+                   f"phase={'OPTIMIZATION' if has_full_wins else 'EXPLORATION'}")
+        
+        return saturations
+        
+    except Exception as e:
+        logger.error(f"Error calculating role saturation: {e}")
+        return {}
+
+
+def _store_role_saturation_metrics(db: DatabaseInterface, generation: int,
+                                    saturations: Dict[str, float], 
+                                    is_optimization_phase: bool):
+    """Store role saturation in ecosystem_metrics table for tracking."""
+    import json
+    
+    try:
+        # Ensure table exists
+        db.execute_query("""
+            CREATE TABLE IF NOT EXISTS ecosystem_metrics (
+                metric_name TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                value REAL NOT NULL,
+                measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metadata TEXT,
+                PRIMARY KEY (metric_name, generation)
+            )
+        """)
+        
+        # Store overall saturation health (mean)
+        mean_saturation = sum(saturations.values()) / len(saturations) if saturations else 0.0
+        
+        metadata = {
+            'by_role': saturations,
+            'phase': 'optimization' if is_optimization_phase else 'exploration'
+        }
+        
+        db.execute_query("""
+            INSERT INTO ecosystem_metrics (metric_name, generation, value, metadata)
+            VALUES ('role_saturation', ?, ?, ?)
+            ON CONFLICT(metric_name, generation) DO UPDATE SET 
+                value = excluded.value,
+                metadata = excluded.metadata,
+                measured_at = CURRENT_TIMESTAMP
+        """, (generation, mean_saturation, json.dumps(metadata)))
+        
+        # Also store individual role saturations for detailed tracking
+        for role, saturation in saturations.items():
+            db.execute_query("""
+                INSERT INTO ecosystem_metrics (metric_name, generation, value, metadata)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(metric_name, generation) DO UPDATE SET 
+                    value = excluded.value,
+                    measured_at = CURRENT_TIMESTAMP
+            """, (f'role_saturation_{role}', generation, saturation, 
+                  json.dumps({'phase': 'optimization' if is_optimization_phase else 'exploration'})))
+        
+    except Exception as e:
+        logger.error(f"Error storing role saturation metrics: {e}")

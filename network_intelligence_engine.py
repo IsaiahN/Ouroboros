@@ -672,3 +672,99 @@ def assess_network_health(snapshot: Dict) -> Dict:
             'status': '[STAR] EXCELLENT',
             'message': 'Network thriving with excellent knowledge diversity and flow.'
         }
+
+
+# ============================================================================
+# SOCIETAL METRICS SYSTEM - EMERGENCE GAIN
+# Part of autopoiesis monitoring for self-regulation
+# ============================================================================
+
+def calculate_emergence_gain(db: DatabaseInterface, generation: int) -> float:
+    """
+    Calculate if network intelligence exceeds sum of individual agents.
+    
+    Emergence Gain > 1.0 means collective intelligence is working.
+    
+    Formula:
+        network_wins_using_shared_knowledge / max(solo_discoveries, 1)
+    
+    Where:
+        network_wins = Levels beaten using sequences from other agents
+        solo_discoveries = Levels beaten without any shared knowledge
+    
+    Args:
+        db: DatabaseInterface instance
+        generation: Current evolution generation
+        
+    Returns:
+        Emergence gain ratio (>1.0 = emergence working)
+        
+    Part of the Societal Metrics System.
+    See DOCS/Societal_Metrics_Implementation_Analysis.md for design rationale.
+    """
+    try:
+        # Network level: Wins where agent used sequence discovered by another
+        network_wins_result = db.execute_query("""
+            SELECT COUNT(*) as count
+            FROM agent_arc_performance aap
+            WHERE aap.game_timestamp > datetime('now', '-7 days')
+              AND EXISTS (
+                  SELECT 1 FROM winning_sequences ws
+                  WHERE ws.game_id = aap.game_id
+                    AND ws.discovered_by_agent_id != aap.agent_id
+                    AND ws.times_referenced > 0
+              )
+        """)
+        network_wins = network_wins_result[0]['count'] if network_wins_result else 0
+        
+        # Individual level: Sequences discovered that were never shared/reused
+        solo_result = db.execute_query("""
+            SELECT COUNT(DISTINCT sequence_id) as count
+            FROM winning_sequences
+            WHERE discovered_at > datetime('now', '-7 days')
+              AND times_referenced = 0
+        """)
+        solo_discoveries = max(solo_result[0]['count'] if solo_result else 1, 1)
+        
+        emergence_gain = network_wins / solo_discoveries
+        
+        # Store metric in ecosystem_metrics table
+        _store_emergence_metric(db, generation, emergence_gain)
+        
+        logger.info(f"[EMERGENCE] Generation {generation}: "
+                   f"gain={emergence_gain:.2f} "
+                   f"(network_wins={network_wins}, solo={solo_discoveries})")
+        
+        return emergence_gain
+        
+    except Exception as e:
+        logger.error(f"Error calculating emergence gain: {e}")
+        return 1.0  # Neutral on error
+
+
+def _store_emergence_metric(db: DatabaseInterface, generation: int, 
+                            emergence_gain: float):
+    """Store emergence gain in ecosystem_metrics table for tracking."""
+    try:
+        # Ensure table exists
+        db.execute_query("""
+            CREATE TABLE IF NOT EXISTS ecosystem_metrics (
+                metric_name TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                value REAL NOT NULL,
+                measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metadata TEXT,
+                PRIMARY KEY (metric_name, generation)
+            )
+        """)
+        
+        db.execute_query("""
+            INSERT INTO ecosystem_metrics (metric_name, generation, value)
+            VALUES ('emergence_gain', ?, ?)
+            ON CONFLICT(metric_name, generation) DO UPDATE SET 
+                value = excluded.value,
+                measured_at = CURRENT_TIMESTAMP
+        """, (generation, emergence_gain))
+        
+    except Exception as e:
+        logger.error(f"Error storing emergence metric: {e}")
