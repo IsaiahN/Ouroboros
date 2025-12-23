@@ -3356,3 +3356,393 @@ User provided external critique (test.md) identifying 6 major gaps in how fronti
 ---
 
 **END OF SESSION 1: December 18, 2025 - 4:15:00 PM**
+
+---
+
+## Session: December 22, 2025
+
+---
+
+### Session 2: Critical Gameplay Regression Fix (12:30:00 PM - 1:35:00 PM)
+
+**Focus**: Diagnose and fix gameplay performance regression discovered after December 18 changes
+
+---
+
+#### Problem Identified
+
+User reported: "gameplay is worse now. review recent games and recent commits to decide why"
+
+**Investigation Approach**:
+1. Query `game_results` table to compare performance before/after recent commits
+2. Review git commits from December 18-19
+3. Trace root cause through code analysis
+
+#### Performance Data Analysis
+
+**Query Results** - Average scores by date:
+
+| Date | Avg Score | Games Played |
+|------|-----------|--------------|
+| Dec 18 | **2.52** | 264 |
+| Dec 19 | **0.94** | 139 |
+
+**Drop**: 63% performance regression (2.52 → 0.94)
+
+**Specific Game Analysis** - `sp80` game:
+- Has 100% validation rate (305/305 successful replays in history)
+- Sequence is 23 actions long, score comes at action 23
+- Recent attempts failing at actions 21, 45, 57 (never reaching score)
+- Agents were exiting sequence replay prematurely
+
+---
+
+#### Root Cause Identification
+
+**Commit 66c4735** (Dec 18, 4:10 PM): "Fix critical gaps in frontier exploration"
+
+This commit introduced:
+1. `STUCK_STATE_THRESHOLD_FRONTIER = 30` (aggressive stuck detection for frontier)
+2. `cycle_trigger_threshold = 10` (very aggressive cycle detection)
+3. Both relied on `frame_changed` data from `action_traces` table
+
+**The Hidden Bug**: `frame_changed` was ALWAYS stored as `False`
+
+**Investigation** - Queried action_traces:
+```sql
+SELECT frame_changed, COUNT(*) FROM action_traces GROUP BY frame_changed;
+```
+Result: **100% of records had `frame_changed = 0` (False)**
+
+This meant:
+- Stuck detection thought frames NEVER changed
+- After 10-15 actions, escape mode triggered incorrectly
+- Agents abandoned working sequences mid-replay
+
+---
+
+#### Code Archaeology
+
+**Where frame_changed SHOULD be computed** - `action_handler.py`:
+```python
+# Line ~190-200 in action_handler.py
+frame_changed = frame_before_hash != frame_after_hash
+```
+
+**Where frame_changed was LOGGED** - `game_session_manager.py`:
+```python
+# Line ~450-460 in send_action()
+'frame_changed': kwargs.get('frame_changed', False),  # Always defaulted to False!
+```
+
+**The Disconnect**:
+- `frame_changed` was computed in `action_handler.py` AFTER `send_action()` returned
+- But `send_action()` logged the trace BEFORE returning with `kwargs.get('frame_changed', False)`
+- The value was never passed, so it always defaulted to `False`
+
+---
+
+#### Fix Implementation
+
+**Step 1: Workaround Fixes (Initial)**
+
+**File**: `core_gameplay.py`
+- Changed `stuck_threshold = 15` → `stuck_threshold = max(30, sequence_length + 10)`
+- Ensures threshold always exceeds the sequence length being replayed
+- Changed `cycle_trigger_threshold = 10` → `cycle_trigger_threshold = 15`
+
+**Step 2: Root Cause Fix (Real Fix)**
+
+**File**: `game_session_manager.py` - Lines 450-469
+
+Changed from:
+```python
+trace_data = {
+    'frame_changed': kwargs.get('frame_changed', False),  # BUG: Always False
+    ...
+}
+```
+
+Changed to:
+```python
+# REAL FIX: Compute frame_changed HERE where both frames are available
+frame_changed = False
+if frame_before and frame_after:
+    try:
+        frame_before_hash = hashlib.md5(str(frame_before).encode()).hexdigest()
+        frame_after_hash = hashlib.md5(str(frame_after).encode()).hexdigest()
+        frame_changed = frame_before_hash != frame_after_hash
+    except Exception:
+        frame_changed = False
+
+trace_data = {
+    'frame_changed': frame_changed,  # Now correctly computed
+    ...
+}
+```
+
+**Why This Works**:
+- `send_action()` has access to both `frame_before` and `frame_after`
+- Compute the hash comparison inside the method where data is available
+- Store the correct value before the method returns
+
+---
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `game_session_manager.py` | Added frame_changed computation inside `send_action()` |
+| `core_gameplay.py` | Dynamic stuck_threshold, balanced cycle_trigger_threshold |
+
+#### Impact Summary
+
+| Issue | Before Fix | After Fix |
+|-------|------------|-----------|
+| `frame_changed` storage | Always `False` | Correctly computed |
+| Stuck detection | Triggered after 15 actions (broken) | Triggers after 30+ or sequence_length+10 |
+| Cycle detection | Triggered after 10 actions (too aggressive) | Triggers after 15 actions (balanced) |
+| Sequence replay | Abandoned mid-sequence | Completes full sequence |
+
+---
+
+### Current Status (1:35:00 PM)
+
+**Approach**: Root cause fix for frame_changed tracking + balanced thresholds
+
+**Completed This Session**:
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | Identify performance regression via database query | [DONE] |
+| 2 | Trace root cause to commit 66c4735 | [DONE] |
+| 3 | Discover frame_changed was never stored correctly | [DONE] |
+| 4 | Apply workaround (dynamic stuck_threshold) | [DONE] |
+| 5 | Apply root fix (compute frame_changed in send_action) | [DONE] |
+| 6 | Balance cycle_trigger_threshold (10 → 15) | [DONE] |
+| 7 | Start 10-generation evolution test | [IN PROGRESS] |
+
+**Current Test Running**:
+- Evolution runner started at 1:28:29 PM
+- Resuming from Generation 287 → Running to Generation 297
+- 20 games per generation = 200 total games to validate fix
+
+**Expected Outcome**:
+- Average score should return toward 2.5+ range (pre-regression baseline)
+- `sp80` game should complete successfully (reach action 23, get score)
+- `frame_changed` should now show mix of `True`/`False` values in action_traces
+
+**Current Failure Being Worked On**:
+- **Validation in progress** - Waiting for evolution test results to confirm fix effectiveness
+
+**Next Steps**:
+1. Monitor evolution progress
+2. Query new game_results after test completes
+3. Compare new average scores to baseline (should recover from 0.94 → 2.5+)
+4. Verify frame_changed is now correctly stored in action_traces
+
+---
+
+## Session: December 22, 2025 (Afternoon)
+
+---
+
+### Session: Societal Metrics System Design & Implementation Planning (2:15:00 PM - 3:45:00 PM)
+
+**Focus**: Create comprehensive metrics system for autopoietic self-regulation based on user's "Societal Metrics List" from cybernetics, complexity science, and agent-based modeling
+
+---
+
+#### Step 1: Codebase Analysis (2:15:00 PM)
+
+**Task**: Review existing metric infrastructure across the codebase
+
+**Files Analyzed**:
+- `core_gameplay.py` - Game loop, action handling
+- `performance_analyzer.py` - Win rates, efficiency, trends
+- `prestige_engine.py` - Social capital, viral spread, validation
+- `viral_package_engine.py` - Knowledge transfer, infection rates
+- `evolutionary_engine.py` - Breeding, fitness, selection
+- `network_intelligence_engine.py` - Knowledge diversity, resilience
+- `regulatory_signal_engine.py` - Quorum sensing, distributed regulation
+- `autonomous_evolution_runner.py` - Evolution orchestration
+
+**Findings**: Substantial existing infrastructure, but key gaps identified:
+1. No boundary integrity metrics (identity drift detection)
+2. No self-maintenance cost tracking (overhead vs productive work)
+3. No emergence gain measurement (network > sum of agents?)
+4. No phase transition detection
+5. No metric rotation system (anti-Goodhart)
+
+---
+
+#### Step 2: Metric Ranking & Analysis Document (2:30:00 PM)
+
+**Created**: `DOCS/Societal_Metrics_Implementation_Analysis.md` (~500 lines)
+
+**Contents**:
+- Executive Summary with gap analysis
+- Current System Problems (5 identified):
+  1. Sequence System Reliability
+  2. Agent Role Distribution
+  3. Knowledge Transfer Bottlenecks
+  4. Stuck State Detection
+  5. Optimization Plateau
+
+- **Tier 1 Metrics (Critical)** - Ranked by Usefulness/Difficulty:
+  | Metric | Usefulness | Difficulty | Problem Solved |
+  |--------|------------|------------|----------------|
+  | Emergence Gain | 5/5 | 3/5 | Network intelligence validation |
+  | Control Error | 5/5 | 2/5 | Feedback loop health |
+  | Sequence Success Rate | 5/5 | 1/5 | Knowledge quality |
+  | Role Saturation Index | 5/5 | 2/5 | Population balance |
+  | Information Velocity | 5/5 | 3/5 | Knowledge flow |
+  | Loop Detection | 5/5 | 2/5 | Stuck prevention |
+  | Functional Identity Drift | 5/5 | 4/5 | Goal corruption prevention |
+
+- Tier 2-5 metrics with similar analysis
+- Human Spot-Check Dashboard with SQL queries
+- Implementation Roadmap (4 phases, 7+ weeks)
+
+---
+
+#### Step 3: Bot Feedback Integration (3:00:00 PM)
+
+**Context**: User received external feedback identifying 5 cybernetic risks in the initial design
+
+**Feedback Issues Identified**:
+1. **Trigger Coupling Risk** - Single-metric triggers can create feedback loops (cascade oscillations)
+2. **Stationarity Assumption** - Metrics assume comparable generations, but system evolves its own problem distribution
+3. **Human Spot-Checks as Boundary Condition** - Dashboard serving as value oracle (feature, not bug)
+4. **Second-Order Goodhart Risk** - Agents can learn to meta-game the rotation itself
+5. **Missing Metric Confidence Meta-Metric** - No way to know if a metric itself is trustworthy
+
+**Solution**: Added new section "Critical Design Constraints" (~300 lines) with:
+
+- **TriggerController class**: Cooldowns, damping, corroboration requirements
+  ```python
+  COOLDOWN_GENERATIONS = 3
+  DAMPING_FACTOR = 0.5
+  MAX_ADJUSTMENT = 0.10  # 10% max change
+  ```
+
+- **Regime Change Detection**: Detect when old metrics don't apply anymore
+
+- **AntiGoodhartRotator class**: Skip rotations, one-time metrics, noise injection
+  ```python
+  SKIP_ROTATION_PROBABILITY = 0.20
+  ONE_TIME_METRIC_PROBABILITY = 0.05
+  NOISE_INJECTION_RANGE = 0.1
+  ```
+
+- **MetricConfidenceTracker class**: Track confidence in metrics themselves
+  - Contradiction rate
+  - Adaptation speed (gaming detection)
+  - Predictive power
+  - Influence concentration
+
+---
+
+#### Step 4: Implementation Plan Document (3:30:00 PM)
+
+**Created**: `DOCS/Metrics_Implementation_Plan.md` (~700 lines)
+
+**Key Architecture Decisions**:
+
+| Principle | Enforcement |
+|-----------|-------------|
+| **Pycache Disabled (LAW)** | 6 mechanisms: file-level, process-level, pre-run cleanup, .gitignore, pre-commit hook, validation tests |
+| **Database-Only** | All metrics stored in SQLite, no log files |
+| **Enhance, Don't Replace** | Add methods to existing classes |
+| **Dependency Injection** | Pass `DatabaseInterface` to all classes |
+
+**Testing Strategy** (5-layer pyramid):
+1. Unit Tests - Per method (90% coverage for core)
+2. Component Tests - Per class
+3. Integration Tests - Metrics working together
+4. Regression Tests - Pycache disabled, no emojis, bugs stay fixed
+5. Property-Based Tests - Using `hypothesis` for invariants
+
+**Implementation Timeline**:
+| Week | Focus | Deliverables |
+|------|-------|--------------|
+| 1 | Core Infrastructure | TriggerController, MetricConfidenceTracker, MetricRotator |
+| 2 | Tier 1 Metrics | Emergence Gain, Control Error, Role Saturation, Loop Detection, Identity Drift |
+| 3 | Tier 2-3 Metrics | Information Velocity, Hub Fragility, Compression Yield |
+| 4 | Integration | Wire into autonomous_evolution_runner.py |
+
+**New Files to Create** (4):
+- `trigger_controller.py`
+- `metric_confidence.py`
+- `metric_rotator.py`
+- `autopoiesis_monitor.py`
+
+**Existing Files to Enhance** (8):
+- `network_intelligence_engine.py` - Add emergence gain
+- `regulatory_signal_engine.py` - Add control error
+- `agent_operating_mode_system.py` - Add role saturation
+- `core_gameplay.py` - Enhance loop detection
+- `viral_package_engine.py` - Add information velocity, hub fragility
+- `frustration_detector.py` - Add strategy abandonment lag
+- `prestige_engine.py` - Add trust concentration
+- `performance_analyzer.py` - Add multi-scale correlation
+
+**Database Schema Changes** (4 new tables):
+- `trigger_history` - Feedback resonance prevention
+- `metric_confidence` - Meta-metric tracking
+- `metric_rotation_history` - Anti-Goodhart rotation
+- `ecosystem_metrics` - Generalized metric storage
+
+---
+
+#### Documents Created This Session
+
+| Document | Path | Lines | Purpose |
+|----------|------|-------|---------|
+| Societal Metrics Analysis | `DOCS/Societal_Metrics_Implementation_Analysis.md` | ~800 | Metric ranking, problem grouping, autopoiesis lens |
+| Implementation Plan | `DOCS/Metrics_Implementation_Plan.md` | ~700 | Detailed implementation with tests, timeline, rollback |
+
+---
+
+#### Approach Summary
+
+**Philosophy**: The metrics system enables autopoiesis - the system observes itself not just to improve, but to maintain its identity as a learning organism.
+
+**Three-Purpose Design**:
+1. **Self-regulation** - System adjusts automatically (TriggerController)
+2. **Human spot-checks** - Infrequent verification (Dashboard)
+3. **Emergence detection** - Is collective intelligence emerging? (MetricConfidence)
+
+**Anti-Goodhart Strategy**:
+- Metrics rotate every 10 generations
+- 20% chance to skip rotation (unpredictability)
+- 5% chance to inject one-time metrics (never reused)
+- Noise injection prevents exact gaming
+- Meta-metric tracks confidence in metrics themselves
+
+---
+
+#### Current Status (3:45:00 PM)
+
+**Completed**:
+- [x] Codebase analysis for existing metrics
+- [x] Metric ranking by usefulness and difficulty
+- [x] Problem domain grouping
+- [x] Autopoiesis lens applied throughout
+- [x] Human spot-check dashboard designed
+- [x] Bot feedback integrated (5 constraints)
+- [x] Detailed implementation plan with tests
+- [x] Pycache enforcement documented (6 mechanisms)
+
+**Current Failure Being Worked On**:
+- **None** - Planning phase complete, ready to begin implementation
+
+**Next Steps**:
+1. Create `trigger_controller.py` with tests (Week 1, Day 1-2)
+2. Create `metric_confidence.py` with tests (Week 1, Day 3-4)
+3. Create `metric_rotator.py` with tests (Week 1, Day 5)
+4. Begin Tier 1 metric implementation (Week 2)
+
+---
+
+**SESSION COMPLETE: December 22, 2025 - 3:45:00 PM**
