@@ -419,6 +419,31 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Multi-stage pipeline error: {e}")
         
+        # STAGE 2.5: Try Abstract Template Replay (ENHANCED)
+        # If multi-stage failed but we have an abstraction engine, try template replay
+        if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+            try:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                
+                # Check if we should use a template for this level
+                should_use, template = self.abstraction_engine.should_use_template(game_type, level_number=1)  # type: ignore[attr-defined]
+                
+                if should_use and template:
+                    # Get executable template
+                    template_actions = self.abstraction_engine.get_template_for_replay(game_type, level_number=1)  # type: ignore[attr-defined]
+                    
+                    if template_actions:
+                        logger.info(f"[TEMPLATE] Using abstract template: {len(template_actions)} actions, "
+                                   f"confidence {template.confidence:.0%}, {len(template.invariant_actions)} invariants")
+                        result.multi_stage_sequence = {
+                            'actions': template_actions,
+                            'stage': 'abstract_template',
+                            'confidence': template.confidence,
+                            'template': template
+                        }
+            except Exception as e:
+                logger.debug(f"Abstract template error: {e}")
+        
         # STAGE 3: Get abstraction guidance for pure exploration
         if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
             try:
@@ -1633,6 +1658,31 @@ class GameplayEngine:
                                 
                         except Exception as e:
                             logger.debug(f"Multi-stage pipeline error: {e}")
+                    
+                    # STAGE 2.5: Try Abstract Template Replay (ENHANCED)
+                    # If multi-stage failed but we have an abstraction engine, try template replay
+                    if not multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                        try:
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            
+                            # Check if we should use a template for this level
+                            should_use, template = self.abstraction_engine.should_use_template(game_type, level_number=1)  # type: ignore[attr-defined]
+                            
+                            if should_use and template:
+                                # Get executable template
+                                template_actions = self.abstraction_engine.get_template_for_replay(game_type, level_number=1)  # type: ignore[attr-defined]
+                                
+                                if template_actions:
+                                    logger.info(f"[TEMPLATE] Using abstract template: {len(template_actions)} actions, "
+                                               f"confidence {template.confidence:.0%}, {len(template.invariant_actions)} invariants")
+                                    multi_stage_sequence = {
+                                        'actions': template_actions,
+                                        'stage': 'abstract_template',
+                                        'confidence': template.confidence,
+                                        'template': template
+                                    }
+                        except Exception as e:
+                            logger.debug(f"Abstract template error: {e}")
                     
                     # STAGE 3: Get abstraction guidance for pure exploration
                     if not multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
