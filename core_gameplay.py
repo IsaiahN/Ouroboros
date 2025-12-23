@@ -80,6 +80,15 @@ except ImportError:
     def is_abstraction_enabled() -> bool:
         return False
 
+# CODS - Cognitive Operator Discovery System (earn-to-learn primitives)
+try:
+    from cods_engine import CODSEngine, CODSGameContext
+    CODS_AVAILABLE = True
+except ImportError:
+    CODS_AVAILABLE = False
+    CODSEngine = None
+    CODSGameContext = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -171,6 +180,18 @@ class GameplayEngine:
                 logger.warning(f"Failed to initialize abstraction engine: {e}")
         else:
             self.abstraction_engine = None
+        
+        # CODS - Cognitive Operator Discovery System
+        # Provides earn-to-learn primitives, operator composition, and discovery
+        if CODS_AVAILABLE:
+            try:
+                self.cods_engine = CODSEngine(db_path=db_path)  # type: ignore[misc]
+                logger.info("CODS engine initialized (earn-to-learn primitives)")
+            except Exception as e:
+                self.cods_engine = None
+                logger.warning(f"Failed to initialize CODS engine: {e}")
+        else:
+            self.cods_engine = None
         
         # NEW: Breakthrough systems initialization
         try:
@@ -658,6 +679,21 @@ class GameplayEngine:
                     )
             except Exception as e:
                 logger.debug(f"Goal inference failed (non-critical): {e}")
+        
+        # CODS - Update context for new level
+        # Advance CODS to track operator usage per level
+        if self.cods_engine:
+            try:
+                new_level = int(game_state.score) + 1
+                self.cods_engine.set_context(
+                    game_id=game_id,
+                    level=new_level,
+                    agent_id=agent_id,
+                    mode=agent_mode or 'generalist'
+                )
+                logger.debug(f"[CODS] Advanced to level {new_level}")
+            except Exception as e:
+                logger.debug(f"CODS level advance failed (non-critical): {e}")
         
         # Pattern Learning: Capture sequence on level completion
         if self.game_config.get('enable_pattern_learning', True):
@@ -1273,6 +1309,26 @@ class GameplayEngine:
             except Exception as e:
                 self.symbolic_engine = None
                 logger.debug(f"Symbolic engine init failed (non-critical): {e}")
+        
+        # CODS - Set game context for operator discovery
+        # This allows primitives and operators to be used during gameplay
+        if self.cods_engine and game_state.frame:
+            try:
+                self.cods_engine.set_context(
+                    game_id=game_id,
+                    level=1,
+                    agent_id=agent_id,
+                    mode=agent_mode or 'generalist'
+                )
+                # Give initial frame to CODS
+                self.cods_engine.update_frame(
+                    game_state.frame,
+                    game_state.score,
+                    actions_taken=0
+                )
+                logger.debug(f"[CODS] Context initialized for {game_id} level 1")
+            except Exception as e:
+                logger.debug(f"CODS context init failed (non-critical): {e}")
         
         # ================================================================
         # SESSION 25: INITIAL REGION CLASSIFICATION
@@ -1927,6 +1983,17 @@ class GameplayEngine:
                                     self._recent_action_traces = []
                             except Exception as e:
                                 logger.debug(f"Self-model action update failed: {e}")
+                        
+                        # CODS: Update frame for operator discovery and primitive learning
+                        if self.cods_engine and game_state.frame:
+                            try:
+                                self.cods_engine.update_frame(
+                                    game_state.frame,
+                                    game_state.score,
+                                    action_count
+                                )
+                            except Exception as e:
+                                logger.debug(f"CODS frame update failed: {e}")
                     
                     # Phase 4.5: Learn from action outcome for sensation system
                     if agent_id and self.game_config.get('enable_sensation_navigation', True):
@@ -3298,6 +3365,31 @@ class GameplayEngine:
                 reasoning = f"Continuing meta-learned pattern: {next_action['reason']}"
                 logger.info(f" {reasoning}: ACTION6 at {next_action['coordinate']}")
                 return "ACTION6", reasoning
+        
+        # ===================================================================
+        # CODS - COGNITIVE OPERATOR DISCOVERY SYSTEM
+        # Use composed operators and unlocked primitives to suggest actions.
+        # CODS provides analysis through discovered operators (symmetry, shapes, etc.)
+        # ===================================================================
+        if self.cods_engine and game_state.frame:
+            try:
+                # Get CODS suggestion based on current frame analysis
+                cods_suggestion = self.cods_engine.suggest_action(game_state.frame)
+                
+                if cods_suggestion and cods_suggestion.get('action'):
+                    action_num = cods_suggestion['action']
+                    confidence = cods_suggestion.get('confidence', 0.0)
+                    operator_name = cods_suggestion.get('operator', 'unknown')
+                    
+                    # Use CODS suggestion if confidence is high enough (0.6 threshold)
+                    if confidence >= 0.6:
+                        reasoning = f"CODS operator '{operator_name}' suggests ACTION{action_num} (confidence: {confidence:.2f})"
+                        logger.info(f"[CODS] {reasoning}")
+                        return f"ACTION{action_num}", reasoning
+                    else:
+                        logger.debug(f"[CODS] Low confidence suggestion ({confidence:.2f}) from '{operator_name}'")
+            except Exception as e:
+                logger.debug(f"CODS suggestion failed (non-critical): {e}")
         
         # Fall back to default action selection WITH viral/pariah influence
         strategy = self.game_config.get('strategy', 'balanced')

@@ -67,6 +67,14 @@ from breakthrough_budget_allocator import BreakthroughBudgetAllocator  # Tier 1:
 from automated_assessment_runner import AutomatedAssessmentRunner  # Other AI #3: Auto-metrics
 # GameDiversityPreserver import removed - prestige-only protection now
 
+# CODS - Cognitive Operator Discovery System (post-generation unlock checks)
+try:
+    from cods_engine import check_for_potential_unlocks
+    CODS_AVAILABLE = True
+except ImportError:
+    CODS_AVAILABLE = False
+    check_for_potential_unlocks = None
+
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
 
@@ -2071,6 +2079,30 @@ class AutonomousEvolutionRunner:
         except Exception as e:
             print(f"[WARN] Automated assessment failed: {e}")
         
+        # CODS: Check for potential primitive unlocks (post-generation)
+        if CODS_AVAILABLE and check_for_potential_unlocks:
+            try:
+                cods_results = check_for_potential_unlocks(
+                    db_path=self.db.db_path,
+                    min_success_rate=0.70,
+                    min_cross_game_rate=0.50,
+                    min_tests=5
+                )
+                if cods_results['unlock_attempts'] > 0:
+                    print(f"[CODS] Checked {cods_results['operators_checked']} operators, "
+                          f"{cods_results['unlock_attempts']} attempts, "
+                          f"{cods_results['unlocks_approved']} unlocked, "
+                          f"{cods_results['novel_discoveries']} novel")
+                    
+                    # Show details for any unlocks
+                    for detail in cods_results.get('details', []):
+                        if detail.get('verdict') == 'approved':
+                            print(f"  [UNLOCK] {detail['matched_primitive']} unlocked via {detail['operator']}")
+                        elif detail.get('verdict') == 'novel':
+                            print(f"  [NOVEL] {detail['operator']} registered as novel discovery")
+            except Exception as e:
+                print(f"[CODS] Unlock check skipped: {e}")
+        
         # Print status
         self.print_status(
             generation=self.current_generation,
@@ -2286,6 +2318,127 @@ class AutonomousEvolutionRunner:
             print(f"  (Could not load final stats: {e})")
             import traceback
             traceback.print_exc()
+        
+        # ======================================================================
+        # DETAILED GAMEPLAY METRICS (Run automatically when all games finish)
+        # ======================================================================
+        print("\n" + "-"*80)
+        print("[METRICS] DETAILED GAMEPLAY ANALYSIS")
+        print("-"*80)
+        
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 1. Recent game results (last 3 hours or this session)
+            cursor.execute("""
+                SELECT 
+                    gr.game_id,
+                    gr.game_type,
+                    gr.final_score,
+                    gr.levels_completed,
+                    gr.total_actions,
+                    gr.agent_id,
+                    gr.ended_at
+                FROM game_results gr
+                WHERE gr.ended_at >= datetime('now', '-3 hours')
+                ORDER BY gr.ended_at DESC
+                LIMIT 25
+            """)
+            recent_games = cursor.fetchall()
+            
+            if recent_games:
+                print(f"\nRecent Games (last 3 hours): {len(recent_games)}")
+                
+                # Calculate stats
+                scores = [g['final_score'] or 0 for g in recent_games]
+                levels = [g['levels_completed'] or 0 for g in recent_games]
+                actions = [g['total_actions'] or 0 for g in recent_games]
+                
+                positive_scores = sum(1 for s in scores if s > 0)
+                level_wins = sum(1 for l in levels if l > 0)
+                
+                print(f"  Positive Scores: {positive_scores}/{len(recent_games)} ({100*positive_scores/len(recent_games):.1f}%)")
+                print(f"  Level Completions: {level_wins}/{len(recent_games)} ({100*level_wins/len(recent_games):.1f}%)")
+                print(f"  Avg Score: {sum(scores)/len(scores):.2f}")
+                print(f"  Avg Levels: {sum(levels)/len(levels):.2f}")
+                print(f"  Avg Actions: {sum(actions)/len(actions):.1f}")
+                print(f"  Best Score: {max(scores):.1f}, Best Levels: {max(levels)}")
+                
+                # Game type distribution
+                game_types = {}
+                for g in recent_games:
+                    gt = g['game_type'] or 'unknown'
+                    if gt not in game_types:
+                        game_types[gt] = {'count': 0, 'total_score': 0, 'total_levels': 0}
+                    game_types[gt]['count'] += 1
+                    game_types[gt]['total_score'] += g['final_score'] or 0
+                    game_types[gt]['total_levels'] += g['levels_completed'] or 0
+                
+                print(f"\n  By Game Type:")
+                for gt, stats in sorted(game_types.items(), key=lambda x: -x[1]['count']):
+                    avg_score = stats['total_score'] / stats['count']
+                    avg_levels = stats['total_levels'] / stats['count']
+                    print(f"    {gt}: {stats['count']} games, avg score {avg_score:.2f}, avg levels {avg_levels:.2f}")
+            
+            # 2. Winning sequences status
+            cursor.execute("""
+                SELECT COUNT(*) as total FROM winning_sequences WHERE is_active = 1
+            """)
+            seq_count = cursor.fetchone()['total']
+            
+            cursor.execute("""
+                SELECT COUNT(DISTINCT game_id) as games FROM winning_sequences WHERE is_active = 1
+            """)
+            seq_games = cursor.fetchone()['games']
+            
+            cursor.execute("""
+                SELECT COUNT(*) as new_seqs FROM winning_sequences 
+                WHERE is_active = 1 AND created_at >= datetime('now', '-3 hours')
+            """)
+            new_seqs = cursor.fetchone()['new_seqs']
+            
+            print(f"\nWinning Sequences:")
+            print(f"  Total Active: {seq_count} sequences across {seq_games} games")
+            print(f"  New (last 3h): {new_seqs}")
+            
+            # 3. CODS Status (if available)
+            if CODS_AVAILABLE:
+                try:
+                    cursor.execute("""
+                        SELECT status, COUNT(*) as cnt FROM primitive_status GROUP BY status
+                    """)
+                    prim_status = cursor.fetchall()
+                    
+                    if prim_status:
+                        print(f"\nCODS Primitives:")
+                        for row in prim_status:
+                            print(f"  {row['status']}: {row['cnt']}")
+                    
+                    cursor.execute("""
+                        SELECT COUNT(*) as cnt FROM composed_operators WHERE status != 'pruned'
+                    """)
+                    comp_ops = cursor.fetchone()
+                    if comp_ops:
+                        print(f"  Composed Operators: {comp_ops['cnt']}")
+                    
+                    cursor.execute("""
+                        SELECT COUNT(*) as cnt FROM oracle_decisions WHERE verdict = 'approved'
+                    """)
+                    unlocks = cursor.fetchone()
+                    if unlocks:
+                        print(f"  Oracle Unlocks: {unlocks['cnt']}")
+                except Exception as e:
+                    print(f"  (CODS stats unavailable: {e})")
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"  (Could not load detailed metrics: {e})")
+        
+        print("-"*80)
         
         print("="*80)
         print("\n[OK] Autonomous evolution runner stopped")
