@@ -75,6 +75,14 @@ except ImportError:
     CODS_AVAILABLE = False
     check_for_potential_unlocks = None
 
+# Schema Auto-Maintenance - sync on startup to catch tables created by other modules
+try:
+    from schema_auto_maintenance import SchemaAutoMaintenance
+    SCHEMA_MAINTENANCE_AVAILABLE = True
+except ImportError:
+    SCHEMA_MAINTENANCE_AVAILABLE = False
+    SchemaAutoMaintenance = None
+
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
 
@@ -2166,6 +2174,15 @@ class AutonomousEvolutionRunner:
         else:
             print("\n[?]  Performing startup database cleanup...")
             self._cleanup_old_logs()
+        
+        # Sync schema file with actual database (catches tables created by other modules)
+        if SCHEMA_MAINTENANCE_AVAILABLE and SchemaAutoMaintenance:
+            try:
+                schema_maint = SchemaAutoMaintenance(self.db.db_path)
+                schema_maint.regenerate_schema_file()
+                print("[OK] Schema file synced with database")
+            except Exception as e:
+                print(f"[WARN] Schema sync failed: {e}")
         
         try:
             # Initialize population
