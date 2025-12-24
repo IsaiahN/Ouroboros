@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Tests package for Ouroboros Evolution System.
 

@@ -503,6 +503,77 @@ class CODSEngine:
         
         return None
     
+    def bootstrap_operators_from_patterns(self, limit: int = 10) -> int:
+        """
+        Bootstrap initial operators from successful game patterns.
+        
+        Creates operators from seed primitives based on common patterns
+        found in winning sequences. This seeds the CODS system so
+        evolve_operators and check_for_potential_unlocks have something to work with.
+        
+        Args:
+            limit: Maximum number of operators to create
+            
+        Returns:
+            Number of operators created
+        """
+        created_count = 0
+        
+        # Check if we already have operators
+        existing = self.db.execute_query("SELECT COUNT(*) as cnt FROM composed_operators")
+        if existing and existing[0]['cnt'] >= 10:
+            logger.debug(f"[CODS] Already have {existing[0]['cnt']} operators, skipping bootstrap")
+            return 0
+        
+        # Define common operator patterns from seed primitives
+        operator_patterns = [
+            # Spatial analysis operators
+            (['get_pixel', 'equals'], 'pixel_compare'),
+            (['for_each_pixel', 'sum'], 'pixel_sum'),
+            (['get_frame', 'len'], 'frame_size'),
+            (['get_at', 'equals'], 'element_match'),
+            
+            # Temporal operators
+            (['get_previous_frame', 'get_frame', 'equals'], 'frame_unchanged'),
+            (['get_action_history', 'len'], 'action_count'),
+            
+            # Aggregation operators
+            (['filter', 'len'], 'count_matching'),
+            (['map', 'sum'], 'mapped_sum'),
+            (['for_range', 'any'], 'range_check'),
+            
+            # Comparison operators
+            (['subtract', 'greater_than'], 'delta_positive'),
+        ]
+        
+        for primitives, name in operator_patterns:
+            if created_count >= limit:
+                break
+            
+            # Check if all primitives are available (seed primitives)
+            all_available = all(self.seeds.get(p) is not None for p in primitives)
+            if not all_available:
+                continue
+            
+            try:
+                # Create the composed operator (cast for type checker)
+                ops: List[Any] = list(primitives)  # type: ignore[misc]
+                operator = self.composer.compose(
+                    ops,
+                    name=name
+                )
+                
+                if operator:
+                    created_count += 1
+                    logger.info(f"[CODS] Bootstrap: Created operator '{name}' from {primitives}")
+            except Exception as e:
+                logger.debug(f"[CODS] Bootstrap failed for {name}: {e}")
+        
+        if created_count > 0:
+            logger.info(f"[CODS] Bootstrap complete: Created {created_count} initial operators")
+        
+        return created_count
+
     # ======================================================================
     # EVOLUTION & OPTIMIZATION
     # ======================================================================

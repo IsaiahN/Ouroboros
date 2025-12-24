@@ -1,4 +1,5 @@
-"""
+"""import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 Core Game Mechanics
 
 A clean, modular implementation of essential ARC-AGI-3 game functionality.

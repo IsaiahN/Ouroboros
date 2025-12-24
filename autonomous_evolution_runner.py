@@ -1113,13 +1113,22 @@ class AutonomousEvolutionRunner:
                 # ================================================================
                 # Track consecutive failures to detect system-wide issues
                 # This prevents wasting compute when API is down or games aren't working
+                # 
+                # IMPORTANT: Only count TRUE errors, not normal game endings:
+                # - GAME_OVER with score 0 = hard game (not an error)
+                # - NO_SEQUENCE_AVAILABLE = pioneer on frontier (not an error)
+                # - ERROR, API_ERROR, TIMEOUT = true errors
                 # ================================================================
                 consecutive_zero_score_games = 0  # Games with 0 score
-                consecutive_error_games = 0  # Games that threw errors
-                ZERO_SCORE_THRESHOLD = 10  # Stop after 10 consecutive zero-score games
-                ERROR_THRESHOLD = 5  # Stop after 5 consecutive errors
+                consecutive_error_games = 0  # Games that threw TRUE errors
+                ZERO_SCORE_THRESHOLD = 20  # Warn after 20 consecutive zero-score games (don't stop)
+                ERROR_THRESHOLD = 15  # Stop after 15 consecutive TRUE errors (was 5, too aggressive)
                 total_zero_score_games = 0  # Track total for reporting
                 total_error_games = 0
+                
+                # Define what counts as a TRUE error vs normal game ending
+                TRUE_ERROR_STATES = {'ERROR', 'API_ERROR', 'TIMEOUT', 'CONNECTION_ERROR'}
+                NORMAL_END_STATES = {'GAME_OVER', 'WIN', 'NO_SEQUENCE_AVAILABLE', 'NOT_FINISHED'}
                 
                 for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
                     agent_id = agent['agent_id']
@@ -1248,34 +1257,49 @@ class AutonomousEvolutionRunner:
                         # ================================================================
                         # ERROR DETECTION: Track game failures
                         # ================================================================
+                        # Only count TRUE errors (API failures, timeouts, etc.)
+                        # NOT normal game endings like GAME_OVER or NO_SEQUENCE_AVAILABLE
+                        # ================================================================
                         game_score = result.get('final_score', 0)
-                        game_error = result.get('error') or result.get('final_state') in ['GAME_OVER', 'ERROR', 'NO_SEQUENCE_AVAILABLE']
+                        final_state = result.get('final_state', 'UNKNOWN')
+                        explicit_error = result.get('error')
                         
-                        if game_error or game_score == 0:
-                            if game_error:
-                                consecutive_error_games += 1
-                                total_error_games += 1
-                                consecutive_zero_score_games = 0  # Reset other counter
-                            else:
-                                consecutive_zero_score_games += 1
-                                total_zero_score_games += 1
-                                consecutive_error_games = 0  # Reset other counter
+                        # Determine if this is a TRUE error vs normal game ending
+                        is_true_error = (
+                            explicit_error is not None or 
+                            final_state in TRUE_ERROR_STATES
+                        )
+                        is_normal_zero = (
+                            game_score == 0 and 
+                            final_state in NORMAL_END_STATES
+                        )
+                        
+                        if is_true_error:
+                            # TRUE error - API failure, timeout, etc.
+                            consecutive_error_games += 1
+                            total_error_games += 1
+                            consecutive_zero_score_games = 0  # Reset other counter
                             
-                            # Check thresholds
+                            # Check threshold
                             if consecutive_error_games >= ERROR_THRESHOLD:
-                                print(f"\n[[STOP] CRITICAL] {consecutive_error_games} consecutive game errors detected!")
-                                print(f"   Stopping evolution early to prevent wasted compute.")
-                                print(f"   Last error: {result.get('error', 'Unknown')}")
+                                print(f"\n[STOP] CRITICAL: {consecutive_error_games} consecutive TRUE errors detected!")
+                                print(f"   Stopping evolution to prevent wasted compute.")
+                                print(f"   Last error: {explicit_error or final_state}")
                                 print(f"   Total errors this generation: {total_error_games}")
                                 self.shutdown_requested = True
                                 engine.session_manager.is_shutting_down = True
                                 break
+                        elif is_normal_zero:
+                            # Normal game ending with 0 score (hard game or frontier pioneer)
+                            consecutive_zero_score_games += 1
+                            total_zero_score_games += 1
+                            consecutive_error_games = 0  # Reset - this isn't an error
                             
+                            # Only warn, never stop for zero scores - could be hard games
                             if consecutive_zero_score_games >= ZERO_SCORE_THRESHOLD:
-                                print(f"\n[[WARN] WARNING] {consecutive_zero_score_games} consecutive zero-score games!")
-                                print(f"   This may indicate API issues or broken game logic.")
+                                print(f"\n[WARN] {consecutive_zero_score_games} consecutive zero-score games")
+                                print(f"   This may indicate hard games or exploration on frontier.")
                                 print(f"   Total zero-score games: {total_zero_score_games}")
-                                # Don't stop, but warn - could be legitimately hard games
                                 consecutive_zero_score_games = 0  # Reset to give more chances
                         else:
                             # Game succeeded with score > 0
@@ -2090,6 +2114,19 @@ class AutonomousEvolutionRunner:
         # CODS: Check for potential primitive unlocks (post-generation)
         if CODS_AVAILABLE and check_for_potential_unlocks:
             try:
+                # Bootstrap operators if none exist (seed the system)
+                from cods_engine import get_cods_engine
+                cods_engine = get_cods_engine(self.db.db_path)
+                bootstrap_count = cods_engine.bootstrap_operators_from_patterns(limit=10)
+                if bootstrap_count > 0:
+                    print(f"[CODS] Bootstrapped {bootstrap_count} initial operators")
+                
+                # Evolve existing operators
+                evolved = cods_engine.evolve_operators(n_generations=1, population_size=10)
+                if evolved:
+                    print(f"[CODS] Evolved {len(evolved)} operator variants")
+                
+                # Now check for unlocks
                 cods_results = check_for_potential_unlocks(
                     db_path=self.db.db_path,
                     min_success_rate=0.70,

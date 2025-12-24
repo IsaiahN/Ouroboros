@@ -1,5 +1,135 @@
 # Ouroboros Progress Log
 
+## Session: December 24, 2025 (6:00 AM - 6:17 AM)
+
+---
+
+### Fixed Assessment-Detected Integration Gaps: Subgoal Planning + CODS Bootstrap
+
+**Focus**: Fix critical issues detected by automated assessment runner:
+- "INTEGRATION NEEDED: Subgoal planning not active"
+- "[CODS] No operators qualify for unlock check"
+
+---
+
+#### Approach
+
+**Problem Diagnosis**:
+The assessment runner detected two systems that were initialized but not producing database records:
+1. **Subgoal Planning**: Code existed but `subgoal_plans` table had 0 entries
+2. **CODS**: `check_for_potential_unlocks()` was called but `composed_operators` table had 0 entries
+
+**Root Cause Analysis**:
+1. `SubgoalPlanningActivator.generate_subgoals()` returned a list in-memory but never called `create_plan()` to persist to database
+2. CODS had no bootstrap mechanism - operators were never created, so there was nothing to check for unlocks or evolve
+
+**Solution Strategy**:
+1. Modify subgoal activator to also store plans to DB after generating them
+2. Add a bootstrap function to CODS that creates initial operators from seed primitive patterns
+3. Integrate bootstrap into evolution runner so operators exist before unlock checks
+
+---
+
+#### Steps Completed
+
+**Step 1: Fixed Subgoal Planning DB Storage** (6:02 AM)
+Modified `subgoal_planning_activator.py`:
+- Added `agent_id`, `session_id`, `generation` parameters to `generate_subgoals()` method
+- After generating subgoals, now calls `self.subgoal_planner.create_plan()` to persist to database
+- Each complex level decomposition now creates a `subgoal_plans` table entry
+
+**Step 2: Updated Core Gameplay Caller** (6:05 AM)
+Modified `core_gameplay.py` (lines 1378-1395):
+- Updated the subgoal activator call to pass required parameters
+- Now passes `agent_id`, `session_id`, `generation` from gameplay context
+
+**Step 3: Added CODS Bootstrap Function** (6:08 AM)
+Added `bootstrap_operators_from_patterns()` to `cods_engine.py`:
+```python
+def bootstrap_operators_from_patterns(self, limit: int = 10) -> int:
+    """Create initial operators from seed primitive patterns."""
+```
+
+**Operator Patterns Created**:
+| Primitives | Operator Name | Purpose |
+|------------|---------------|---------|
+| `['get_pixel', 'equals']` | `pixel_compare` | Compare pixel values |
+| `['for_each_pixel', 'sum']` | `pixel_sum` | Sum all pixels |
+| `['get_frame', 'len']` | `frame_size` | Get frame dimensions |
+| `['get_at', 'equals']` | `element_match` | Match element at position |
+| `['get_previous_frame', 'get_frame', 'equals']` | `frame_unchanged` | Detect no-change frames |
+| `['get_action_history', 'len']` | `action_count` | Count actions taken |
+| `['filter', 'len']` | `count_matching` | Count matching elements |
+| `['map', 'sum']` | `mapped_sum` | Sum after mapping |
+| `['for_range', 'any']` | `range_check` | Check range condition |
+| `['subtract', 'greater_than']` | `delta_positive` | Detect positive change |
+
+**Step 4: Integrated Bootstrap into Evolution Runner** (6:12 AM)
+Modified `autonomous_evolution_runner.py` (CODS section):
+- Added bootstrap call before `check_for_potential_unlocks()`
+- Added `evolve_operators()` call to create variants
+- Now seeds the operator pool at start of each generation
+
+```python
+# Bootstrap operators if none exist (seed the system)
+from cods_engine import get_cods_engine
+cods_engine = get_cods_engine(self.db.db_path)
+bootstrap_count = cods_engine.bootstrap_operators_from_patterns(limit=10)
+if bootstrap_count > 0:
+    print(f"[CODS] Bootstrapped {bootstrap_count} initial operators")
+
+# Evolve existing operators
+evolved = cods_engine.evolve_operators(n_generations=1, population_size=10)
+if evolved:
+    print(f"[CODS] Evolved {len(evolved)} operator variants")
+
+# Now check for unlocks
+cods_results = check_for_potential_unlocks(...)
+```
+
+**Step 5: Fixed Type Error** (6:15 AM)
+Fixed Pylance type error in `cods_engine.py`:
+- `compose()` method expected `List[Union[str, ComposedOperator, Primitive]]`
+- Added type cast: `ops: List[Any] = list(primitives)`
+- Removed incorrect `composition_type` parameter (set internally, not a parameter)
+
+---
+
+#### Files Modified
+
+| File | Lines | Change |
+|------|-------|--------|
+| `subgoal_planning_activator.py` | ~15 lines | Added DB storage via `create_plan()`, new parameters |
+| `core_gameplay.py` | ~20 lines | Updated subgoal activator call with required parameters |
+| `cods_engine.py` | ~60 lines | Added `bootstrap_operators_from_patterns()` method |
+| `autonomous_evolution_runner.py` | ~15 lines | Integrated CODS bootstrap before unlock checks |
+
+---
+
+#### Expected Outcomes
+
+After these fixes, evolution runs should show:
+```
+[CODS] Bootstrapped 10 initial operators
+[CODS] Evolved X operator variants
+[CODS] Checked X operators for potential unlock
+```
+
+Assessment should now report:
+- "Subgoal planning: X plans stored" instead of "not active"
+- "Composed operators: X qualify" instead of "0 operators"
+
+---
+
+#### Current Status: TESTING
+
+Fixes applied. Ready for evolution run to verify:
+1. Subgoal plans appear in database
+2. CODS operators are bootstrapped and evolved
+3. Assessment no longer reports integration gaps
+
+---
+
 ## Session: December 23, 2025 (Afternoon)
 
 ---

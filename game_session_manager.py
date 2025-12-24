@@ -1,4 +1,5 @@
-"""
+"""import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 Game Session Manager
 
 Handles the lifecycle of game sessions including:

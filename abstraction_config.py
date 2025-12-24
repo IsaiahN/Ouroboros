@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Configuration for Sequence Abstraction Engine
 ==============================================
 
 Feature flags, settings, and backwards compatibility controls.
 """
-
-import os
 
 # Feature flag - NOW ENABLED BY DEFAULT (abstractions replace ubersequences)
 ENABLE_ABSTRACTION = os.getenv('ENABLE_ABSTRACTION', 'true').lower() == 'true'

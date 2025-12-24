@@ -1387,7 +1387,10 @@ class GameplayEngine:
                 game_id=game_id,
                 level_number=1,
                 frame_data=game_state.frame,
-                current_score=int(game_state.score)
+                current_score=int(game_state.score),
+                agent_id=agent_id or "unknown",
+                session_id=self.session_manager.current_session_id or "unknown",
+                generation=self.game_config.get('generation', 0)
             )
             if subgoals:
                 logger.info(f"[SUBGOAL] Generated {len(subgoals)} subgoals for {game_id} L1")

@@ -101,7 +101,10 @@ class SubgoalPlanningActivator:
         game_id: str,
         level_number: int,
         frame_data: Any,
-        current_score: int
+        current_score: int,
+        agent_id: str = "unknown",
+        session_id: str = "unknown",
+        generation: int = 0
     ) -> List[Dict[str, Any]]:
         """
         Generate hierarchical subgoals for level completion.
@@ -123,15 +126,36 @@ class SubgoalPlanningActivator:
         # Use existing subgoal_planner if available
         if self.subgoal_planner:
             try:
+                # Generate subgoals in memory
                 subgoals = self.subgoal_planner.generate_subgoals(
                     game_id=game_id,
                     level_number=level_number,
-                    frame_data=frame_data
+                    frame_data=frame_data,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    current_score=current_score,
+                    generation=generation
                 )
                 if subgoals:
                     self.active_subgoals[level_key] = subgoals
                     self.current_subgoal_index[level_key] = 0
                     logger.info(f"[SubgoalActivator] Generated {len(subgoals)} subgoals for {level_key}")
+                    
+                    # ALSO store to database via create_plan for tracking/assessment
+                    try:
+                        plan_id = self.subgoal_planner.create_plan(
+                            agent_id=agent_id,
+                            game_id=game_id,
+                            session_id=session_id,
+                            current_frame=frame_data,
+                            current_score=current_score,
+                            generation=generation
+                        )
+                        if plan_id:
+                            logger.info(f"[SubgoalActivator] Stored plan {plan_id} to database")
+                    except Exception as e:
+                        logger.debug(f"[SubgoalActivator] Plan storage failed (non-critical): {e}")
+                    
                     return subgoals
             except Exception as e:
                 logger.warning(f"[SubgoalActivator] Subgoal planner failed: {e}")

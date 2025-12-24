@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Core ARC-AGI-3 API Client
 
@@ -6,7 +9,6 @@ Contains only the essential functionality needed for gameplay.
 No architect, governor, or director-specific code.
 """
 
-import os
 import asyncio
 import aiohttp
 import logging
