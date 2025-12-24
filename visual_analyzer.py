@@ -34,6 +34,7 @@ class VisualAnalyzer:
         self.exploration_radius = 5  # Start with focused exploration
         self.min_exploration_radius = 3
         self.max_exploration_radius = 20
+        self._expansion_step = 2  # Accelerates: +2, +3, +4, +5... (urgency increases when stuck)
         self.stagnation_threshold = 8  # Actions without improvement to trigger expansion
         self.improvement_threshold = 5  # Actions with improvement to trigger contraction
         self.recent_scores = []  # Track recent scores to detect stagnation
@@ -119,20 +120,23 @@ class VisualAnalyzer:
         When stuck (no changes, no improvement): EXPAND exploration
         When improving: CONTRACT to exploit current strategy
         """
-        # Expand if stagnating
+        # Expand if stagnating - ACCELERATING expansion (urgency increases the longer stuck)
+        # Sequence: 5 -> 7 (+2) -> 10 (+3) -> 14 (+4) -> 19 (+5) -> 20 (max in 5 triggers)
         if self.actions_since_decline >= self.stagnation_threshold:
             old_radius = self.exploration_radius
             self.exploration_radius = min(
-                self.exploration_radius + 2,
+                self.exploration_radius + self._expansion_step,
                 self.max_exploration_radius
             )
             if old_radius != self.exploration_radius:
-                logger.info(f"Stagnation detected - expanding exploration radius: {old_radius} → {self.exploration_radius}")
+                logger.info(f"Stagnation detected - expanding exploration radius: {old_radius} -> {self.exploration_radius} (+{self._expansion_step})")
                 # Reset clicked coordinates to explore new areas
                 self.reset_clicked_coordinates()
                 self.actions_since_decline = 0
+                # Accelerate next expansion (more urgent the longer stuck)
+                self._expansion_step = min(self._expansion_step + 1, 10)
         
-        # Contract if improving
+        # Contract if improving - also reset expansion step (no longer desperate)
         elif self.actions_since_improvement == 0 and self.exploration_radius > self.min_exploration_radius:
             old_radius = self.exploration_radius
             self.exploration_radius = max(
@@ -140,7 +144,9 @@ class VisualAnalyzer:
                 self.min_exploration_radius
             )
             if old_radius != self.exploration_radius:
-                logger.info(f"Improvement detected - contracting exploration radius: {old_radius} → {self.exploration_radius}")
+                logger.info(f"Improvement detected - contracting exploration radius: {old_radius} -> {self.exploration_radius}")
+                # Reset expansion urgency since we're making progress
+                self._expansion_step = 2
     
     def mark_coordinate_clicked(self, x: int, y: int):
         """Mark a coordinate as already clicked.

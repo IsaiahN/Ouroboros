@@ -512,22 +512,8 @@ class GameplayEngine:
                 frontier_level = int(game_state.score) + 1
                 logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
                 
-                # EXPLOITER: STOP here
-                if agent_mode == 'exploiter':
-                    logger.info(f" EXPLOITER: Stopping at frontier (Level {frontier_level})")
-                    await self.session_manager.finish_game(
-                        game_state.state, game_state.score, 
-                        int(game_state.score), len(json.loads(known_sequence['action_sequence']))
-                    )
-                    return {
-                        'game_id': game_id,
-                        'final_state': game_state.state,
-                        'final_score': game_state.score,
-                        'actions_taken': len(json.loads(known_sequence['action_sequence'])),
-                        'win': game_state.state == 'WIN',
-                        'method': 'exploiter_sequence_replay',
-                        'sequence_id': known_sequence['sequence_id']
-                    }
+                # ALL AGENTS EXPLORE AT FRONTIER (including exploiters)
+                # Exploiters can contribute discoveries too - sequence abstraction will help guide them
                 
                 # Force game state to NOT_FINISHED for continuation
                 if game_state.state != "NOT_FINISHED":
@@ -535,7 +521,7 @@ class GameplayEngine:
                     game_state.state = "NOT_FINISHED"
                 
                 mode_name = (agent_mode or 'generalist').upper()
-                logger.info(f" {mode_name}: At frontier (Level {frontier_level}), continuing until action budget exhausted")
+                logger.info(f" {mode_name}: At frontier (Level {frontier_level}), exploring until action budget exhausted")
                 
         elif fallback_result.all_failed:
             # All sequences failed - set up fallback options
@@ -1732,31 +1718,20 @@ class GameplayEngine:
                     frontier_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
                     logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
                     
-                    # ROLE-SPECIFIC FRONTIER BEHAVIOR
-                    # EXPLOITER: STOP here - exploiters ONLY use proven sequences, never explore
-                    if agent_mode == 'exploiter':
-                        logger.info(f" EXPLOITER: Stopping at frontier (Level {frontier_level}) - exploiters only use proven sequences")
-                        await self.session_manager.finish_game(game_state.state, game_state.score, int(game_state.score), len(json.loads(known_sequence['action_sequence'])))
-                        return {
-                            'game_id': game_id,
-                            'final_state': game_state.state,
-                            'final_score': game_state.score,
-                            'actions_taken': len(json.loads(known_sequence['action_sequence'])),
-                            'win': game_state.state == 'WIN',
-                            'method': 'exploiter_sequence_replay',
-                            'sequence_id': known_sequence['sequence_id']
-                        }
+                    # ALL AGENTS EXPLORE AT FRONTIER (including exploiters)
+                    # Exploiters can contribute discoveries too - sequence abstraction will help guide them
+                    # This is where abstraction templates and guided exploration kick in
                     
-                    # CRITICAL FIX: Force game state to NOT_FINISHED for PIONEERS and GENERALISTS
+                    # CRITICAL FIX: Force game state to NOT_FINISHED for ALL agent types
                     # Some games (like ls20) incorrectly report WIN/GAME_OVER after partial completion
-                    # Pioneers and Generalists should continue playing until action budget exhausted
+                    # All agents should continue playing until action budget exhausted
                     if game_state.state != "NOT_FINISHED":
                         logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED for continuation")
                         game_state.state = "NOT_FINISHED"
                     
-                    # PIONEER/GENERALIST/OPTIMIZER: Continue playing until action budget exhausted
+                    # ALL AGENTS: Continue playing until action budget exhausted
                     mode_name = (agent_mode or 'generalist').upper()
-                    logger.info(f" {mode_name}: At frontier (Level {frontier_level}), continuing until action budget exhausted")
+                    logger.info(f" {mode_name}: At frontier (Level {frontier_level}), exploring until action budget exhausted")
                     # Continue to game loop below
             
             elif all_sequences_failed:
@@ -1959,6 +1934,10 @@ class GameplayEngine:
                     if action_succeeded:
                         action_count += 1
                         level_action_count += 1
+                        
+                        # Store level action count in game_config for frontier abstraction templates
+                        self.game_config['level_action_count'] = level_action_count
+                        self.game_config['current_level'] = current_level
                         
                         # Update world model and self-model after EVERY exploration action
                         # NOTE: This only runs for exploration, not sequence replay
@@ -2201,14 +2180,17 @@ class GameplayEngine:
                                         )
                                         if bias_result:
                                             current_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
-                                            # Boost toward self-trust (0.7-0.9 range)
-                                            boosted_bias = min(0.9, current_bias + 0.25)
-                                            self._original_self_bias = current_bias  # Store to restore later
-                                            self.db.execute_query(
-                                                "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
-                                                (boosted_bias, agent_id)
-                                            )
-                                            logger.info(f"[SELF-DIRECTED] Boosted self-trust: {current_bias:.2f} -> {boosted_bias:.2f}")
+                                            # Boost toward full self-trust (cap at 1.0 for self-directed mode)
+                                            boosted_bias = min(1.0, current_bias + 0.25)
+                                            if boosted_bias > current_bias:  # Only update/log if actual boost
+                                                self._original_self_bias = current_bias  # Store to restore later
+                                                self.db.execute_query(
+                                                    "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
+                                                    (boosted_bias, agent_id)
+                                                )
+                                                logger.info(f"[SELF-DIRECTED] Boosted self-trust: {current_bias:.2f} -> {boosted_bias:.2f}")
+                                            else:
+                                                logger.debug(f"[SELF-DIRECTED] Self-trust already at max: {current_bias:.2f}")
                                     except Exception as e:
                                         logger.debug(f"Failed to boost self-trust: {e}")
                     # NOTE: Removed the "elif not is_frontier_level" block that was resetting
@@ -3480,7 +3462,7 @@ class GameplayEngine:
                 
                 # Use network suggestion if confidence is high enough
                 if confidence >= 0.4:
-                    logger.info(f"🌐 NETWORK WISDOM: ACTION{network_suggested_action} (confidence: {confidence:.2f}) - {reasoning_detail}")
+                    logger.info(f"[NETWORK] NETWORK WISDOM: ACTION{network_suggested_action} (confidence: {confidence:.2f}) - {reasoning_detail}")
                     base_action = f"ACTION{network_suggested_action}"
                     # Skip to applying biases below
                 else:
@@ -3491,6 +3473,33 @@ class GameplayEngine:
         # If no network suggestion at all, use smart action selection
         if network_suggested_action is None:
             base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
+        
+        # ===================================================================
+        # FRONTIER-LEVEL ABSTRACTION TEMPLATES
+        # When at frontier, check if abstraction engine has templates for this level.
+        # Templates provide sequence patterns from aggregated winning sequences.
+        # ===================================================================
+        if hasattr(self, 'abstraction_engine') and self.abstraction_engine and current_game_id:
+            try:
+                game_type = current_game_id.split('-')[0] if '-' in current_game_id else current_game_id
+                should_use, template = self.abstraction_engine.should_use_template(game_type, level_number=current_level)  # type: ignore[attr-defined]
+                
+                if should_use and template:
+                    # Template available for this frontier level!
+                    # Get the next action from the template based on action count
+                    template_actions = self.abstraction_engine.get_template_for_replay(game_type, level_number=current_level)  # type: ignore[attr-defined]
+                    
+                    if template_actions:
+                        # Get current position in template from game_config
+                        level_action_count = self.game_config.get('level_action_count', 0)
+                        
+                        if level_action_count < len(template_actions):
+                            template_action = template_actions[level_action_count]
+                            action_code = template_action.get('action', 'ACTION1')
+                            logger.info(f"[TEMPLATE] Frontier L{current_level}: Using template action {level_action_count+1}/{len(template_actions)} - {action_code} (conf: {template.confidence:.0%})")
+                            return action_code, f"Abstract template for L{current_level} (action {level_action_count+1}/{len(template_actions)}, {template.confidence:.0%} confidence)"
+            except Exception as e:
+                logger.debug(f"Frontier abstraction template error: {e}")
         
         # ===================================================================
         # PHASE 4: ABSTRACTION HINTS - Apply conceptual guidance from failed sequences
@@ -6947,7 +6956,11 @@ class GameplayEngine:
             if stuck_pattern == 'oscillation':
                 failure_reason = f"Got stuck in oscillation pattern on level {level_number}. Actions cycling without progress."
             elif stuck_pattern == 'stuck_no_progress':
-                failure_reason = f"Exhausted {actions_taken} actions on level {level_number} without score increase. May need different approach."
+                # Only say "exhausted" if we actually tried many actions
+                if actions_taken >= 50:
+                    failure_reason = f"Exhausted {actions_taken} actions on level {level_number} without score increase. May need different approach."
+                else:
+                    failure_reason = f"Attempted {actions_taken} actions on level {level_number} without score increase. Early exploration attempt."
             elif stuck_pattern == 'frozen_state':
                 failure_reason = f"Game state frozen on level {level_number}. Possibly reached dead end or unwinnable state."
             elif final_score == 0:
@@ -6963,8 +6976,11 @@ class GameplayEngine:
                 win_strategies.append("Avoid repeating the same 2-3 actions. Try longer sequences.")
                 win_strategies.append("Consider ACTION6 (click) on unexplored objects.")
             
-            if level_number > 1:
-                win_strategies.append(f"Levels 1-{int(final_score)} are solvable. Focus exploration on level {level_number}.")
+            # FIX: Use level_number - 1 (completed levels) instead of final_score
+            # final_score could be 0 even on level 4 if agent got there via replay but made no progress
+            completed_levels = level_number - 1
+            if completed_levels >= 1:
+                win_strategies.append(f"Levels 1-{completed_levels} are solvable. Focus exploration on level {level_number}.")
             
             if actions_taken > 500:
                 win_strategies.append("High action count suggests need for more efficient pathing.")
