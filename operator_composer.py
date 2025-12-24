@@ -551,11 +551,23 @@ class OperatorComposer:
             raise ValueError(f"Unknown composition type: {comp_type}")
     
     def _execute_compose(self, tree: Dict, *args, **kwargs) -> Any:
-        """Execute sequential composition."""
+        """
+        Execute sequential composition.
+        
+        For each operator in the chain:
+        - If result is None and operator takes no args, call with no args
+        - If result is not None, pass it as the first argument
+        - Output becomes input for next operator
+        """
         result = args[0] if args else None
         
         for op_ref in tree.get('operators', []):
-            result = self._execute_ref(op_ref, result, **kwargs)
+            if result is None:
+                # First operator or previous returned None - call with no args
+                result = self._execute_ref(op_ref, **kwargs)
+            else:
+                # Pass previous result as input
+                result = self._execute_ref(op_ref, result, **kwargs)
         
         return result
     
@@ -957,6 +969,16 @@ class OperatorComposer:
         results = self.db.execute_query(
             "SELECT * FROM composed_operators WHERE operator_id = ?",
             (operator_id,)
+        )
+        if results:
+            return self._row_to_operator(results[0])
+        return None
+    
+    def get_operator_by_name(self, name: str) -> Optional[ComposedOperator]:
+        """Get an operator by name."""
+        results = self.db.execute_query(
+            "SELECT * FROM composed_operators WHERE name = ?",
+            (name,)
         )
         if results:
             return self._row_to_operator(results[0])

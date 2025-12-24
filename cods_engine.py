@@ -178,11 +178,46 @@ class CODSEngine:
         self.seeds.set_episode_context(game_id)
         self.seeds.reset_episode()
     
-    def update_frame(self, frame: List[List[int]]):
-        """Update current frame in context."""
+    def update_frame(
+        self,
+        frame: List[List[int]],
+        score: Optional[float] = None,
+        action_count: Optional[int] = None
+    ):
+        """
+        Update current frame in context and test composed operators.
+        
+        Args:
+            frame: Current game frame
+            score: Current score (optional, for success evaluation)
+            action_count: Current action count (optional)
+        """
+        previous_frame = None
+        previous_score = 0.0
+        
         if self._context:
+            previous_frame = self._context.current_frame
+            previous_score = self._context.score or 0.0
             self._context.update_frame(frame)
+            if score is not None:
+                self._context.score = score
+        
         self.seeds.update_frame(frame)
+        
+        # Calculate score delta for operator success evaluation
+        score_delta = (score or 0.0) - previous_score
+        
+        # Test composed operators on this frame (critical for unlock system)
+        # Only test every 10 actions to avoid overhead
+        if action_count is None or action_count % 10 == 0:
+            try:
+                self.test_composed_operators(
+                    frame=frame,
+                    previous_frame=previous_frame,
+                    score_delta=score_delta
+                )
+            except Exception as e:
+                logger.debug(f"[CODS] Operator testing failed: {e}")
     
     def record_action(self, action: int):
         """Record an action taken."""
@@ -250,8 +285,12 @@ class CODSEngine:
                     operator_id=f"unlocked:{operator_name}"
                 )
             
-            # 3. Check if it's a composed operator
+            # 3. Check if it's a composed operator (by ID or by name)
             composed_op = self.composer.get_operator(operator_name)
+            if not composed_op:
+                # Try by name instead of ID
+                composed_op = self.composer.get_operator_by_name(operator_name)
+            
             if composed_op:
                 output = self.composer.execute(composed_op, *args, **kwargs)
                 exec_time = (time.time() - start_time) * 1000
@@ -511,6 +550,11 @@ class CODSEngine:
         found in winning sequences. This seeds the CODS system so
         evolve_operators and check_for_potential_unlocks have something to work with.
         
+        CRITICAL: Operators must be executable! Each primitive in a chain must
+        be able to accept the output of the previous one. Single-primitive
+        operators are always valid. Multi-primitive operators must have
+        compatible type signatures.
+        
         Args:
             limit: Maximum number of operators to create
             
@@ -525,39 +569,55 @@ class CODSEngine:
             logger.debug(f"[CODS] Already have {existing[0]['cnt']} operators, skipping bootstrap")
             return 0
         
-        # Define common operator patterns from seed primitives
+        # Define ACTUALLY EXECUTABLE operator patterns
+        # 
+        # Type 1: Single-primitive wrappers (always work)
+        # Type 2: Compositions where output feeds correctly to next input
+        #
+        # Format: (primitives, name, description)
         operator_patterns = [
-            # Spatial analysis operators
-            (['get_pixel', 'equals'], 'pixel_compare'),
-            (['for_each_pixel', 'sum'], 'pixel_sum'),
-            (['get_frame', 'len'], 'frame_size'),
-            (['get_at', 'equals'], 'element_match'),
+            # === Single-primitive wrappers (guaranteed to work) ===
+            (['get_frame'], 'op_get_frame', 'Get current frame state'),
+            (['get_previous_frame'], 'op_get_previous_frame', 'Get previous frame'),
+            (['get_action_history'], 'op_get_action_history', 'Get action history list'),
+            (['get_step_index'], 'op_get_step_index', 'Get current step index'),
+            (['get_action_count'], 'op_action_count', 'Get total action count'),
+            (['random_choice'], 'op_random_action', 'Choose random action'),
             
-            # Temporal operators
-            (['get_previous_frame', 'get_frame', 'equals'], 'frame_unchanged'),
-            (['get_action_history', 'len'], 'action_count'),
+            # === Frame size analysis (get_frame -> len = height) ===
+            # Note: len of 2D frame gives number of rows (height)
+            (['get_frame', 'len'], 'op_frame_height', 'Get frame height (rows)'),
             
-            # Aggregation operators
-            (['filter', 'len'], 'count_matching'),
-            (['map', 'sum'], 'mapped_sum'),
-            (['for_range', 'any'], 'range_check'),
+            # === Action history analysis ===
+            # get_action_history returns list, len gives count
+            (['get_action_history', 'len'], 'op_history_length', 'Count actions in history'),
             
-            # Comparison operators
-            (['subtract', 'greater_than'], 'delta_positive'),
+            # === Step comparison (step > threshold) ===
+            # get_step_index returns int, can be compared
+            # But greater_than needs TWO args, so this is a partial application
+            # Skip multi-arg compositions for now
+            
+            # === Equality check for last action ===
+            # get_last_action returns int (or None)
+            (['get_last_action'], 'op_last_action', 'Get the last action taken'),
+            
+            # === Random number generator ===
+            (['random_float'], 'op_random_float', 'Generate random 0.0-1.0'),
         ]
         
-        for primitives, name in operator_patterns:
+        for primitives, name, description in operator_patterns:
             if created_count >= limit:
                 break
             
             # Check if all primitives are available (seed primitives)
             all_available = all(self.seeds.get(p) is not None for p in primitives)
             if not all_available:
+                logger.debug(f"[CODS] Bootstrap: Missing primitive in {primitives}")
                 continue
             
             try:
-                # Create the composed operator (cast for type checker)
-                ops: List[Any] = list(primitives)  # type: ignore[misc]
+                # Create the composed operator
+                ops: List[Any] = list(primitives)
                 operator = self.composer.compose(
                     ops,
                     name=name
@@ -662,6 +722,96 @@ class CODSEngine:
         return pruned_count
     
     # ======================================================================
+    # COMPOSED OPERATOR TESTING
+    # ======================================================================
+    
+    def test_composed_operators(
+        self,
+        frame: Optional[List[List[int]]] = None,
+        previous_frame: Optional[List[List[int]]] = None,
+        score_delta: float = 0.0
+    ) -> Dict[str, bool]:
+        """
+        Test all cobbled/solid composed operators on the current frame.
+        
+        This is CRITICAL for the unlock system - operators must be tested
+        to accumulate success/failure data for unlock evaluation.
+        
+        Args:
+            frame: Current frame
+            previous_frame: Previous frame (for delta operators)
+            score_delta: Change in score (for success evaluation)
+            
+        Returns:
+            Dict of {operator_name: success}
+        """
+        frame = frame or (self._context.current_frame if self._context else None)
+        if not frame:
+            return {}
+        
+        results = {}
+        
+        # Get all operators that need testing (cobbled or solid, not yet canonical)
+        operators = self.db.execute_query("""
+            SELECT operator_id, name, composition_tree, composition_type
+            FROM composed_operators
+            WHERE status IN ('cobbled', 'solid')
+            ORDER BY times_tested ASC
+            LIMIT 10
+        """)
+        
+        if not operators:
+            return {}
+        
+        for op in operators:
+            op_name = op['name']
+            op_id = op['operator_id']
+            
+            try:
+                # Apply the operator
+                result = self.apply(op_name, frame)
+                
+                # Determine success based on:
+                # 1. Operator executed without error
+                # 2. Score increased (if we have score_delta)
+                success = result.success
+                if success and score_delta > 0:
+                    # Bonus: score improved after using this operator's insight
+                    success = True
+                elif success and score_delta < 0:
+                    # Score decreased - operator may have misled
+                    success = False
+                
+                results[op_name] = success
+                
+                # Record the test result in database
+                game_id = self._context.game_id if self._context else 'unknown'
+                self.db.execute_query("""
+                    UPDATE composed_operators
+                    SET times_tested = times_tested + 1,
+                        successes = successes + ?,
+                        failures = failures + ?,
+                        success_rate = CAST(successes + ? AS REAL) / CAST(times_tested + 1 AS REAL),
+                        games_tested_on = COALESCE(games_tested_on, '[]') || ?,
+                        last_tested_at = CURRENT_TIMESTAMP
+                    WHERE operator_id = ?
+                """, (
+                    1 if success else 0,
+                    0 if success else 1,
+                    1 if success else 0,
+                    f',"{game_id}"' if game_id != 'unknown' else '',
+                    op_id
+                ))
+                
+                logger.debug(f"[CODS] Tested {op_name}: {'SUCCESS' if success else 'FAIL'}")
+                
+            except Exception as e:
+                results[op_name] = False
+                logger.debug(f"[CODS] Operator {op_name} test failed: {e}")
+        
+        return results
+    
+    # ======================================================================
     # ANALYSIS & INSIGHT
     # ======================================================================
     
@@ -695,6 +845,24 @@ class CODSEngine:
                 result = self.apply(prim, frame)
                 if result.success:
                     results[prim] = result.output
+        
+        # Also apply composed operators that are solid/canonical
+        try:
+            composed_ops = self.db.execute_query("""
+                SELECT name FROM composed_operators
+                WHERE status IN ('solid', 'canonical')
+                AND success_rate >= 0.5
+                ORDER BY success_rate DESC
+                LIMIT 5
+            """)
+            
+            for op in (composed_ops or []):
+                op_name = op['name']
+                result = self.apply(op_name, frame)
+                if result.success:
+                    results[f"composed:{op_name}"] = result.output
+        except Exception as e:
+            logger.debug(f"[CODS] Composed operator analysis failed: {e}")
         
         return results
     

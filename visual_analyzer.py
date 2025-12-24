@@ -1,5 +1,7 @@
-"""import os
+import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
+"""
 Visual Frame Analyzer
 
 Analyzes ARC game frames to identify interesting targets for ACTION6.

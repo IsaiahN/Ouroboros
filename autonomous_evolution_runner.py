@@ -67,6 +67,14 @@ from breakthrough_budget_allocator import BreakthroughBudgetAllocator  # Tier 1:
 from automated_assessment_runner import AutomatedAssessmentRunner  # Other AI #3: Auto-metrics
 # GameDiversityPreserver import removed - prestige-only protection now
 
+# Autopoiesis Monitor - system health and emergence tracking
+try:
+    from autopoiesis_monitor import AutopoiesisMonitor
+    AUTOPOIESIS_AVAILABLE = True
+except ImportError:
+    AUTOPOIESIS_AVAILABLE = False
+    AutopoiesisMonitor = None
+
 # CODS - Cognitive Operator Discovery System (post-generation unlock checks)
 try:
     from cods_engine import check_for_potential_unlocks
@@ -1700,6 +1708,35 @@ class AutonomousEvolutionRunner:
                 
             except Exception as e:
                 print(f"[WARN]  Network snapshot failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # PHASE 0.5: AUTOPOIESIS HEALTH CHECK (system self-regulation)
+            print(f"\n[AUTOPOIESIS] Checking system health for generation {self.current_generation}...")
+            try:
+                if AUTOPOIESIS_AVAILABLE and AutopoiesisMonitor:
+                    autopoiesis = AutopoiesisMonitor(self.db)
+                    health = autopoiesis.get_system_health(self.current_generation)
+                    
+                    print(f"[OK] System Health: {health['status']} (score: {health['overall_health']:.2f})")
+                    print(f"     Emergence Gain: {health['emergence_gain']:.2f} "
+                          f"({'network > individuals' if health['emergence_gain'] > 1.0 else 'needs improvement'})")
+                    print(f"     Identity Drift: {health['identity_drift']:.2f} "
+                          f"({'aligned' if health['identity_drift'] < 0.3 else 'drifting from goals'})")
+                    print(f"     Control Error: {health['control_error']:.2f} "
+                          f"({'calibrated' if abs(health['control_error']) < 0.2 else 'needs tuning'})")
+                    print(f"     Loop Detection: {health['loop_detection_score']:.2f} "
+                          f"({'no loops' if health['loop_detection_score'] < 0.3 else 'oscillation detected'})")
+                    
+                    # Display warnings if any
+                    if health.get('warnings'):
+                        for warning in health['warnings']:
+                            print(f"[WARN] {warning}")
+                else:
+                    print(f"[INFO] Autopoiesis monitor not available")
+                    
+            except Exception as e:
+                print(f"[WARN] Autopoiesis health check failed: {e}")
                 import traceback
                 traceback.print_exc()
             

@@ -1335,7 +1335,7 @@ class GameplayEngine:
                 self.cods_engine.update_frame(
                     game_state.frame,
                     game_state.score,
-                    actions_taken=0
+                    action_count=0
                 )
                 logger.debug(f"[CODS] Context initialized for {game_id} level 1")
             except Exception as e:
@@ -5510,6 +5510,76 @@ class GameplayEngine:
         return context
 
     # ========================================================================
+    # PRIMITIVES CONTEXT: Track which systems contributed to decisions
+    # ========================================================================
+    
+    def _build_primitives_context(self) -> Dict[str, Any]:
+        """
+        Build primitives context for API reasoning payload (Tier 8).
+        
+        Tracks which systems and operators contributed to the current decision,
+        helping analyze what features are actually being used.
+        
+        Returns:
+            Dict with primitives/operators used and feature activation log
+        """
+        context = {
+            'cods_operators_used': [],
+            'features_activated': [],
+            'decision_contributors': {}
+        }
+        
+        try:
+            # Track CODS operators if engine is available
+            if self.cods_engine:
+                try:
+                    # Get operators applied this level
+                    if hasattr(self.cods_engine, 'get_operators_used_this_level'):
+                        context['cods_operators_used'] = self.cods_engine.get_operators_used_this_level()
+                    elif hasattr(self.cods_engine, 'context') and self.cods_engine.context:
+                        # Fallback: check context for applied operators
+                        context['cods_operators_used'] = list(getattr(self.cods_engine, '_applied_operators', []))
+                except Exception:
+                    pass
+            
+            # Track activated features from game config
+            if self.game_config:
+                if self.game_config.get('enable_pattern_learning'):
+                    context['features_activated'].append('PATTERN_LEARNING')
+                if self.game_config.get('enable_sensation_navigation'):
+                    context['features_activated'].append('SENSATION_NAVIGATION')
+                if self.game_config.get('use_3_try_fallback'):
+                    context['features_activated'].append('3_TRY_FALLBACK')
+                if self.game_config.get('enable_multi_stage_pipeline'):
+                    context['features_activated'].append('MULTI_STAGE_PIPELINE')
+                if self.game_config.get('enable_rule_induction'):
+                    context['features_activated'].append('RULE_INDUCTION')
+                if self.game_config.get('enable_self_model'):
+                    context['features_activated'].append('SELF_MODEL')
+            
+            # Track visual analyzer usage
+            if hasattr(self.action_handler, 'visual_analyzer') and self.action_handler.visual_analyzer:
+                context['features_activated'].append('VISUAL_ANALYSIS')
+            
+            # Track rule engine contribution
+            if hasattr(self, '_active_rules') and self._active_rules:
+                context['decision_contributors']['rule_engine'] = len(self._active_rules)
+            
+            # Track sensation engine contribution  
+            if hasattr(self, '_sensation_influence') and self._sensation_influence:
+                context['decision_contributors']['sensation_engine'] = self._sensation_influence
+            
+            # Track sequence matching contribution
+            if hasattr(self, '_using_sequence') and self._using_sequence:
+                context['decision_contributors']['sequence_matching'] = 1.0
+                context['features_activated'].append('SEQUENCE_REPLAY')
+            
+        except Exception as e:
+            logger.debug(f"Error building primitives context: {e}")
+        
+        return context
+
+    # ========================================================================
     # EMERGENT REASONING: THE FOUR CORE QUESTIONS + EXTENSIONS
     # Compressed reasoning framework for intelligent exploration
     # Q1: What is changing vs. what is fixed?
@@ -6506,6 +6576,11 @@ class GameplayEngine:
         }
         
         # ===================================================================
+        # TIER 8: PRIMITIVES - What systems contributed to this decision
+        # ===================================================================
+        primitives_tier = self._build_primitives_context()
+        
+        # ===================================================================
         # ASSEMBLE PAYLOAD (Priority Order)
         # ===================================================================
         reasoning_obj = {
@@ -6516,7 +6591,8 @@ class GameplayEngine:
             '4.5_resonance': resonance,
             '5_context': context,
             '6_environment': environment,
-            '7_action': action_tier
+            '7_action': action_tier,
+            '8_primitives': primitives_tier
         }
         
         # Store for next delta calculation
