@@ -1378,6 +1378,13 @@ class AutonomousEvolutionRunner:
                                 )
                                 if insights_id:
                                     print(f"  [>] Near-miss analysis recorded (ID: {insights_id[:8]})")
+                                    
+                                    # CODS: Process near-miss patterns for primitive gap detection
+                                    if hasattr(engine, 'cods_engine') and engine.cods_engine:
+                                        try:
+                                            engine.cods_engine.process_near_miss_patterns(insights_id)
+                                        except Exception as cods_e:
+                                            pass  # Non-critical
                             except Exception as e:
                                 print(f"  [WARN] Near-miss analysis failed: {e}")
                         
@@ -1394,8 +1401,30 @@ class AutonomousEvolutionRunner:
                                 )
                                 if learning_ids:
                                     print(f"  [?] Counterfactual: {len(learning_ids)} alternative strategies identified")
+                                    
+                                    # CODS: Process counterfactual insights for primitive gap detection
+                                    if hasattr(engine, 'cods_engine') and engine.cods_engine:
+                                        try:
+                                            engine.cods_engine.process_counterfactual_insights(learning_ids)
+                                        except Exception as cods_e:
+                                            pass  # Non-critical
                             except Exception as e:
                                 print(f"  [WARN] Counterfactual analysis failed: {e}")
+                        
+                        # 4. CODS: Record game outcome for failure-driven learning
+                        if hasattr(engine, 'cods_engine') and engine.cods_engine:
+                            try:
+                                cods_result = engine.cods_engine.record_game_outcome(
+                                    game_id=game_id,
+                                    final_score=final_score,
+                                    max_level_reached=result.get('levels_completed', 0) + 1,
+                                    total_actions=result.get('actions_taken', 0),
+                                    won=result.get('win', False)
+                                )
+                                if cods_result.get('primitive_gaps'):
+                                    print(f"  [CODS] Detected {len(cods_result['primitive_gaps'])} primitive gaps")
+                            except Exception as e:
+                                pass  # Non-critical
                         
                         # PERSISTENT MODE MEMORY: Record mode effectiveness for this game
                         mode_system.update_mode_effectiveness(

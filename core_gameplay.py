@@ -2209,8 +2209,20 @@ class GameplayEngine:
                     # Previously incremented on >= 0.5 which caused overcounting with partial progress
                     if score_increase >= 1.0:  # Full level completion (ARC levels give 1.0 point each)
                         level_completions += 1
-                        logger.info(f" Level {current_level} completed! Score: {previous_score} → {game_state.score} (+{score_increase})")
+                        logger.info(f" Level {current_level} completed! Score: {previous_score} -> {game_state.score} (+{score_increase})")
                         logger.info(f" Level {current_level} stats: {level_action_count} actions, {level_api_resets} API resets used")
+                        
+                        # CODS: Record level completion for failure-driven learning
+                        if hasattr(self, 'cods_engine') and self.cods_engine:
+                            try:
+                                self.cods_engine.record_level_outcome(
+                                    level=current_level,
+                                    passed=True,
+                                    actions_used=level_action_count,
+                                    score_gained=score_increase
+                                )
+                            except Exception:
+                                pass  # Non-critical
                         
                         # Reset level-specific counters for next level
                         level_api_resets = 0  # Fresh reset budget for new level

@@ -121,10 +121,12 @@ class OperatorComposer:
         self, 
         db: Optional[DatabaseInterface] = None, 
         db_path: str = "core_data.db",
-        seed_registry: Optional[SeedPrimitiveRegistry] = None
+        seed_registry: Optional[SeedPrimitiveRegistry] = None,
+        primitive_callback: Optional[Callable[[str, tuple, dict], Any]] = None
     ):
         self.db = db or DatabaseInterface(db_path)
         self.seeds = seed_registry or get_seed_primitives()
+        self._primitive_callback = primitive_callback  # Callback to CODS for grandfathered primitives
         self._initialize_schema()
         
         # Cache of compiled operators
@@ -259,9 +261,16 @@ class OperatorComposer:
         for op in operators:
             if isinstance(op, str):
                 # Primitive name or operator ID
+                # Check seed primitives first
                 if self.seeds.get(op):
                     operator_refs.append({'type': 'primitive', 'name': op})
+                # Then check if callback can handle it (for grandfathered primitives)
+                elif self._primitive_callback:
+                    # It might be a grandfathered primitive - mark as primitive type
+                    # The actual availability check happens at execution time
+                    operator_refs.append({'type': 'primitive', 'name': op})
                 else:
+                    # No callback - assume it's an operator ID
                     operator_refs.append({'type': 'operator', 'id': op})
             elif isinstance(op, Primitive):
                 operator_refs.append({'type': 'primitive', 'name': op.name})
@@ -313,6 +322,9 @@ class OperatorComposer:
         for op in operators:
             if isinstance(op, str):
                 if self.seeds.get(op):
+                    operator_refs.append({'type': 'primitive', 'name': op})
+                elif self._primitive_callback:
+                    # Might be a grandfathered primitive
                     operator_refs.append({'type': 'primitive', 'name': op})
                 else:
                     operator_refs.append({'type': 'operator', 'id': op})
@@ -632,9 +644,20 @@ class OperatorComposer:
             prim_name = ref.get('name')
             if not prim_name:
                 raise ValueError("Primitive reference missing 'name'")
+            
+            # First try seed primitives
             prim = self.seeds.get(str(prim_name))
             if prim:
                 return prim(*args, **kwargs)
+            
+            # Then try callback for grandfathered/unlocked primitives
+            if self._primitive_callback:
+                try:
+                    result = self._primitive_callback(str(prim_name), args, kwargs)
+                    return result
+                except NotImplementedError:
+                    pass  # Callback doesn't have this primitive
+            
             raise ValueError(f"Unknown primitive: {prim_name}")
             
         elif ref_type == 'operator':

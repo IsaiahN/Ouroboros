@@ -111,7 +111,11 @@ class CODSEngine:
         # Initialize components
         self.seeds = get_seed_primitives()
         self.unlock_manager = PrimitiveUnlockManager(db=self.db)
-        self.composer = OperatorComposer(db=self.db, seed_registry=self.seeds)
+        self.composer = OperatorComposer(
+            db=self.db, 
+            seed_registry=self.seeds,
+            primitive_callback=self._primitive_callback  # Allows composer to call grandfathered primitives
+        )
         self.oracle = OracleInterface(db=self.db, unlock_manager=self.unlock_manager)
         
         # Initialize existing engines as wrappers
@@ -126,7 +130,34 @@ class CODSEngine:
         # Operator execution stats
         self._execution_stats: Dict[str, Dict] = {}
         
+        # Ensure failure-driven learning tables exist
+        self._ensure_failure_tables()
+        
         logger.info(f"[CODS] Engine initialized with {self.seeds.count()} seed primitives")
+    
+    def _primitive_callback(self, name: str, args: tuple, kwargs: dict) -> Any:
+        """
+        Callback for OperatorComposer to execute grandfathered/unlocked primitives.
+        
+        This allows composed operators to use primitives beyond just seed primitives.
+        
+        Args:
+            name: Primitive name
+            args: Positional arguments
+            kwargs: Keyword arguments
+            
+        Returns:
+            Primitive output
+            
+        Raises:
+            NotImplementedError: If primitive is not available
+        """
+        # Check if it's an unlocked or grandfathered primitive
+        status = self.unlock_manager.get_status(name)
+        if status in [PrimitiveStatus.UNLOCKED, PrimitiveStatus.GRANDFATHERED]:
+            return self._apply_unlocked_primitive(name, *args, **kwargs)
+        
+        raise NotImplementedError(f"Primitive '{name}' not available via callback")
     
     def _init_existing_engines(self):
         """Initialize wrappers for existing engine implementations."""
@@ -210,14 +241,19 @@ class CODSEngine:
         # Test composed operators on this frame (critical for unlock system)
         # Only test every 10 actions to avoid overhead
         if action_count is None or action_count % 10 == 0:
+            game_id = self._context.game_id if self._context else 'unknown'
+            logger.info(f"[CODS] Testing operators at action_count={action_count} for game {game_id}")
             try:
-                self.test_composed_operators(
+                results = self.test_composed_operators(
                     frame=frame,
                     previous_frame=previous_frame,
                     score_delta=score_delta
                 )
+                if results:
+                    successes = sum(1 for v in results.values() if v)
+                    logger.info(f"[CODS] Tested {len(results)} operators: {successes} success")
             except Exception as e:
-                logger.debug(f"[CODS] Operator testing failed: {e}")
+                logger.warning(f"[CODS] Operator testing failed: {e}")
     
     def record_action(self, action: int):
         """Record an action taken."""
@@ -546,14 +582,19 @@ class CODSEngine:
         """
         Bootstrap initial operators from successful game patterns.
         
-        Creates operators from seed primitives based on common patterns
-        found in winning sequences. This seeds the CODS system so
+        Creates operators from seed primitives AND grandfathered primitives based on 
+        common patterns found in winning sequences. This seeds the CODS system so
         evolve_operators and check_for_potential_unlocks have something to work with.
         
         CRITICAL: Operators must be executable! Each primitive in a chain must
         be able to accept the output of the previous one. Single-primitive
         operators are always valid. Multi-primitive operators must have
         compatible type signatures.
+        
+        CRITICAL v2: We must bootstrap operators that actually try to discover
+        higher-level concepts like containment, boundary detection, etc.
+        The grandfathered primitives (flood_fill, detect_shapes, etc.) should
+        be composed into operators that could match locked primitives.
         
         Args:
             limit: Maximum number of operators to create
@@ -563,54 +604,85 @@ class CODSEngine:
         """
         created_count = 0
         
-        # Check if we already have operators
+        # Check if we already have operators (but not too many - allow gradual expansion)
         existing = self.db.execute_query("SELECT COUNT(*) as cnt FROM composed_operators")
-        if existing and existing[0]['cnt'] >= 10:
+        if existing and existing[0]['cnt'] >= 30:
             logger.debug(f"[CODS] Already have {existing[0]['cnt']} operators, skipping bootstrap")
             return 0
+        
+        # Get list of already created operator names
+        existing_names = self.db.execute_query("SELECT name FROM composed_operators")
+        existing_name_set = {r['name'] for r in existing_names} if existing_names else set()
         
         # Define ACTUALLY EXECUTABLE operator patterns
         # 
         # Type 1: Single-primitive wrappers (always work)
         # Type 2: Compositions where output feeds correctly to next input
+        # Type 3: Operators using grandfathered primitives (for discovery!)
         #
-        # Format: (primitives, name, description)
+        # Format: (primitives, name, description, uses_grandfathered)
         operator_patterns = [
             # === Single-primitive wrappers (guaranteed to work) ===
-            (['get_frame'], 'op_get_frame', 'Get current frame state'),
-            (['get_previous_frame'], 'op_get_previous_frame', 'Get previous frame'),
-            (['get_action_history'], 'op_get_action_history', 'Get action history list'),
-            (['get_step_index'], 'op_get_step_index', 'Get current step index'),
-            (['get_action_count'], 'op_action_count', 'Get total action count'),
-            (['random_choice'], 'op_random_action', 'Choose random action'),
+            (['get_frame'], 'op_get_frame', 'Get current frame state', False),
+            (['get_previous_frame'], 'op_get_previous_frame', 'Get previous frame', False),
+            (['get_action_history'], 'op_get_action_history', 'Get action history list', False),
+            (['get_step_index'], 'op_get_step_index', 'Get current step index', False),
+            (['get_action_count'], 'op_action_count', 'Get total action count', False),
+            (['random_choice'], 'op_random_action', 'Choose random action', False),
             
             # === Frame size analysis (get_frame -> len = height) ===
-            # Note: len of 2D frame gives number of rows (height)
-            (['get_frame', 'len'], 'op_frame_height', 'Get frame height (rows)'),
+            (['get_frame', 'len'], 'op_frame_height', 'Get frame height (rows)', False),
             
             # === Action history analysis ===
-            # get_action_history returns list, len gives count
-            (['get_action_history', 'len'], 'op_history_length', 'Count actions in history'),
-            
-            # === Step comparison (step > threshold) ===
-            # get_step_index returns int, can be compared
-            # But greater_than needs TWO args, so this is a partial application
-            # Skip multi-arg compositions for now
-            
-            # === Equality check for last action ===
-            # get_last_action returns int (or None)
-            (['get_last_action'], 'op_last_action', 'Get the last action taken'),
+            (['get_action_history', 'len'], 'op_history_length', 'Count actions in history', False),
+            (['get_last_action'], 'op_last_action', 'Get the last action taken', False),
             
             # === Random number generator ===
-            (['random_float'], 'op_random_float', 'Generate random 0.0-1.0'),
+            (['random_float'], 'op_random_float', 'Generate random 0.0-1.0', False),
+            
+            # ===================================================================
+            # GRANDFATHERED PRIMITIVE WRAPPERS - Critical for discovery!
+            # These primitives are already unlocked and should be composed
+            # into operators that could potentially discover locked primitives
+            # ===================================================================
+            
+            # Visual analysis operators (single-primitive wrappers)
+            # These read from context and work with no extra arguments
+            (['detect_symmetry'], 'op_detect_symmetry', 'Detect symmetry in current frame', True),
+            (['detect_shapes'], 'op_detect_shapes', 'Detect distinct shapes/objects', True),
+            (['find_repeating_patterns'], 'op_find_patterns', 'Find repeating patterns in frame', True),
+            (['analyze_color_distribution'], 'op_color_distribution', 'Analyze color distribution', True),
+            (['analyze_spatial_relations'], 'op_spatial_relations', 'Analyze spatial relationships', True),
+            
+            # NOTE: detect_objects_in_frame and flood_fill are excluded because they
+            # require special arguments that can't be auto-provided in this context.
+            # They should be composed into higher-level operators that provide args.
+            
+            # These operators are designed to discover containment-like behavior
+            # When they succeed consistently, they may unlock locked primitives
         ]
         
-        for primitives, name, description in operator_patterns:
+        for primitives, name, description, uses_grandfathered in operator_patterns:
             if created_count >= limit:
                 break
             
-            # Check if all primitives are available (seed primitives)
-            all_available = all(self.seeds.get(p) is not None for p in primitives)
+            # Skip if already exists
+            if name in existing_name_set:
+                continue
+            
+            # Check if primitives are available
+            all_available = True
+            for p in primitives:
+                # Check seed primitives first
+                if self.seeds.get(p) is not None:
+                    continue
+                # Then check grandfathered primitives
+                status = self.unlock_manager.get_status(p)
+                if status in [PrimitiveStatus.UNLOCKED, PrimitiveStatus.GRANDFATHERED]:
+                    continue
+                all_available = False
+                break
+            
             if not all_available:
                 logger.debug(f"[CODS] Bootstrap: Missing primitive in {primitives}")
                 continue
@@ -768,23 +840,36 @@ class CODSEngine:
             op_id = op['operator_id']
             
             try:
-                # Apply the operator
-                result = self.apply(op_name, frame)
+                # Apply the operator (no args - operators read from context set by update_frame)
+                # FIXED: Previously passed frame as arg, but seed primitives like get_frame()
+                # take no arguments and read from internal context
+                start_time = time.time()
+                result = self.apply(op_name)
+                exec_time_ms = (time.time() - start_time) * 1000
                 
-                # Determine success based on:
-                # 1. Operator executed without error
-                # 2. Score increased (if we have score_delta)
+                # Determine success based on operator execution (not score delta)
+                # Score-based evaluation was marking data-access operators as failures
+                # when score didn't change, which is wrong - get_frame() is always successful
+                # if it returns data without error.
+                # 
+                # Future: For operators that suggest ACTIONS (not just data access),
+                # we could evaluate based on score_delta, but that requires tracking
+                # which operators influenced which actions.
                 success = result.success
-                if success and score_delta > 0:
-                    # Bonus: score improved after using this operator's insight
-                    success = True
-                elif success and score_delta < 0:
-                    # Score decreased - operator may have misled
-                    success = False
                 
                 results[op_name] = success
                 
-                # Record the test result in database
+                # Record test result in operator_test_results table (CRITICAL for unlock system)
+                # BUG FIX: Previously only updated composed_operators but check_for_potential_unlocks
+                # queries operator_test_results for cross-game validation
+                self._record_test_result(
+                    operator_id=op_id,
+                    success=success,
+                    output=result.output,
+                    exec_time=exec_time_ms
+                )
+                
+                # Also update the composed_operators summary stats
                 game_id = self._context.game_id if self._context else 'unknown'
                 self.db.execute_query("""
                     UPDATE composed_operators
@@ -957,6 +1042,649 @@ class CODSEngine:
     def get_locked_primitives(self) -> List[Dict[str, Any]]:
         """Get all locked primitives awaiting discovery."""
         return self.unlock_manager.list_locked()
+    
+    # ======================================================================
+    # FAILURE-DRIVEN LEARNING (Post-Game Analysis)
+    # ======================================================================
+    
+    def record_level_outcome(
+        self,
+        level: int,
+        passed: bool,
+        actions_used: int,
+        score_gained: float = 0.0
+    ) -> None:
+        """
+        Record level outcome for failure-driven learning.
+        
+        Called when a level completes or times out. This is a key learning
+        point - we can analyze what operators were/weren't used and whether
+        they might have helped.
+        
+        Args:
+            level: Level number (1-based)
+            passed: Whether level was completed
+            actions_used: Number of actions taken on this level
+            score_gained: Score earned on this level
+        """
+        if not self._context:
+            logger.warning("[CODS] record_level_outcome called without context")
+            return
+        
+        try:
+            # Record level outcome
+            outcome_id = str(uuid.uuid4())[:12]
+            
+            self.db.execute_query("""
+                INSERT INTO cods_level_outcomes (
+                    outcome_id, game_id, agent_id, level_number,
+                    passed, actions_used, score_gained,
+                    generation, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                outcome_id,
+                self._context.game_id,
+                self._context.agent_id,
+                level,
+                passed,
+                actions_used,
+                score_gained,
+                self._context.generation,
+                datetime.now().isoformat()
+            ))
+            
+            # On failure, analyze what primitives might have helped
+            if not passed:
+                self._analyze_level_failure(level, actions_used)
+                
+            logger.debug(f"[CODS] Level {level} outcome: {'PASS' if passed else 'FAIL'} "
+                        f"({actions_used} actions, {score_gained} score)")
+                        
+        except Exception as e:
+            logger.error(f"[CODS] Error recording level outcome: {e}")
+    
+    def record_game_outcome(
+        self,
+        game_id: str,
+        final_score: float,
+        max_level_reached: int,
+        total_actions: int,
+        won: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Record game outcome - MAIN LEARNING POINT.
+        
+        This is where we analyze the full game to understand:
+        1. What operators were used and did they help?
+        2. What primitives might have been missing?
+        3. Are there patterns across failed games?
+        
+        Args:
+            game_id: Game that was played
+            final_score: Final score achieved
+            max_level_reached: Highest level reached
+            total_actions: Total actions taken
+            won: Whether game was won
+            
+        Returns:
+            Analysis results including primitive gap suggestions
+        """
+        if not self._context:
+            logger.warning("[CODS] record_game_outcome called without context")
+            return {'error': 'no_context'}
+        
+        results = {
+            'game_id': game_id,
+            'won': won,
+            'max_level': max_level_reached,
+            'operators_tested': 0,
+            'operators_helpful': 0,
+            'primitive_gaps': [],
+            'concept_signals': []
+        }
+        
+        try:
+            # Get operator test results for this game
+            test_results = self.db.execute_query("""
+                SELECT operator_id, success, level_number
+                FROM operator_test_results
+                WHERE game_id = ?
+                ORDER BY tested_at
+            """, (game_id,))
+            
+            if test_results:
+                results['operators_tested'] = len(test_results)
+                results['operators_helpful'] = sum(1 for t in test_results if t['success'])
+            
+            # If game failed, analyze what was missing
+            if not won:
+                gaps = self._analyze_game_failure(
+                    game_id, final_score, max_level_reached, total_actions
+                )
+                results['primitive_gaps'] = gaps
+                
+                # Check for recurring failure patterns
+                concept_signals = self._detect_concept_signals(game_id, max_level_reached)
+                results['concept_signals'] = concept_signals
+            
+            # Record outcome to database
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO cods_game_outcomes (
+                    game_id, agent_id, final_score, max_level_reached,
+                    total_actions, won, operators_tested, operators_helpful,
+                    primitive_gaps, concept_signals, generation, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                game_id,
+                self._context.agent_id,
+                final_score,
+                max_level_reached,
+                total_actions,
+                won,
+                results['operators_tested'],
+                results['operators_helpful'],
+                json.dumps(results['primitive_gaps']),
+                json.dumps(results['concept_signals']),
+                self._context.generation,
+                datetime.now().isoformat()
+            ))
+            
+            logger.info(f"[CODS] Game outcome: {'WIN' if won else 'FAIL'} L{max_level_reached} "
+                       f"- {len(results['primitive_gaps'])} primitive gaps detected")
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error recording game outcome: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def _analyze_level_failure(self, level: int, actions_used: int) -> None:
+        """Analyze a level failure to identify primitive gaps."""
+        if not self._context:
+            return
+        
+        # Get frame characteristics at failure point
+        frame = self._context.current_frame
+        if not frame:
+            return
+        
+        # Run available operators on the failed frame to see what insights we get
+        operators = self.composer.list_operators(min_success_rate=0.3, limit=20)
+        
+        insights = []
+        for op in operators:
+            try:
+                result = self.apply(op.operator_id)
+                if result.success and result.output:
+                    insights.append({
+                        'operator': op.name,
+                        'output': str(result.output)[:100]  # Truncate for storage
+                    })
+            except Exception:
+                pass
+        
+        # Store failure analysis
+        if insights:
+            self.db.execute_query("""
+                INSERT INTO cods_failure_analyses (
+                    analysis_id, game_id, level_number, agent_id,
+                    actions_at_failure, operator_insights, generation, analyzed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(uuid.uuid4())[:12],
+                self._context.game_id,
+                level,
+                self._context.agent_id,
+                actions_used,
+                json.dumps(insights),
+                self._context.generation,
+                datetime.now().isoformat()
+            ))
+    
+    def _analyze_game_failure(
+        self,
+        game_id: str,
+        final_score: float,
+        max_level: int,
+        total_actions: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze a failed game to identify potential primitive gaps.
+        
+        Returns list of primitive gaps with confidence scores.
+        """
+        gaps = []
+        
+        # Get game type from game_id (e.g., "sp80" from "sp80-abc123")
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Check historical failures for this game type
+        failure_history = self.db.execute_query("""
+            SELECT COUNT(*) as fail_count, AVG(max_level_reached) as avg_level
+            FROM cods_game_outcomes
+            WHERE game_id LIKE ? AND won = FALSE
+        """, (f"{game_type}%",))
+        
+        if failure_history and failure_history[0]['fail_count'] >= 3:
+            avg_level = failure_history[0]['avg_level'] or 1
+            
+            # If agents consistently fail at same level, there's likely a primitive gap
+            if max_level <= avg_level + 0.5:
+                # Check which locked primitives might help
+                locked = self.unlock_manager.list_locked()
+                
+                for prim in locked:
+                    # Score each primitive by relevance to this failure pattern
+                    relevance = self._score_primitive_relevance(
+                        prim['primitive_name'], game_type, max_level
+                    )
+                    
+                    if relevance >= 0.3:
+                        gaps.append({
+                            'primitive_name': prim['primitive_name'],
+                            'category': prim.get('category', 'unknown'),
+                            'relevance_score': relevance,
+                            'failure_pattern': f"{game_type}_level{max_level}",
+                            'suggested_reason': self._get_unlock_reason(
+                                prim['primitive_name'], game_type
+                            )
+                        })
+        
+        # Sort by relevance
+        gaps.sort(key=lambda x: x['relevance_score'], reverse=True)
+        
+        return gaps[:5]  # Top 5 gaps
+    
+    def _score_primitive_relevance(
+        self,
+        primitive_name: str,
+        game_type: str,
+        failed_level: int
+    ) -> float:
+        """Score how relevant a locked primitive might be for a failure pattern."""
+        score = 0.0
+        prim_lower = primitive_name.lower()
+        
+        # Containment-related primitives for games with boundary patterns
+        containment_prims = ['containment_check', 'boundary_seal_check', 'flow_simulation',
+                           'is_enclosed', 'capacity_estimate', 'overflow_predict']
+        
+        # Reference/template primitives for pattern-matching games
+        reference_prims = ['identify_reference_object', 'extract_schema', 'apply_template',
+                          'create_variable_mapping', 'detect_legend_object']
+        
+        # Spatial primitives for navigation games
+        spatial_prims = ['path_exists', 'distance_transform', 'detect_edges',
+                        'motion_vector', 'gravity_simulation']
+        
+        # Check if primitive category matches game patterns
+        # (This is a heuristic - real matching would analyze frames)
+        if any(p in prim_lower for p in ['contain', 'bound', 'seal', 'flow', 'enclos']):
+            score += 0.4
+        
+        if any(p in prim_lower for p in ['path', 'distance', 'motion', 'gravity']):
+            score += 0.3
+        
+        if any(p in prim_lower for p in ['reference', 'schema', 'template', 'mapping']):
+            score += 0.3
+        
+        # Higher relevance for level 2+ failures (level 1 usually has simpler mechanics)
+        if failed_level >= 2:
+            score += 0.2
+        
+        return min(1.0, score)
+    
+    def _get_unlock_reason(self, primitive_name: str, game_type: str) -> str:
+        """Get a human-readable reason for why this primitive might help."""
+        reasons = {
+            'containment_check': 'Detect if regions are fully bounded/sealed',
+            'boundary_seal_check': 'Verify all edges of containers are blocked',
+            'flow_simulation': 'Predict where dynamic content will flow',
+            'is_enclosed': 'Check if a region is completely surrounded',
+            'path_exists': 'Find if there is a valid path between points',
+            'detect_edges': 'Find boundaries between different regions',
+            'identify_reference_object': 'Detect objects that define rules for others',
+            'extract_schema': 'Get abstract pattern independent of specific values',
+        }
+        return reasons.get(primitive_name, f'May help with {game_type} patterns')
+    
+    def _detect_concept_signals(
+        self,
+        game_id: str,
+        max_level: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect signals that a higher-level concept might be needed.
+        
+        Concepts are semantic models that organize which operators are relevant.
+        """
+        signals = []
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Check if multiple primitives from same category would help
+        gaps = self._analyze_game_failure(game_id, 0, max_level, 0)
+        
+        if gaps:
+            # Group by category
+            categories = {}
+            for gap in gaps:
+                cat = gap.get('category', 'unknown')
+                if cat not in categories:
+                    categories[cat] = []
+                categories[cat].append(gap['primitive_name'])
+            
+            # If 2+ primitives from same category, it's a concept signal
+            for cat, prims in categories.items():
+                if len(prims) >= 2:
+                    signals.append({
+                        'concept_type': cat,
+                        'related_primitives': prims,
+                        'confidence': min(0.9, 0.3 * len(prims)),
+                        'game_type': game_type,
+                        'level': max_level
+                    })
+        
+        return signals
+    
+    def process_counterfactual_insights(
+        self,
+        scenario_ids: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Process counterfactual analysis results to inform CODS.
+        
+        Connects the CounterfactualAnalyzer output to primitive gap detection.
+        
+        Args:
+            scenario_ids: IDs from counterfactual_scenarios table
+            
+        Returns:
+            Processing results
+        """
+        results = {
+            'scenarios_processed': 0,
+            'operator_hypotheses': [],
+            'primitive_hints': []
+        }
+        
+        if not scenario_ids:
+            return results
+        
+        try:
+            # Get counterfactual scenarios
+            placeholders = ','.join('?' * len(scenario_ids))
+            scenarios = self.db.execute_query(f"""
+                SELECT scenario_id, game_id, decision_point_index,
+                       divergence_reason, predicted_outcome, learning_value
+                FROM counterfactual_scenarios
+                WHERE scenario_id IN ({placeholders})
+                ORDER BY learning_value DESC
+            """, tuple(scenario_ids))
+            
+            for scenario in scenarios:
+                results['scenarios_processed'] += 1
+                
+                # High-value counterfactuals suggest we need better decision-making
+                if scenario['learning_value'] >= 0.7:
+                    game_type = scenario['game_id'].split('-')[0]
+                    
+                    # Record as a signal that we need better primitives for this game
+                    self.db.execute_query("""
+                        INSERT INTO cods_primitive_hints (
+                            hint_id, game_type, source, hint_type,
+                            confidence, details, recorded_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        str(uuid.uuid4())[:12],
+                        game_type,
+                        'counterfactual',
+                        'decision_point',
+                        scenario['learning_value'],
+                        json.dumps({
+                            'scenario_id': scenario['scenario_id'],
+                            'reason': scenario['divergence_reason']
+                        }),
+                        datetime.now().isoformat()
+                    ))
+                    
+                    results['primitive_hints'].append({
+                        'game_type': game_type,
+                        'hint': scenario['divergence_reason'][:100]
+                    })
+            
+            logger.info(f"[CODS] Processed {results['scenarios_processed']} counterfactual scenarios")
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error processing counterfactuals: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def process_near_miss_patterns(
+        self,
+        near_miss_id: str
+    ) -> Dict[str, Any]:
+        """
+        Process near-miss analysis to inform CODS.
+        
+        Near-misses (15-18/20 scores) are especially valuable because
+        they show what ALMOST worked - small gaps in understanding.
+        
+        Args:
+            near_miss_id: ID from near_miss_games table
+            
+        Returns:
+            Processing results
+        """
+        results = {
+            'processed': False,
+            'gap_identified': None,
+            'suggested_primitive': None
+        }
+        
+        try:
+            # Get near-miss details
+            near_miss = self.db.execute_query("""
+                SELECT game_id, final_score, score_gap, near_miss_category,
+                       what_failed, missing_elements
+                FROM near_miss_games
+                WHERE near_miss_id = ?
+            """, (near_miss_id,))
+            
+            if not near_miss:
+                return results
+            
+            nm = near_miss[0]
+            results['processed'] = True
+            
+            game_type = nm['game_id'].split('-')[0]
+            
+            # Parse what failed
+            what_failed = json.loads(nm['what_failed']) if nm['what_failed'] else []
+            missing = json.loads(nm['missing_elements']) if nm['missing_elements'] else []
+            
+            # Near-misses suggest specific primitive gaps
+            if nm['score_gap'] <= 3:  # Very close to winning
+                # Check which locked primitives might close this gap
+                locked = self.unlock_manager.list_locked()
+                
+                for prim in locked:
+                    relevance = self._score_primitive_relevance(
+                        prim['primitive_name'], game_type, 2
+                    )
+                    
+                    if relevance >= 0.5:
+                        results['gap_identified'] = f"Near-win on {game_type}"
+                        results['suggested_primitive'] = prim['primitive_name']
+                        
+                        # Record as high-confidence hint
+                        self.db.execute_query("""
+                            INSERT INTO cods_primitive_hints (
+                                hint_id, game_type, source, hint_type,
+                                confidence, details, recorded_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            str(uuid.uuid4())[:12],
+                            game_type,
+                            'near_miss',
+                            'almost_won',
+                            0.8,  # High confidence for near-wins
+                            json.dumps({
+                                'near_miss_id': near_miss_id,
+                                'score_gap': nm['score_gap'],
+                                'suggested': prim['primitive_name']
+                            }),
+                            datetime.now().isoformat()
+                        ))
+                        break
+            
+            logger.info(f"[CODS] Processed near-miss {near_miss_id}: gap={results['gap_identified']}")
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error processing near-miss: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def get_primitive_gap_summary(self, min_confidence: float = 0.5) -> Dict[str, Any]:
+        """
+        Get summary of detected primitive gaps across all games.
+        
+        This is the main interface for understanding what primitives
+        the system needs to discover/unlock.
+        
+        Args:
+            min_confidence: Minimum confidence threshold
+            
+        Returns:
+            Summary of gaps by game type and primitive
+        """
+        summary = {
+            'total_hints': 0,
+            'by_game_type': {},
+            'by_primitive': {},
+            'top_suggestions': []
+        }
+        
+        try:
+            # Get all hints above threshold
+            hints = self.db.execute_query("""
+                SELECT game_type, hint_type, confidence, details
+                FROM cods_primitive_hints
+                WHERE confidence >= ?
+                ORDER BY confidence DESC
+            """, (min_confidence,))
+            
+            if not hints:
+                return summary
+            
+            summary['total_hints'] = len(hints)
+            
+            for hint in hints:
+                game_type = hint['game_type']
+                if game_type not in summary['by_game_type']:
+                    summary['by_game_type'][game_type] = []
+                summary['by_game_type'][game_type].append(hint)
+                
+                # Extract primitive from details if present
+                try:
+                    details = json.loads(hint['details']) if hint['details'] else {}
+                    if 'suggested' in details:
+                        prim = details['suggested']
+                        if prim not in summary['by_primitive']:
+                            summary['by_primitive'][prim] = 0
+                        summary['by_primitive'][prim] += hint['confidence']
+                except Exception:
+                    pass
+            
+            # Get top suggestions
+            for prim, score in sorted(
+                summary['by_primitive'].items(), 
+                key=lambda x: x[1], 
+                reverse=True
+            )[:5]:
+                summary['top_suggestions'].append({
+                    'primitive': prim,
+                    'cumulative_confidence': score
+                })
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error getting gap summary: {e}")
+            summary['error'] = str(e)
+        
+        return summary
+    
+    def _ensure_failure_tables(self) -> None:
+        """Ensure failure-driven learning tables exist."""
+        try:
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS cods_level_outcomes (
+                    outcome_id TEXT PRIMARY KEY,
+                    game_id TEXT NOT NULL,
+                    agent_id TEXT,
+                    level_number INTEGER NOT NULL,
+                    passed BOOLEAN NOT NULL,
+                    actions_used INTEGER NOT NULL,
+                    score_gained REAL DEFAULT 0,
+                    generation INTEGER DEFAULT 0,
+                    recorded_at TEXT NOT NULL
+                )
+            """)
+            
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS cods_game_outcomes (
+                    game_id TEXT PRIMARY KEY,
+                    agent_id TEXT,
+                    final_score REAL NOT NULL,
+                    max_level_reached INTEGER NOT NULL,
+                    total_actions INTEGER NOT NULL,
+                    won BOOLEAN NOT NULL,
+                    operators_tested INTEGER DEFAULT 0,
+                    operators_helpful INTEGER DEFAULT 0,
+                    primitive_gaps TEXT,
+                    concept_signals TEXT,
+                    generation INTEGER DEFAULT 0,
+                    recorded_at TEXT NOT NULL
+                )
+            """)
+            
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS cods_failure_analyses (
+                    analysis_id TEXT PRIMARY KEY,
+                    game_id TEXT NOT NULL,
+                    level_number INTEGER NOT NULL,
+                    agent_id TEXT,
+                    actions_at_failure INTEGER,
+                    operator_insights TEXT,
+                    generation INTEGER DEFAULT 0,
+                    analyzed_at TEXT NOT NULL
+                )
+            """)
+            
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS cods_primitive_hints (
+                    hint_id TEXT PRIMARY KEY,
+                    game_type TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    hint_type TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    details TEXT,
+                    recorded_at TEXT NOT NULL
+                )
+            """)
+            
+            # Create indexes
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_cods_level_game 
+                ON cods_level_outcomes(game_id, level_number)
+            """)
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_cods_hints_game 
+                ON cods_primitive_hints(game_type, confidence DESC)
+            """)
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error creating failure tables: {e}")
     
     # ======================================================================
     # INTERNAL HELPERS
