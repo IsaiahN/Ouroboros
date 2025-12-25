@@ -706,9 +706,8 @@ class GameplayEngine:
                 new_level = int(game_state.score) + 1
                 self.cods_engine.set_context(
                     game_id=game_id,
-                    level=new_level,
-                    agent_id=agent_id,
-                    mode=agent_mode or 'generalist'
+                    level_number=new_level,
+                    agent_id=agent_id
                 )
                 logger.debug(f"[CODS] Advanced to level {new_level}")
             except Exception as e:
@@ -1381,9 +1380,8 @@ class GameplayEngine:
             try:
                 self.cods_engine.set_context(
                     game_id=game_id,
-                    level=1,
-                    agent_id=agent_id,
-                    mode=agent_mode or 'generalist'
+                    level_number=1,
+                    agent_id=agent_id
                 )
                 # Give initial frame to CODS
                 self.cods_engine.update_frame(
@@ -2837,6 +2835,53 @@ class GameplayEngine:
                 except Exception as e:
                     logger.debug(f"Role fit update failed (non-critical): {e}")
 
+            # ===================================================================
+            # COGNITIVE DEVELOPMENT: Update agent competencies after game
+            # Track developmental progress through Piaget-inspired stages
+            # This was previously in _finalize_game but never called!
+            # ===================================================================
+            if agent_id:
+                try:
+                    # Determine competency updates based on game outcome
+                    sequence_discovered = results.get('learned_sequence_id') is not None
+                    object_control_learned = False
+                    action_effect_pairs_delta = 0
+                    
+                    # Check if agent learned object control during this game
+                    if hasattr(self, 'agent_self_model'):
+                        control_data = self.agent_self_model.get_controlled_objects(
+                            agent_id, game_id, current_level
+                        )
+                        if control_data:
+                            object_control_learned = True
+                    
+                    # Count action-effect pairs observed
+                    session_id = self.session_manager.current_session_id
+                    if session_id:
+                        effect_count = self.db.execute_query("""
+                            SELECT COUNT(*) as count FROM action_traces
+                            WHERE session_id = ? AND game_id = ? AND frame_changed = 1
+                        """, (session_id, game_id))
+                        if effect_count and effect_count[0]['count']:
+                            action_effect_pairs_delta = min(effect_count[0]['count'], 5)  # Cap at 5 per game
+                    
+                    # Update cognitive competencies (may trigger stage transition)
+                    competency_result = self.cognitive_stage_system.update_competencies(
+                        agent_id=agent_id,
+                        games_played_delta=1,
+                        sequences_discovered_delta=1 if sequence_discovered else 0,
+                        object_control_learned=object_control_learned if object_control_learned else None,
+                        action_effect_pairs_delta=action_effect_pairs_delta
+                    )
+                    
+                    if competency_result.get('transitioned'):
+                        new_stage = competency_result.get('current_stage')
+                        logger.info(f"[COGNITIVE] Agent {agent_id[:8]} advanced to {new_stage} stage!")
+                        results['cognitive_stage_transition'] = new_stage
+                        
+                except Exception as e:
+                    logger.debug(f"Cognitive competency update failed (non-critical): {e}")
+
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
                        f"Actions: {action_count}, Levels Completed: {level_completions}/{current_level}")
             return results
@@ -2909,6 +2954,50 @@ class GameplayEngine:
             # (We don't have action_count here, but we can estimate from game_state or just stay in mode)
             # For now, just log and skip the deterministic early-returns
             logger.debug(f"[SELF-DIRECTED] Agent exploring on its own (off-script)")
+        
+        # ===================================================================
+        # OBJECT DISCOVERY PHASE (Seed Capability)
+        # ===================================================================
+        # Even babies systematically test what they can control.
+        # First N actions of a level: click on each object, test movement.
+        # This builds the fundamental understanding of "I control this object".
+        # ===================================================================
+        if hasattr(self, 'agent_self_model') and game_state.frame:
+            try:
+                current_game_id = self.session_manager.current_game_id
+                current_level = game_state.score + 1  # Estimate from score
+                
+                # Track actions taken this level (use session action count)
+                actions_this_level = getattr(self, '_level_action_count', 0)
+                
+                if current_game_id:
+                    game_type = current_game_id.split('-')[0] if '-' in current_game_id else current_game_id
+                    
+                    # Check if discovery phase should suggest an action
+                    discovery_action = self.agent_self_model.get_discovery_phase_actions(
+                        frame=game_state.frame,
+                        game_type=game_type,
+                        level=current_level,
+                        actions_taken=actions_this_level
+                    )
+                    
+                    if discovery_action:
+                        action = discovery_action.get('action', 'ACTION1')
+                        reason = discovery_action.get('reason', 'Object discovery')
+                        
+                        # For ACTION6, set click coordinates
+                        if action == 'ACTION6' and 'x' in discovery_action:
+                            self._discovery_click_coords = (
+                                discovery_action['x'],
+                                discovery_action['y']
+                            )
+                        
+                        reasoning = f"[DISCOVERY] {reason}"
+                        logger.info(f"[DISCOVERY PHASE] {action} - {reason}")
+                        return action, reasoning
+                        
+            except Exception as e:
+                logger.debug(f"Object discovery check failed (non-critical): {e}")
         
         # === Step 8: Query learned rules BEFORE action selection ===
         # This allows agents to use network-learned knowledge from previous wins
@@ -3260,9 +3349,37 @@ class GameplayEngine:
                 
                 elif stage == 'formal_operational':
                     # Formal operational agents can hypothesize and experiment
-                    # Query their own hypotheses first before network hypotheses
+                    # First: Check for primitive-aware hypothesis with action recommendation
                     if hasattr(self, 'agent_hypothesis_system') and self.agent_hypothesis_system:
                         game_type = current_game_id.split('-')[0] if current_game_id and '-' in current_game_id else current_game_id
+                        
+                        # TRY PRIMITIVE-BASED ACTION FIRST
+                        # This uses structured hypotheses with trigger conditions
+                        primitive_recommendation = self.agent_hypothesis_system.get_primitive_based_action(
+                            agent_id=agent_id,
+                            game_type=game_type,
+                            level_number=game_state.level if game_state else None
+                        )
+                        
+                        if primitive_recommendation and primitive_recommendation.get('action'):
+                            action = primitive_recommendation['action']
+                            confidence = primitive_recommendation.get('confidence', 0.5)
+                            primitives = primitive_recommendation.get('primitives', [])
+                            reasoning = primitive_recommendation.get('reasoning', 'Primitive-based hypothesis')
+                            
+                            # High confidence = take the action
+                            if confidence >= 0.6:
+                                cognitive_stage_action = action
+                                cognitive_stage_reasoning = f"Formal agent (primitive-aware): {reasoning[:50]} [conf={confidence:.0%}]"
+                                logger.info(f"[STAGE] {cognitive_stage_reasoning} using {primitives[:3]}")
+                                return cognitive_stage_action, cognitive_stage_reasoning
+                            else:
+                                # Lower confidence = add bias but don't force
+                                action_num = int(action.replace('ACTION', '')) if action.startswith('ACTION') else 0
+                                if action_num:
+                                    hypothesis_biases[action_num] = hypothesis_biases.get(action_num, 0) + 0.3 * confidence
+                        
+                        # FALLBACK: Query text-based hypotheses
                         agent_hypotheses = self.agent_hypothesis_system.get_agent_hypotheses(
                             agent_id=agent_id,
                             game_type=game_type,
@@ -7384,26 +7501,60 @@ class GameplayEngine:
             # ===============================================================
             # AGENT-INITIATED HYPOTHESIS (Formal Operational Only)
             # If agent has reached formal operational stage, let them create
-            # their own hypothesis about what went wrong
+            # their own PRIMITIVE-AWARE hypothesis about what went wrong
             # ===============================================================
             try:
                 if self.agent_hypothesis_system.can_create_hypothesis(agent_id):
-                    # Agent creates their own hypothesis based on experience
-                    agent_hypothesis_text = f"On {game_type} level {level_number}: {failure_reason}"
-                    if stuck_pattern:
-                        agent_hypothesis_text += f" Pattern: {stuck_pattern}"
+                    # Get available primitives for this agent
+                    available_primitives = []
+                    if hasattr(self, 'cods_engine') and self.cods_engine:
+                        try:
+                            inventory = self.cods_engine.get_primitive_inventory()
+                            # Collect all available primitive names
+                            available_primitives = inventory.get('seed', [])
+                            available_primitives += [p['name'] for p in inventory.get('grandfathered', [])]
+                            available_primitives += [p['name'] for p in inventory.get('unlocked', [])]
+                        except Exception:
+                            pass
                     
-                    agent_hyp_id = self.agent_hypothesis_system.create_hypothesis(
-                        agent_id=agent_id,
-                        game_type=game_type,
-                        hypothesis_text=agent_hypothesis_text,
-                        hypothesis_type='game_rule',
-                        level_number=level_number,
-                        initial_evidence=[f"Observed during game {game_id}"]
-                    )
+                    # Build game observations for primitive-aware hypothesis
+                    game_observations = {
+                        'stuck_pattern': stuck_pattern,
+                        'last_actions': last_actions[:10] if last_actions else [],
+                        'action_effects': {},  # Could be populated from action traces
+                        'controlled_objects': getattr(self, '_controlled_objects', []),
+                        'frame_changes': {},
+                        'goal_indicators': {}
+                    }
+                    
+                    # Try primitive-aware hypothesis first
+                    agent_hyp_id = None
+                    if available_primitives:
+                        agent_hyp_id = self.agent_hypothesis_system.generate_primitive_aware_hypothesis(
+                            agent_id=agent_id,
+                            game_type=game_type,
+                            level_number=level_number,
+                            available_primitives=available_primitives,
+                            game_observations=game_observations
+                        )
+                    
+                    # Fallback to text-based hypothesis if primitive-aware failed
+                    if not agent_hyp_id:
+                        agent_hypothesis_text = f"On {game_type} level {level_number}: {failure_reason}"
+                        if stuck_pattern:
+                            agent_hypothesis_text += f" Pattern: {stuck_pattern}"
+                        
+                        agent_hyp_id = self.agent_hypothesis_system.create_hypothesis(
+                            agent_id=agent_id,
+                            game_type=game_type,
+                            hypothesis_text=agent_hypothesis_text,
+                            hypothesis_type='game_rule',
+                            level_number=level_number,
+                            initial_evidence=[f"Observed during game {game_id}"]
+                        )
                     
                     if agent_hyp_id:
-                        logger.debug(f"[HYPOTHESIS] Formal agent {agent_id[:8]} created personal hypothesis: {agent_hyp_id}")
+                        logger.debug(f"[HYPOTHESIS] Formal agent {agent_id[:8]} created hypothesis: {agent_hyp_id}")
             except Exception as e:
                 logger.debug(f"Agent hypothesis creation failed (non-critical): {e}")
             

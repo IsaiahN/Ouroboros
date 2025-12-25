@@ -684,6 +684,266 @@ class SequenceAbstraction:
             logger.debug(f"Error getting conceptual hints: {e}")
             return None
 
+    # ========================================================================
+    # PRIMITIVE-AWARE SEQUENCE ANALYSIS
+    # ========================================================================
+    # Connect sequence patterns to primitives needed to detect/execute them
+    # ========================================================================
+    
+    def analyze_primitive_requirements(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> Dict[str, Any]:
+        """
+        Analyze what primitives would help detect/execute sequence patterns.
+        
+        This connects sequence abstraction to CODS:
+        - Invariant actions may need specific detection primitives
+        - Coordinate patterns may need spatial primitives
+        - Action sequences may need temporal primitives
+        
+        Args:
+            game_type: Game type prefix
+            level_number: Level to analyze
+            
+        Returns:
+            Dict with:
+            - required_primitives: Must have for this sequence type
+            - helpful_primitives: Would improve execution
+            - detection_strategy: How to detect when to execute
+            - confidence: How confident we are in this analysis
+        """
+        template = self.generate_abstract_template(game_type, level_number)
+        
+        result = {
+            'required_primitives': [],
+            'helpful_primitives': [],
+            'detection_strategy': None,
+            'sequence_type': None,
+            'confidence': 0.0
+        }
+        
+        if not template:
+            return result
+        
+        required = set()
+        helpful = set()
+        
+        # Analyze invariant actions for primitive requirements
+        for inv in template.invariant_actions:
+            action = inv.get('action', 0)
+            coords = inv.get('coordinates')
+            
+            # Movement actions (1-4) need object tracking
+            if action in [1, 2, 3, 4]:
+                required.add('get_frame')
+                helpful.add('detect_movement')
+                helpful.add('track_object')
+            
+            # Selection action (5) needs object detection
+            if action == 5:
+                required.add('get_frame')
+                helpful.add('detect_object')
+                helpful.add('identify_goal')
+            
+            # Submit/click action (6) - coordinate dependent
+            if action == 6:
+                required.add('get_frame')
+                if coords and coords.get('x_variance', 0) < 5:
+                    # Fixed coordinate - need precise detection
+                    helpful.add('detect_target')
+                    helpful.add('get_pixel')
+                else:
+                    # Variable coordinate - need region detection
+                    helpful.add('detect_region')
+            
+            # Coordinates present - spatial awareness needed
+            if coords:
+                helpful.add('get_pixel')
+                if coords.get('is_fixed'):
+                    helpful.add('detect_exact_position')
+                if coords.get('is_regional'):
+                    helpful.add('detect_region')
+        
+        # Analyze variant regions for adaptive primitives
+        for var_region in template.variant_regions:
+            # Multiple options = need decision-making primitives
+            if var_region.get('options') and len(var_region['options']) > 1:
+                helpful.add('frame_diff')
+                helpful.add('detect_change')
+        
+        # Sequence length analysis
+        if len(template.template_sequence) > 10:
+            # Long sequences need temporal primitives
+            helpful.add('get_action_history')
+            helpful.add('get_elapsed_actions')
+        
+        # Detect sequence type
+        action_counts = {}
+        for step in template.template_sequence:
+            a = step.get('action', 0)
+            action_counts[a] = action_counts.get(a, 0) + 1
+        
+        dominant_action = max(action_counts.items(), key=lambda x: x[1])[0] if action_counts else 0
+        
+        if dominant_action in [1, 2, 3, 4]:
+            result['sequence_type'] = 'movement_dominant'
+            required.add('detect_boundary')
+        elif dominant_action == 6:
+            result['sequence_type'] = 'click_dominant'
+            required.add('detect_target')
+        elif dominant_action == 5:
+            result['sequence_type'] = 'selection_dominant'
+            required.add('detect_object')
+        else:
+            result['sequence_type'] = 'mixed'
+        
+        # Build detection strategy
+        if template.invariant_actions:
+            first_invariant = template.invariant_actions[0]
+            strategy = {
+                'trigger': 'level_start',
+                'first_action': first_invariant.get('action'),
+                'checkpoint_count': len(template.invariant_actions),
+                'adaptable_regions': len(template.variant_regions)
+            }
+            result['detection_strategy'] = strategy
+        
+        result['required_primitives'] = list(required)
+        result['helpful_primitives'] = list(helpful - required)  # Don't duplicate
+        result['confidence'] = template.confidence
+        
+        return result
+
+    def get_template_with_primitives(
+        self,
+        game_type: str,
+        level_number: int,
+        available_primitives: List[str]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a template enriched with primitive-based execution guidance.
+        
+        This is what formal agents use to execute sequences intelligently,
+        not just replay blindly.
+        
+        Args:
+            game_type: Game type prefix
+            level_number: Level number
+            available_primitives: List of primitives agent has access to
+            
+        Returns:
+            Dict with template, primitive requirements, and execution hints
+        """
+        template = self.generate_abstract_template(game_type, level_number)
+        requirements = self.analyze_primitive_requirements(game_type, level_number)
+        
+        if not template:
+            return None
+        
+        # Check if agent has required primitives
+        missing_required = [
+            p for p in requirements['required_primitives'] 
+            if p not in available_primitives
+        ]
+        
+        missing_helpful = [
+            p for p in requirements['helpful_primitives']
+            if p not in available_primitives
+        ]
+        
+        # Calculate execution readiness
+        if not requirements['required_primitives']:
+            readiness = 1.0
+        else:
+            have_required = len(requirements['required_primitives']) - len(missing_required)
+            readiness = have_required / len(requirements['required_primitives'])
+        
+        # Build execution hints based on available primitives
+        execution_hints = []
+        
+        if 'detect_boundary' in available_primitives:
+            execution_hints.append("Use boundary detection to know when to turn")
+        
+        if 'frame_diff' in available_primitives:
+            execution_hints.append("Compare frames to detect progress")
+        
+        if 'get_action_history' in available_primitives:
+            execution_hints.append("Track actions to avoid oscillation")
+        
+        if 'detect_object' in available_primitives:
+            execution_hints.append("Identify target objects for clicks")
+        
+        return {
+            'template': template,
+            'executable_sequence': template.to_executable(),
+            'requirements': requirements,
+            'missing_required': missing_required,
+            'missing_helpful': missing_helpful,
+            'execution_readiness': readiness,
+            'execution_hints': execution_hints,
+            'can_execute': readiness >= 0.8,  # 80% of required primitives
+            'sequence_type': requirements['sequence_type']
+        }
+
+    def suggest_primitives_for_game(
+        self,
+        game_type: str,
+        max_level: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Analyze multiple levels to suggest what primitives would help this game.
+        
+        Used by CODS to prioritize primitive unlocking based on game needs.
+        
+        Args:
+            game_type: Game type prefix
+            max_level: How many levels to analyze
+            
+        Returns:
+            Dict with primitive recommendations and unlock priority
+        """
+        all_required = {}
+        all_helpful = {}
+        levels_analyzed = 0
+        
+        for level in range(1, max_level + 1):
+            reqs = self.analyze_primitive_requirements(game_type, level)
+            
+            if reqs['confidence'] > 0:
+                levels_analyzed += 1
+                
+                for p in reqs['required_primitives']:
+                    all_required[p] = all_required.get(p, 0) + 1
+                
+                for p in reqs['helpful_primitives']:
+                    all_helpful[p] = all_helpful.get(p, 0) + 1
+        
+        if levels_analyzed == 0:
+            return {'error': 'No templates available for analysis'}
+        
+        # Sort by frequency
+        sorted_required = sorted(all_required.items(), key=lambda x: x[1], reverse=True)
+        sorted_helpful = sorted(all_helpful.items(), key=lambda x: x[1], reverse=True)
+        
+        return {
+            'game_type': game_type,
+            'levels_analyzed': levels_analyzed,
+            'required_primitives': [
+                {'primitive': p, 'needed_in_levels': count, 'priority': 'high'}
+                for p, count in sorted_required
+            ],
+            'helpful_primitives': [
+                {'primitive': p, 'helpful_in_levels': count, 'priority': 'medium'}
+                for p, count in sorted_helpful
+            ],
+            'unlock_recommendation': (
+                sorted_required[0][0] if sorted_required else 
+                (sorted_helpful[0][0] if sorted_helpful else None)
+            )
+        }
+
 
 # Abstraction levels
 ABSTRACTION_LEVELS = {

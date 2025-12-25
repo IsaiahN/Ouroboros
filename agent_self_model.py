@@ -1592,6 +1592,344 @@ class AgentSelfModel:
         return None
     
     # ========================================================================
+    # SYSTEMATIC OBJECT CONTROL DISCOVERY
+    # ========================================================================
+    # This is a SEED capability - even babies do this!
+    # Pick up objects, test if you can control them, learn what you control.
+    # ========================================================================
+    
+    def generate_object_discovery_plan(
+        self,
+        frame: List[List[int]],
+        game_type: str,
+        level: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate a systematic plan to discover which objects are controllable.
+        
+        This is what babies do:
+        1. See distinct objects
+        2. Try to interact with each
+        3. See if it responds to control
+        4. Remember which ones respond
+        
+        Args:
+            frame: Current game frame
+            game_type: Game type
+            level: Current level
+            
+        Returns:
+            List of discovery actions to take:
+            [
+                {'phase': 'click', 'target': obj_id, 'coords': (x, y)},
+                {'phase': 'test', 'actions': [1, 2, 3, 4]},
+                ...
+            ]
+        """
+        # Use seed primitive to find distinct objects
+        from seed_primitives import get_seed_primitives
+        primitives = get_seed_primitives()
+        
+        objects = primitives.call('find_distinct_objects', frame)
+        
+        if not objects:
+            return []
+        
+        # Check what we already know about this game/level
+        known_controllable = self._get_known_controllable_objects(game_type, level)
+        known_buttons = self._get_known_buttons(game_type, level)
+        
+        # Generate discovery plan
+        plan = []
+        
+        for obj in objects:
+            obj_id = obj['object_id']
+            color = obj['color']
+            cx, cy = obj['centroid']
+            
+            # Skip if we already know about this object
+            if obj_id in known_controllable or obj_id in known_buttons:
+                continue
+            
+            # Plan 1: Click on the object (try to select it)
+            plan.append({
+                'phase': 'select',
+                'action': 'ACTION6',
+                'target': obj_id,
+                'coords': (int(cx), int(cy)),
+                'purpose': f'Click on {obj_id} to see if selectable'
+            })
+            
+            # Plan 2: Test movement actions (see if object responds)
+            plan.append({
+                'phase': 'test_control',
+                'actions': ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'],
+                'target': obj_id,
+                'purpose': f'Test if {obj_id} responds to movement'
+            })
+        
+        logger.info(f"[DISCOVERY] Generated {len(plan)} discovery actions for {len(objects)} objects")
+        return plan
+    
+    def execute_object_discovery(
+        self,
+        frame_before: List[List[int]],
+        frame_after: List[List[int]],
+        action_taken: str,
+        click_coords: Tuple[int, int] = None,
+        game_type: str = None,
+        level: int = None,
+        agent_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze a single action to discover object control relationships.
+        
+        Call this after EVERY action during the discovery phase.
+        
+        Args:
+            frame_before: Frame before action
+            frame_after: Frame after action
+            action_taken: The action (ACTION1-ACTION7)
+            click_coords: For ACTION6, the click coordinates
+            game_type: Game type for storing results
+            level: Level number
+            agent_id: Agent doing the discovery
+            
+        Returns:
+            Discovery result:
+            {
+                'discovered_control': bool,
+                'object_id': str or None,
+                'control_type': 'direct'|'after_select'|'button'|None,
+                'movement_matches_action': bool,
+                'confidence': float
+            }
+        """
+        from seed_primitives import get_seed_primitives
+        primitives = get_seed_primitives()
+        
+        result = {
+            'discovered_control': False,
+            'object_id': None,
+            'control_type': None,
+            'movement_matches_action': False,
+            'confidence': 0.0
+        }
+        
+        # Get objects in both frames
+        objects_before = primitives.call('find_distinct_objects', frame_before)
+        objects_after = primitives.call('find_distinct_objects', frame_after)
+        
+        if not objects_before:
+            return result
+        
+        # Map action to expected direction
+        action_num = int(action_taken.replace('ACTION', '')) if action_taken.startswith('ACTION') else 0
+        
+        # For movement actions (1-4), check if any object moved in the expected direction
+        if action_num in [1, 2, 3, 4]:
+            for obj in objects_before:
+                obj_id = obj['object_id']
+                
+                # Use seed primitive to check movement
+                movement = primitives.call('get_object_movement', obj_id, frame_before, frame_after)
+                matches = primitives.call('action_matches_movement', action_num, movement)
+                
+                if matches:
+                    result['discovered_control'] = True
+                    result['object_id'] = obj_id
+                    result['control_type'] = 'direct'
+                    result['movement_matches_action'] = True
+                    result['confidence'] = 0.7
+                    
+                    # Store discovery
+                    if game_type and level:
+                        self._record_control_discovery(
+                            game_type, level, obj_id,
+                            control_type='direct',
+                            confidence=0.7,
+                            agent_id=agent_id
+                        )
+                    
+                    logger.info(f"[DISCOVERY] Found control: {obj_id} responds to {action_taken}")
+                    break
+        
+        # For ACTION6 (click), check if we selected something
+        elif action_num == 6 and click_coords:
+            clicked_obj = primitives.call('get_click_target', frame_before, click_coords[0], click_coords[1])
+            
+            if clicked_obj:
+                result['object_id'] = clicked_obj
+                
+                # Did anything change after clicking?
+                for obj in objects_before:
+                    if obj['object_id'] == clicked_obj:
+                        # Check if object properties changed
+                        movement = primitives.call('get_object_movement', clicked_obj, frame_before, frame_after)
+                        
+                        if movement != 'none':
+                            # Object moved when clicked - might be a button or direct control
+                            result['discovered_control'] = True
+                            result['control_type'] = 'button'
+                            result['confidence'] = 0.6
+                            
+                            if game_type and level:
+                                self._record_button_discovery(
+                                    game_type, level, click_coords[0], click_coords[1],
+                                    movement, clicked_obj, agent_id
+                                )
+                        else:
+                            # Object didn't move - might be a selection (test with next movement)
+                            result['control_type'] = 'maybe_selectable'
+                            result['confidence'] = 0.3
+        
+        return result
+    
+    def get_discovery_phase_actions(
+        self,
+        frame: List[List[int]],
+        game_type: str,
+        level: int,
+        actions_taken: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the next action for the discovery phase.
+        
+        First N actions should systematically test objects.
+        
+        Args:
+            frame: Current frame
+            game_type: Game type
+            level: Level number
+            actions_taken: How many actions taken so far
+            
+        Returns:
+            Action recommendation or None if discovery complete:
+            {'action': 'ACTION6', 'x': 10, 'y': 15, 'reason': 'Testing object obj_3'}
+        """
+        # Only do discovery phase in first 20 actions
+        if actions_taken > 20:
+            return None
+        
+        # Generate plan if we don't have one
+        if not hasattr(self, '_current_discovery_plan') or not self._current_discovery_plan:
+            self._current_discovery_plan = self.generate_object_discovery_plan(frame, game_type, level)
+            self._discovery_plan_index = 0
+        
+        # Get next action from plan
+        if self._discovery_plan_index >= len(self._current_discovery_plan):
+            # Discovery complete
+            return None
+        
+        step = self._current_discovery_plan[self._discovery_plan_index]
+        
+        if step['phase'] == 'select':
+            self._discovery_plan_index += 1
+            return {
+                'action': step['action'],
+                'x': step['coords'][0],
+                'y': step['coords'][1],
+                'reason': step['purpose']
+            }
+        elif step['phase'] == 'test_control':
+            # Test one movement action at a time
+            if not hasattr(self, '_test_action_index'):
+                self._test_action_index = 0
+            
+            actions = step['actions']
+            if self._test_action_index >= len(actions):
+                self._test_action_index = 0
+                self._discovery_plan_index += 1
+                return self.get_discovery_phase_actions(frame, game_type, level, actions_taken)
+            
+            action = actions[self._test_action_index]
+            self._test_action_index += 1
+            
+            return {
+                'action': action,
+                'reason': f"Testing {step['target']} control with {action}"
+            }
+        
+        return None
+    
+    def _get_known_controllable_objects(self, game_type: str, level: int) -> List[str]:
+        """Get objects already known to be controllable for this game/level."""
+        result = self.db.execute_query("""
+            SELECT object_color FROM object_selection_state
+            WHERE game_type = ? AND level_number = ? AND is_moveable = 1
+        """, (game_type, level))
+        
+        return [f"obj_{r['object_color']}" for r in result] if result else []
+    
+    def _get_known_buttons(self, game_type: str, level: int) -> List[str]:
+        """Get objects already known to be buttons for this game/level."""
+        result = self.db.execute_query("""
+            SELECT object_color FROM object_selection_state
+            WHERE game_type = ? AND level_number = ? AND is_button = 1
+        """, (game_type, level))
+        
+        return [f"obj_{r['object_color']}" for r in result] if result else []
+    
+    def _record_control_discovery(
+        self,
+        game_type: str,
+        level: int,
+        object_id: str,
+        control_type: str,
+        confidence: float,
+        agent_id: str = None
+    ):
+        """Record a control discovery to the database."""
+        # Extract color from object_id
+        try:
+            color = int(object_id.replace('obj_', ''))
+        except:
+            return
+        
+        self.db.execute_query("""
+            INSERT INTO object_selection_state 
+            (game_type, level_number, object_color, is_selectable, is_moveable, 
+             control_actions, confidence, discovered_by_agent)
+            VALUES (?, ?, ?, 1, 1, ?, ?, ?)
+            ON CONFLICT(game_type, level_number, object_color) DO UPDATE SET
+                is_moveable = 1,
+                confidence = MAX(confidence, excluded.confidence),
+                discovery_count = discovery_count + 1,
+                last_observed = CURRENT_TIMESTAMP
+        """, (game_type, level, color, 
+              json.dumps(['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']),
+              confidence, agent_id))
+    
+    def _record_button_discovery(
+        self,
+        game_type: str,
+        level: int,
+        x: int,
+        y: int,
+        movement_direction: str,
+        affected_object: str,
+        agent_id: str = None
+    ):
+        """Record a button discovery to the database."""
+        region_x = min(x // 8, 7)
+        region_y = min(y // 8, 7)
+        
+        self.db.execute_query("""
+            INSERT OR REPLACE INTO pseudo_button_behavior
+            (game_type, level_number, region_x, region_y, 
+             produces_action, movement_direction, affected_objects, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (game_type, level, region_x, region_y,
+              f'ACTION6@{x},{y}', movement_direction, 
+              json.dumps([affected_object]), 0.6))
+    
+    def reset_discovery_state(self):
+        """Reset discovery state for a new game/level."""
+        self._current_discovery_plan = []
+        self._discovery_plan_index = 0
+        self._test_action_index = 0
+
+    # ========================================================================
     # TETRAHEDRAL GRAMMAR: INTERPRETATION (VOID) AXIS
     # ========================================================================
     # From McGuffin Tensor Framework: Every object needs four axes:
@@ -6562,6 +6900,13 @@ class AgentHypothesisSystem:
                 hypothesis_text TEXT NOT NULL,
                 hypothesis_type TEXT NOT NULL,  -- 'object_behavior', 'action_effect', 'sequence_pattern', 'game_rule'
                 
+                -- PRIMITIVE-AWARE HYPOTHESIS STRUCTURE
+                -- Hypotheses are now expressed in terms of primitives + actions
+                primitives_used TEXT,            -- JSON: list of primitives referenced in this hypothesis
+                trigger_condition TEXT,          -- JSON: {primitive: name, params: {...}} - what triggers the action
+                predicted_action TEXT,           -- ACTION1-ACTION7 that the hypothesis suggests
+                action_sequence TEXT,            -- JSON: sequence of actions if multi-step
+                
                 -- Evidence and confidence
                 supporting_evidence TEXT,        -- JSON: list of observations supporting this
                 contradicting_evidence TEXT,     -- JSON: list of observations against this
@@ -6579,6 +6924,24 @@ class AgentHypothesisSystem:
                 FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
             )
         """)
+        
+        # Add new columns if table already exists (migration)
+        try:
+            self.db.execute_query("ALTER TABLE agent_hypotheses ADD COLUMN primitives_used TEXT")
+        except:
+            pass  # Column already exists
+        try:
+            self.db.execute_query("ALTER TABLE agent_hypotheses ADD COLUMN trigger_condition TEXT")
+        except:
+            pass
+        try:
+            self.db.execute_query("ALTER TABLE agent_hypotheses ADD COLUMN predicted_action TEXT")
+        except:
+            pass
+        try:
+            self.db.execute_query("ALTER TABLE agent_hypotheses ADD COLUMN action_sequence TEXT")
+        except:
+            pass
         self.db.execute_query("""
             CREATE INDEX IF NOT EXISTS idx_agent_hypotheses_game 
             ON agent_hypotheses(game_type, level_number, status)
@@ -6600,12 +6963,23 @@ class AgentHypothesisSystem:
         hypothesis_text: str,
         hypothesis_type: str,
         level_number: int = None,
-        initial_evidence: List[str] = None
+        initial_evidence: List[str] = None,
+        primitives_used: List[str] = None,
+        trigger_condition: Dict[str, Any] = None,
+        predicted_action: str = None,
+        action_sequence: List[str] = None
     ) -> Optional[str]:
         """
         Agent creates a new hypothesis based on observations.
         
         Only agents in FORMAL_OPERATIONAL stage can create hypotheses.
+        
+        PRIMITIVE-AWARE HYPOTHESES:
+        Hypotheses can now be expressed in terms of:
+        - primitives_used: Which primitives inform this hypothesis
+        - trigger_condition: {primitive: 'detect_color_change', params: {color: 'red'}}
+        - predicted_action: 'ACTION2' - what to do when trigger fires
+        - action_sequence: ['ACTION2', 'ACTION4'] - multi-step response
         
         Args:
             agent_id: Agent creating hypothesis
@@ -6614,6 +6988,10 @@ class AgentHypothesisSystem:
             hypothesis_type: Category ('object_behavior', 'action_effect', 'sequence_pattern', 'game_rule')
             level_number: Optional specific level
             initial_evidence: List of observations supporting this hypothesis
+            primitives_used: List of primitive names used in this hypothesis
+            trigger_condition: Dict with primitive and params that trigger the action
+            predicted_action: Single action prediction (ACTION1-ACTION7)
+            action_sequence: Sequence of actions if multi-step
             
         Returns:
             hypothesis_id if created, None if agent lacks capability
@@ -6626,19 +7004,28 @@ class AgentHypothesisSystem:
         hypothesis_id = f"hyp_{uuid.uuid4().hex[:12]}"
         
         evidence_json = json.dumps(initial_evidence or [])
+        primitives_json = json.dumps(primitives_used or [])
+        trigger_json = json.dumps(trigger_condition) if trigger_condition else None
+        sequence_json = json.dumps(action_sequence) if action_sequence else None
         
         self.db.execute_query("""
             INSERT INTO agent_hypotheses 
             (hypothesis_id, agent_id, game_type, level_number, hypothesis_text, 
-             hypothesis_type, supporting_evidence, confidence, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proposed')
+             hypothesis_type, supporting_evidence, confidence, status,
+             primitives_used, trigger_condition, predicted_action, action_sequence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, ?, ?, ?)
         """, (hypothesis_id, agent_id, game_type, level_number, hypothesis_text,
-              hypothesis_type, evidence_json, 0.5))
+              hypothesis_type, evidence_json, 0.5,
+              primitives_json, trigger_json, predicted_action, sequence_json))
         
         # Update agent's competency
         self.cognitive_system.update_competencies(agent_id, hypotheses_created_delta=1)
         
-        logger.info(f"[HYPOTHESIS] Agent {agent_id[:8]} created: {hypothesis_text[:50]}...")
+        # Log with primitive info if available
+        if primitives_used:
+            logger.info(f"[HYPOTHESIS] Agent {agent_id[:8]} created primitive-aware: {hypothesis_text[:40]}... using {primitives_used}")
+        else:
+            logger.info(f"[HYPOTHESIS] Agent {agent_id[:8]} created: {hypothesis_text[:50]}...")
         
         return hypothesis_id
     
@@ -6779,6 +7166,275 @@ class AgentHypothesisSystem:
                         }
         
         return None
+
+    def generate_primitive_aware_hypothesis(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int,
+        available_primitives: List[str],
+        game_observations: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Generate a hypothesis that explicitly references available primitives.
+        
+        This is the key method that connects primitives to hypothesis formation.
+        The agent thinks: "Given I have [primitives], what combination + actions
+        might help me progress?"
+        
+        Args:
+            agent_id: Agent creating hypothesis
+            game_type: Current game type
+            level_number: Current level
+            available_primitives: List of primitive names agent can use
+            game_observations: Dict with observed patterns:
+                - frame_changes: What changed between frames
+                - controlled_objects: What agent controls
+                - stuck_pattern: How agent is stuck (if any)
+                - action_effects: Observed action->effect mappings
+                - goal_indicators: Detected goal patterns
+                
+        Returns:
+            hypothesis_id if created, None otherwise
+        """
+        if not self.can_create_hypothesis(agent_id):
+            return None
+        
+        # ===================================================================
+        # PRIMITIVE-BASED REASONING
+        # Map observations to primitives that could detect/exploit them
+        # ===================================================================
+        
+        primitives_to_use = []
+        trigger_condition = None
+        predicted_action = None
+        action_sequence = None
+        
+        # 1. OBJECT DETECTION -> Movement primitives
+        controlled = game_observations.get('controlled_objects', [])
+        if controlled:
+            # Agent knows what it controls - can use movement detection
+            if 'detect_movement' in available_primitives:
+                primitives_to_use.append('detect_movement')
+            if 'track_object' in available_primitives:
+                primitives_to_use.append('track_object')
+        
+        # 2. FRAME CHANGES -> Pattern detection primitives
+        frame_changes = game_observations.get('frame_changes', {})
+        if frame_changes:
+            change_type = frame_changes.get('type', 'unknown')
+            
+            if change_type == 'color_change' and 'detect_color_change' in available_primitives:
+                primitives_to_use.append('detect_color_change')
+                trigger_condition = {
+                    'primitive': 'detect_color_change',
+                    'params': {'watch_for': frame_changes.get('colors', [])}
+                }
+            
+            if change_type == 'boundary_hit' and 'detect_boundary' in available_primitives:
+                primitives_to_use.append('detect_boundary')
+                trigger_condition = {
+                    'primitive': 'detect_boundary',
+                    'params': {'direction': frame_changes.get('direction')}
+                }
+            
+            if change_type == 'object_appeared' and 'detect_new_object' in available_primitives:
+                primitives_to_use.append('detect_new_object')
+        
+        # 3. STUCK PATTERNS -> Escape strategy primitives
+        stuck_pattern = game_observations.get('stuck_pattern')
+        if stuck_pattern:
+            if 'oscillation' in stuck_pattern.lower():
+                # Oscillating = need to break pattern
+                if 'detect_oscillation' in available_primitives:
+                    primitives_to_use.append('detect_oscillation')
+                # Suggest a different action
+                last_actions = game_observations.get('last_actions', [])
+                if last_actions:
+                    # Avoid the oscillating actions
+                    used_actions = set(last_actions[-4:])
+                    for a in ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION6']:
+                        if a not in used_actions:
+                            predicted_action = a
+                            break
+        
+        # 4. GOAL INDICATORS -> Goal-seeking primitives  
+        goal_indicators = game_observations.get('goal_indicators', {})
+        if goal_indicators:
+            goal_direction = goal_indicators.get('direction')
+            if goal_direction and 'identify_goal' in available_primitives:
+                primitives_to_use.append('identify_goal')
+                # Map direction to action
+                direction_to_action = {
+                    'up': 'ACTION1', 'right': 'ACTION2',
+                    'down': 'ACTION4', 'left': 'ACTION3'
+                }
+                predicted_action = direction_to_action.get(goal_direction, 'ACTION6')
+        
+        # 5. ACTION EFFECTS -> Use proven patterns
+        action_effects = game_observations.get('action_effects', {})
+        if action_effects:
+            # Find actions that had positive effects
+            for action, effect in action_effects.items():
+                if effect.get('positive'):
+                    # This action worked before
+                    if 'get_last_action' in available_primitives:
+                        primitives_to_use.append('get_last_action')
+                    if not predicted_action:
+                        predicted_action = action
+        
+        # ===================================================================
+        # GENERATE HYPOTHESIS
+        # ===================================================================
+        
+        if not primitives_to_use:
+            # No specific primitives matched - use basic reasoning
+            primitives_to_use = [p for p in available_primitives 
+                                if p in ['get_frame', 'get_action_history', 'frame_diff']][:3]
+        
+        # Build hypothesis text
+        if trigger_condition and predicted_action:
+            hypothesis_text = (
+                f"When {trigger_condition['primitive']} detects change, "
+                f"execute {predicted_action} to progress"
+            )
+        elif predicted_action:
+            hypothesis_text = f"Execute {predicted_action} based on observed patterns"
+        elif stuck_pattern:
+            hypothesis_text = f"Escape {stuck_pattern} by trying alternative actions"
+        else:
+            hypothesis_text = f"Explore using {primitives_to_use[:2]} to find path forward"
+        
+        # Create the hypothesis
+        return self.create_hypothesis(
+            agent_id=agent_id,
+            game_type=game_type,
+            hypothesis_text=hypothesis_text,
+            hypothesis_type='action_effect' if predicted_action else 'sequence_pattern',
+            level_number=level_number,
+            initial_evidence=[json.dumps(game_observations)],
+            primitives_used=primitives_to_use,
+            trigger_condition=trigger_condition,
+            predicted_action=predicted_action,
+            action_sequence=action_sequence
+        )
+
+    def get_primitive_based_action(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get an action recommendation based on agent's primitive-aware hypotheses.
+        
+        This queries the agent's confirmed/testing hypotheses and returns
+        an actionable recommendation if a trigger condition is met.
+        
+        Returns:
+            Dict with 'action', 'hypothesis_id', 'confidence', 'primitives' or None
+        """
+        # Get agent's active primitive-aware hypotheses
+        hypotheses = self.db.execute_query("""
+            SELECT hypothesis_id, predicted_action, trigger_condition,
+                   action_sequence, primitives_used, confidence, hypothesis_text
+            FROM agent_hypotheses
+            WHERE agent_id = ?
+              AND game_type = ?
+              AND (level_number = ? OR level_number IS NULL)
+              AND status IN ('proposed', 'testing', 'confirmed')
+              AND predicted_action IS NOT NULL
+            ORDER BY 
+                CASE status 
+                    WHEN 'confirmed' THEN 1 
+                    WHEN 'testing' THEN 2 
+                    ELSE 3 
+                END,
+                confidence DESC
+            LIMIT 5
+        """, (agent_id, game_type, level_number))
+        
+        if not hypotheses:
+            return None
+        
+        # Return the highest confidence hypothesis with an action
+        for h in hypotheses:
+            if h['predicted_action']:
+                return {
+                    'action': h['predicted_action'],
+                    'hypothesis_id': h['hypothesis_id'],
+                    'confidence': h['confidence'],
+                    'primitives': json.loads(h['primitives_used'] or '[]'),
+                    'reasoning': h['hypothesis_text']
+                }
+        
+        return None
+
+    def get_hypotheses_by_primitives(
+        self,
+        primitives: List[str],
+        game_type: str = None,
+        min_confidence: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """
+        Find hypotheses that use specific primitives.
+        
+        Useful for:
+        - Finding how other agents used a primitive
+        - Learning from network's primitive combinations
+        - Identifying which primitives lead to success
+        
+        Args:
+            primitives: List of primitive names to search for
+            game_type: Optional game type filter
+            min_confidence: Minimum hypothesis confidence
+            
+        Returns:
+            List of matching hypotheses with usage context
+        """
+        # Build query to search JSON primitives_used field
+        matches = []
+        
+        for primitive in primitives:
+            query = """
+                SELECT h.*, a.fitness
+                FROM agent_hypotheses h
+                LEFT JOIN agents a ON h.agent_id = a.agent_id
+                WHERE h.primitives_used LIKE ?
+                  AND h.confidence >= ?
+                  AND h.status IN ('testing', 'confirmed')
+            """
+            params = [f'%"{primitive}"%', min_confidence]
+            
+            if game_type:
+                query += " AND h.game_type = ?"
+                params.append(game_type)
+            
+            query += " ORDER BY h.confidence DESC LIMIT 10"
+            
+            results = self.db.execute_query(query, tuple(params))
+            if results:
+                for r in results:
+                    matches.append({
+                        'hypothesis_id': r['hypothesis_id'],
+                        'agent_id': r['agent_id'],
+                        'hypothesis_text': r['hypothesis_text'],
+                        'primitives': json.loads(r['primitives_used'] or '[]'),
+                        'predicted_action': r['predicted_action'],
+                        'confidence': r['confidence'],
+                        'agent_fitness': r.get('fitness', 0),
+                        'status': r['status']
+                    })
+        
+        # Deduplicate and sort by confidence
+        seen = set()
+        unique = []
+        for m in matches:
+            if m['hypothesis_id'] not in seen:
+                seen.add(m['hypothesis_id'])
+                unique.append(m)
+        
+        return sorted(unique, key=lambda x: x['confidence'], reverse=True)
 
 
 if __name__ == "__main__":

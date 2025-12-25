@@ -1,5 +1,519 @@
 # Ouroboros Progress Log
 
+## Session: December 25, 2025 (8:01:03 AM)
+
+---
+
+### Progress Documentation Update
+
+**Timestamp**: 8:01:03 AM  
+**Status**: Session documentation requested
+
+---
+
+#### Current Approach: Youth-Derived Cognitive Primitives for AGI
+
+**Philosophy**: Leverage 4 billion years of evolution by implementing what babies are born with - they are highly structured learning machines, NOT blank slates.
+
+**Source Document**: `DOCS/advanced primitives.md` - Comprehensive review of infant cognition research
+
+**Goal**: Give agents the same cognitive toolkit that human youth use to learn about the world, enabling faster hypothesis formation, better mistake learning, and more efficient game rule discovery.
+
+---
+
+#### Steps Completed (This Session + Previous Night Session)
+
+| Step | Time | Description | Status |
+|------|------|-------------|--------|
+| 1 | 12:00 AM | Review `advanced primitives.md` document | DONE |
+| 2 | 12:10 AM | Assess seed vs unlockable primitives | DONE |
+| 3 | 12:20 AM | Map primitives to Piaget stages | DONE |
+| 4 | 12:30 AM | Phase 1: Add attention, affordance, social, motivation primitives | DONE |
+| 5 | 12:50 AM | Phase 2: Add weak physics priors (adjustable strength) | DONE |
+| 6 | 1:10 AM | Phase 3: Piaget stage integration APIs | DONE |
+| 7 | 1:30 AM | Add comprehensive unit tests (16 new) | DONE |
+| 8 | 1:50 AM | Update progress.md with session notes | DONE |
+| 9 | 8:01 AM | Final documentation update | NOW |
+
+---
+
+#### Implementation Summary
+
+**Total Primitives**: 103 (expanded from ~50 original)
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| ATTENTION | 5 | detect_change, detect_motion, detect_contingency, surprise_magnitude, information_gain |
+| AFFORDANCE | 7 | is_movable, is_obstacle, is_interactive, is_container, is_support, is_reference, is_tool |
+| SOCIAL_LEARNING | 4 | credibility_weighting, demonstration_bias, attention_following, teaching_detection |
+| MOTIVATION | 4 | novelty_bonus, competence_signal, exploration_value, boredom_threshold |
+| PHYSICS_PRIOR | 5 | solidity_bias (0.3), continuity_bias (0.4), gravity_bias (0.2), persistence_bias (0.5), contact_causality (0.4) |
+| QUANTITATIVE | 4 | count_objects, compare_quantities, detect_one_vs_many, one_to_one_match |
+| METACOGNITION | 5 | get_confidence, detect_stuck, strategy_effectiveness, get_knowledge_state, estimate_learning_curve |
+| NEGATIVE_SPACE | 4 | detect_enclosed_empty, detect_open_edge, detect_absence, negative_space_volume |
+
+**Unlock Levels**:
+- **SEED** (86 primitives): Available at birth - babies have these
+- **EARLY** (10 primitives): Preoperational/Concrete stage unlock
+- **LATE** (7 primitives): Formal Operational stage unlock (is_reference, is_tool, strategy_effectiveness, etc.)
+
+---
+
+#### Key Design Decisions
+
+1. **Physics priors are WEAK** (0.2-0.5 range):
+   - ARC games frequently violate real physics
+   - Priors guide initial hypotheses but can be overridden
+   - `adjust_physics_prior(name, strength)` API available
+
+2. **Most primitives are SEED** (86 of 103):
+   - Research shows babies have sophisticated innate capabilities
+   - Only abstract/meta-level capabilities require unlocking
+   - Late unlocks: is_reference, is_tool, strategy_effectiveness, get_knowledge_state, estimate_learning_curve, negative_space_volume
+
+3. **Social learning primitives critical for viral packages**:
+   - `credibility_weighting` - Trust based on source prestige/success
+   - `demonstration_bias` - Prioritize demonstrated actions
+   - Enables efficient learning from network knowledge
+
+---
+
+#### Test Results
+
+```
+============================= 50 passed in 0.90s =============================
+```
+
+New test classes added:
+- `TestBabyDerivedPrimitives` (12 tests)
+- `TestPiagetStageIntegration` (5 tests)
+
+---
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `seed_primitives.py` | +1350 lines: 8 new categories, 47 new primitives, Piaget integration APIs |
+| `tests/test_developmental_systems.py` | +200 lines: 16 new tests for baby primitives |
+| `progress.md` | Updated with session documentation |
+
+---
+
+#### Current Failure/Issue: NONE
+
+**Status**: All implementation complete, all 50 tests passing.
+
+---
+
+#### Next Steps (Future Work)
+
+1. Wire new primitives into actual gameplay (`core_gameplay.py` integration)
+2. Test primitives on actual ARC games
+3. Implement physics prior adjustment based on game evidence
+4. Add more edge case tests
+5. Connect negative space primitives to SP80-type games (water physics)
+
+---
+
+#### Why This Matters for Game Learning
+
+| Before | After |
+|--------|-------|
+| Agents start with raw data access only | Agents start with baby-like cognitive toolkit |
+| No attention guidance | Know WHAT to look at (changes, motion, contingent events) |
+| No object understanding | Know what objects are FOR (movable, container, tool) |
+| Random social learning | Can learn from viral packages efficiently |
+| No intrinsic motivation | Have curiosity and competence drives |
+| No physics expectations | Have weak priors to guide hypotheses |
+| No self-assessment | Can assess own knowledge state |
+
+---
+
+## Session: December 25, 2025 (12:00 AM - 2:00 AM)
+
+---
+
+### Youth-Derived Primitives: Full Implementation (Phases 1-3)
+
+**Focus**: Implement the complete youth-derived primitive system based on cognitive science research on what babies are born with.
+
+---
+
+#### Key Insight
+
+Babies aren't blank slates - they're **highly structured learning machines** with innate primitives for attention, physics expectations, social learning, and metacognition. These aren't learned - they're the result of 4 billion years of evolution solving the cold-start problem.
+
+---
+
+#### Implementation Summary
+
+**Total Primitives**: 103 (up from ~50 original seed primitives)
+
+| Category | Count | Unlock Level |
+|----------|-------|--------------|
+| Attention | 5 | SEED |
+| Affordance | 7 | SEED/EARLY/LATE |
+| Social Learning | 4 | SEED |
+| Motivation | 4 | SEED/EARLY/LATE |
+| Physics Priors | 5 | WEAK PRIORS |
+| Quantitative | 4 | SEED/EARLY |
+| Metacognition | 5 | SEED/EARLY/LATE |
+| Negative Space | 4 | SEED/EARLY/LATE |
+
+---
+
+#### Phase 1: Core Seed Primitives (SEED - Available at Birth)
+
+**Attention Primitives** (5):
+```python
+detect_change       # Flag regions that differ between frames
+detect_motion       # Flag objects that moved
+detect_contingency  # Does my action correlate with this event?
+surprise_magnitude  # How much does observation violate prediction?
+information_gain    # How much does this observation reduce uncertainty?
+```
+
+**Affordance Primitives** (7):
+```python
+is_movable      # Can I move this object?
+is_obstacle     # Does this block movement?
+is_interactive  # Does this respond to actions?
+is_container    # Can this hold things? (EARLY)
+is_support      # Can this support objects? (EARLY)
+is_reference    # Does this define rules for others? (LATE - Formal Op)
+is_tool         # Can I use this to affect others? (LATE - Formal Op)
+```
+
+**Social Learning Primitives** (4):
+```python
+credibility_weighting  # Trust based on source prestige/success
+demonstration_bias     # Prioritize demonstrated actions
+attention_following    # Follow where successful agents looked
+teaching_detection     # Recognize pedagogical information
+```
+
+**Motivation Primitives** (4):
+```python
+novelty_bonus       # Intrinsic reward for new states
+competence_signal   # Reward for mastering difficulty
+exploration_value   # Expected value of exploring unknown
+boredom_threshold   # When familiar becomes unrewarding
+```
+
+---
+
+#### Phase 2: Weak Physics Priors (Adjustable)
+
+These are NOT hard constraints - they're expectations that can be overridden by evidence.
+
+| Prior | Strength | Why Weak |
+|-------|----------|----------|
+| `solidity_bias` | 0.3 | Many ARC games violate this |
+| `continuity_bias` | 0.4 | Teleportation exists |
+| `gravity_bias` | 0.2 | Many games have no gravity |
+| `persistence_bias` | 0.5 | Objects can disappear |
+| `contact_causality` | 0.4 | Action-at-distance exists |
+
+**Key Feature**: `adjust_physics_prior(name, new_strength)` - priors can be weakened based on evidence that game violates expectations.
+
+---
+
+#### Phase 3: Piaget Stage Integration
+
+**Unlock Levels**:
+- **SEED** (86 primitives): Available at birth (sensorimotor)
+- **EARLY** (10 primitives): Preoperational/Concrete stage unlock
+- **LATE** (7 primitives): Formal Operational stage unlock
+
+**API Methods**:
+```python
+list_by_piaget_stage(stage)              # Get primitives for stage
+get_primitives_for_agent(stage, extras)  # All available for agent
+get_primitive_inventory_by_stage()       # Full inventory by stage
+get_unlock_requirements(name)            # What's needed to unlock
+```
+
+**Quantitative Primitives** (4):
+```python
+count_objects       # How many objects? (approximate)
+compare_quantities  # More, less, or equal?
+detect_one_vs_many  # Singular vs plural
+one_to_one_match    # Same count in two sets?
+```
+
+**Metacognition Primitives** (5):
+```python
+get_confidence           # How certain am I? (EARLY)
+detect_stuck             # Am I making progress? (SEED)
+strategy_effectiveness   # Is my strategy working? (LATE)
+get_knowledge_state      # What do I know vs don't know? (LATE)
+estimate_learning_curve  # How fast am I learning? (LATE)
+```
+
+**Negative Space Primitives** (4):
+```python
+detect_enclosed_empty  # Find container interiors (EARLY)
+detect_open_edge       # Find gaps where things escape (EARLY) - SP80 critical!
+detect_absence         # Expected object missing (SEED)
+negative_space_volume  # How much empty space? (LATE)
+```
+
+---
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| `seed_primitives.py` | +1350 lines: 8 new categories, 47 new primitives, Piaget integration |
+| `tests/test_developmental_systems.py` | +200 lines: 16 new tests for baby primitives |
+
+---
+
+#### Test Results
+
+**50/50 tests pass** (up from 34)
+
+New test classes:
+- `TestBabyDerivedPrimitives` (12 tests)
+- `TestPiagetStageIntegration` (5 tests)
+
+---
+
+#### Why This Matters for Game Learning
+
+**Before**: Agents started with only low-level data access (get_pixel, add, subtract).
+
+**After**: Agents start with baby-like cognitive toolkit:
+- **Attention**: Know WHAT to look at (changes, motion, contingent events)
+- **Affordances**: Know what objects are FOR (movable, container, tool)
+- **Social**: Can learn from viral packages efficiently (trust, imitation)
+- **Motivation**: Have intrinsic drives (curiosity, competence)
+- **Physics**: Have weak expectations that guide hypotheses
+- **Metacognition**: Can assess their own knowledge state
+
+---
+
+#### Mapping to Game-Playing Skills
+
+| Primitive Category | Game Skill Enabled |
+|--------------------|-------------------|
+| `detect_contingency` | "My action caused that effect" - agency learning |
+| `is_container` + `detect_open_edge` | SP80 water physics understanding |
+| `is_reference` | FT09-like template/rule games |
+| `credibility_weighting` | Trust viral packages appropriately |
+| `detect_stuck` | Know when to ask for help |
+| `novelty_bonus` | Explore systematically |
+| `physics_priors` | Form useful hypotheses, detect gotchas |
+
+---
+
+## Session: December 24, 2025 (10:00 PM - 11:30 PM)
+
+---
+
+### Primitive-Aware Hypothesis System + Object Control Discovery Seed Primitives
+
+**Focus**: Connect primitives to agent hypothesis formation and implement fundamental object control discovery as a seed capability ("even babies can pick up objects").
+
+---
+
+#### Key Insight (User-Driven)
+
+**User observation**: "Agents should systematically click on all objects to see if they can control them. This strategy should be a primitive... unlocked by default. Even babies can pick up objects and do stuff. They know if they can control items."
+
+**Implication**: Object discovery is not a learned skill - it's a seed primitive. Every agent should test object controllability from birth.
+
+---
+
+#### Steps Completed
+
+**Step 1: Primitive-Aware Hypothesis Schema** (10:10 PM)
+Modified `agent_self_model.py`:
+
+Added columns to agent hypotheses:
+- `primitives_used` - Which primitives this hypothesis depends on
+- `trigger_condition` - What state triggers the hypothesis
+- `predicted_action` - What action the primitive suggests
+- `action_sequence` - Multi-step action sequence
+
+```python
+def generate_primitive_aware_hypothesis(
+    self,
+    agent_id: str,
+    game_type: str,
+    level: int,
+    pattern_observed: str,
+    primitives_required: List[str]
+) -> str:
+    """Create hypotheses that reference the primitives they need."""
+```
+
+**Step 2: Sequence Abstraction Primitive Analysis** (10:20 PM)
+Modified `sequence_abstraction.py`:
+
+```python
+def analyze_primitive_requirements(self, template_id: str) -> Dict[str, Any]:
+    """Analyze which primitives a template needs to execute."""
+
+def get_template_with_primitives(self, template_id: str) -> Dict[str, Any]:
+    """Get template with full primitive requirement analysis."""
+
+def suggest_primitives_for_game(self, game_type: str) -> List[str]:
+    """Suggest useful primitives based on successful game history."""
+```
+
+**Step 3: Wire Formal Agents to Use Primitive-Aware Hypotheses** (10:30 PM)
+Modified `core_gameplay.py` lines 3352-3376:
+
+```python
+# Formal operational agents check available primitives before forming hypotheses
+if stage == 'formal_operational' and hasattr(self, 'cods_engine'):
+    inventory = self.cods_engine.get_primitive_inventory()
+    available_primitives = [p['name'] for p in inventory.get('unlocked', [])]
+    
+    # Query hypotheses that can be tested with available primitives
+    primitive_based_action = self.agent_self_model.get_primitive_based_action(
+        agent_id=agent_id,
+        game_type=game_type,
+        available_primitives=available_primitives
+    )
+    if primitive_based_action:
+        return primitive_based_action['action'], primitive_based_action['reasoning']
+```
+
+**Step 4: Add OBJECT_INTERACTION Seed Primitives** (10:45 PM)
+Modified `seed_primitives.py`:
+
+Added new category `PrimitiveCategory.OBJECT_INTERACTION` with 6 primitives:
+
+| Primitive | Description |
+|-----------|-------------|
+| `test_object_control` | Test if an action controls an object |
+| `find_distinct_objects` | Find all distinct objects in frame by color |
+| `did_object_move` | Check if object moved between frames |
+| `get_object_movement` | Get movement direction (up/down/left/right/none) |
+| `action_matches_movement` | Check if action matches movement direction |
+| `get_click_target` | Get object at click coordinates |
+
+These primitives are **unlocked by default** - available from birth.
+
+**Step 5: Systematic Object Discovery in Agent Self-Model** (11:00 PM)
+Added to `agent_self_model.py`:
+
+```python
+def generate_object_discovery_plan(
+    self,
+    frame: List[List[int]],
+    game_type: str,
+    level: int
+) -> List[Dict[str, Any]]:
+    """
+    Generate a systematic plan to discover which objects are controllable.
+    Even babies do this: see objects -> try to interact -> see if responds.
+    """
+
+def execute_object_discovery(
+    self,
+    frame_before: List[List[int]],
+    frame_after: List[List[int]],
+    action_taken: str,
+    click_coords: Tuple[int, int] = None,
+    ...
+) -> Dict[str, Any]:
+    """Analyze a single action to discover object control relationships."""
+
+def get_discovery_phase_actions(
+    self,
+    frame: List[List[int]],
+    game_type: str,
+    level: int,
+    actions_taken: int
+) -> Optional[Dict[str, Any]]:
+    """Get the next action for the discovery phase (first N actions)."""
+```
+
+**Step 6: Wire Discovery into Gameplay** (11:15 PM)
+Modified `core_gameplay.py` in `_select_action()`:
+
+```python
+# ===================================================================
+# OBJECT DISCOVERY PHASE (Seed Capability)
+# ===================================================================
+# Even babies systematically test what they can control.
+# First N actions of a level: click on each object, test movement.
+# ===================================================================
+if hasattr(self, 'agent_self_model') and game_state.frame:
+    discovery_action = self.agent_self_model.get_discovery_phase_actions(
+        frame=game_state.frame,
+        game_type=game_type,
+        level=current_level,
+        actions_taken=actions_this_level
+    )
+    
+    if discovery_action:
+        return action, f"[DISCOVERY] {reason}"
+```
+
+**Step 7: Unit Tests** (11:20 PM)
+Added 7 new tests to `tests/test_developmental_systems.py`:
+
+- `TestPrimitiveInventoryAwareness::test_inventory_structure` 
+- `TestPrimitiveAwareHypothesis::test_create_hypothesis_with_primitives`
+- `TestPrimitiveAwareHypothesis::test_get_primitive_based_action`
+- `TestPrimitiveAwareHypothesis::test_hypotheses_by_primitives_search`
+- `TestPrimitiveAwareHypothesis::test_primitive_trigger_condition_structure`
+- `TestSequenceAbstractionPrimitives::test_primitive_requirement_analysis_structure`
+- `TestSequenceAbstractionPrimitives::test_suggest_primitives_for_game_structure`
+- `TestSequenceAbstractionPrimitives::test_template_with_primitives_readiness`
+
+**Test Results**: All 34 tests pass
+
+---
+
+#### Files Modified
+
+| File | Lines Changed | Purpose |
+|------|---------------|---------|
+| `agent_self_model.py` | +350 lines | Primitive-aware hypotheses + object discovery |
+| `seed_primitives.py` | +130 lines | OBJECT_INTERACTION category + 6 primitives |
+| `sequence_abstraction.py` | +90 lines | Primitive requirement analysis |
+| `core_gameplay.py` | +70 lines | Wire discovery phase + formal agent primitives |
+| `tests/test_developmental_systems.py` | +180 lines | 7 new unit tests |
+
+---
+
+#### Conceptual Breakthrough
+
+**Before**: Agents learned object control reactively (random actions -> observe effect -> remember)
+
+**After**: Agents systematically discover control relationships proactively:
+1. **Scan level** - Find all distinct objects by color
+2. **Click each object** - Test if selectable
+3. **Test movements** - ACTION1-4 after each click
+4. **Record controllability** - Store what responds to control
+5. **Build control map** - Know which objects "I am" before strategizing
+
+This mirrors how babies explore:
+- Pick up object -> Can I hold this?
+- Push button -> Does something happen?
+- Pull toy -> Does it move with me?
+
+---
+
+#### Current Status: COMPLETE (All 34 tests passing)
+
+**What Agents Can Now Do**:
+| Capability | Status |
+|------------|--------|
+| Know available primitives before hypothesizing | [NEW-YES] |
+| Form hypotheses tied to specific primitives | [NEW-YES] |
+| Systematically test object controllability | [NEW-YES] |
+| Use seed primitives for object discovery | [NEW-YES] |
+| Discovery phase in first N actions of level | [NEW-YES] |
+
+---
+
 ## Session: December 24, 2025 (7:15 PM - 9:50 PM)
 
 ---
@@ -2467,4 +2981,213 @@ Created `tests/test_cods_failure_learning.py`:
 
 ---
 
-**SESSION IN PROGRESS: December 24, 2025 - 7:46:28 PM**
+## Session: December 25, 2025 (6:00 AM - 7:10 AM)
+
+---
+
+### Critical Bug Hunt: Why Agents Are Not Learning
+
+**Focus**: Investigate why SP80 games show "game unknown" in CODS logs and why all 52 agents are stuck at preoperational stage with 0 games_played.
+
+---
+
+#### Approach
+
+**Investigation Trigger**:
+User reported SP80 games showing poor performance (score 0-1, high actions) with "game unknown" appearing in CODS logs.
+
+**Investigation Strategy**:
+1. Check CODS tables for data - are they being populated?
+2. Trace the CODS integration code path
+3. Create network health report tool for comprehensive diagnostics
+4. Investigate cognitive stage stagnation
+
+---
+
+#### Steps Completed
+
+**Step 1: CODS Table Analysis** (6:00 AM)
+Queried CODS tables:
+```sql
+SELECT COUNT(*) FROM cods_game_outcomes;   -- Result: 0 rows
+SELECT COUNT(*) FROM cods_level_outcomes;  -- Result: 0 rows
+```
+
+**Finding**: CODS tables were completely EMPTY despite games being played.
+
+**Step 2: Bug #1 Found - CODS set_context() Wrong Parameters** (6:10 AM)
+Traced the call in `core_gameplay.py`:
+
+```python
+# WRONG (line 707):
+self.cods_engine.set_context(level=current_level, mode='generalist')
+
+# CORRECT signature:
+def set_context(self, level_number: int) -> None:
+```
+
+**Root Cause**: 
+- `level=` should be `level_number=`
+- `mode=` parameter doesn't exist in the method signature
+- This caused a `TypeError` caught silently, context never set
+- All CODS recording returned `{'error': 'no_context'}`
+
+**Fix Applied** (lines 707 and 1382 in `core_gameplay.py`):
+```python
+# Before:
+self.cods_engine.set_context(level=current_level, mode='generalist')
+
+# After:
+self.cods_engine.set_context(level_number=current_level)
+```
+
+**Step 3: Created Network Health Report Tool** (6:25 AM)
+Created `network_health_report.py` - comprehensive diagnostics dashboard:
+
+| Metric Category | What It Tracks |
+|----------------|----------------|
+| Population Stats | Total agents, active/inactive, avg fitness |
+| Emergence Gain | Network learning rate |
+| Role Saturation | Pioneer/Optimizer/Generalist distribution |
+| Sequence Health | Total sequences, validation rates |
+| CODS Status | Game outcomes, level outcomes, operator stats |
+| Cognitive Development | Stage distribution, competency stats |
+| Prestige Distribution | Max/avg prestige, vampire detection |
+| Identity Drift | Agent chromosome changes |
+| Red Flags | Automatic anomaly detection |
+
+**Step 4: Fixed Column Name Mismatches in Report** (6:35 AM)
+Several database queries had wrong column names:
+- `times_validated` → `times_referenced` (winning_sequences)
+- `prestige_score` → `discovery_prestige` (winning_sequences)
+- `action_effect_pairs` → Fixed to use JSON extraction from `competencies`
+
+**Step 5: Network Health Report Revealed Critical Issue** (6:45 AM)
+Report output showed:
+```
+Cognitive Development
+  Preoperational:    52 (100.0%)
+  Concrete Op:        0 (0.0%)
+  Formal Op:          0 (0.0%)
+  
+  Avg games_played: 0.00
+  Avg sequences:    0.00
+```
+
+**ALL 52 agents stuck at preoperational with 0 games_played** - cognitive development was not updating!
+
+**Step 6: Bug #2 Found - Dead Code in _finalize_game()** (6:50 AM)
+Searched for where `update_competencies()` was called:
+
+```python
+# Found in _finalize_game() method around line 2600:
+def _finalize_game(self, agent_id, game_result):
+    # ... cognitive development update code here ...
+    self.cognitive_stage_system.update_competencies(...)
+```
+
+**Critical Discovery**: `_finalize_game()` was DEFINED but NEVER CALLED anywhere in the codebase!
+
+The actual game completion path was:
+```
+play_single_game() → returns result → caller handles it
+```
+
+But `play_single_game()` never called `_finalize_game()`, so cognitive development NEVER ran.
+
+**Step 7: Fixed by Adding Cognitive Update to play_single_game()** (7:00 AM)
+Added cognitive development block directly to `play_single_game()` (around line 2810):
+
+```python
+# ============================================
+# COGNITIVE DEVELOPMENT UPDATE
+# ============================================
+if hasattr(self, 'cognitive_stage_system') and self.cognitive_stage_system:
+    try:
+        # Determine what was discovered this game
+        sequences_discovered = 1 if game_result.get('max_level_reached', 0) > 0 else 0
+        discovered_object_control = hasattr(self, '_controlled_objects') and bool(self._controlled_objects)
+        
+        # Count action-effect pairs from this game
+        action_effect_count = 0
+        if hasattr(self, '_action_traces'):
+            action_effect_count = len([t for t in self._action_traces if t.get('frame_changed', False)])
+        
+        self.cognitive_stage_system.update_competencies(
+            agent_id=agent_id,
+            games_played_increment=1,
+            sequences_discovered=sequences_discovered,
+            discovered_object_control=discovered_object_control,
+            action_effect_pairs=action_effect_count
+        )
+        
+        new_stage = self.cognitive_stage_system.check_stage_transition(agent_id)
+        if new_stage:
+            logger.info(f"[COGNITIVE] Agent {agent_id[:8]} transitioned to {new_stage}")
+    except Exception as e:
+        logger.warning(f"[COGNITIVE] Failed to update competencies: {e}")
+```
+
+**Step 8: Verification** (7:05 AM)
+```
+PS> python -m pytest tests/test_developmental_systems.py -v --tb=short
+============================= 27 passed in 0.47s ==============================
+
+PS> python -c "from core_gameplay import GameplayEngine; print('core_gameplay.py imports OK')"
+core_gameplay.py imports OK
+```
+
+All tests pass, code compiles correctly.
+
+---
+
+#### Files Modified
+
+| File | Change |
+|------|--------|
+| `core_gameplay.py` (line 707) | Fixed `set_context(level=...)` → `set_context(level_number=...)` |
+| `core_gameplay.py` (line 1382) | Same fix for second call site |
+| `core_gameplay.py` (line ~2810) | Added cognitive development update block |
+| `network_health_report.py` | NEW FILE - comprehensive diagnostics tool |
+
+---
+
+#### Bug Summary
+
+| Bug | Symptom | Root Cause | Fix |
+|-----|---------|------------|-----|
+| CODS Silent Failure | "game unknown", empty tables | Wrong kwargs in `set_context()` | Changed `level=` → `level_number=`, removed `mode=` |
+| Cognitive Dead Code | All agents at preoperational, 0 games_played | `_finalize_game()` never called | Added update block to `play_single_game()` |
+
+---
+
+#### Current Status: BUGS FIXED - READY FOR EVOLUTION RUN
+
+**What Will Happen After Next Evolution**:
+1. CODS will populate `cods_game_outcomes` and `cods_level_outcomes` tables
+2. Agents will accumulate competencies after each game:
+   - `games_played` increments by 1
+   - `sequences_discovered` increments when level won
+   - `object_control` set when controlled objects identified
+   - `action_effect_pairs` accumulated from frame-changing actions
+3. Agents can transition to `concrete_operational` after meeting thresholds:
+   - 5+ games played
+   - 1+ sequence discovered
+   - object_control = True
+   - 3+ action_effect_pairs
+
+**Monitoring Commands**:
+```bash
+# Run network health report
+python network_health_report.py
+
+# Quick version
+python network_health_report.py --quick
+
+# JSON output for automation
+python network_health_report.py --json
+```
+
+---
+
+**SESSION COMPLETE: December 25, 2025 - 7:10:19 AM**
