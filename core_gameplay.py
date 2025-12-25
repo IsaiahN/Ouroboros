@@ -42,7 +42,10 @@ from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
-from agent_self_model import AgentSelfModel, WeavingReporter
+from agent_self_model import (
+    AgentSelfModel, WeavingReporter, 
+    CognitiveStageSystem, EpisodicMemorySystem, AgentHypothesisSystem
+)
 from object_detector import ObjectDetector
 
 # Two-Streams: Import cohort wisdom for role-based sequence selection
@@ -152,6 +155,11 @@ class GameplayEngine:
         
         # Two-Streams: Weaving reporter for self-reflection in every action
         self.weaving_reporter = WeavingReporter(self.db)
+        
+        # Developmental Systems: Cognitive stages and episodic memory
+        self.cognitive_stage_system = CognitiveStageSystem(self.db)
+        self.episodic_memory = EpisodicMemorySystem(self.db)
+        self.agent_hypothesis_system = AgentHypothesisSystem(self.db, self.cognitive_stage_system)
         
         # Inject subgoal activator into action handler for real-time guidance
         self.action_handler.subgoal_activator = self.subgoal_activator  # type: ignore[attr-defined]
@@ -991,6 +999,52 @@ class GameplayEngine:
                 if sequence_id:
                     results['learned_sequence_id'] = sequence_id
                     logger.info(f" Captured partial progress sequence: {sequence_id}")
+
+        # ===================================================================
+        # COGNITIVE DEVELOPMENT: Update agent competencies after game
+        # Track developmental progress through Piaget-inspired stages
+        # ===================================================================
+        if agent_id:
+            try:
+                # Determine competency updates based on game outcome
+                sequence_discovered = results.get('learned_sequence_id') is not None
+                object_control_learned = False
+                action_effect_pairs_delta = 0
+                
+                # Check if agent learned object control during this game
+                if hasattr(self, 'agent_self_model'):
+                    control_data = self.agent_self_model.get_controlled_objects(
+                        agent_id, game_id, loop_state.current_level
+                    )
+                    if control_data:
+                        object_control_learned = True
+                
+                # Count action-effect pairs observed
+                session_id = self.session_manager.current_session_id
+                if session_id:
+                    effect_count = self.db.execute_query("""
+                        SELECT COUNT(*) as count FROM action_traces
+                        WHERE session_id = ? AND game_id = ? AND frame_changed = 1
+                    """, (session_id, game_id))
+                    if effect_count and effect_count[0]['count']:
+                        action_effect_pairs_delta = min(effect_count[0]['count'], 5)  # Cap at 5 per game
+                
+                # Update cognitive competencies (may trigger stage transition)
+                competency_result = self.cognitive_stage_system.update_competencies(
+                    agent_id=agent_id,
+                    games_played_delta=1,
+                    sequences_discovered_delta=1 if sequence_discovered else 0,
+                    object_control_learned=object_control_learned if object_control_learned else None,
+                    action_effect_pairs_delta=action_effect_pairs_delta
+                )
+                
+                if competency_result.get('transitioned'):
+                    new_stage = competency_result.get('current_stage')
+                    logger.info(f"[COGNITIVE] Agent {agent_id[:8]} advanced to {new_stage} stage!")
+                    results['cognitive_stage_transition'] = new_stage
+                    
+            except Exception as e:
+                logger.debug(f"Cognitive competency update failed (non-critical): {e}")
 
         # Knowledge Recombination
         if agent_id:
@@ -2142,6 +2196,27 @@ class GameplayEngine:
                                     logger.warning(
                                         f"[ESCAPE] All {ESCAPE_ATTEMPTS_MAX} escape attempts failed. Game truly stuck on level {current_level}."
                                     )
+                                    
+                                    # ASK FOR HELP: Agent explicitly requests help from CODS
+                                    # This contributes to unlock threshold for needed primitives
+                                    if hasattr(self, 'cods_engine') and self.cods_engine:
+                                        try:
+                                            need_description = f"Stuck on level {current_level} after {action_count} actions. " \
+                                                             f"Tried {ESCAPE_ATTEMPTS_MAX} escape attempts. " \
+                                                             f"Need help breaking out of stuck state."
+                                            help_response = self.cods_engine.request_help(
+                                                agent_id=agent_id or 'unknown',
+                                                game_id=game_id or current_game_id,
+                                                level=current_level,
+                                                need_description=need_description
+                                            )
+                                            if help_response.get('available_primitives'):
+                                                logger.info(f"[HELP] Available primitives: {help_response['available_primitives']}")
+                                            if help_response.get('suggested_actions'):
+                                                logger.info(f"[HELP] Suggested actions: {help_response['suggested_actions']}")
+                                        except Exception as e:
+                                            logger.debug(f"Help request failed: {e}")
+                                    
                                     if is_frontier_level:
                                         # ANYONE at frontier should stop wasting actions when truly stuck
                                         logger.info(f"   Terminating exploration at frontier L{current_level} to avoid wasting actions")
@@ -3157,6 +3232,113 @@ class GameplayEngine:
                         
             except Exception as e:
                 logger.debug(f"Failure hypothesis query error: {e}")
+        
+        # ===================================================================
+        # COGNITIVE STAGE-AWARE BEHAVIOR
+        # Agents at different developmental stages act differently:
+        # - Preoperational: Random exploration, no sequence following
+        # - Concrete Operational: Prefer proven sequences, literal matching
+        # - Formal Operational: Hypothesize, experiment, abstract patterns
+        # ===================================================================
+        cognitive_stage_action = None
+        cognitive_stage_reasoning = None
+        
+        if agent_id and hasattr(self, 'cognitive_stage_system') and self.cognitive_stage_system:
+            try:
+                stage = self.cognitive_stage_system.get_stage(agent_id)
+                capabilities = self.cognitive_stage_system.get_stage_capabilities(agent_id)
+                
+                if stage == 'preoperational':
+                    # Preoperational agents explore randomly - skip deterministic strategies
+                    # They cannot follow sequences or use hypotheses yet
+                    if random.random() < 0.5:  # 50% chance of random action
+                        random_action = random.randint(1, 6)  # Skip ACTION7 (submit)
+                        cognitive_stage_action = f"ACTION{random_action}"
+                        cognitive_stage_reasoning = f"Preoperational exploration: Random ACTION{random_action}"
+                        logger.debug(f"[STAGE] {cognitive_stage_reasoning}")
+                        return cognitive_stage_action, cognitive_stage_reasoning
+                
+                elif stage == 'formal_operational':
+                    # Formal operational agents can hypothesize and experiment
+                    # Query their own hypotheses first before network hypotheses
+                    if hasattr(self, 'agent_hypothesis_system') and self.agent_hypothesis_system:
+                        game_type = current_game_id.split('-')[0] if current_game_id and '-' in current_game_id else current_game_id
+                        agent_hypotheses = self.agent_hypothesis_system.get_agent_hypotheses(
+                            agent_id=agent_id,
+                            game_type=game_type,
+                            status='active'
+                        )
+                        
+                        if agent_hypotheses:
+                            # Parse agent's own hypotheses to bias actions
+                            for hyp in agent_hypotheses[:5]:  # Top 5 most recent
+                                hyp_text = (hyp.get('hypothesis_text') or '').lower()
+                                confidence = hyp.get('confidence', 0.5)
+                                
+                                # Parse hypothesis for action suggestions
+                                if 'up' in hyp_text or 'climb' in hyp_text:
+                                    hypothesis_biases[1] = hypothesis_biases.get(1, 0) + 0.2 * confidence
+                                if 'down' in hyp_text or 'descend' in hyp_text:
+                                    hypothesis_biases[2] = hypothesis_biases.get(2, 0) + 0.2 * confidence
+                                if 'left' in hyp_text:
+                                    hypothesis_biases[3] = hypothesis_biases.get(3, 0) + 0.2 * confidence
+                                if 'right' in hyp_text:
+                                    hypothesis_biases[4] = hypothesis_biases.get(4, 0) + 0.2 * confidence
+                                if 'wait' in hyp_text or 'timing' in hyp_text:
+                                    hypothesis_biases[5] = hypothesis_biases.get(5, 0) + 0.2 * confidence
+                                if 'click' in hyp_text or 'select' in hyp_text or 'interact' in hyp_text:
+                                    hypothesis_biases[6] = hypothesis_biases.get(6, 0) + 0.2 * confidence
+                                if 'avoid' in hyp_text:
+                                    # Parse what to avoid
+                                    if 'avoid up' in hyp_text or 'avoid top' in hyp_text:
+                                        hypothesis_biases[1] = hypothesis_biases.get(1, 0) - 0.3 * confidence
+                                    if 'avoid down' in hyp_text or 'avoid bottom' in hyp_text:
+                                        hypothesis_biases[2] = hypothesis_biases.get(2, 0) - 0.3 * confidence
+                            
+                            if agent_hypotheses:
+                                logger.info(f"[STAGE] Formal agent using {len(agent_hypotheses)} own hypotheses")
+                
+                # Store stage for reasoning
+                self._current_cognitive_stage = stage
+                self._current_cognitive_capabilities = capabilities
+                
+            except Exception as e:
+                logger.debug(f"Cognitive stage behavior error: {e}")
+        
+        # ===================================================================
+        # PRIMITIVE INVENTORY AWARENESS
+        # Agents can query what primitives they have access to
+        # This enables "What tools do I have?" self-reflection
+        # ===================================================================
+        primitive_context = None
+        
+        if hasattr(self, 'cods_engine') and self.cods_engine:
+            try:
+                # Query available primitives (network-wide)
+                inventory = self.cods_engine.get_primitive_inventory()
+                composed_ops = self.cods_engine.get_composed_operator_inventory()
+                
+                if inventory or composed_ops:
+                    # Build context from inventory
+                    available_primitives = []
+                    available_primitives.extend(inventory.get('seed', [])[:3])
+                    available_primitives.extend(inventory.get('grandfathered', [])[:3])
+                    available_primitives.extend(inventory.get('unlocked', [])[:3])
+                    
+                    composed_list = composed_ops.get('operators', [])[:5]
+                    
+                    primitive_context = {
+                        'primitives': available_primitives[:8],  # Top 8 primitives
+                        'composed_operators': composed_list,
+                        'total_available': len(inventory.get('seed', [])) + len(inventory.get('grandfathered', [])) + len(inventory.get('unlocked', [])),
+                        'locked_count': len(inventory.get('locked', [])),
+                        'summary': inventory.get('summary', {})
+                    }
+                    # Store for API payload
+                    self._primitive_context = primitive_context
+                    
+            except Exception as e:
+                logger.debug(f"Primitive inventory query error: {e}")
         
         # ===================================================================
         # EMERGENT REASONING: Four Core Questions (Q1-Q4)
@@ -6877,7 +7059,64 @@ class GameplayEngine:
             else:
                 emotion = 'confident'
             
-            return {
+            # =================================================================
+            # EPISODIC MEMORY: Query agent's personal history for narrative
+            # This adds "what did I do last time?" context to decision-making
+            # =================================================================
+            game_id = self.game_config.get('current_game_id', '')
+            game_type = game_id[:4] if game_id else ''
+            current_level = int(game_state.score) + 1 if game_state.score else 1
+            
+            episodic_narrative = None
+            stream_comparison = None
+            try:
+                # Get narrative summary of agent's experience
+                episodic_narrative = self.episodic_memory.get_narrative_summary(
+                    agent_id, game_type, current_level
+                )
+                
+                # Compare private vs network streams
+                stream_comparison = self.episodic_memory.compare_streams(
+                    agent_id, game_id, current_level
+                )
+                
+                # Adjust alpha based on stream comparison if significant
+                if stream_comparison and stream_comparison.get('conflict_detected'):
+                    # Use recommended bias from stream comparison
+                    recommended_alpha = stream_comparison.get('recommended_bias', alpha)
+                    # Blend current alpha with recommendation (80% current, 20% recommended)
+                    alpha = alpha * 0.8 + recommended_alpha * 0.2
+                    conflict_detected = True  # Flag the conflict
+                    
+            except Exception as e:
+                logger.debug(f"Episodic memory query failed (non-critical): {e}")
+            
+            # =================================================================
+            # COGNITIVE STAGE: Get agent's developmental capabilities
+            # =================================================================
+            cognitive_stage = None
+            cognitive_capabilities = None
+            try:
+                cognitive_stage = self.cognitive_stage_system.get_stage(agent_id)
+                cognitive_capabilities = self.cognitive_stage_system.get_stage_capabilities(agent_id)
+            except Exception as e:
+                logger.debug(f"Cognitive stage query failed (non-critical): {e}")
+            
+            # Build enhanced narrative with episodic context
+            narrative_parts = [f"{emotion.capitalize()}"]
+            if alpha > 0.6:
+                narrative_parts.append("trusting self")
+            elif alpha < 0.4:
+                narrative_parts.append("following network")
+            else:
+                narrative_parts.append("balanced")
+            
+            if episodic_narrative and len(episodic_narrative) < 100:
+                narrative_parts.append(f"({episodic_narrative[:80]})")
+            
+            enhanced_narrative = " | ".join(narrative_parts)
+            
+            result = {
                 # Three internal networks (now using live data)
                 'emotional_network': round(emotional_input, 3),
                 'semantic_network': round(semantic_input, 3),
@@ -6892,10 +7131,53 @@ class GameplayEngine:
                 # Conflict detection
                 'conflict': conflict_detected,
                 
-                # Human-readable summary
+                # Human-readable summary (enhanced with episodic context)
                 'emotion': emotion,
-                'narrative': f"{emotion.capitalize()} | bias={alpha:.2f} | {'trusting self' if alpha > 0.6 else 'following network' if alpha < 0.4 else 'balanced'}"
+                'narrative': enhanced_narrative,
+                
+                # Episodic memory context
+                'episodic_narrative': episodic_narrative,
+                'stream_comparison': stream_comparison,
+                
+                # Cognitive development stage
+                'cognitive_stage': cognitive_stage,
+                'can_hypothesize': cognitive_capabilities.get('hypothesis_generation', False) if cognitive_capabilities else False
             }
+            
+            # =================================================================
+            # WEAVING REPORTER: Generate and potentially store decision report
+            # This enables full introspection and meta-learning
+            # =================================================================
+            try:
+                action_counter = getattr(self, '_action_counter', 0)
+                weaving_report = self.weaving_reporter.generate_report(
+                    agent_id=agent_id,
+                    game_id=game_id,
+                    level_number=current_level,
+                    action_number=action_counter,
+                    chosen_action=action,
+                    private_memory_strength=private_memory_strength,
+                    network_recommendation_strength=network_recommendation_strength,
+                    self_network_bias=alpha,
+                    navigation_state=navigation_state,
+                    role_confidence=role_confidence,
+                    role_fit_score=role_fit_score,
+                    sensation_profile=sensation_profile,
+                    alternative_action=None  # Could be filled if network suggested different
+                )
+                
+                # Store report if sampling criteria met
+                is_terminal = game_state.state != 'NOT_FINISHED'
+                if self.weaving_reporter.should_store_locally(weaving_report, is_terminal):
+                    self.weaving_reporter.store_report(weaving_report)
+                
+                # Attach compact report for API
+                result['weaving_report_id'] = weaving_report.get('report_id')
+                
+            except Exception as e:
+                logger.debug(f"Weaving report generation failed (non-critical): {e}")
+            
+            return result
             
         except Exception as e:
             logger.debug(f"Self-reflection context build failed: {e}")
@@ -7098,6 +7380,32 @@ class GameplayEngine:
                 stuck_pattern,
                 json.dumps(last_actions[:10]) if last_actions else None
             ))
+            
+            # ===============================================================
+            # AGENT-INITIATED HYPOTHESIS (Formal Operational Only)
+            # If agent has reached formal operational stage, let them create
+            # their own hypothesis about what went wrong
+            # ===============================================================
+            try:
+                if self.agent_hypothesis_system.can_create_hypothesis(agent_id):
+                    # Agent creates their own hypothesis based on experience
+                    agent_hypothesis_text = f"On {game_type} level {level_number}: {failure_reason}"
+                    if stuck_pattern:
+                        agent_hypothesis_text += f" Pattern: {stuck_pattern}"
+                    
+                    agent_hyp_id = self.agent_hypothesis_system.create_hypothesis(
+                        agent_id=agent_id,
+                        game_type=game_type,
+                        hypothesis_text=agent_hypothesis_text,
+                        hypothesis_type='game_rule',
+                        level_number=level_number,
+                        initial_evidence=[f"Observed during game {game_id}"]
+                    )
+                    
+                    if agent_hyp_id:
+                        logger.debug(f"[HYPOTHESIS] Formal agent {agent_id[:8]} created personal hypothesis: {agent_hyp_id}")
+            except Exception as e:
+                logger.debug(f"Agent hypothesis creation failed (non-critical): {e}")
             
             return hypothesis_id
             

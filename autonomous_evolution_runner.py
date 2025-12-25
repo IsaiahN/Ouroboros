@@ -77,11 +77,12 @@ except ImportError:
 
 # CODS - Cognitive Operator Discovery System (post-generation unlock checks)
 try:
-    from cods_engine import check_for_potential_unlocks
+    from cods_engine import check_for_potential_unlocks, CODSEngine
     CODS_AVAILABLE = True
 except ImportError:
     CODS_AVAILABLE = False
     check_for_potential_unlocks = None
+    CODSEngine = None
 
 # Schema Auto-Maintenance - sync on startup to catch tables created by other modules
 try:
@@ -119,7 +120,7 @@ class AutonomousEvolutionRunner:
         specialist_mode: bool = False,  # NEW: Enable specialist-focused evolution
         skip_cleanup: bool = False,  # Skip database cleanup on startup (for test mode)
         ensure_game_type_coverage: bool = False,  # Force one game per unique game type
-        target_game: str = None  # NEW: Focus on specific game (e.g., "as66")
+        target_game: str | None = None  # NEW: Focus on specific game (e.g., "as66")
     ):
         """
         Initialize autonomous runner.
@@ -2211,6 +2212,56 @@ class AutonomousEvolutionRunner:
                             print(f"  [UNLOCK] {detail['matched_primitive']} unlocked via {detail['operator']}")
                         elif detail.get('verdict') == 'novel':
                             print(f"  [NOVEL] {detail['operator']} registered as novel discovery")
+                
+                # STRATEGY-DRIVEN UNLOCK: Process agent strategy signals
+                # This is the "Teacher Model" - CODS listens to what agents say they need
+                # and unlocks primitives when the network expresses a capability gap
+                try:
+                    cods_instance = CODSEngine() if CODSEngine else None
+                    if cods_instance:
+                        # ADAPTIVE: threshold = 10% of active agents (floor 15, cap 100)
+                        strategy_results = cods_instance.process_agent_strategy_signals(
+                            min_frequency=10,
+                            unlock_threshold=None,  # Use adaptive
+                            unlock_percentage=0.10  # 10% of network must express need
+                        )
+                        if strategy_results.get('needs_detected'):
+                            top_needs = sorted(
+                                strategy_results['needs_detected'].items(),
+                                key=lambda x: x[1]['total_frequency'],
+                                reverse=True
+                            )[:3]
+                            print(f"[CODS-TEACHER] Network needs: " + 
+                                  ", ".join(f"{p}({d['total_frequency']}x)" for p, d in top_needs))
+                        
+                        if strategy_results.get('unlocks_triggered'):
+                            for unlock in strategy_results['unlocks_triggered']:
+                                print(f"  [NEED-UNLOCK] {unlock['primitive']} "
+                                      f"(expressed {unlock['frequency']}x by network)")
+                except Exception as e:
+                    pass  # Silently skip on error (strategy unlock is supplemental)
+                
+                # PRIMITIVE INVENTORY: Show what network has access to
+                try:
+                    cods_instance = CODSEngine() if CODSEngine else None
+                    if cods_instance:
+                        inventory = cods_instance.get_primitive_inventory()
+                        summary = inventory.get('summary', {})
+                        print(f"[CODS-INVENTORY] Available: {summary.get('total_available', 0)} primitives "
+                              f"(seed={summary.get('seed_count', 0)}, "
+                              f"grandfathered={summary.get('grandfathered_count', 0)}, "
+                              f"unlocked={summary.get('unlocked_count', 0)}, "
+                              f"novel={summary.get('novel_count', 0)}) | "
+                              f"Locked: {summary.get('locked_count', 0)}")
+                        
+                        # Show most used if any usage
+                        most_used = summary.get('most_used', [])
+                        if most_used:
+                            top_3 = most_used[:3]
+                            usage_str = ", ".join(f"{name}({data['calls']})" for name, data in top_3)
+                            print(f"[CODS-INVENTORY] Most used: {usage_str}")
+                except Exception as e:
+                    pass  # Silently skip inventory display on error
             except Exception as e:
                 print(f"[CODS] Unlock check skipped: {e}")
         

@@ -6030,6 +6030,757 @@ class WeavingReporter:
         """, (outcome_correct, report_id))
 
 
+# ============================================================================
+# COGNITIVE STAGE SYSTEM (Developmental Progression)
+# ============================================================================
+
+class CognitiveStageSystem:
+    """
+    Tracks and evolves agent cognitive development through three stages:
+    
+    1. PREOPERATIONAL (Early Development)
+       - Explores through action-effect observation
+       - No planning, reactive behavior
+       - Learning object permanence and causation
+       
+    2. CONCRETE_OPERATIONAL (Learned Patterns)
+       - Can apply learned sequences
+       - Understands conservation and reversibility
+       - Logical thinking about concrete objects
+       
+    3. FORMAL_OPERATIONAL (Abstract Reasoning)
+       - Hypothetical-deductive reasoning
+       - Can create and test hypotheses
+       - Abstract pattern generalization
+    
+    Stage transitions based on demonstrated competencies, not age/time.
+    """
+    
+    # Stage names (Piaget-based, adapted for AI agents)
+    PREOPERATIONAL = 'preoperational'
+    CONCRETE_OPERATIONAL = 'concrete_operational'
+    FORMAL_OPERATIONAL = 'formal_operational'
+    
+    # Competency thresholds for stage transitions
+    COMPETENCIES = {
+        'preoperational_to_concrete': {
+            'games_played': 5,          # Minimum experience
+            'sequences_discovered': 1,   # Can find a winning pattern
+            'object_control_learned': True,  # Knows "I am this object"
+            'action_effect_pairs': 3     # Understands cause-effect
+        },
+        'concrete_to_formal': {
+            'games_played': 20,
+            'sequences_discovered': 5,
+            'hypotheses_created': 2,     # Has generated own hypotheses
+            'cross_game_transfer': True, # Applied learning across game types
+            'validation_success_rate': 0.6  # Sequences work for others too
+        }
+    }
+    
+    def __init__(self, db: DatabaseInterface):
+        """Initialize cognitive stage system."""
+        self.db = db
+        self._ensure_tables()
+    
+    def _ensure_tables(self):
+        """Ensure cognitive stage tracking table exists."""
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS agent_cognitive_stages (
+                agent_id TEXT PRIMARY KEY,
+                current_stage TEXT NOT NULL DEFAULT 'preoperational',
+                stage_entered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                -- Competency tracking
+                games_played INTEGER DEFAULT 0,
+                sequences_discovered INTEGER DEFAULT 0,
+                hypotheses_created INTEGER DEFAULT 0,
+                object_control_learned BOOLEAN DEFAULT FALSE,
+                action_effect_pairs INTEGER DEFAULT 0,
+                cross_game_transfer BOOLEAN DEFAULT FALSE,
+                validation_success_rate REAL DEFAULT 0.0,
+                
+                -- Stage history
+                preoperational_exit DATETIME,
+                concrete_exit DATETIME,
+                
+                last_evaluated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+            )
+        """)
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_cognitive_stage 
+            ON agent_cognitive_stages(current_stage)
+        """)
+    
+    def get_stage(self, agent_id: str) -> str:
+        """Get agent's current cognitive stage."""
+        result = self.db.execute_query("""
+            SELECT current_stage FROM agent_cognitive_stages WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if result:
+            return result[0]['current_stage']
+        
+        # Initialize new agent at preoperational stage
+        self._initialize_agent(agent_id)
+        return self.PREOPERATIONAL
+    
+    def _initialize_agent(self, agent_id: str) -> None:
+        """Initialize cognitive stage tracking for new agent."""
+        self.db.execute_query("""
+            INSERT OR IGNORE INTO agent_cognitive_stages (agent_id, current_stage)
+            VALUES (?, ?)
+        """, (agent_id, self.PREOPERATIONAL))
+    
+    def update_competencies(
+        self,
+        agent_id: str,
+        games_played_delta: int = 0,
+        sequences_discovered_delta: int = 0,
+        hypotheses_created_delta: int = 0,
+        object_control_learned: bool = None,
+        action_effect_pairs_delta: int = 0,
+        cross_game_transfer: bool = None,
+        validation_success_rate: float = None
+    ) -> Dict[str, Any]:
+        """
+        Update agent's cognitive competencies and check for stage transition.
+        
+        Returns:
+            Dict with current_stage, transitioned (bool), and competencies
+        """
+        # Ensure agent exists
+        self._initialize_agent(agent_id)
+        
+        # Build update query dynamically
+        updates = []
+        params = []
+        
+        if games_played_delta:
+            updates.append("games_played = games_played + ?")
+            params.append(games_played_delta)
+        if sequences_discovered_delta:
+            updates.append("sequences_discovered = sequences_discovered + ?")
+            params.append(sequences_discovered_delta)
+        if hypotheses_created_delta:
+            updates.append("hypotheses_created = hypotheses_created + ?")
+            params.append(hypotheses_created_delta)
+        if object_control_learned is not None:
+            updates.append("object_control_learned = ?")
+            params.append(object_control_learned)
+        if action_effect_pairs_delta:
+            updates.append("action_effect_pairs = action_effect_pairs + ?")
+            params.append(action_effect_pairs_delta)
+        if cross_game_transfer is not None:
+            updates.append("cross_game_transfer = ?")
+            params.append(cross_game_transfer)
+        if validation_success_rate is not None:
+            updates.append("validation_success_rate = ?")
+            params.append(validation_success_rate)
+        
+        updates.append("last_evaluated = CURRENT_TIMESTAMP")
+        
+        if updates:
+            query = f"UPDATE agent_cognitive_stages SET {', '.join(updates)} WHERE agent_id = ?"
+            params.append(agent_id)
+            self.db.execute_query(query, tuple(params))
+        
+        # Check for stage transition
+        return self._evaluate_stage_transition(agent_id)
+    
+    def _evaluate_stage_transition(self, agent_id: str) -> Dict[str, Any]:
+        """Evaluate if agent should transition to next cognitive stage."""
+        result = self.db.execute_query("""
+            SELECT * FROM agent_cognitive_stages WHERE agent_id = ?
+        """, (agent_id,))
+        
+        if not result:
+            return {'current_stage': self.PREOPERATIONAL, 'transitioned': False}
+        
+        r = result[0]
+        current_stage = r['current_stage']
+        transitioned = False
+        new_stage = current_stage
+        
+        if current_stage == self.PREOPERATIONAL:
+            # Check for transition to concrete operational
+            reqs = self.COMPETENCIES['preoperational_to_concrete']
+            if (r['games_played'] >= reqs['games_played'] and
+                r['sequences_discovered'] >= reqs['sequences_discovered'] and
+                r['object_control_learned'] and
+                r['action_effect_pairs'] >= reqs['action_effect_pairs']):
+                
+                new_stage = self.CONCRETE_OPERATIONAL
+                transitioned = True
+                self.db.execute_query("""
+                    UPDATE agent_cognitive_stages 
+                    SET current_stage = ?, 
+                        preoperational_exit = CURRENT_TIMESTAMP,
+                        stage_entered_at = CURRENT_TIMESTAMP
+                    WHERE agent_id = ?
+                """, (new_stage, agent_id))
+                logger.info(f"[COGNITIVE] Agent {agent_id[:8]} -> CONCRETE_OPERATIONAL stage")
+        
+        elif current_stage == self.CONCRETE_OPERATIONAL:
+            # Check for transition to formal operational
+            reqs = self.COMPETENCIES['concrete_to_formal']
+            if (r['games_played'] >= reqs['games_played'] and
+                r['sequences_discovered'] >= reqs['sequences_discovered'] and
+                r['hypotheses_created'] >= reqs['hypotheses_created'] and
+                r['cross_game_transfer'] and
+                r['validation_success_rate'] >= reqs['validation_success_rate']):
+                
+                new_stage = self.FORMAL_OPERATIONAL
+                transitioned = True
+                self.db.execute_query("""
+                    UPDATE agent_cognitive_stages 
+                    SET current_stage = ?, 
+                        concrete_exit = CURRENT_TIMESTAMP,
+                        stage_entered_at = CURRENT_TIMESTAMP
+                    WHERE agent_id = ?
+                """, (new_stage, agent_id))
+                logger.info(f"[COGNITIVE] Agent {agent_id[:8]} -> FORMAL_OPERATIONAL stage")
+        
+        return {
+            'current_stage': new_stage,
+            'transitioned': transitioned,
+            'competencies': dict(r)
+        }
+    
+    def get_stage_capabilities(self, agent_id: str) -> Dict[str, bool]:
+        """Get what cognitive capabilities an agent has based on their stage."""
+        stage = self.get_stage(agent_id)
+        
+        capabilities = {
+            # Preoperational capabilities (all agents have these)
+            'action_exploration': True,
+            'object_observation': True,
+            'pattern_recognition': True,
+            
+            # Concrete operational capabilities
+            'sequence_following': stage in [self.CONCRETE_OPERATIONAL, self.FORMAL_OPERATIONAL],
+            'reversibility_understanding': stage in [self.CONCRETE_OPERATIONAL, self.FORMAL_OPERATIONAL],
+            'conservation_of_state': stage in [self.CONCRETE_OPERATIONAL, self.FORMAL_OPERATIONAL],
+            
+            # Formal operational capabilities
+            'hypothesis_generation': stage == self.FORMAL_OPERATIONAL,
+            'abstract_generalization': stage == self.FORMAL_OPERATIONAL,
+            'hypothetical_reasoning': stage == self.FORMAL_OPERATIONAL,
+            'cross_domain_transfer': stage == self.FORMAL_OPERATIONAL
+        }
+        
+        return capabilities
+    
+    def get_population_distribution(self) -> Dict[str, int]:
+        """Get distribution of agents across cognitive stages."""
+        result = self.db.execute_query("""
+            SELECT current_stage, COUNT(*) as count
+            FROM agent_cognitive_stages
+            GROUP BY current_stage
+        """)
+        
+        distribution = {
+            self.PREOPERATIONAL: 0,
+            self.CONCRETE_OPERATIONAL: 0,
+            self.FORMAL_OPERATIONAL: 0
+        }
+        
+        for r in result or []:
+            stage = r['current_stage']
+            if stage in distribution:
+                distribution[stage] = r['count']
+        
+        return distribution
+
+
+# ============================================================================
+# EPISODIC MEMORY SYSTEM (Agent History Query + Intuition)
+# ============================================================================
+
+class EpisodicMemorySystem:
+    """
+    Enables agents to query their own experience history (wA) vs network wisdom (wB).
+    
+    Philosophy: "Episodic memory" is not a separate storage - it's the ability
+    to query one's own action history and form intuitions from personal experience.
+    
+    This implements the Two-Streams insight that private memory (wA) should be
+    queryable and comparable against network recommendations (wB).
+    
+    Key Queries:
+    - "What did I do last time in this situation?"
+    - "Did my approach work better than network's?"
+    - "What's my personal success pattern?"
+    """
+    
+    def __init__(self, db: DatabaseInterface):
+        """Initialize episodic memory system."""
+        self.db = db
+    
+    def query_personal_history(
+        self,
+        agent_id: str,
+        game_type: str,
+        level: int,
+        context: str = None,
+        limit: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Query agent's personal history for this game/level combination.
+        
+        This is the "what did I do last time?" query.
+        
+        Args:
+            agent_id: Agent querying their history
+            game_type: Game type prefix (e.g., "SP80")
+            level: Level number
+            context: Optional context string (e.g., "stuck_state")
+            limit: Max records to return
+            
+        Returns:
+            Dict with episodes, patterns, and intuition strength
+        """
+        # Get agent's historical game results for this game type/level
+        episodes = self.db.execute_query("""
+            SELECT 
+                gr.game_id, gr.final_score, gr.levels_completed,
+                gr.actions_used, gr.timestamp,
+                CASE WHEN gr.final_score > 0 THEN 1 ELSE 0 END as success
+            FROM game_results gr
+            WHERE gr.agent_id = ? 
+              AND gr.game_id LIKE ?
+            ORDER BY gr.timestamp DESC
+            LIMIT ?
+        """, (agent_id, f"{game_type}%", limit))
+        
+        if not episodes:
+            return {
+                'has_history': False,
+                'episodes': [],
+                'intuition_strength': 0.0,
+                'personal_pattern': None,
+                'recommendation': 'explore_new'
+            }
+        
+        # Calculate success rate (personal intuition strength)
+        successes = sum(1 for e in episodes if e['success'])
+        total = len(episodes)
+        success_rate = successes / total if total > 0 else 0.0
+        
+        # Find common patterns in successful episodes
+        successful_episodes = [e for e in episodes if e['success']]
+        personal_pattern = None
+        
+        if successful_episodes:
+            # Calculate average actions for success
+            avg_actions = sum(e['actions_used'] for e in successful_episodes) / len(successful_episodes)
+            avg_score = sum(e['final_score'] for e in successful_episodes) / len(successful_episodes)
+            
+            personal_pattern = {
+                'avg_actions_to_win': avg_actions,
+                'avg_score': avg_score,
+                'consistent_success': len(successful_episodes) >= 2
+            }
+        
+        # Determine recommendation based on history
+        if success_rate >= 0.7:
+            recommendation = 'trust_self'  # Strong personal track record
+        elif success_rate >= 0.3:
+            recommendation = 'blend_sources'  # Mixed results
+        else:
+            recommendation = 'try_network'  # Personal approach not working
+        
+        return {
+            'has_history': True,
+            'episodes': [dict(e) for e in episodes],
+            'intuition_strength': success_rate,
+            'personal_pattern': personal_pattern,
+            'recommendation': recommendation,
+            'total_attempts': total,
+            'successes': successes
+        }
+    
+    def compare_streams(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int
+    ) -> Dict[str, Any]:
+        """
+        Compare agent's private experience (wA) vs network wisdom (wB).
+        
+        This is the core Two-Streams comparison that enables agents to
+        make informed decisions about which source to trust.
+        
+        Returns:
+            Dict with wA_strength, wB_strength, recommended_bias, and reasoning
+        """
+        game_type = game_id[:4] if game_id else ''
+        
+        # Stream A: Personal experience (wA)
+        personal = self.query_personal_history(agent_id, game_type, level)
+        wA_strength = personal['intuition_strength']
+        wA_episodes = personal['total_attempts'] if personal['has_history'] else 0
+        
+        # Stream B: Network wisdom (wB)
+        network = self.db.execute_query("""
+            SELECT 
+                COUNT(*) as sequence_count,
+                AVG(ws.efficiency_score) as avg_efficiency,
+                MAX(ws.times_referenced) as max_references,
+                AVG(COALESCE(sr.success_rate, 0.5)) as avg_success_rate
+            FROM winning_sequences ws
+            LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
+            WHERE ws.game_id LIKE ? 
+              AND ws.level_number = ?
+              AND ws.is_active = 1
+        """, (f"{game_type}%", level))
+        
+        wB_strength = 0.0
+        wB_sequences = 0
+        
+        if network and network[0]['sequence_count'] > 0:
+            n = network[0]
+            wB_sequences = n['sequence_count']
+            # Network strength based on availability and reputation
+            availability_score = min(1.0, wB_sequences / 5.0)  # Cap at 5 sequences
+            reputation_score = n['avg_success_rate'] or 0.5
+            wB_strength = (availability_score * 0.4) + (reputation_score * 0.6)
+        
+        # Compare streams
+        stream_difference = wA_strength - wB_strength
+        
+        if stream_difference > 0.2:
+            recommended_bias = 0.7  # Trust self more
+            reasoning = f"Personal success ({wA_strength:.0%}) exceeds network ({wB_strength:.0%})"
+        elif stream_difference < -0.2:
+            recommended_bias = 0.3  # Trust network more
+            reasoning = f"Network ({wB_strength:.0%}) outperforms personal ({wA_strength:.0%})"
+        else:
+            recommended_bias = 0.5  # Balanced
+            reasoning = f"Streams comparable: personal {wA_strength:.0%}, network {wB_strength:.0%}"
+        
+        # Check for conflict (significant disagreement)
+        conflict_detected = abs(stream_difference) > 0.3
+        
+        return {
+            'wA_strength': wA_strength,
+            'wA_episodes': wA_episodes,
+            'wB_strength': wB_strength,
+            'wB_sequences': wB_sequences,
+            'recommended_bias': recommended_bias,
+            'reasoning': reasoning,
+            'conflict_detected': conflict_detected,
+            'stream_difference': stream_difference
+        }
+    
+    def get_narrative_summary(
+        self,
+        agent_id: str,
+        game_type: str,
+        level: int
+    ) -> str:
+        """
+        Generate a natural language summary of agent's experience.
+        
+        This creates the "last time I..." narrative for agent reasoning.
+        """
+        history = self.query_personal_history(agent_id, game_type, level, limit=3)
+        
+        if not history['has_history']:
+            return "First time encountering this game type - exploring with fresh perspective."
+        
+        episodes = history['episodes']
+        recent = episodes[0] if episodes else None
+        
+        if not recent:
+            return "No detailed episode memory available."
+        
+        # Build narrative
+        parts = []
+        
+        # Most recent outcome
+        if recent['success']:
+            parts.append(f"Last attempt succeeded with score {recent['final_score']:.0f} in {recent['actions_used']} actions.")
+        else:
+            parts.append(f"Last attempt ended at level {recent.get('levels_completed', 0)} after {recent['actions_used']} actions.")
+        
+        # Pattern summary
+        if history['personal_pattern']:
+            pattern = history['personal_pattern']
+            if pattern['consistent_success']:
+                parts.append(f"Consistently winning with ~{pattern['avg_actions_to_win']:.0f} actions.")
+            else:
+                parts.append("Success pattern still emerging.")
+        
+        # Recommendation
+        rec = history['recommendation']
+        if rec == 'trust_self':
+            parts.append("My approach works well - trusting personal experience.")
+        elif rec == 'try_network':
+            parts.append("Personal approach struggling - considering network alternatives.")
+        else:
+            parts.append("Balancing personal intuition with network guidance.")
+        
+        return " ".join(parts)
+
+
+# ============================================================================
+# AGENT-INITIATED HYPOTHESIS SYSTEM
+# ============================================================================
+
+class AgentHypothesisSystem:
+    """
+    Enables agents to CREATE hypotheses, not just follow them.
+    
+    Key insight: Formal operational agents should be able to:
+    1. Notice patterns in their experience
+    2. Formulate testable hypotheses
+    3. Design experiments to test them
+    4. Update beliefs based on results
+    
+    This requires FORMAL_OPERATIONAL cognitive stage.
+    """
+    
+    def __init__(self, db: DatabaseInterface, cognitive_system: CognitiveStageSystem):
+        """Initialize agent hypothesis system."""
+        self.db = db
+        self.cognitive_system = cognitive_system
+        self._ensure_tables()
+    
+    def _ensure_tables(self):
+        """Ensure agent hypothesis tables exist."""
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS agent_hypotheses (
+                hypothesis_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                
+                -- Hypothesis content
+                game_type TEXT NOT NULL,
+                level_number INTEGER,
+                hypothesis_text TEXT NOT NULL,
+                hypothesis_type TEXT NOT NULL,  -- 'object_behavior', 'action_effect', 'sequence_pattern', 'game_rule'
+                
+                -- Evidence and confidence
+                supporting_evidence TEXT,        -- JSON: list of observations supporting this
+                contradicting_evidence TEXT,     -- JSON: list of observations against this
+                confidence REAL DEFAULT 0.5,
+                
+                -- Testing
+                tests_conducted INTEGER DEFAULT 0,
+                tests_successful INTEGER DEFAULT 0,
+                last_tested DATETIME,
+                
+                -- Status
+                status TEXT DEFAULT 'proposed',  -- 'proposed', 'testing', 'confirmed', 'refuted', 'abandoned'
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+            )
+        """)
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_agent_hypotheses_game 
+            ON agent_hypotheses(game_type, level_number, status)
+        """)
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_agent_hypotheses_agent 
+            ON agent_hypotheses(agent_id, status)
+        """)
+    
+    def can_create_hypothesis(self, agent_id: str) -> bool:
+        """Check if agent has the cognitive capability to create hypotheses."""
+        capabilities = self.cognitive_system.get_stage_capabilities(agent_id)
+        return capabilities.get('hypothesis_generation', False)
+    
+    def create_hypothesis(
+        self,
+        agent_id: str,
+        game_type: str,
+        hypothesis_text: str,
+        hypothesis_type: str,
+        level_number: int = None,
+        initial_evidence: List[str] = None
+    ) -> Optional[str]:
+        """
+        Agent creates a new hypothesis based on observations.
+        
+        Only agents in FORMAL_OPERATIONAL stage can create hypotheses.
+        
+        Args:
+            agent_id: Agent creating hypothesis
+            game_type: Game type this applies to
+            hypothesis_text: Natural language hypothesis
+            hypothesis_type: Category ('object_behavior', 'action_effect', 'sequence_pattern', 'game_rule')
+            level_number: Optional specific level
+            initial_evidence: List of observations supporting this hypothesis
+            
+        Returns:
+            hypothesis_id if created, None if agent lacks capability
+        """
+        if not self.can_create_hypothesis(agent_id):
+            logger.debug(f"[HYPOTHESIS] Agent {agent_id[:8]} lacks cognitive stage for hypothesis creation")
+            return None
+        
+        import uuid
+        hypothesis_id = f"hyp_{uuid.uuid4().hex[:12]}"
+        
+        evidence_json = json.dumps(initial_evidence or [])
+        
+        self.db.execute_query("""
+            INSERT INTO agent_hypotheses 
+            (hypothesis_id, agent_id, game_type, level_number, hypothesis_text, 
+             hypothesis_type, supporting_evidence, confidence, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'proposed')
+        """, (hypothesis_id, agent_id, game_type, level_number, hypothesis_text,
+              hypothesis_type, evidence_json, 0.5))
+        
+        # Update agent's competency
+        self.cognitive_system.update_competencies(agent_id, hypotheses_created_delta=1)
+        
+        logger.info(f"[HYPOTHESIS] Agent {agent_id[:8]} created: {hypothesis_text[:50]}...")
+        
+        return hypothesis_id
+    
+    def record_test_result(
+        self,
+        hypothesis_id: str,
+        success: bool,
+        observation: str = None
+    ) -> Dict[str, Any]:
+        """
+        Record the result of testing a hypothesis.
+        
+        Returns updated hypothesis status and confidence.
+        """
+        # Get current hypothesis
+        result = self.db.execute_query("""
+            SELECT * FROM agent_hypotheses WHERE hypothesis_id = ?
+        """, (hypothesis_id,))
+        
+        if not result:
+            return {'error': 'hypothesis_not_found'}
+        
+        h = result[0]
+        
+        # Update test counts
+        tests = h['tests_conducted'] + 1
+        successes = h['tests_successful'] + (1 if success else 0)
+        
+        # Calculate new confidence using Bayesian-ish update
+        prior = h['confidence']
+        if success:
+            new_confidence = prior + (1.0 - prior) * 0.2  # Move toward 1.0
+        else:
+            new_confidence = prior * 0.8  # Decay toward 0
+        
+        new_confidence = max(0.05, min(0.95, new_confidence))
+        
+        # Update evidence
+        evidence_key = 'supporting_evidence' if success else 'contradicting_evidence'
+        existing_evidence = json.loads(h[evidence_key] or '[]')
+        if observation:
+            existing_evidence.append(observation)
+        evidence_json = json.dumps(existing_evidence[-10:])  # Keep last 10
+        
+        # Determine status
+        status = h['status']
+        if new_confidence > 0.85 and tests >= 3:
+            status = 'confirmed'
+        elif new_confidence < 0.15 and tests >= 3:
+            status = 'refuted'
+        elif status == 'proposed':
+            status = 'testing'
+        
+        self.db.execute_query(f"""
+            UPDATE agent_hypotheses
+            SET tests_conducted = ?,
+                tests_successful = ?,
+                confidence = ?,
+                {evidence_key} = ?,
+                status = ?,
+                last_tested = CURRENT_TIMESTAMP
+            WHERE hypothesis_id = ?
+        """, (tests, successes, new_confidence, evidence_json, status, hypothesis_id))
+        
+        return {
+            'hypothesis_id': hypothesis_id,
+            'new_confidence': new_confidence,
+            'status': status,
+            'tests_conducted': tests,
+            'tests_successful': successes
+        }
+    
+    def get_agent_hypotheses(
+        self,
+        agent_id: str,
+        game_type: str = None,
+        status: str = None
+    ) -> List[Dict[str, Any]]:
+        """Get hypotheses created by an agent."""
+        query = "SELECT * FROM agent_hypotheses WHERE agent_id = ?"
+        params = [agent_id]
+        
+        if game_type:
+            query += " AND game_type = ?"
+            params.append(game_type)
+        
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        
+        query += " ORDER BY created_at DESC LIMIT 20"
+        
+        result = self.db.execute_query(query, tuple(params))
+        return [dict(r) for r in result] if result else []
+    
+    def suggest_hypothesis_from_pattern(
+        self,
+        agent_id: str,
+        game_type: str,
+        observations: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Analyze observations and suggest a hypothesis the agent could create.
+        
+        This helps agents generate hypotheses by finding patterns in their experience.
+        """
+        if not self.can_create_hypothesis(agent_id):
+            return None
+        
+        if len(observations) < 3:
+            return None  # Need minimum observations
+        
+        # Look for action-effect patterns
+        action_effects = {}
+        for obs in observations:
+            action = obs.get('action')
+            effect = obs.get('effect')
+            if action and effect:
+                if action not in action_effects:
+                    action_effects[action] = []
+                action_effects[action].append(effect)
+        
+        # Find consistent patterns
+        for action, effects in action_effects.items():
+            if len(effects) >= 2:
+                # Check if same effect occurs consistently
+                effect_counts = {}
+                for e in effects:
+                    effect_counts[e] = effect_counts.get(e, 0) + 1
+                
+                for effect, count in effect_counts.items():
+                    if count >= 2:
+                        return {
+                            'suggested_hypothesis': f"ACTION{action} consistently causes {effect}",
+                            'hypothesis_type': 'action_effect',
+                            'evidence_count': count,
+                            'confidence': count / len(effects)
+                        }
+        
+        return None
+
+
 if __name__ == "__main__":
     # Test self-model system
     print("=" * 70)

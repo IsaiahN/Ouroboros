@@ -1614,6 +1614,659 @@ class CODSEngine:
         
         return summary
     
+    # ======================================================================
+    # STRATEGY-DRIVEN UNLOCK SYSTEM (Teacher Model)
+    # ======================================================================
+    # CODS acts as a teacher observing agents express capability needs
+    # When agents say "need to find object to interact with", CODS diagnoses
+    # this as a need for control_test or systematic_explore primitives
+    # ======================================================================
+    
+    # Expression-to-primitive mapping
+    # Maps natural language patterns in agent strategies to locked primitives
+    STRATEGY_TO_PRIMITIVE_MAP = {
+        # Agent-centric primitives
+        'find.*object.*interact': ['control_test', 'effect_scope'],
+        'starting move': ['self_location', 'control_test'],
+        'click.*different': ['control_test', 'effect_scope'],
+        'try.*each.*object': ['control_test', 'effect_scope'],
+        'what.*control': ['self_location', 'effect_scope'],
+        'which.*move': ['self_location', 'control_test'],
+        
+        # Exploration primitives
+        'explor': ['effect_scope', 'control_test'],
+        'discover': ['control_test', 'effect_scope'],
+        'find.*pattern': ['detect_cycles', 'correlation'],
+        
+        # Spatial/structural primitives
+        'path|route|way': ['path_exists', 'distance_transform'],
+        'edge|boundary|wall': ['detect_edges', 'containment_check'],
+        'enclosed|sealed|contain': ['containment_check', 'boundary_seal_check'],
+        'flow|fill|overflow': ['flow_simulation', 'containment_check'],
+        
+        # Goal-oriented primitives
+        'goal|target|objective': ['goal_distance', 'progress_estimate'],
+        'stuck|blocked|dead.?end': ['dead_end_detect', 'path_exists'],
+        'progress|closer|further': ['progress_estimate', 'goal_distance'],
+        
+        # Temporal/predictive primitives
+        'repeat|cycle|loop|oscillat': ['detect_cycles', 'rate_of_change'],
+        'stable|unchang|constant': ['stability_score', 'rate_of_change'],
+        'predict|expect|anticipate': ['rate_of_change', 'stability_score'],
+        
+        # Meta-cognitive primitives
+        'uncertain|unsure|maybe': ['uncertainty_estimate', 'novelty_score'],
+        'confiden|certain|sure': ['uncertainty_estimate', 'learning_progress'],
+        'learn|improv|better': ['learning_progress', 'novelty_score'],
+        
+        # Constraint primitives
+        'constraint|rule|must': ['identify_constraints', 'check_constraint_satisfaction'],
+        'satisfy|meet|fulfill': ['check_constraint_satisfaction', 'find_minimal_changes'],
+        'minimal|fewest|least': ['find_minimal_changes', 'optimize_action_sequence'],
+        
+        # Relational primitives
+        'cause|effect|trigger': ['causal_link', 'dependency_check'],
+        'depend|require|need.*first': ['dependency_check', 'causal_link'],
+        
+        # Reference/template primitives
+        'template|pattern|example': ['extract_schema', 'apply_template'],
+        'reference|key|legend': ['identify_reference_object', 'extract_schema'],
+    }
+    
+    def parse_strategy_for_needs(self, strategy_text: str) -> List[Dict[str, Any]]:
+        """
+        Parse agent strategy text to identify capability needs.
+        
+        This is the "teacher listening" phase - CODS observes what agents
+        say they need and maps it to locked primitives.
+        
+        Args:
+            strategy_text: The win_strategy or failure_reason text from agents
+            
+        Returns:
+            List of identified needs with primitive mappings and confidence
+        """
+        import re
+        
+        needs = []
+        text_lower = strategy_text.lower()
+        
+        for pattern, primitives in self.STRATEGY_TO_PRIMITIVE_MAP.items():
+            if re.search(pattern, text_lower):
+                for prim in primitives:
+                    # Check if this primitive is locked
+                    status = self.unlock_manager.get_status(prim)
+                    if status == PrimitiveStatus.LOCKED:
+                        needs.append({
+                            'primitive': prim,
+                            'pattern_matched': pattern,
+                            'strategy_text': strategy_text[:100],
+                            'confidence': 0.7 if primitives.index(prim) == 0 else 0.5
+                        })
+        
+        return needs
+    
+    def process_agent_strategy_signals(
+        self,
+        min_frequency: int = 10,
+        unlock_threshold: Optional[int] = None,
+        unlock_percentage: float = 0.10
+    ) -> Dict[str, Any]:
+        """
+        Process all agent strategy signals to identify network-wide needs.
+        
+        This is the main entry point for strategy-driven unlock.
+        Scans network_failure_hypotheses for capability needs.
+        
+        ADAPTIVE THRESHOLD:
+        - If unlock_threshold is None, calculates based on active agent count
+        - unlock_percentage (default 10%) of active agents must express need
+        - Minimum floor of 15 to prevent noise-based unlocks
+        - Maximum cap of 100 to prevent very large networks from being too slow
+        
+        Args:
+            min_frequency: Minimum times a need must be expressed to track (default 10)
+            unlock_threshold: Fixed threshold (if None, uses adaptive)
+            unlock_percentage: Percentage of active agents for adaptive threshold (default 10%)
+            
+        Returns:
+            Summary of needs detected and any unlocks triggered
+        """
+        results = {
+            'strategies_scanned': 0,
+            'needs_detected': {},
+            'unlocks_triggered': [],
+            'unlock_threshold_used': 0,
+            'active_agents': 0,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        
+        try:
+            # Calculate adaptive threshold if not provided
+            if unlock_threshold is None:
+                # Get active agent count
+                agent_count = self.db.execute_query("""
+                    SELECT COUNT(*) as cnt FROM agents WHERE is_active = 1
+                """)
+                active_agents = agent_count[0]['cnt'] if agent_count else 100
+                results['active_agents'] = active_agents
+                
+                # Adaptive: unlock_percentage of active agents, with floor/ceiling
+                calculated = int(active_agents * unlock_percentage)
+                unlock_threshold = max(15, min(100, calculated))  # Floor 15, cap 100
+                
+                logger.info(f"[CODS-TEACHER] Adaptive threshold: {unlock_threshold} "
+                           f"({unlock_percentage:.0%} of {active_agents} agents)")
+            
+            results['unlock_threshold_used'] = unlock_threshold
+            
+            # Get all unique strategies from the network
+            strategies = self.db.execute_query("""
+                SELECT win_strategy, COUNT(*) as frequency
+                FROM network_failure_hypotheses
+                WHERE win_strategy IS NOT NULL
+                GROUP BY win_strategy
+                ORDER BY frequency DESC
+                LIMIT 100
+            """)
+            
+            if not strategies:
+                logger.info("[CODS-TEACHER] No agent strategies found to analyze")
+                return results
+            
+            results['strategies_scanned'] = len(strategies)
+            
+            # Parse each strategy for needs
+            for strat in strategies:
+                text = strat['win_strategy']
+                frequency = strat['frequency']
+                
+                needs = self.parse_strategy_for_needs(text)
+                
+                for need in needs:
+                    prim = need['primitive']
+                    if prim not in results['needs_detected']:
+                        results['needs_detected'][prim] = {
+                            'total_frequency': 0,
+                            'patterns': [],
+                            'status': 'locked'
+                        }
+                    
+                    results['needs_detected'][prim]['total_frequency'] += frequency
+                    if need['pattern_matched'] not in results['needs_detected'][prim]['patterns']:
+                        results['needs_detected'][prim]['patterns'].append(need['pattern_matched'])
+            
+            # Check for unlock threshold
+            for prim, data in results['needs_detected'].items():
+                if data['total_frequency'] >= unlock_threshold:
+                    # Try to unlock this primitive
+                    success = self._attempt_need_based_unlock(
+                        prim, 
+                        data['total_frequency'],
+                        data['patterns']
+                    )
+                    if success:
+                        results['unlocks_triggered'].append({
+                            'primitive': prim,
+                            'frequency': data['total_frequency'],
+                            'reason': 'network_need_threshold'
+                        })
+            
+            # Record primitive needs to hints table for tracking
+            self._record_strategy_needs(results['needs_detected'])
+            
+            # Log summary
+            if results['needs_detected']:
+                top_needs = sorted(
+                    results['needs_detected'].items(),
+                    key=lambda x: x[1]['total_frequency'],
+                    reverse=True
+                )[:5]
+                logger.info(f"[CODS-TEACHER] Top needs: " + 
+                           ", ".join(f"{p}({d['total_frequency']}x)" for p, d in top_needs))
+            
+            if results['unlocks_triggered']:
+                logger.info(f"[CODS-TEACHER] Unlocked {len(results['unlocks_triggered'])} primitives!")
+            
+        except Exception as e:
+            logger.error(f"[CODS-TEACHER] Error processing strategies: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def _attempt_need_based_unlock(
+        self,
+        primitive_name: str,
+        frequency: int,
+        patterns: List[str]
+    ) -> bool:
+        """
+        Attempt to unlock a primitive based on expressed network need.
+        
+        Unlike discovery-based unlock, this is triggered by high frequency
+        of agents expressing a capability need in their strategies.
+        
+        Args:
+            primitive_name: Primitive to unlock
+            frequency: How many times agents expressed need
+            patterns: What patterns were matched
+            
+        Returns:
+            True if unlock successful
+        """
+        try:
+            # Verify primitive exists and is locked
+            status = self.unlock_manager.get_status(primitive_name)
+            if status != PrimitiveStatus.LOCKED:
+                logger.debug(f"[CODS-TEACHER] {primitive_name} not locked (status={status})")
+                return False
+            
+            # Record the unlock attempt
+            attempt_id = self.unlock_manager.record_unlock_attempt(
+                primitive_name=primitive_name,
+                discovered_pattern={'type': 'need_based', 'patterns': patterns},
+                game_ids_tested=['network_aggregate'],
+                success_rate=1.0,  # Need-based = 100% valid
+                cross_game_success_rate=1.0,  # Network-wide = cross-game
+                agent_id='network_collective',
+                generation=self._context.generation if self._context else 0
+            )
+            
+            # Approve the unlock - network need is sufficient
+            reasoning = (f"Network expressed need {frequency} times via patterns: "
+                        f"{', '.join(patterns[:3])}")
+            
+            success = self.unlock_manager.approve_unlock(
+                attempt_id=attempt_id,
+                oracle_reasoning=reasoning,
+                similarity=0.95  # High similarity for need-based
+            )
+            
+            if success:
+                logger.info(f"[CODS-TEACHER] NETWORK UNLOCKED: {primitive_name} "
+                           f"(expressed {frequency}x)")
+                
+                # Note: The unlock is already recorded by approve_unlock
+                # No separate record_decision call needed
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"[CODS-TEACHER] Unlock attempt failed for {primitive_name}: {e}")
+            return False
+    
+    def _record_strategy_needs(self, needs: Dict[str, Dict]) -> None:
+        """Record detected needs to primitive hints table."""
+        try:
+            for prim, data in needs.items():
+                hint_id = f"need_{prim}_{uuid.uuid4().hex[:8]}"
+                details = json.dumps({
+                    'suggested': prim,
+                    'frequency': data['total_frequency'],
+                    'patterns': data['patterns']
+                })
+                
+                self.db.execute_query("""
+                    INSERT OR REPLACE INTO cods_primitive_hints
+                    (hint_id, game_type, source, hint_type, confidence, details, recorded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    hint_id,
+                    'network_aggregate',
+                    'strategy_expression',
+                    'capability_need',
+                    min(1.0, data['total_frequency'] / 100.0),
+                    details,
+                    datetime.utcnow().isoformat()
+                ))
+        except Exception as e:
+            logger.debug(f"[CODS-TEACHER] Error recording needs: {e}")
+    
+    # ======================================================================
+    # AGENT HELP REQUEST SYSTEM
+    # ======================================================================
+    # Agents can actively request specific capabilities they need.
+    # This is different from passive strategy analysis - it's an explicit
+    # "I need X to solve this problem" request.
+    # ======================================================================
+    
+    def request_help(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int,
+        need_description: str,
+        requested_capability: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Agent actively requests help by describing what they need.
+        
+        This is the "student asking for help" interface. Agents can describe
+        what they're struggling with and optionally request specific primitives.
+        
+        Args:
+            agent_id: Agent making the request
+            game_id: Game they're struggling with
+            level: Level they're stuck on
+            need_description: Natural language description of what they need
+            requested_capability: Optional specific primitive they think they need
+            
+        Returns:
+            Response with available help, suggested primitives, or cohort wisdom
+        """
+        response = {
+            'help_provided': False,
+            'available_primitives': [],
+            'suggested_actions': [],
+            'cohort_wisdom': None,
+            'unlock_triggered': False,
+            'message': ''
+        }
+        
+        try:
+            # 1. Parse what the agent needs
+            needs = self.parse_strategy_for_needs(need_description)
+            
+            # 2. Check if any needed primitives are already available
+            available = []
+            locked_needs = []
+            
+            for need in needs:
+                prim_name = need['primitive']
+                status = self.unlock_manager.get_status(prim_name)
+                if status in [PrimitiveStatus.UNLOCKED, PrimitiveStatus.GRANDFATHERED]:
+                    available.append({
+                        'primitive': prim_name,
+                        'status': str(status),
+                        'description': self._get_primitive_description(prim_name)
+                    })
+                elif status == PrimitiveStatus.LOCKED:
+                    locked_needs.append(prim_name)
+            
+            response['available_primitives'] = available
+            
+            if available:
+                response['help_provided'] = True
+                response['message'] = f"You already have access to: {', '.join([p['primitive'] for p in available])}"
+            
+            # 3. Record the help request (contributes to unlock threshold)
+            self._record_help_request(agent_id, game_id, level, need_description, locked_needs)
+            
+            # 4. If specific capability requested and it's locked, record that need
+            if requested_capability:
+                status = self.unlock_manager.get_status(requested_capability)
+                if status == PrimitiveStatus.LOCKED:
+                    self._record_help_request(
+                        agent_id, game_id, level, 
+                        f"Explicit request: {requested_capability}", 
+                        [requested_capability]
+                    )
+                    response['message'] += f" Request for '{requested_capability}' recorded."
+            
+            # 5. Suggest actions based on available primitives
+            if available:
+                for prim in available:
+                    suggestion = self._primitive_to_action_suggestion(prim['primitive'])
+                    if suggestion:
+                        response['suggested_actions'].append(suggestion)
+            
+            logger.info(f"[CODS-HELP] Agent {agent_id[:8]} requested help on {game_id}/{level}: "
+                       f"needs={len(needs)}, available={len(available)}, locked={len(locked_needs)}")
+            
+        except Exception as e:
+            logger.warning(f"[CODS-HELP] Help request processing error: {e}")
+            response['message'] = f"Error processing help request: {e}"
+        
+        return response
+    
+    def _record_help_request(
+        self, 
+        agent_id: str, 
+        game_id: str, 
+        level: int, 
+        description: str,
+        locked_needs: List[str]
+    ) -> None:
+        """Record agent help request to database for unlock threshold tracking."""
+        try:
+            for prim in locked_needs:
+                self.db.execute_query("""
+                    INSERT INTO cods_primitive_hints
+                    (hint_id, game_type, source, hint_type, confidence, details, recorded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    f"help_{agent_id[:8]}_{prim}_{uuid.uuid4().hex[:6]}",
+                    game_id,
+                    f"agent_request:{agent_id}",
+                    'explicit_help_request',
+                    0.9,  # High confidence for explicit requests
+                    json.dumps({
+                        'agent_id': agent_id,
+                        'game_id': game_id,
+                        'level': level,
+                        'description': description[:200],
+                        'primitive_requested': prim
+                    }),
+                    datetime.utcnow().isoformat()
+                ))
+        except Exception as e:
+            logger.debug(f"[CODS-HELP] Failed to record help request: {e}")
+    
+    def _get_primitive_description(self, primitive_name: str) -> str:
+        """Get human-readable description of a primitive."""
+        descriptions = {
+            'flood_fill': 'Fill connected regions with a color',
+            'count_objects': 'Count distinct objects by color',
+            'detect_symmetry': 'Detect horizontal/vertical symmetry',
+            'get_bounding_box': 'Find the bounding rectangle of an object',
+            'extract_objects': 'Separate individual objects from background',
+            'apply_transformation': 'Apply rotation, flip, or scale',
+            'find_pattern': 'Identify repeating patterns',
+            'measure_distance': 'Calculate distances between objects',
+            'trace_path': 'Follow a path between points',
+            'identify_goal': 'Identify goal/target objects',
+        }
+        return descriptions.get(primitive_name, f'Primitive: {primitive_name}')
+    
+    def _primitive_to_action_suggestion(self, primitive_name: str) -> Optional[Dict[str, Any]]:
+        """Convert a primitive to an action suggestion for the agent."""
+        suggestions = {
+            'flood_fill': {'action': 6, 'reasoning': 'Click to fill connected region'},
+            'detect_symmetry': {'action': 5, 'reasoning': 'Wait to analyze symmetry'},
+            'trace_path': {'action': 1, 'reasoning': 'Move along detected path'},
+            'identify_goal': {'action': 6, 'reasoning': 'Click on identified goal'},
+        }
+        return suggestions.get(primitive_name)
+    
+    # ======================================================================
+    # PRIMITIVE INVENTORY (Assessment Interface)
+    # ======================================================================
+    # Track what primitives the network has access to and is using
+    # ======================================================================
+    
+    def get_primitive_inventory(self) -> Dict[str, Any]:
+        """
+        Get comprehensive inventory of all primitives.
+        
+        This provides visibility into what capabilities the network has:
+        - Seed primitives (always available)
+        - Grandfathered (given for free)
+        - Unlocked (earned through discovery or need)
+        - Locked (not yet available)
+        - Novel (discovered, no human analog)
+        - Usage statistics
+        
+        Returns:
+            Complete primitive inventory for assessment
+        """
+        inventory = {
+            'seed': [],
+            'grandfathered': [],
+            'unlocked': [],
+            'locked': [],
+            'novel': [],
+            'usage_stats': {},
+            'summary': {}
+        }
+        
+        try:
+            # Seed primitives - get list of names
+            inventory['seed'] = self.seeds.list_all()
+            
+            # Note: Seed primitives are always available, no usage tracking needed
+            # (they're internal Python functions, not database-tracked)
+            
+            # Grandfathered primitives
+            grandfathered = self.db.execute_query("""
+                SELECT primitive_name, category, description, 
+                       COALESCE(times_used, 0) as times_used
+                FROM primitive_status
+                WHERE status = 'grandfathered'
+                ORDER BY times_used DESC
+            """)
+            if grandfathered:
+                for g in grandfathered:
+                    inventory['grandfathered'].append({
+                        'name': g['primitive_name'],
+                        'category': g['category'],
+                        'description': g['description']
+                    })
+                    if g['times_used'] > 0:
+                        inventory['usage_stats'][g['primitive_name']] = {
+                            'calls': g['times_used'],
+                            'type': 'grandfathered'
+                        }
+            
+            # Unlocked primitives
+            unlocked = self.db.execute_query("""
+                SELECT primitive_name, category, description, unlocked_at,
+                       unlocked_by_agent, COALESCE(times_used, 0) as times_used
+                FROM primitive_status
+                WHERE status = 'unlocked'
+                ORDER BY unlocked_at DESC
+            """)
+            if unlocked:
+                for u in unlocked:
+                    inventory['unlocked'].append({
+                        'name': u['primitive_name'],
+                        'category': u['category'],
+                        'unlocked_at': u['unlocked_at'],
+                        'unlocked_by': u['unlocked_by_agent']
+                    })
+                    if u['times_used'] > 0:
+                        inventory['usage_stats'][u['primitive_name']] = {
+                            'calls': u['times_used'],
+                            'type': 'unlocked'
+                        }
+            
+            # Locked primitives
+            inventory['locked'] = self.unlock_manager.list_locked()
+            
+            # Novel primitives
+            inventory['novel'] = self.unlock_manager.list_novel()
+            for n in inventory['novel']:
+                if n.get('times_used', 0) > 0:
+                    inventory['usage_stats'][n['discovered_name']] = {
+                        'calls': n['times_used'],
+                        'type': 'novel',
+                        'success_rate': n.get('success_rate', 0)
+                    }
+            
+            # Summary
+            inventory['summary'] = {
+                'total_available': (len(inventory['seed']) + 
+                                   len(inventory['grandfathered']) + 
+                                   len(inventory['unlocked']) +
+                                   len(inventory['novel'])),
+                'seed_count': len(inventory['seed']),
+                'grandfathered_count': len(inventory['grandfathered']),
+                'unlocked_count': len(inventory['unlocked']),
+                'locked_count': len(inventory['locked']),
+                'novel_count': len(inventory['novel']),
+                'total_usage_tracked': sum(
+                    s['calls'] for s in inventory['usage_stats'].values()
+                ),
+                'most_used': sorted(
+                    inventory['usage_stats'].items(),
+                    key=lambda x: x[1]['calls'],
+                    reverse=True
+                )[:10]
+            }
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error getting primitive inventory: {e}")
+            inventory['error'] = str(e)
+        
+        return inventory
+    
+    def get_composed_operator_inventory(self) -> Dict[str, Any]:
+        """
+        Get inventory of composed operators created by the network.
+        
+        Returns:
+            Operator inventory with usage and success stats
+        """
+        inventory = {
+            'operators': [],
+            'by_status': {},
+            'most_successful': [],
+            'most_used': [],
+            'summary': {}
+        }
+        
+        try:
+            # Get all operators
+            operators = self.db.execute_query("""
+                SELECT operator_id, name, status, composition_tree,
+                       times_tested, successes, success_rate,
+                       created_by_agent, created_at
+                FROM composed_operators
+                WHERE status != 'pruned'
+                ORDER BY success_rate DESC, times_tested DESC
+            """)
+            
+            if operators:
+                for op in operators:
+                    op_dict = dict(op)
+                    inventory['operators'].append(op_dict)
+                    
+                    # Group by status
+                    status = op['status']
+                    if status not in inventory['by_status']:
+                        inventory['by_status'][status] = 0
+                    inventory['by_status'][status] += 1
+                
+                # Most successful (min 5 tests, sorted by success rate)
+                inventory['most_successful'] = [
+                    {'name': op['name'], 'success_rate': op['success_rate'], 
+                     'times_tested': op['times_tested']}
+                    for op in operators
+                    if op['times_tested'] >= 5
+                ][:10]
+                
+                # Most used
+                inventory['most_used'] = sorted(
+                    [{'name': op['name'], 'times_tested': op['times_tested']}
+                     for op in operators],
+                    key=lambda x: x['times_tested'],
+                    reverse=True
+                )[:10]
+            
+            inventory['summary'] = {
+                'total_operators': len(inventory['operators']),
+                'by_status': inventory['by_status'],
+                'with_success_rate_above_70': sum(
+                    1 for op in inventory['operators']
+                    if (op['success_rate'] or 0) >= 0.7 and op['times_tested'] >= 5
+                )
+            }
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error getting operator inventory: {e}")
+            inventory['error'] = str(e)
+        
+        return inventory
+
     def _ensure_failure_tables(self) -> None:
         """Ensure failure-driven learning tables exist."""
         try:
