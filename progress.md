@@ -1,5 +1,96 @@
 # Ouroboros Progress Log
 
+## Session: December 25, 2025 (7:38 PM) - CRITICAL BUG FIX
+
+---
+
+### Critical Bug Discovery: game_type Storage Error
+
+**Timestamp**: 7:38 PM  
+**Status**: BUG FIXED - Sequence Lookup Now Works
+
+---
+
+#### The Problem
+
+Agents were completing Level 1 but ending games early with "NOT FINISHED" status. Investigation revealed a **critical bug** in how `game_type` was being stored in the `winning_sequences` table.
+
+**Root Cause**: In `_capture_winning_sequence()`, the code was calling:
+```python
+game_type = self._classify_game_type(actions)  # WRONG!
+```
+This returned action pattern classifications like:
+- `diverse_actions`
+- `mixed_actions`
+- `action6_only`
+- `coordinate_heavy`
+
+Instead of actual game types like:
+- `ft09`, `sp80`, `as66`, `lp85`, `ls20`, `vc33`
+
+**Impact**: When agents tried to look up sequences by game_type (e.g., `ft09`), they found NOTHING because the database only had `diverse_actions`, etc.
+
+---
+
+#### Fixes Applied
+
+| Fix | File | Line | Description |
+|-----|------|------|-------------|
+| 1 | `core_gameplay.py` | ~7935 | Changed `game_type = self._classify_game_type(actions)` to `game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]` |
+| 2 | `core_gameplay.py` | ~7774-7810 | Fixed `_is_frontier_level()` to query by `game_type` instead of exact `game_id` |
+| 3 | Database | N/A | SQL UPDATE to fix 354 existing records |
+
+**Database Before Fix**:
+```
+action6_only: 3, coordinate_heavy: 10, diverse_actions: 329, mixed_actions: 12
+```
+
+**Database After Fix**:
+```
+as66: 31, ft09: 13, lp85: 212, ls20: 76, sp80: 11, vc33: 11
+```
+
+---
+
+#### Verification Results
+
+```
+=== FT09 SEQUENCES (AFTER FIX) ===
+  L1: 3 sequences ACTIVE
+  L1: 9 sequences inactive
+  L2: 1 sequences inactive
+
+=== ALL GAME TYPES - LEVEL COVERAGE ===
+  as66: max_level=4, 17 active sequences
+  ft09: max_level=1, 3 active sequences
+  lp85: max_level=1, 3 active sequences
+  ls20: max_level=1, 3 active sequences
+  sp80: max_level=1, 3 active sequences
+  vc33: max_level=2, 4 active sequences
+
+[OK] All game_types are correct!
+```
+
+---
+
+#### Expected Behavior After Fix
+
+1. **Sequence Lookup**: Agents can now find sequences for their game type
+2. **Frontier Detection**: `_is_frontier_level()` correctly identifies unbeaten levels
+3. **Continuation**: After replaying L1, agents should now explore L2+ as frontier
+
+---
+
+#### Type Errors Fixed (Earlier This Session)
+
+| File | Issue | Fix |
+|------|-------|-----|
+| `seed_primitives.py` | `List[int] = None` | Changed to `Optional[List[int]] = None` |
+| `seed_primitives.py` | `P()` return type | Changed to `Optional[Primitive]` |
+| `test_developmental_systems.py` | 7 potential None dereferences | Added `assert result is not None` guards |
+
+---
+
 ## Session: December 25, 2025 (8:01:03 AM)
 
 ---

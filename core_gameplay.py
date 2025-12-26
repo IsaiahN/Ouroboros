@@ -7778,8 +7778,11 @@ class GameplayEngine:
         A frontier level is one where network_max_level < current_level,
         meaning no agent has ever solved this level before.
         
+        BUG FIX (2024-12-25): Query by game_type (e.g., 'ft09'), not exact game_id,
+        so sequences from previous sessions of the same game type are found.
+        
         Args:
-            game_id: Current game ID
+            game_id: Current game ID (e.g., 'ft09-abc123')
             level: Current level number
             
         Returns:
@@ -7789,12 +7792,15 @@ class GameplayEngine:
             return True  # Assume frontier if no game context
         
         try:
-            # Query the max level achieved by any sequence for this game
+            # Extract game_type from game_id (e.g., 'ft09' from 'ft09-abc123')
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+            
+            # Query the max level achieved by any sequence for this game TYPE
             result = self.db.execute_query("""
                 SELECT MAX(level_number) as max_level
                 FROM winning_sequences
-                WHERE game_id = ? AND is_active = 1
-            """, (game_id,))
+                WHERE game_type = ? AND is_active = 1
+            """, (game_type,))
             
             if result and result[0] and result[0].get('max_level'):
                 network_max = result[0]['max_level']
@@ -7932,7 +7938,14 @@ class GameplayEngine:
             
             # Detect pattern tags and abstract pattern signature
             pattern_tags = self._detect_pattern_tags(actions, coordinates)
-            game_type = self._classify_game_type(actions)
+            # BUG FIX (2024-12-25): game_type should be the ACTUAL game type from game_id,
+            # not an action pattern classification. Action patterns go in pattern_tags.
+            # Extract game_type from game_id (e.g., "ft09" from "ft09-abc123")
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+            # Add action pattern to pattern_tags (was incorrectly being used as game_type)
+            action_pattern = self._classify_game_type(actions)
+            if action_pattern and action_pattern not in pattern_tags:
+                pattern_tags.append(action_pattern)
             pattern_signature = self._detect_frame_pattern(initial_frame, final_frame)
             
             # Check if we already have a winning sequence for this game/level
