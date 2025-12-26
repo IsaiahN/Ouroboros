@@ -101,6 +101,14 @@ except ImportError:
     get_seed_primitives = None
     SeedPrimitiveRegistry = None
 
+# Terminal Pattern Detector - Foresight to avoid game_over
+try:
+    from terminal_pattern_detector import TerminalPatternDetector
+    TERMINAL_DETECTOR_AVAILABLE = True
+except ImportError:
+    TERMINAL_DETECTOR_AVAILABLE = False
+    TerminalPatternDetector = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -423,6 +431,18 @@ class GameplayEngine:
             logger.info("Baby primitives initialized (seed_primitives integration)")
         else:
             logger.debug("Baby primitives not available (seed_primitives import failed)")
+        
+        # TERMINAL PATTERN DETECTOR - Foresight to avoid game_over
+        # Tracks frame states that led to game_over and warns agents before fatal actions
+        if TERMINAL_DETECTOR_AVAILABLE:
+            try:
+                self.terminal_detector = TerminalPatternDetector(self.db)
+                logger.info("Terminal pattern detector initialized (game_over foresight)")
+            except Exception as e:
+                self.terminal_detector = None
+                logger.debug(f"Terminal detector init failed: {e}")
+        else:
+            self.terminal_detector = None
         
         # NEW: Breakthrough systems initialization
         try:
@@ -2116,6 +2136,47 @@ class GameplayEngine:
                         # Q5: Mark last action as causing game-over for learning
                         if hasattr(self, '_recent_action_traces') and self._recent_action_traces:
                             self._recent_action_traces[-1]['outcome_type'] = 'game_over'
+                            
+                            # TERMINAL PATTERN DETECTION: Record the death signature
+                            # This gives future agents FORESIGHT to avoid this fatal action
+                            if hasattr(self, 'terminal_detector') and self.terminal_detector:
+                                try:
+                                    last_trace = self._recent_action_traces[-1]
+                                    frame_before = last_trace.get('frame_before', [])
+                                    fatal_action = last_trace.get('action_type', '')
+                                    
+                                    # Extract action number
+                                    if isinstance(fatal_action, str) and fatal_action.upper().startswith('ACTION'):
+                                        fatal_action_num = int(fatal_action.upper().replace('ACTION', ''))
+                                    elif isinstance(fatal_action, int):
+                                        fatal_action_num = fatal_action
+                                    else:
+                                        fatal_action_num = None
+                                    
+                                    if frame_before and fatal_action_num:
+                                        # Get recent action sequence
+                                        pre_death_actions = [
+                                            int(str(t.get('action_type', '')).upper().replace('ACTION', ''))
+                                            for t in self._recent_action_traces[-5:]
+                                            if str(t.get('action_type', '')).upper().startswith('ACTION')
+                                        ]
+                                        
+                                        agent_id = self.game_config.get('agent_id', 'unknown')
+                                        generation = self.game_config.get('generation', 0)
+                                        
+                                        pattern_id = self.terminal_detector.record_terminal_pattern(
+                                            game_id=game_id,
+                                            level_number=current_level,
+                                            frame_before_death=frame_before,
+                                            pre_death_actions=pre_death_actions,
+                                            fatal_action=fatal_action_num,
+                                            agent_id=agent_id,
+                                            generation=generation
+                                        )
+                                        if pattern_id:
+                                            logger.info(f"[FORESIGHT] Recorded terminal pattern: {pattern_id[:20]}")
+                                except Exception as e:
+                                    logger.debug(f"Terminal pattern recording failed: {e}")
                         break
                     else:
                         # Possible premature GAME_OVER - some games do this after levels
@@ -3129,14 +3190,15 @@ class GameplayEngine:
         """Select the next action to take with reasoning.
         
         Uses:
-        0. NEW: Learned rules from network (Step 8 - query before all other strategies)
-        1. NEW: Hierarchical subgoal planning (multi-step strategy)
-        2. PHASE 4.5: Sensation-based navigation (emotional intelligence for actions 1-7)
-        3. NEW: Network failure hypotheses (learn from others' failures)
-        4. PHASE 3: Viral package influence (prefer successful patterns)
-        5. PHASE 3: Pariah avoidance (avoid known failures)
-        6. Meta-learning pattern detection
-        7. Default strategy
+        0. NEW: Terminal pattern foresight (avoid known fatal actions)
+        1. NEW: Learned rules from network (Step 8 - query before all other strategies)
+        2. NEW: Hierarchical subgoal planning (multi-step strategy)
+        3. PHASE 4.5: Sensation-based navigation (emotional intelligence for actions 1-7)
+        4. NEW: Network failure hypotheses (learn from others' failures)
+        5. PHASE 3: Viral package influence (prefer successful patterns)
+        6. PHASE 3: Pariah avoidance (avoid known failures)
+        7. Meta-learning pattern detection
+        8. Default strategy
 
         Args:
             game_state: Current game state
@@ -4256,6 +4318,56 @@ class GameplayEngine:
             reasoning_parts.append(f"Standard {strategy} strategy")
         
         final_reasoning = " | ".join(reasoning_parts)
+        
+        # =====================================================================
+        # TERMINAL PATTERN FORESIGHT CHECK
+        # Before returning the action, check if it might lead to game_over
+        # This gives agents the ability to AVOID fatal mistakes
+        # =====================================================================
+        if hasattr(self, 'terminal_detector') and self.terminal_detector and game_state.frame:
+            try:
+                # Extract action number from base_action
+                action_to_check = None
+                if isinstance(base_action, str) and base_action.upper().startswith('ACTION'):
+                    action_to_check = int(base_action.upper().replace('ACTION', ''))
+                elif isinstance(base_action, int):
+                    action_to_check = base_action
+                
+                if action_to_check:
+                    # Get recent actions for pattern matching
+                    recent_action_nums = []
+                    if hasattr(self, '_recent_action_traces') and self._recent_action_traces:
+                        for t in self._recent_action_traces[-5:]:
+                            act = t.get('action_type', '')
+                            if isinstance(act, str) and act.upper().startswith('ACTION'):
+                                recent_action_nums.append(int(act.upper().replace('ACTION', '')))
+                            elif isinstance(act, int):
+                                recent_action_nums.append(act)
+                    
+                    # Check for terminal danger
+                    game_id = self.session_manager.current_game_id or ''
+                    current_level_check = int(game_state.score) + 1
+                    
+                    danger = self.terminal_detector.check_for_terminal_danger(
+                        game_id=game_id,
+                        level_number=current_level_check,
+                        current_frame=game_state.frame,
+                        recent_actions=recent_action_nums,
+                        planned_action=action_to_check,
+                        min_confidence=0.65
+                    )
+                    
+                    if danger and danger.get('warning'):
+                        # DANGER DETECTED! Use alternative action
+                        alt_action = danger.get('alternative_action', action_to_check)
+                        if alt_action != action_to_check:
+                            logger.info(f"[FORESIGHT] Avoiding ACTION{action_to_check} "
+                                       f"(caused game_over {danger.get('confirmed_lethal', 0)} times) -> "
+                                       f"ACTION{alt_action}")
+                            base_action = f"ACTION{alt_action}"
+                            final_reasoning = f"FORESIGHT: {danger.get('reason', 'Avoided fatal action')} | {final_reasoning}"
+            except Exception as e:
+                logger.debug(f"Terminal foresight check failed: {e}")
         
         return base_action, final_reasoning
 

@@ -37,12 +37,63 @@ class ViralPackageEngine:
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self._ensure_frontier_columns()
+        self._ensure_pariah_level_column()  # Backfill pariah source levels
         
         # Phase 4.5: Initialize sensation engine if available
         if SENSATION_AVAILABLE:
             self.sensation_engine = SensationEngine(db)
         else:
             self.sensation_engine = None
+    
+    def _ensure_pariah_level_column(self):
+        """
+        Ensure pariahs have source_level_number and backfill existing ones.
+        
+        Backfill logic: Use game's max completed level as the source level.
+        Example: If as66 has been beaten to level 4, all as66 pariahs get source_level_number=4.
+        This means on level 5 (frontier), those pariahs apply at only 5% strength.
+        """
+        try:
+            # Check if column exists
+            self.db.execute_query("SELECT source_level_number FROM pariahs LIMIT 1")
+        except Exception:
+            # Column doesn't exist - add it
+            try:
+                self.db.execute_query("""
+                    ALTER TABLE pariahs ADD COLUMN source_level_number INTEGER DEFAULT 1
+                """)
+                print("[SCHEMA] Added source_level_number to pariahs table")
+            except Exception:
+                pass
+        
+        # Always try to backfill pariahs with source_level_number = 1 (default/unknown)
+        # Use game's max beaten level as the assumed source level
+        try:
+            updated = self.db.execute_query("""
+                UPDATE pariahs 
+                SET source_level_number = (
+                    SELECT COALESCE(MAX(gr.level_completions), 1)
+                    FROM game_results gr
+                    WHERE gr.game_id LIKE substr(pariahs.source_game_id, 1, 4) || '%'
+                    AND gr.level_completions > 0
+                )
+                WHERE source_level_number = 1 
+                AND source_game_id IS NOT NULL
+                AND EXISTS (
+                    SELECT 1 FROM game_results gr2
+                    WHERE gr2.game_id LIKE substr(pariahs.source_game_id, 1, 4) || '%'
+                    AND gr2.level_completions > 1
+                )
+            """)
+            # Check if any were updated
+            check = self.db.execute_query("""
+                SELECT COUNT(*) as cnt FROM pariahs 
+                WHERE source_level_number > 1
+            """)
+            if check and check[0].get('cnt', 0) > 0:
+                print(f"[PARIAH] Backfilled {check[0]['cnt']} pariahs with source_level_number")
+        except Exception as e:
+            pass  # Silently continue if backfill fails
     
     def _ensure_frontier_columns(self):
         """Ensure frontier package columns exist in viral_information_packages table."""
@@ -441,7 +492,8 @@ class ViralPackageEngine:
                                    failed_actions: List[int],
                                    failed_coordinates: List[Tuple[int, int]],
                                    final_score: float,
-                                   generation: int) -> Optional[str]:
+                                   generation: int,
+                                   source_level_number: int = 1) -> Optional[str]:
         """
         Create a pariah (failure pattern) from a failed game.
         
@@ -451,6 +503,9 @@ class ViralPackageEngine:
         instead of generic "Failed with score X" messages. Pariahs are also marked
         as active and set to influence action selection.
         
+        FIXED (2025-12-26): Added source_level_number for level-scoped pariah penalties.
+        Pariahs from beaten levels apply weakly to frontier levels.
+        
         Args:
             game_id: Game where failure occurred
             agent_id: Agent who failed
@@ -458,6 +513,7 @@ class ViralPackageEngine:
             failed_coordinates: Coordinate sequence that failed
             final_score: Final score (low = worse failure)
             generation: Current generation
+            source_level_number: Level where failure occurred (for level-scoped penalties)
             
         Returns:
             pariah_id if created, None if failed
@@ -478,18 +534,39 @@ class ViralPackageEngine:
             # ================================================================
             failure_description = self._analyze_failure_pattern(failed_actions, failed_coordinates, final_score)
             
+            # Add source_level_number column if it doesn't exist (migration)
+            try:
+                self.db.execute_query("""
+                    ALTER TABLE pariahs ADD COLUMN source_level_number INTEGER DEFAULT 1
+                """)
+                # Backfill existing pariahs using game's max completed level
+                # Per user suggestion: "use game types top level completed as source_level_number"
+                self.db.execute_query("""
+                    UPDATE pariahs 
+                    SET source_level_number = COALESCE(
+                        (SELECT MAX(level_completions) 
+                         FROM game_results 
+                         WHERE game_id LIKE substr(pariahs.source_game_id, 1, 4) || '%'
+                         AND level_completions > 0),
+                        1
+                    )
+                    WHERE source_level_number IS NULL OR source_level_number = 1
+                """)
+            except Exception:
+                pass  # Column already exists
+            
             self.db.execute_query("""
                 INSERT INTO pariahs (
                     pariah_id, pariah_name, pariah_type,
                     action_sequence, coordinate_pattern, failure_description,
                     toxicity, detection_difficulty, context_specificity,
                     trigger_count, avg_score_loss,
-                    discovery_generation, source_game_id, source_agent_id,
+                    discovery_generation, source_game_id, source_agent_id, source_level_number,
                     is_active, last_triggered_generation, avoidance_success_rate
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 pariah_id,
-                f"Pariah_{game_id[:8]}_{generation}",
+                f"Pariah_{game_id[:8]}_L{source_level_number}_{generation}",
                 'action_sequence',
                 json.dumps(failed_actions),
                 json.dumps(failed_coordinates),
@@ -502,6 +579,7 @@ class ViralPackageEngine:
                 generation,
                 game_id,
                 agent_id,
+                source_level_number,  # NEW: Level where failure occurred
                 True,  # is_active
                 generation,
                 0.0  # No avoidance data yet
@@ -1037,21 +1115,55 @@ class ViralPackageEngine:
         
         return action_weights
     
-    def get_pariah_action_penalties(self, agent_id: str) -> Dict[int, float]:
+    def get_pariah_action_penalties(self, agent_id: str, 
+                                     game_id: str = None,
+                                     current_level: int = None) -> Dict[int, float]:
         """
         Get action penalties from pariahs this agent is aware of.
+        
+        FIXED (2025-12-26): Now applies level-aware decay.
+        Pariahs from beaten levels apply weakly to frontier levels.
+        
+        Level Decay Logic:
+        - Same level as pariah source: 100% penalty
+        - Adjacent level (+/- 1): 40% penalty
+        - 2+ levels away: 15% penalty
+        - On frontier AND pariah from beaten level: 5% penalty (just a hint)
+        
+        Args:
+            agent_id: Agent to get penalties for
+            game_id: Current game (for level context)
+            current_level: Current level number (for decay calculation)
         
         Returns:
             Dict mapping action_id -> penalty (higher = avoid this action more)
         """
-        # Get all pariahs this agent is aware of
+        # Get max beaten level for this game (to detect frontier)
+        max_beaten_level = 0
+        if game_id:
+            try:
+                result = self.db.execute_query("""
+                    SELECT MAX(level_completions) as max_level
+                    FROM game_results 
+                    WHERE game_id LIKE ? AND level_completions > 0
+                """, (f"{game_id[:4]}%",))
+                if result and result[0].get('max_level'):
+                    max_beaten_level = result[0]['max_level']
+            except Exception:
+                pass
+        
+        is_frontier = current_level is not None and current_level > max_beaten_level
+        
+        # Get all pariahs this agent is aware of (with level info)
         awareness = self.db.execute_query("""
             SELECT 
                 pa.pariah_id,
                 pa.awareness_level,
                 pa.avoidance_priority,
                 p.action_sequence,
-                p.toxicity
+                p.toxicity,
+                p.source_game_id,
+                COALESCE(p.source_level_number, 1) as source_level_number
             FROM agent_pariah_awareness pa
             JOIN pariahs p ON pa.pariah_id = p.pariah_id
             WHERE pa.agent_id = ? AND pa.is_active = TRUE AND p.is_active = TRUE
@@ -1064,13 +1176,49 @@ class ViralPackageEngine:
             try:
                 actions = json.loads(aware['action_sequence'])
                 
-                # Penalty for each action by awareness level, avoidance priority, and toxicity
-                penalty = (aware['awareness_level'] * 
-                          aware['avoidance_priority'] * 
-                          aware['toxicity'])
+                # Base penalty from awareness, priority, and toxicity
+                base_penalty = (aware['awareness_level'] * 
+                               aware['avoidance_priority'] * 
+                               aware['toxicity'])
+                
+                # ============================================================
+                # LEVEL-AWARE DECAY (2025-12-26)
+                # Pariahs from beaten levels shouldn't block frontier exploration
+                # ============================================================
+                level_decay = 1.0  # Default: full penalty
+                
+                pariah_game_id = aware.get('source_game_id', '')
+                pariah_level = aware.get('source_level_number', 1)
+                
+                # Only apply level decay if we have context AND same game
+                if current_level is not None and game_id and pariah_game_id:
+                    # Check if pariah is from same game type
+                    same_game = (game_id[:4] == pariah_game_id[:4])
+                    
+                    if same_game:
+                        level_distance = abs(current_level - pariah_level)
+                        
+                        if is_frontier and pariah_level <= max_beaten_level:
+                            # On frontier, pariahs from beaten territory = very weak
+                            level_decay = 0.05  # 5% - just a faint hint
+                        elif level_distance == 0:
+                            # Same level - full penalty
+                            level_decay = 1.0
+                        elif level_distance == 1:
+                            # Adjacent level - moderate decay
+                            level_decay = 0.4
+                        else:
+                            # 2+ levels away - heavy decay
+                            level_decay = 0.15
+                    else:
+                        # Different game entirely - weak cross-game hint
+                        level_decay = 0.1
+                
+                # Apply decayed penalty
+                final_penalty = base_penalty * level_decay
                 
                 for action in actions:
-                    action_penalties[action] = action_penalties.get(action, 0.0) + penalty
+                    action_penalties[action] = action_penalties.get(action, 0.0) + final_penalty
                     
             except (json.JSONDecodeError, TypeError):
                 continue
@@ -1364,8 +1512,8 @@ class ViralPackageEngine:
         # Combined tolerance (capped at 0.95 - always some caution)
         final_tolerance = min(0.95, base_tolerance + paralysis_boost)
         
-        # Get base pariah penalties
-        base_penalties = self.get_pariah_action_penalties(agent_id)
+        # Get base pariah penalties with level-aware decay
+        base_penalties = self.get_pariah_action_penalties(agent_id, game_id, level_number)
         
         # Apply tolerance reduction
         adjusted_penalties = {}
