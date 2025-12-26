@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
+
 """
 Specialist Coordinator - Matches games to specialist agents
 ===========================================================
@@ -13,14 +16,10 @@ Following Rule 3: Enhances existing code, doesn't replace
 Following Rule 10: No code drift - clean integration
 """
 
-import os
 import json
 import random
 from typing import Dict, List, Any, Optional, Tuple
 from database_interface import DatabaseInterface
-
-# Rule 1: Disable pycache
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 
 class SpecialistCoordinator:

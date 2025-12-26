@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """
 Concept Discovery Engine - Tier 4 of CODS Architecture
 

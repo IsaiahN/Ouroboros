@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """
 Rule Induction Engine - Learn abstract rules from successful game attempts
 ===========================================================================
@@ -12,16 +15,12 @@ Following Rule 2: All rules stored in database
 Following Rule 3: Integrates with existing gameplay systems
 """
 
-import os
 import json
 import uuid
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 from database_interface import DatabaseInterface
 from visual_reasoning_engine import VisualReasoningEngine
-
-# Rule 1: Disable pycache
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 
 class RuleInductionEngine:

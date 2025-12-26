@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """
 Visual Reasoning Engine - Extract semantic meaning from ARC grids
 ==================================================================
@@ -13,7 +16,6 @@ Following Rule 2: All analysis results stored in database
 Following Rule 3: Clean integration with existing systems
 """
 
-import os
 import numpy as np
 from typing import Dict, List, Any, Tuple, Optional
 from collections import Counter, defaultdict

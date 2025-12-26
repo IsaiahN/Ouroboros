@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
+
 """
 Meta-Learning Curriculum - Intelligent game selection for generalization
 =========================================================================
@@ -12,14 +15,10 @@ Following Rule 2: All progress tracked in database
 Following Rule 3: Integrates with existing gameplay systems
 """
 
-import os
 import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from database_interface import DatabaseInterface
-
-# Rule 1: Disable pycache
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 
 class MetaLearningCurriculum:

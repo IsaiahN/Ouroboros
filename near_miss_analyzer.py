@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
+
 """
 Near-Miss Analysis System - Learn from High-Score Failures
 ===========================================================
@@ -9,16 +12,12 @@ Following Rule 2: All analysis stored in database
 Following Rule 3: Enhances existing performance analysis
 """
 
-import os
 import json
 import uuid
 import logging
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from database_interface import DatabaseInterface
-
-# Rule 1: Disable pycache
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 logger = logging.getLogger(__name__)
 

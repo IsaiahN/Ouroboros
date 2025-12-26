@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """
 Subgoal Planning Activator (Competitive Improvement #3, +30% expected gain)
 
@@ -8,7 +11,7 @@ planning into action selection to break down complex levels into achievable step
 
 PROBLEM SOLVED:
 Currently: Agents make random/reactive decisions without goal decomposition
-New: Hierarchical goal planning → reach subgoal 1 → reach subgoal 2 → win level
+New: Hierarchical goal planning -> reach subgoal 1 -> reach subgoal 2 -> win level
 
 INTEGRATION POINTS:
 1. Action selection: Before choosing action, check if subgoal exists

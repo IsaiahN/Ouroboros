@@ -20,9 +20,9 @@ Created: 2025-12-02
 Status: FULLY IMPLEMENTED
 """
 
-import sys
 import os
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
+import sys
 sys.dont_write_bytecode = True
 
 from abc import ABC, abstractmethod

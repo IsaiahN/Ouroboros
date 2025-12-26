@@ -116,15 +116,14 @@ implements this architecture with specialist_mode and agi_mode support.
 """
 
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
+
 import json
 import uuid
 import asyncio
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from database_interface import DatabaseInterface
-
-# Rule 1: Disable pycache
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 
 class OuroborosCoordinator:

@@ -18,6 +18,8 @@ Integration Rule: Enhance existing systems, don't replace them.
 """
 
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
+
 import json
 import math
 import random
@@ -25,9 +27,6 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from database_interface import DatabaseInterface
-
-# Critical: Prevent .pyc file generation per Copilot Instructions Rule 1
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 def safe_json_parse(json_str, default=None):
     """Safely parse JSON string, returning default if invalid or empty."""

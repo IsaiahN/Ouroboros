@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
+
 """
 Counterfactual Reasoning Engine - "What If?" Analysis After Failures
 ====================================================================
@@ -9,16 +12,12 @@ Following Rule 2: All counterfactual analysis stored in database
 Following Rule 3: Enhances existing failure analysis systems
 """
 
-import os
 import json
 import uuid
 import logging
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from database_interface import DatabaseInterface
-
-# Rule 1: Disable pycache
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 logger = logging.getLogger(__name__)
 

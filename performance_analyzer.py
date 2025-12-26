@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """
 Performance Analyzer - Analyzes ARC performance data for Claude Code decision-making
 Provides comprehensive analysis of agent and population performance

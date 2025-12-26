@@ -423,8 +423,6 @@ class GameplayEngine:
             logger.info("Baby primitives initialized (seed_primitives integration)")
         else:
             logger.debug("Baby primitives not available (seed_primitives import failed)")
-        else:
-            self.cods_engine = None
         
         # NEW: Breakthrough systems initialization
         try:

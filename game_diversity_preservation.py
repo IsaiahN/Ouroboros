@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
+
 """
 Game Diversity Preservation System
 
