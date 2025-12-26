@@ -1,5 +1,156 @@
 # Ouroboros Progress Log
 
+## Session: December 26, 2025 (Morning) - Terminal Foresight + Level-Aware Pariahs + System Audit
+
+---
+
+### Approach: Multi-Pronged System Improvements
+
+**Timestamp**: 8:38:37 AM  
+**Status**: COMPLETED - All fixes implemented
+
+---
+
+### Context
+
+User identified that agents on frontier levels (e.g., as66 level 5) lacked foresight to avoid game_over actions, and pariahs from beaten levels were incorrectly blocking frontier exploration. Additionally, requested comprehensive audit of multiple gameplay subsystems.
+
+---
+
+### Part 1: Terminal Pattern Detector (Game Over Foresight)
+
+**Problem**: Agents learn "ACTION X led to game_over" but this is too generic. The SAME action might be safe in other contexts. What matters is CONTEXT (state) + ACTION = terminal.
+
+**Files Created**: `terminal_pattern_detector.py` (~350 lines)
+
+**Solution - Track "pre-death signatures"**:
+1. Hash of frame state before fatal action
+2. Last N actions leading up to game_over
+3. The fatal action itself
+
+**Key Classes**:
+- `TerminalPatternDetector` - Main engine
+
+**Key Methods**:
+- `record_terminal_pattern()` - Records death signature on game_over
+- `check_for_terminal_danger()` - Checks before action selection
+- `compute_frame_hash()` - Creates frame signature (exact or fuzzy)
+- `_suggest_alternative_action()` - Suggests safe alternative
+
+**Database Table**: `terminal_patterns`
+- `pattern_id`, `game_id`, `level_number`
+- `frame_hash`, `pre_death_actions`, `fatal_action`
+- `occurrence_count`, `confirmed_lethal`, `confidence`
+
+**Integration in core_gameplay.py**:
+- Import at line ~107
+- Initialization in `GameplayEngine.__init__` (~line 435)
+- Recording on game_over (~lines 2133-2172)
+- Foresight check before action selection (~lines 4318-4380)
+
+---
+
+### Part 2: Level-Aware Pariah Decay
+
+**Problem**: Pariahs from level 1 incorrectly blocking agents on level 5 (frontier), causing "analysis paralysis" where agents are scared to try anything.
+
+**Files Modified**: `viral_package_engine.py`
+
+**Changes**:
+1. Added `source_level_number` parameter to `create_pariah_from_failure()` (~line 440)
+2. Added ALTER TABLE migration + backfill logic (~lines 487-503)
+3. Rewrote `get_pariah_action_penalties()` with level-aware decay (~lines 1067-1180)
+4. Updated `get_role_adjusted_pariah_penalties()` to pass level context (~line 1453)
+5. Added `_ensure_pariah_level_column()` method (~lines 48-96)
+
+**Level Decay Logic**:
+| Context | Decay |
+|---------|-------|
+| Same level as pariah source | 100% penalty |
+| Adjacent level (+/- 1) | 40% penalty |
+| 2+ levels away | 15% penalty |
+| On frontier AND pariah from beaten level | 5% (just a hint) |
+| Different game | 10% (cross-game hint) |
+
+**Backfill Strategy**: Use game's max completed level as assumed source level for existing pariahs.
+
+---
+
+### Part 3: Comprehensive System Audit
+
+**User requested analysis of 10 subsystems**. Results:
+
+| System | Status | Issue | Fix Applied |
+|--------|--------|-------|-------------|
+| [ESCAPE]/Stuck Detection | [OK] | None | N/A |
+| Meta-Learner | [OK] | Coherent with CODS | N/A |
+| Extracted Rules | [PARTIAL] | Under-utilized | N/A |
+| [PARIAH] Backfill | [FIXED] | Repeated message | Yes |
+| [PKG] Level-Specific | [OK] | Expected behavior | N/A |
+| Sequence Recombinations | [LOW VALUE] | Rarely triggers | N/A |
+| Counterfactual Analyzer | [PARTIAL] | Needs 5+ actions | Expected |
+| Collective Reasoning | [FIXED] | Used live agents only | Yes |
+| World Model | [FIXED] | Not reinitialized on level change | Yes |
+| [3-TRY] Rule | [ACCEPTABLE] | Balances reliability | N/A |
+| Agent Operating Mode | [OK] | Well-designed | N/A |
+
+---
+
+### Part 4: Fixes Applied
+
+#### Fix 1: PARIAH Backfill Repeated Message
+**File**: `viral_package_engine.py` (lines 69-96)
+**Problem**: Printed every time ViralPackageEngine instantiated
+**Solution**: Count pariahs needing update BEFORE updating, only print if actual updates
+
+#### Fix 2: Collective Reasoning Uses Network History
+**File**: `collective_reasoning_engine.py` (lines 235-290)
+**Problem**: Required 3+ live agents from current generation only
+**Solution**: 3-tier fallback strategy:
+1. Try current generation agents first
+2. Fall back to last 5 generations if sparse
+3. Use top historical performers regardless of generation
+
+#### Fix 3: World Model Reinitialization on Level Change
+**File**: `core_gameplay.py` (lines 2775-2790)
+**Problem**: World model initialized once at game start, never refreshed
+**Solution**: Added reinitialization on level transition - new levels may have different obstacles/goals
+
+#### Fix 4: Emoji Violations (Rule 11)
+**File**: `core_gameplay.py`
+**Problem**: Unicode emojis causing Windows cp1252 encoding errors
+**Solution**: Replaced all emojis with ASCII tags:
+- `[RECOMB]` instead of DNA emoji
+- `[SENSATION]` instead of brain emoji
+- `[META]` instead of brain emoji
+- `[LEARNING]` instead of brain emoji
+
+---
+
+### Files Modified This Session
+
+| File | Changes |
+|------|---------|
+| `terminal_pattern_detector.py` | NEW - Game over foresight system |
+| `viral_package_engine.py` | Level-aware pariah decay + backfill fix |
+| `collective_reasoning_engine.py` | Network-based agent selection |
+| `core_gameplay.py` | Terminal detector integration, world model reinit, emoji fixes |
+
+---
+
+### Current Status
+
+**NO BLOCKERS** - All identified issues fixed. System ready for evolution run.
+
+**Key Improvements**:
+1. Agents can now anticipate fatal actions via terminal pattern detection
+2. Frontier exploration no longer blocked by beaten-level pariahs
+3. Collective reasoning works with sparse agent populations
+4. World model stays fresh across level transitions
+5. No more Windows encoding errors from emojis
+
+---
+
 ## Session: December 25, 2025 (Late Evening) - Assessment Gap Implementation
 
 ---

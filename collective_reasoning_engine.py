@@ -233,9 +233,15 @@ class CollectiveReasoningEngine:
             return None
     
     def _select_collective_agents(self, generation: int) -> List[Dict]:
-        """Select top-performing agents for collective reasoning"""
+        """
+        Select top-performing agents for collective reasoning.
+        
+        FIXED (2025-12-26): Now uses network historical performance, not just
+        current generation. This allows collective reasoning to work even with
+        few live agents by leveraging the network's accumulated knowledge.
+        """
         try:
-            # Get diverse top performers
+            # STRATEGY 1: Try current generation first
             agents = self.db.execute_query("""
                 SELECT agent_id, agent_type, avg_score_per_game,
                        total_games_won, score_efficiency
@@ -245,7 +251,40 @@ class CollectiveReasoningEngine:
                 LIMIT ?
             """, (generation, self.max_agents_for_collective))
             
-            return agents
+            if agents and len(agents) >= self.min_agents_for_collective:
+                return agents
+            
+            # STRATEGY 2: Fall back to recent generations (last 5)
+            # This uses network history when current generation is sparse
+            agents = self.db.execute_query("""
+                SELECT agent_id, agent_type, avg_score_per_game,
+                       total_games_won, score_efficiency
+                FROM agents
+                WHERE generation >= ? AND is_active = TRUE
+                ORDER BY avg_score_per_game DESC, total_games_won DESC
+                LIMIT ?
+            """, (max(0, generation - 5), self.max_agents_for_collective))
+            
+            if agents and len(agents) >= self.min_agents_for_collective:
+                self.logger.info(f"Using cross-generation agents for collective reasoning")
+                return agents
+            
+            # STRATEGY 3: Use top historical performers regardless of generation
+            # This ensures collective reasoning can always draw from network knowledge
+            agents = self.db.execute_query("""
+                SELECT agent_id, agent_type, avg_score_per_game,
+                       total_games_won, score_efficiency
+                FROM agents
+                WHERE total_games_won > 0
+                ORDER BY total_games_won DESC, avg_score_per_game DESC
+                LIMIT ?
+            """, (self.max_agents_for_collective,))
+            
+            if agents:
+                self.logger.info(f"Using historical top performers for collective reasoning")
+                return agents
+            
+            return []
             
         except Exception as e:
             self.logger.error(f"Error selecting agents: {e}")

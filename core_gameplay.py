@@ -2777,6 +2777,17 @@ class GameplayEngine:
                         level_start_action = action_count  # Mark where this level starts
                         consecutive_no_frame_change = 0  # CRITICAL FIX: Reset stuck state counter on level completion
                         
+                        # WORLD MODEL: Reinitialize for new level (2025-12-26)
+                        # New levels may have different obstacles/goals - refresh world model
+                        if SYMBOLIC_REASONING_AVAILABLE and self.symbolic_engine and game_state.frame:
+                            try:
+                                game_type = game_id[:4] if game_id else "unknown"
+                                self.symbolic_engine = SymbolicReasoningEngine(game_type, level=current_level)
+                                self.symbolic_engine.initialize(np.array(game_state.frame))
+                                logger.info(f"[WORLD-MODEL] Reinitialized for level {current_level}")
+                            except Exception as e:
+                                logger.debug(f"World model reinit for level {current_level} failed: {e}")
+                        
                         # NOTE: Old level-by-level sequence chaining was REMOVED (Dec 2024)
                         # Now using cumulative sequence approach: replay best sequence ONCE to frontier
                         # See 3-TRY FALLBACK SYSTEM above for the new approach
@@ -2949,7 +2960,7 @@ class GameplayEngine:
                 )
                 if recombinations:
                     results['recombinations_created'] = len(recombinations)
-                    logger.info(f"🧬 Agent {agent_id[:8]} created {len(recombinations)} sequence recombinations")
+                    logger.info(f"[RECOMB] Agent {agent_id[:8]} created {len(recombinations)} sequence recombinations")
             
             # PHASE 3: Viral Packages & Pariahs (AUTOMATIC - runs after EVERY game)
             # Bidirectional evolution: extract success patterns AND failure patterns
@@ -4167,14 +4178,14 @@ class GameplayEngine:
                 # If current action has strong negative bias, consider alternatives
                 if current_bias < -0.4:
                     emotion = self._get_emotion_label(navigation_state)
-                    logger.info(f"🧠 {emotion.capitalize()} agent avoiding {base_action} (sensation bias: {current_bias:.2f})")
+                    logger.info(f"[SENSATION] {emotion.capitalize()} agent avoiding {base_action} (sensation bias: {current_bias:.2f})")
                     
                     # Find best sensation-biased alternative
                     alternatives = [(act, bias) for act, bias in sensation_biases.items() if bias > 0.1]
                     
                     if alternatives:
                         best_alt, best_bias = max(alternatives, key=lambda x: x[1])
-                        logger.info(f"🧠 Switching to ACTION{best_alt} (positive sensation bias: {best_bias:.2f})")
+                        logger.info(f"[SENSATION] Switching to ACTION{best_alt} (positive sensation bias: {best_bias:.2f})")
                         base_action = f"ACTION{best_alt}"
                         sensation_reasoning = f"{emotion.capitalize()} state (nav: {navigation_state:.2f}) - switched from negative bias to positive alternative (bias: {best_bias:.2f})"
                     else:
@@ -4183,7 +4194,7 @@ class GameplayEngine:
                 # If current action has positive bias, reinforce it
                 elif current_bias > 0.2:
                     emotion = self._get_emotion_label(navigation_state)
-                    logger.info(f"🧠 {emotion.capitalize()} agent reinforcing {base_action} (positive sensation: {current_bias:.2f})")
+                    logger.info(f"[SENSATION] {emotion.capitalize()} agent reinforcing {base_action} (positive sensation: {current_bias:.2f})")
                     sensation_reasoning = f"{emotion.capitalize()} state (nav: {navigation_state:.2f}) - positive sensation bias (bias: {current_bias:.2f})"
                 else:
                     sensation_reasoning = None
@@ -11271,22 +11282,22 @@ class GameplayEngine:
         try:
             # Step 1: Find what's special (anomalies)
             anomalies = self._meta_detect_anomalies(frame)
-            logger.info(f"🧠 Meta: Detected {len(anomalies)} anomalies")
+            logger.info(f"[META] Detected {len(anomalies)} anomalies")
             
             # Step 2: Check spatial significance
             spatial_features = self._meta_analyze_spatial_significance(frame, anomalies)
-            logger.info(f"🧠 Meta: {len(spatial_features.get('center_anomalies', []))} center, "
+            logger.info(f"[META] {len(spatial_features.get('center_anomalies', []))} center, "
                        f"{len(spatial_features.get('corner_anomalies', []))} corner, "
                        f"{len(spatial_features.get('edge_anomalies', []))} edge")
             
             # Step 3: Look for templates/transformation examples
             templates = self._meta_find_transformation_templates(frame, anomalies, spatial_features)
-            logger.info(f"🧠 Meta: Found {len(templates)} potential templates")
+            logger.info(f"[META] Found {len(templates)} potential templates")
             
             # Step 4: Extract transformation rules
             if templates:
                 rule = self._meta_extract_transformation_rule(frame, templates[0])
-                logger.info(f"🧠 Meta: Extracted rule: {rule}")
+                logger.info(f"[META] Extracted rule: {rule}")
                 
                 if rule:
                     # Step 5: Find where to apply the rule
@@ -12364,7 +12375,7 @@ class GameplayEngine:
                     learning_occurred = True
             
             if learning_occurred:
-                logger.debug(f"🧠 Agent learned from action {action_num} outcome (score change: {score_change:+.1f})")
+                logger.debug(f"[LEARNING] Agent learned from action {action_num} outcome (score change: {score_change:+.1f})")
         
         except Exception as e:
             logger.debug(f"Error in sensation learning: {e}")

@@ -66,17 +66,12 @@ class ViralPackageEngine:
             except Exception:
                 pass
         
-        # Always try to backfill pariahs with source_level_number = 1 (default/unknown)
+        # Only backfill pariahs that still have source_level_number = 1 (default/unknown)
         # Use game's max beaten level as the assumed source level
         try:
-            updated = self.db.execute_query("""
-                UPDATE pariahs 
-                SET source_level_number = (
-                    SELECT COALESCE(MAX(gr.level_completions), 1)
-                    FROM game_results gr
-                    WHERE gr.game_id LIKE substr(pariahs.source_game_id, 1, 4) || '%'
-                    AND gr.level_completions > 0
-                )
+            # First, count how many need updating
+            need_update = self.db.execute_query("""
+                SELECT COUNT(*) as cnt FROM pariahs 
                 WHERE source_level_number = 1 
                 AND source_game_id IS NOT NULL
                 AND EXISTS (
@@ -85,13 +80,26 @@ class ViralPackageEngine:
                     AND gr2.level_completions > 1
                 )
             """)
-            # Check if any were updated
-            check = self.db.execute_query("""
-                SELECT COUNT(*) as cnt FROM pariahs 
-                WHERE source_level_number > 1
-            """)
-            if check and check[0].get('cnt', 0) > 0:
-                print(f"[PARIAH] Backfilled {check[0]['cnt']} pariahs with source_level_number")
+            
+            if need_update and need_update[0].get('cnt', 0) > 0:
+                # Only update and print if there are actually pariahs to backfill
+                self.db.execute_query("""
+                    UPDATE pariahs 
+                    SET source_level_number = (
+                        SELECT COALESCE(MAX(gr.level_completions), 1)
+                        FROM game_results gr
+                        WHERE gr.game_id LIKE substr(pariahs.source_game_id, 1, 4) || '%'
+                        AND gr.level_completions > 0
+                    )
+                    WHERE source_level_number = 1 
+                    AND source_game_id IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM game_results gr2
+                        WHERE gr2.game_id LIKE substr(pariahs.source_game_id, 1, 4) || '%'
+                        AND gr2.level_completions > 1
+                    )
+                """)
+                print(f"[PARIAH] Backfilled {need_update[0]['cnt']} pariahs with source_level_number")
         except Exception as e:
             pass  # Silently continue if backfill fails
     
