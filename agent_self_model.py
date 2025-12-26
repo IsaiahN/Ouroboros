@@ -182,6 +182,23 @@ class AgentSelfModel:
             )
         """)
         
+        # Add click behavior classification columns (migration for existing tables)
+        click_behavior_columns = [
+            ('click_behavior_type', 'TEXT DEFAULT "unknown"'),
+            ('is_self_toggle', 'INTEGER DEFAULT 0'),
+            ('is_trigger', 'INTEGER DEFAULT 0'),
+            ('is_reference', 'INTEGER DEFAULT 0'),  # NEW: FT09-style reference objects
+            ('movement_verified', 'INTEGER DEFAULT 0'),
+            ('affects_objects', 'TEXT'),
+            ('state_changes_observed', 'INTEGER DEFAULT 0'),
+            ('movement_test_count', 'INTEGER DEFAULT 0'),
+        ]
+        for col_name, col_type in click_behavior_columns:
+            try:
+                self.db.execute_query(f"ALTER TABLE object_selection_state ADD COLUMN {col_name} {col_type}")
+            except:
+                pass  # Column already exists
+        
         # Index for fast selectable object lookup
         self.db.execute_query("""
             CREATE INDEX IF NOT EXISTS idx_object_selection_game 
@@ -6084,6 +6101,428 @@ class AgentSelfModel:
                 return progress
         
         return 0.0  # Unknown goal type
+
+    # ========================================================================
+    # CLICK BEHAVIOR CLASSIFICATION SYSTEM (Added 2025-12-25)
+    # ========================================================================
+    # Three distinct click behaviors for clickable objects:
+    # 1. SELF_TOGGLE: Clicking changes THIS object's state (button on/off)
+    # 2. TRIGGER: Clicking changes OTHER objects' states (switch opens door)
+    # 3. SELECTABLE: Clicking gives movement control ("I became this object")
+    #
+    # Detection requires testing:
+    # - Click object -> observe frame changes
+    # - If object itself changed: SELF_TOGGLE
+    # - If OTHER objects changed: TRIGGER
+    # - Then try ACTION1-4:
+    #   - If clicked object moves: SELECTABLE
+    #   - If still doesn't move: confirm TOGGLE or TRIGGER only
+    # ========================================================================
+    
+    def classify_click_behavior(
+        self,
+        game_id: str,
+        level: int,
+        click_x: int,
+        click_y: int,
+        object_color: int,
+        frame_before_click: List,
+        frame_after_click: List,
+        frames_after_movement_tests: Optional[Dict[str, List]] = None
+    ) -> Dict[str, Any]:
+        """
+        Classify the behavior type of a clicked object.
+        
+        Args:
+            game_id: Game identifier
+            level: Level number
+            click_x, click_y: Click coordinates
+            object_color: Color of clicked object
+            frame_before_click: Grid state before ACTION6 click
+            frame_after_click: Grid state after ACTION6 click
+            frames_after_movement_tests: Dict mapping ACTION1-4 -> frame after
+                                         (for movement verification)
+        
+        Returns:
+            Classification dict with behavior type and evidence
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Analyze what changed from the click itself
+        diff = self.get_grid_diff(frame_before_click, frame_after_click)
+        
+        classification = {
+            'object_color': object_color,
+            'click_coords': (click_x, click_y),
+            'behavior_type': 'unknown',
+            'is_self_toggle': False,
+            'is_trigger': False,
+            'is_selectable': False,
+            'movement_verified': False,
+            'self_changes': [],
+            'other_changes': [],
+            'movement_responses': {}
+        }
+        
+        if not diff['changed']:
+            # Click had no immediate effect - might still be selectable
+            # Need to test movement
+            classification['behavior_type'] = 'no_immediate_effect'
+        else:
+            # Analyze what changed
+            self_changed = False
+            others_changed = False
+            
+            # Check if the clicked object itself changed
+            if object_color in diff.get('objects_disappeared', {}):
+                self_changed = True
+                classification['self_changes'].append('disappeared')
+            
+            if object_color in diff.get('objects_moved', {}):
+                self_changed = True
+                classification['self_changes'].append('moved')
+            
+            # Check cell changes at click location
+            for change in diff.get('cell_changes', []):
+                if change['x'] == click_x and change['y'] == click_y:
+                    if change['color_before'] == object_color:
+                        self_changed = True
+                        classification['self_changes'].append(
+                            f"state_change:{change['color_before']}->{change['color_after']}"
+                        )
+            
+            # Check for changes to OTHER objects
+            for color in diff.get('objects_disappeared', {}):
+                if color != object_color and color != 0:
+                    others_changed = True
+                    classification['other_changes'].append({
+                        'color': color,
+                        'change': 'disappeared',
+                        'positions': diff['objects_disappeared'][color]
+                    })
+            
+            for color in diff.get('objects_moved', {}):
+                if color != object_color and color != 0:
+                    others_changed = True
+                    classification['other_changes'].append({
+                        'color': color,
+                        'change': 'moved',
+                        'details': diff['objects_moved'][color]
+                    })
+            
+            for color in diff.get('objects_appeared', {}):
+                if color != object_color and color != 0:
+                    others_changed = True
+                    classification['other_changes'].append({
+                        'color': color,
+                        'change': 'appeared',
+                        'positions': diff['objects_appeared'][color]
+                    })
+            
+            # Initial classification from click effect
+            classification['is_self_toggle'] = self_changed
+            classification['is_trigger'] = others_changed
+        
+        # Now check movement responses if provided
+        if frames_after_movement_tests:
+            reference_frame = frame_after_click
+            movement_responses = {}
+            
+            for action, frame_after in frames_after_movement_tests.items():
+                action_diff = self.get_grid_diff(reference_frame, frame_after)
+                
+                # Did the clicked object move in response to this action?
+                if object_color in action_diff.get('objects_moved', {}):
+                    movement_responses[action] = {
+                        'moved': True,
+                        'details': action_diff['objects_moved'][object_color]
+                    }
+                    classification['is_selectable'] = True
+                    classification['movement_verified'] = True
+                else:
+                    movement_responses[action] = {'moved': False}
+            
+            classification['movement_responses'] = movement_responses
+        
+        # Determine final behavior type
+        # ================================================================
+        # BEHAVIOR TYPES:
+        # - selectable: Can be selected and then moved with ACTION1-4
+        # - trigger_only: Clicking causes changes to OTHER objects
+        # - self_toggle_only: Clicking changes only THIS object
+        # - toggle_and_trigger: Clicking changes both self and others
+        # - reference: Object that defines a pattern for others to match
+        #              (doesn't change, doesn't trigger, but has visual info)
+        # - unknown: Insufficient data to classify
+        # ================================================================
+        if classification['is_selectable'] and classification['movement_verified']:
+            classification['behavior_type'] = 'selectable'
+        elif classification['is_trigger'] and not classification['is_self_toggle']:
+            classification['behavior_type'] = 'trigger_only'
+        elif classification['is_self_toggle'] and not classification['is_trigger']:
+            classification['behavior_type'] = 'self_toggle_only'
+        elif classification['is_self_toggle'] and classification['is_trigger']:
+            classification['behavior_type'] = 'toggle_and_trigger'
+        elif not diff['changed'] and classification.get('movement_verified'):
+            classification['behavior_type'] = 'selectable'
+        elif not diff['changed'] and not classification.get('movement_verified'):
+            # ================================================================
+            # REFERENCE DETECTION (FT09-style objects)
+            # ================================================================
+            # Object that:
+            # 1. Does NOT change when clicked (no toggle)
+            # 2. Does NOT trigger changes to other objects
+            # 3. Does NOT move when ACTION1-4 are applied
+            # These are "template" objects that define patterns for goals.
+            # Example: FT09's center grid shows the target pattern.
+            # ================================================================
+            classification['behavior_type'] = 'reference'
+            classification['is_reference'] = True
+        else:
+            classification['behavior_type'] = 'unknown'
+        
+        # Save to database
+        self._save_click_behavior_classification(
+            game_type=game_type,
+            level=level,
+            object_color=object_color,
+            classification=classification
+        )
+        
+        logger.info(
+            f"[CLICK CLASSIFY] {game_type} L{level} color={object_color}: "
+            f"{classification['behavior_type']} "
+            f"(toggle={classification['is_self_toggle']}, "
+            f"trigger={classification['is_trigger']}, "
+            f"select={classification['is_selectable']}, "
+            f"ref={classification.get('is_reference', False)})"
+        )
+        
+        return classification
+    
+    def _save_click_behavior_classification(
+        self,
+        game_type: str,
+        level: int,
+        object_color: int,
+        classification: Dict[str, Any]
+    ) -> None:
+        """Save click behavior classification to database."""
+        import json
+        
+        behavior_type = classification.get('behavior_type', 'unknown')
+        is_self_toggle = classification.get('is_self_toggle', False)
+        is_trigger = classification.get('is_trigger', False)
+        is_selectable = classification.get('is_selectable', False)
+        movement_verified = classification.get('movement_verified', False)
+        other_changes = classification.get('other_changes', [])
+        
+        # Get affected object colors from other_changes
+        affects_colors = [c['color'] for c in other_changes if 'color' in c]
+        
+        # REFERENCE flag (for FT09-style pattern template objects)
+        is_reference = classification.get('is_reference', False)
+        
+        # Check if entry exists
+        existing = self.db.execute_query("""
+            SELECT discovery_count, state_changes_observed, movement_test_count
+            FROM object_selection_state
+            WHERE game_type = ? AND level_number = ? AND object_color = ?
+        """, (game_type, level, object_color))
+        
+        if existing:
+            old_count = existing[0]['discovery_count'] or 1
+            old_state_changes = existing[0]['state_changes_observed'] or 0
+            old_movement_tests = existing[0]['movement_test_count'] or 0
+            
+            # Calculate new confidence based on observations
+            new_confidence = min(0.95, 0.5 + (old_count * 0.05))
+            
+            self.db.execute_query("""
+                UPDATE object_selection_state
+                SET click_behavior_type = ?,
+                    is_self_toggle = ?,
+                    is_trigger = ?,
+                    is_selectable = ?,
+                    is_moveable = ?,
+                    is_reference = ?,
+                    movement_verified = ?,
+                    affects_objects = ?,
+                    state_changes_observed = ?,
+                    movement_test_count = ?,
+                    confidence = ?,
+                    discovery_count = discovery_count + 1,
+                    last_observed = CURRENT_TIMESTAMP
+                WHERE game_type = ? AND level_number = ? AND object_color = ?
+            """, (
+                behavior_type,
+                1 if is_self_toggle else 0,
+                1 if is_trigger else 0,
+                1 if is_selectable else 0,
+                1 if (is_selectable and movement_verified) else 0,
+                1 if is_reference else 0,
+                1 if movement_verified else 0,
+                json.dumps(affects_colors) if affects_colors else None,
+                old_state_changes + (1 if is_self_toggle or is_trigger else 0),
+                old_movement_tests + (1 if movement_verified else 0),
+                new_confidence,
+                game_type, level, object_color
+            ))
+        else:
+            # Insert new entry
+            self.db.execute_query("""
+                INSERT INTO object_selection_state
+                (game_type, level_number, object_color, 
+                 click_behavior_type, is_self_toggle, is_trigger, is_selectable,
+                 is_moveable, is_button, is_reference, movement_verified, affects_objects,
+                 state_changes_observed, movement_test_count, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)
+            """, (
+                game_type, level, object_color,
+                behavior_type,
+                1 if is_self_toggle else 0,
+                1 if is_trigger else 0,
+                1 if is_selectable else 0,
+                1 if (is_selectable and movement_verified) else 0,
+                1 if (is_self_toggle and not is_selectable) else 0,  # is_button
+                1 if is_reference else 0,  # is_reference (FT09-style pattern template)
+                1 if movement_verified else 0,
+                json.dumps(affects_colors) if affects_colors else None,
+                1 if is_self_toggle or is_trigger else 0,
+                1 if movement_verified else 0
+            ))
+    
+    def get_click_behavior(
+        self,
+        game_type: str,
+        level: int,
+        object_color: Optional[int] = None,
+        min_confidence: float = 0.4
+    ) -> List[Dict[str, Any]]:
+        """
+        Get known click behaviors for a game/level.
+        
+        Args:
+            game_type: Game type to query
+            level: Level number
+            object_color: Specific color to query (or None for all)
+            min_confidence: Minimum confidence threshold
+        
+        Returns:
+            List of click behavior dicts
+        """
+        if object_color is not None:
+            results = self.db.execute_query("""
+                SELECT object_color, click_behavior_type, is_self_toggle,
+                       is_trigger, is_selectable, is_moveable, is_reference, movement_verified,
+                       affects_objects, state_changes_observed, movement_test_count,
+                       confidence
+                FROM object_selection_state
+                WHERE game_type = ? AND level_number = ? AND object_color = ?
+                      AND confidence >= ?
+            """, (game_type, level, object_color, min_confidence))
+        else:
+            results = self.db.execute_query("""
+                SELECT object_color, click_behavior_type, is_self_toggle,
+                       is_trigger, is_selectable, is_moveable, is_reference, movement_verified,
+                       affects_objects, state_changes_observed, movement_test_count,
+                       confidence
+                FROM object_selection_state
+                WHERE game_type = ? AND level_number = ? AND confidence >= ?
+                ORDER BY confidence DESC
+            """, (game_type, level, min_confidence))
+        
+        behaviors = []
+        for row in results or []:
+            behaviors.append({
+                'object_color': row['object_color'],
+                'behavior_type': row['click_behavior_type'] or 'unknown',
+                'is_self_toggle': bool(row['is_self_toggle']),
+                'is_trigger': bool(row['is_trigger']),
+                'is_selectable': bool(row['is_selectable']),
+                'is_moveable': bool(row['is_moveable']),
+                'is_reference': bool(row.get('is_reference', False)),  # FT09-style pattern template
+                'movement_verified': bool(row['movement_verified']),
+                'affects_objects': json.loads(row['affects_objects'] or '[]'),
+                'state_changes_observed': row['state_changes_observed'] or 0,
+                'movement_test_count': row['movement_test_count'] or 0,
+                'confidence': row['confidence']
+            })
+        return behaviors
+    
+    def systematic_click_discovery(
+        self,
+        game_id: str,
+        level: int,
+        current_frame: List,
+        available_colors: List[int]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Suggest next click action for systematic object discovery.
+        
+        Prioritizes testing objects that haven't been tested yet,
+        or have low confidence classifications.
+        
+        Args:
+            game_id: Game identifier
+            level: Level number
+            current_frame: Current grid state
+            available_colors: Colors of objects visible in frame
+        
+        Returns:
+            Suggested click action or None if all objects tested
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Get existing knowledge
+        known_behaviors = self.get_click_behavior(game_type, level, min_confidence=0.0)
+        known_colors = {b['object_color'] for b in known_behaviors}
+        
+        # Find untested colors
+        untested = [c for c in available_colors if c not in known_colors and c != 0]
+        
+        if untested:
+            # Test an untested object
+            target_color = untested[0]
+            objects = self._find_objects_in_grid(current_frame)
+            
+            if target_color in objects:
+                positions = objects[target_color]
+                # Get center of object
+                cx = sum(p[0] for p in positions) // len(positions)
+                cy = sum(p[1] for p in positions) // len(positions)
+                
+                return {
+                    'action': 'ACTION6',
+                    'x': cx,
+                    'y': cy,
+                    'reason': f'Testing untested object color {target_color}',
+                    'target_color': target_color,
+                    'phase': 'initial_click'
+                }
+        
+        # Check for objects needing movement verification
+        for behavior in known_behaviors:
+            if behavior['behavior_type'] == 'no_immediate_effect' and not behavior['movement_verified']:
+                target_color = behavior['object_color']
+                objects = self._find_objects_in_grid(current_frame)
+                
+                if target_color in objects:
+                    positions = objects[target_color]
+                    cx = sum(p[0] for p in positions) // len(positions)
+                    cy = sum(p[1] for p in positions) // len(positions)
+                    
+                    return {
+                        'action': 'ACTION6',
+                        'x': cx,
+                        'y': cy,
+                        'reason': f'Re-testing color {target_color} for movement verification',
+                        'target_color': target_color,
+                        'phase': 'retest_for_movement'
+                    }
+        
+        # All objects tested
+        return None
 
 
 # ============================================================================

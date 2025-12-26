@@ -37,6 +37,15 @@ from primitive_unlock_manager import PrimitiveUnlockManager, grandfather_existin
 from operator_composer import OperatorComposer, ComposedOperator, OperatorStatus
 from oracle_interface import OracleInterface, OracleVerdict
 
+# Concept Discovery Engine (Tier 4 - Semantic Models)
+try:
+    from concept_discovery_engine import ConceptDiscoveryEngine, get_concept_engine
+    CONCEPT_ENGINE_AVAILABLE = True
+except ImportError:
+    CONCEPT_ENGINE_AVAILABLE = False
+    ConceptDiscoveryEngine = None  # type: ignore
+    get_concept_engine = None  # type: ignore
+
 # Optional imports for existing engines
 try:
     from visual_reasoning_engine import VisualReasoningEngine
@@ -123,6 +132,17 @@ class CODSEngine:
         
         # Grandfather existing primitives
         grandfather_existing_primitives(self.unlock_manager)
+        
+        # Tier 4: Concept Discovery Engine (semantic models)
+        if CONCEPT_ENGINE_AVAILABLE and get_concept_engine:
+            try:
+                self.concept_engine = get_concept_engine(db_path)
+                logger.info(f"[CODS] Concept discovery engine initialized (Tier 4)")
+            except Exception as e:
+                self.concept_engine = None
+                logger.warning(f"[CODS] Concept engine init failed: {e}")
+        else:
+            self.concept_engine = None
         
         # Current game context
         self._context: Optional[CODSGameContext] = None
@@ -213,7 +233,9 @@ class CODSEngine:
         self,
         frame: List[List[int]],
         score: Optional[float] = None,
-        action_count: Optional[int] = None
+        action_count: Optional[int] = None,
+        reasoning: Optional[str] = None,
+        hypothesis_id: Optional[str] = None
     ):
         """
         Update current frame in context and test composed operators.
@@ -222,6 +244,8 @@ class CODSEngine:
             frame: Current game frame
             score: Current score (optional, for success evaluation)
             action_count: Current action count (optional)
+            reasoning: Agent's reasoning for current action (triggers smart testing)
+            hypothesis_id: ID of hypothesis being tested (for tracking)
         """
         previous_frame = None
         previous_score = 0.0
@@ -238,20 +262,94 @@ class CODSEngine:
         # Calculate score delta for operator success evaluation
         score_delta = (score or 0.0) - previous_score
         
-        # Test composed operators on this frame (critical for unlock system)
-        # Only test every 10 actions to avoid overhead
-        if action_count is None or action_count % 10 == 0:
+        # ======================================================================
+        # INTELLIGENT OPERATOR TESTING (Updated 2025-12-25)
+        # ======================================================================
+        # Instead of testing every 10 actions blindly, test based on:
+        # 1. Agent reasoning mentions patterns/operators (trigger relevant tests)
+        # 2. Score increased (test all operators to capture successful state)
+        # 3. Level transition (test to capture state)
+        # 4. Hypothesis testing mode (agent is explicitly testing something)
+        # 5. Fallback: periodic testing every 20 actions (reduced from 10)
+        # ======================================================================
+        
+        should_test = False
+        test_reason = "periodic"
+        relevant_operators = None  # None means test all
+        
+        # Trigger 1: Agent reasoning mentions patterns we have operators for
+        if reasoning:
+            reasoning_lower = reasoning.lower()
+            
+            # Check if reasoning mentions visual patterns
+            pattern_triggers = {
+                'symmetry': ['op_detect_symmetry'],
+                'pattern': ['op_find_patterns'],
+                'shape': ['op_detect_shapes'],
+                'spatial': ['op_spatial_relations'],
+                'color': ['op_analyze_colors'],
+                'object': ['op_detect_objects'],
+            }
+            
+            for pattern, ops in pattern_triggers.items():
+                if pattern in reasoning_lower:
+                    should_test = True
+                    test_reason = f"reasoning_mentions_{pattern}"
+                    relevant_operators = ops
+                    logger.info(f"[CODS] Testing triggered by reasoning mention: '{pattern}'")
+                    break
+            
+            # Check for discovery/exploration keywords
+            if not should_test:
+                discovery_keywords = ['discover', 'explore', 'test', 'hypothesis', 'try']
+                if any(kw in reasoning_lower for kw in discovery_keywords):
+                    should_test = True
+                    test_reason = "discovery_mode"
+                    logger.debug("[CODS] Testing triggered by discovery reasoning")
+        
+        # Trigger 2: Score increased (capture successful state)
+        if score_delta > 0:
+            should_test = True
+            test_reason = "score_increase"
+            logger.info(f"[CODS] Testing triggered by score increase: +{score_delta}")
+        
+        # Trigger 3: Agent is explicitly testing a hypothesis
+        if hypothesis_id:
+            should_test = True
+            test_reason = "hypothesis_test"
+            logger.debug(f"[CODS] Testing triggered by hypothesis: {hypothesis_id}")
+        
+        # Trigger 4: Fallback periodic testing (every 20 actions, reduced overhead)
+        if not should_test and action_count is not None:
+            if action_count % 20 == 0 and action_count > 0:
+                should_test = True
+                test_reason = "periodic_20"
+        
+        # Execute testing
+        if should_test:
             game_id = self._context.game_id if self._context else 'unknown'
-            logger.info(f"[CODS] Testing operators at action_count={action_count} for game {game_id}")
+            logger.info(f"[CODS] Testing operators: reason={test_reason}, game={game_id}")
+            
             try:
                 results = self.test_composed_operators(
                     frame=frame,
                     previous_frame=previous_frame,
-                    score_delta=score_delta
+                    score_delta=score_delta,
+                    operator_ids=relevant_operators  # Filter to relevant operators if specified
                 )
                 if results:
                     successes = sum(1 for v in results.values() if v)
                     logger.info(f"[CODS] Tested {len(results)} operators: {successes} success")
+                    
+                    # Store test context for learning
+                    self._store_test_context(
+                        game_id=game_id,
+                        test_reason=test_reason,
+                        reasoning=reasoning,
+                        hypothesis_id=hypothesis_id,
+                        score_delta=score_delta,
+                        results=results
+                    )
             except Exception as e:
                 logger.warning(f"[CODS] Operator testing failed: {e}")
     
@@ -801,7 +899,8 @@ class CODSEngine:
         self,
         frame: Optional[List[List[int]]] = None,
         previous_frame: Optional[List[List[int]]] = None,
-        score_delta: float = 0.0
+        score_delta: float = 0.0,
+        operator_ids: Optional[List[str]] = None
     ) -> Dict[str, bool]:
         """
         Test all cobbled/solid composed operators on the current frame.
@@ -813,6 +912,7 @@ class CODSEngine:
             frame: Current frame
             previous_frame: Previous frame (for delta operators)
             score_delta: Change in score (for success evaluation)
+            operator_ids: Optional list of specific operator IDs/names to test
             
         Returns:
             Dict of {operator_name: success}
@@ -823,14 +923,26 @@ class CODSEngine:
         
         results = {}
         
-        # Get all operators that need testing (cobbled or solid, not yet canonical)
-        operators = self.db.execute_query("""
-            SELECT operator_id, name, composition_tree, composition_type
-            FROM composed_operators
-            WHERE status IN ('cobbled', 'solid')
-            ORDER BY times_tested ASC
-            LIMIT 10
-        """)
+        # Get operators to test
+        if operator_ids:
+            # Test specific operators requested
+            placeholders = ','.join(['?' for _ in operator_ids])
+            params = tuple(operator_ids + operator_ids)
+            operators = self.db.execute_query(f"""
+                SELECT operator_id, name, composition_tree, composition_type
+                FROM composed_operators
+                WHERE (name IN ({placeholders}) OR operator_id IN ({placeholders}))
+                  AND status IN ('cobbled', 'solid', 'tested')
+            """, params)
+        else:
+            # Get all operators that need testing (cobbled or solid, not yet canonical)
+            operators = self.db.execute_query("""
+                SELECT operator_id, name, composition_tree, composition_type
+                FROM composed_operators
+                WHERE status IN ('cobbled', 'solid')
+                ORDER BY times_tested ASC
+                LIMIT 10
+            """)
         
         if not operators:
             return {}
@@ -954,24 +1066,63 @@ class CODSEngine:
     def suggest_action(
         self,
         frame: Optional[List[List[int]]] = None
-    ) -> Optional[int]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Use cognitive operators to suggest an action.
         
-        This is a placeholder for more sophisticated action selection.
-        Currently just demonstrates operator application.
+        Tier 4: Uses concept discovery to find relevant operators for this game.
         
         Args:
             frame: Current frame
             
         Returns:
-            Suggested action (1-7) or None
+            Dict with 'action', 'confidence', 'operator', 'concept' or None
         """
         frame = frame or (self._context.current_frame if self._context else None)
         if not frame:
             return None
         
-        # Analyze frame
+        game_type = self._context.game_id.split('-')[0] if self._context and self._context.game_id else None
+        
+        # Tier 4: Check if we have a concept that applies to this game
+        if self.concept_engine and game_type:
+            suggested_concept = self.concept_engine.suggest_concept_for_game(
+                game_type=game_type,
+                frame=frame
+            )
+            
+            if suggested_concept:
+                # Get operators organized by this concept
+                relevant_ops = self.concept_engine.get_relevant_operators_for_concept(
+                    concept_id=suggested_concept.concept_id,
+                    min_relevance=0.4
+                )
+                
+                if relevant_ops:
+                    # Use the most relevant operator
+                    best_op = relevant_ops[0]
+                    operator_id = best_op['operator_id']
+                    
+                    # Try to apply the operator
+                    result = self.apply(operator_id, frame)
+                    
+                    if result.success:
+                        logger.info(
+                            f"[CODS-CONCEPT] Using concept '{suggested_concept.name}' "
+                            f"suggests operator '{operator_id[:8]}'"
+                        )
+                        
+                        # Extract action from operator result if possible
+                        action = self._extract_action_from_output(result.output)
+                        if action:
+                            return {
+                                'action': action,
+                                'confidence': best_op['relevance'],
+                                'operator': operator_id,
+                                'concept': suggested_concept.name
+                            }
+        
+        # Analyze frame with available operators
         analysis = self.analyze_frame(frame)
         
         # Simple heuristic based on analysis
@@ -980,18 +1131,29 @@ class CODSEngine:
         if 'detect_symmetry' in analysis:
             symmetry = analysis['detect_symmetry']
             if symmetry.get('horizontal'):
-                return 1  # ACTION1 - up
+                return {'action': 1, 'confidence': 0.3, 'operator': 'detect_symmetry', 'concept': None}
             if symmetry.get('vertical'):
-                return 3  # ACTION3 - left
+                return {'action': 3, 'confidence': 0.3, 'operator': 'detect_symmetry', 'concept': None}
         
         if 'detect_shapes' in analysis:
             shapes = analysis['detect_shapes']
             if shapes:
                 # Move toward first detected shape
-                return 1  # Placeholder
+                return {'action': 1, 'confidence': 0.2, 'operator': 'detect_shapes', 'concept': None}
         
         # Default to random action
-        return self.seeds.call('rand_int', 1, 7)
+        return {'action': self.seeds.call('rand_int', 1, 7), 'confidence': 0.1, 'operator': 'random', 'concept': None}
+    
+    def _extract_action_from_output(self, output: Any) -> Optional[int]:
+        """Extract an action number from operator output."""
+        if isinstance(output, int) and 1 <= output <= 7:
+            return output
+        if isinstance(output, dict):
+            if 'action' in output:
+                return int(output['action'])
+            if 'suggested_action' in output:
+                return int(output['suggested_action'])
+        return None
     
     # ======================================================================
     # STATISTICS & REPORTING
@@ -1005,6 +1167,10 @@ class CODSEngine:
             'composer': self.composer.get_stats(),
             'oracle': self.oracle.get_oracle_stats()
         }
+        
+        # Tier 4: Concept discovery stats
+        if self.concept_engine:
+            stats['concepts'] = self.concept_engine.get_concept_stats()
         
         # Execution stats
         stats['execution'] = {
@@ -2358,6 +2524,42 @@ class CODSEngine:
         # Also track in database
         self.unlock_manager.track_primitive_usage(name, success)
     
+    def _extract_primitives_from_tree(self, tree: Dict[str, Any]) -> List[str]:
+        """
+        Recursively extract all primitive names from a composition tree.
+        
+        Args:
+            tree: Composition tree dict with 'type' and 'components' or 'name'
+            
+        Returns:
+            List of primitive names found in the tree
+        """
+        primitives = []
+        
+        if not tree:
+            return primitives
+        
+        if isinstance(tree, str):
+            # Direct primitive name
+            primitives.append(tree)
+        elif isinstance(tree, dict):
+            # Check for 'name' field (leaf primitive)
+            if 'name' in tree:
+                primitives.append(tree['name'])
+            
+            # Check for 'components' (composed operator)
+            if 'components' in tree:
+                for component in tree['components']:
+                    primitives.extend(self._extract_primitives_from_tree(component))
+            
+            # Check for 'left'/'right' (binary composition)
+            if 'left' in tree:
+                primitives.extend(self._extract_primitives_from_tree(tree['left']))
+            if 'right' in tree:
+                primitives.extend(self._extract_primitives_from_tree(tree['right']))
+        
+        return primitives
+
     def _record_test_result(
         self,
         operator_id: str,
@@ -2380,6 +2582,113 @@ class CODSEngine:
             generation=self._context.generation,
             score_before=self._context.score,
             score_after=self._context.score
+        )
+        
+        # Tier 4: Track operator patterns for concept discovery
+        if self.concept_engine:
+            try:
+                # Get the operator's sub-patterns (component primitives)
+                composed_op = self.composer.get_operator(operator_id)
+                if composed_op:
+                    # Extract primitive names from operator's composition_tree
+                    sub_patterns = self._extract_primitives_from_tree(composed_op.composition_tree)
+                    
+                    if success:
+                        self.concept_engine.track_successful_operator_pattern(
+                            operator_id=operator_id,
+                            game_id=self._context.game_id,
+                            sub_patterns=sub_patterns
+                        )
+                    else:
+                        self.concept_engine.track_failed_operator_pattern(
+                            operator_id=operator_id,
+                            game_id=self._context.game_id,
+                            sub_patterns=sub_patterns
+                        )
+                    
+                    # Periodically check for concept emergence
+                    if self._context and self._context.generation % 10 == 0:
+                        emerging = self.concept_engine.check_concept_emergence()
+                        for concept_data in emerging:
+                            logger.info(
+                                f"[CODS-CONCEPT] Potential concept: {concept_data['pattern'][:30]} "
+                                f"({len(concept_data['games_proven'])} games)"
+                            )
+            except Exception as e:
+                logger.debug(f"Concept tracking failed (non-critical): {e}")
+    
+    def _store_test_context(
+        self,
+        game_id: str,
+        test_reason: str,
+        reasoning: Optional[str],
+        hypothesis_id: Optional[str],
+        score_delta: float,
+        results: Dict[str, bool]
+    ):
+        """
+        Store context about why operators were tested (for learning).
+        
+        This enables:
+        1. Correlation between reasoning patterns and operator success
+        2. Learning which operators are relevant to which game situations
+        3. Tracking hypothesis-driven testing outcomes
+        
+        Args:
+            game_id: Game identifier
+            test_reason: Why testing was triggered
+            reasoning: Agent's reasoning text (if any)
+            hypothesis_id: Hypothesis being tested (if any)
+            score_delta: Change in score
+            results: Dict of {operator_name: success}
+        """
+        # Create table if needed
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS cods_test_contexts (
+                context_id TEXT PRIMARY KEY,
+                game_id TEXT NOT NULL,
+                level_number INTEGER,
+                agent_id TEXT,
+                generation INTEGER,
+                test_reason TEXT NOT NULL,
+                reasoning_text TEXT,
+                hypothesis_id TEXT,
+                score_delta REAL,
+                operators_tested INTEGER,
+                operators_succeeded INTEGER,
+                operator_results TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        context_id = str(uuid.uuid4())
+        operators_tested = len(results)
+        operators_succeeded = sum(1 for v in results.values() if v)
+        
+        self.db.execute_query("""
+            INSERT INTO cods_test_contexts
+            (context_id, game_id, level_number, agent_id, generation,
+             test_reason, reasoning_text, hypothesis_id, score_delta,
+             operators_tested, operators_succeeded, operator_results)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            context_id,
+            game_id,
+            self._context.level_number if self._context else 1,
+            self._context.agent_id if self._context else None,
+            self._context.generation if self._context else 0,
+            test_reason,
+            reasoning[:500] if reasoning else None,  # Truncate long reasoning
+            hypothesis_id,
+            score_delta,
+            operators_tested,
+            operators_succeeded,
+            json.dumps(results)
+        ))
+        
+        logger.debug(
+            f"[CODS] Stored test context: reason={test_reason}, "
+            f"tested={operators_tested}, succeeded={operators_succeeded}"
         )
 
 

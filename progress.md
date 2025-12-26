@@ -1,5 +1,332 @@
 # Ouroboros Progress Log
 
+## Session: December 25, 2025 (Late Evening) - Assessment Gap Implementation
+
+---
+
+### Approach: Implement 4 Real Gaps from Assessment Analysis
+
+**Timestamp**: Late Evening  
+**Status**: COMPLETED - All 4 gaps implemented
+
+---
+
+#### Context
+
+User provided an LLM-generated `assessment.md` file claiming many gaps in the system. Upon investigation, most "gaps" were already implemented. Only 4 real gaps were identified and then implemented.
+
+---
+
+### Gap Analysis Results
+
+| Claimed Gap | Reality | Action Taken |
+|------------|---------|--------------|
+| Baby primitives missing | seed_primitives.py has 103 primitives | Gap 1: Wire into core_gameplay |
+| REFERENCE click type | Missing from classification | Gap 2: Added |
+| Primitives not in CODS | Already integrated since creation | Gap 3: Verified |
+| ConceptDiscoveryEngine | Design doc only | Gap 4: Implemented |
+
+---
+
+### Gap 1: Wire Primitives into core_gameplay.py
+
+**Files Modified**: `core_gameplay.py`
+
+**Changes**:
+1. Added import for `seed_primitives` (lines 95-102)
+2. Created `PrimitiveHelper` class (lines 107-280) providing:
+   - `analyze_frame_changes()` - detect_change, detect_motion primitives
+   - `check_stuck()` - detect_stuck metacognition primitive
+   - `analyze_action_contingency()` - detect_contingency primitive  
+   - `get_novelty_bonus()` - novelty_bonus motivation primitive
+   - `classify_object_affordance()` - is_movable, is_obstacle, is_container
+   - `detect_negative_space()` - detect_enclosed_empty, detect_open_edge
+
+3. Created `get_primitive_helper()` factory function
+4. Wired primitive_helper into `GameplayEngine.__init__`
+5. Added `_analyze_situation_with_primitives()` method (lines ~8004-8100)
+6. Added post-action primitive analysis in `_execute_action()` (lines ~4780-4830)
+   - Tracks score/action history
+   - Runs primitive analysis after each non-ACTION6 action
+   - Sets `_is_stuck` flag when primitives detect stuck pattern
+
+---
+
+### Gap 2: Add REFERENCE Click Behavior Type
+
+**Files Modified**: `agent_self_model.py`
+
+**The Problem**: Objects like FT09's center square define patterns for others without being clickable/movable. These are REFERENCE objects - they show the goal but don't change.
+
+**Changes**:
+1. Added `is_reference` column migration to object_selection_state (line ~183)
+2. Updated `classify_click_behavior()` to detect REFERENCE type:
+   - Object that doesn't change when clicked
+   - Doesn't trigger changes to other objects
+   - Doesn't move when ACTION1-4 applied
+   - Classified as 'reference' behavior type (lines ~6277-6282)
+3. Updated `_save_click_behavior_classification()` to save is_reference (lines ~6340-6395)
+4. Updated `get_click_behavior()` to return is_reference (lines ~6415-6450)
+5. Updated logging to show ref= flag
+
+**Behavior Types Now**:
+- `selectable`: Can be selected then moved
+- `trigger_only`: Clicking causes OTHER objects to change
+- `self_toggle_only`: Clicking changes only THIS object
+- `toggle_and_trigger`: Both self and others change
+- `reference`: **NEW** - Object that defines patterns for others (FT09 center)
+- `unknown`: Insufficient data
+
+---
+
+### Gap 3: Verify Primitives in CODS
+
+**Files Verified**: `cods_engine.py`
+
+**Result**: Already fully integrated since inception. CODS imports `get_seed_primitives()` and uses them in:
+- `OperatorComposer` for composition
+- `_primitive_callback()` for grandfathered primitive execution
+- Stats reporting
+
+**No changes needed** - marked as verified.
+
+---
+
+### Gap 4: Implement ConceptDiscoveryEngine
+
+**Files Created**: `concept_discovery_engine.py` (600+ lines)
+
+**Purpose**: Tier 4 of CODS architecture - discovers semantic concepts that organize operators across games.
+
+**Key Classes**:
+- `ConceptCandidate` - Tracks patterns that might become concepts
+- `Concept` - Confirmed high-level organizing concept
+- `ConceptDiscoveryEngine` - Main engine
+
+**Key Methods**:
+- `track_successful_operator_pattern()` - Track patterns from winning operators
+- `track_failed_operator_pattern()` - Track patterns from failures
+- `check_concept_emergence()` - Detect when pattern becomes concept
+- `confirm_concept()` - Promote candidate to confirmed concept
+- `extract_concept_from_counterfactuals()` - Learn from success/failure differences
+- `suggest_concept_for_game()` - Recommend concept for new game
+- `associate_operator_with_concept()` - Link operators to concepts
+
+**Pre-defined Conceptual Primitives**:
+- `containment`: Bounded regions with capacity
+- `reference_semantics`: Objects representing rules
+- `conservation`: Quantities preserved under transformation
+- `causality`: Action causes state change
+- `goal_directedness`: Transform toward target
+- `symmetry`: Patterns invariant under transformation
+- `hierarchy`: Objects containing other objects
+
+**Database Tables Created**:
+- `concept_candidates` - Patterns being tracked
+- `discovered_concepts` - Confirmed concepts
+- `concept_operator_map` - Concept-operator associations
+
+**Files Modified**: `cods_engine.py`
+
+**Changes**:
+1. Added import for ConceptDiscoveryEngine (lines 42-47)
+2. Initialize concept_engine in CODSEngine.__init__ (lines ~138-145)
+3. Added `_extract_primitives_from_tree()` helper method (lines ~2528-2556)
+4. Updated `_record_test_result()` to track patterns for concept discovery (lines ~2558-2592)
+5. Enhanced `suggest_action()` to use concept-aware operator selection (lines ~1076-1162)
+6. Added `_extract_action_from_output()` helper (lines ~1164-1175)
+7. Added concept stats to `get_stats()` (line ~1189)
+
+---
+
+### Summary
+
+| Gap | Status | Impact |
+|-----|--------|--------|
+| 1. Wire primitives | DONE | Baby-derived cognition now active in gameplay |
+| 2. REFERENCE type | DONE | Can now detect template/pattern objects |
+| 3. Verify CODS | VERIFIED | Already integrated |
+| 4. ConceptDiscoveryEngine | DONE | Tier 4 semantic layer now operational |
+
+---
+
+## Session: December 25, 2025 (8:16 PM) - CODS & Self-Model Audit + Click Behavior Classification
+
+---
+
+### Approach: Systematic Audit & Fix of CODS and Self-Model Systems
+
+**Timestamp**: 8:16:28 PM  
+**Status**: IN PROGRESS - Click Behavior Classification Fixed, Integration Pending
+
+---
+
+#### The Goal
+
+Review all game types (ls20, lp85, vc33, as66, sp80, ft09) to ensure CODS (Composed Operator Discovery System) and self-model/world models are working properly with no gaps or errors.
+
+---
+
+#### Key Insight from User
+
+Three distinct types of clickable objects exist in ARC games:
+1. **SELF_TOGGLE**: Clicking changes THIS object's state (button on/off, color change)
+2. **TRIGGER**: Clicking changes OTHER objects' states (switch opens door)
+3. **SELECTABLE**: Clicking gives movement control ("I became this object")
+
+Detection requires systematic testing:
+- Click object → observe frame changes
+- If object itself changed: SELF_TOGGLE
+- If OTHER objects changed: TRIGGER
+- Then try ACTION1-4: If clicked object moves → SELECTABLE
+
+---
+
+#### Step 1: Created Audit Script (audit_cods.py)
+
+**Timestamp**: ~7:45 PM
+
+Created comprehensive audit script to diagnose current state of CODS and self-model systems across all game types.
+
+---
+
+#### Step 2: Audit Results - GAPS IDENTIFIED
+
+**Timestamp**: ~7:50 PM
+
+| Issue | Finding | Impact |
+|-------|---------|--------|
+| CODS Operators | All at 100% success rate - only trivial operators like `get_frame` | No real operator testing |
+| Object Selection State | Only has data for as66, ls20, sp80 | Missing ft09, lp85, vc33 |
+| Collision Effects | 0 learned | No collision learning |
+| is_button Column | Always FALSE | Button detection not working |
+| Control Hypotheses | 0 validation attempts | Hypotheses never tested |
+| CODS Testing Trigger | Every 10 actions blindly | Should be reasoning-based |
+
+---
+
+#### Step 3: Database Migration - Click Behavior Columns
+
+**Timestamp**: ~7:55 PM
+
+Added new columns to `object_selection_state` table:
+- `click_behavior_type` TEXT - Classification type
+- `is_self_toggle` INTEGER DEFAULT 0
+- `is_trigger` INTEGER DEFAULT 0
+- `affects_objects` TEXT (JSON array of affected colors)
+- `state_changes_observed` INTEGER DEFAULT 0
+- `movement_verified` INTEGER DEFAULT 0
+- `movement_test_count` INTEGER DEFAULT 0
+
+---
+
+#### Step 4: CODS Engine Update - Reasoning-Based Testing
+
+**Timestamp**: ~8:00 PM
+
+**File**: `cods_engine.py`
+
+Changed `update_frame()` to accept `reasoning` and `hypothesis_id` parameters for intelligent operator testing.
+
+**Old Behavior**: Test operators every 10 actions blindly
+**New Behavior**: Test based on:
+- Reasoning mentions patterns (e.g., "pattern", "rule", "behavior")
+- Score increased (learning opportunity)
+- Hypothesis being actively tested
+- Fallback: Every 20 actions (reduced from 10)
+
+Added `_store_test_context()` method for learning correlations between reasoning and operator success.
+
+---
+
+#### Step 5: core_gameplay.py Integration
+
+**Timestamp**: ~8:05 PM
+
+Updated CODS `update_frame()` call at line ~2074 to pass `reasoning=current_reasoning`.
+
+---
+
+#### Step 6: Click Behavior Classification Methods - PLACEMENT BUG
+
+**Timestamp**: ~8:10 PM
+
+**Issue Found**: Added `classify_click_behavior()` and related methods to `agent_self_model.py`, but they were placed OUTSIDE the `AgentSelfModel` class!
+
+**AST Analysis**:
+```
+Class AgentSelfModel: lines 26-6086
+Class WeavingReporter: lines 6093-6368
+Class CognitiveStageSystem: lines 6375-6632
+Class EpisodicMemorySystem: lines 6639-6864
+Class AgentHypothesisSystem: lines 6871-7828
+```
+
+New code was added at line ~7456, which is INSIDE `AgentHypothesisSystem`, NOT `AgentSelfModel`!
+
+---
+
+#### Step 7: FIX - Moved Methods to Correct Class
+
+**Timestamp**: 8:15 PM
+
+**Fixed by**:
+1. Added click behavior code to correct location - end of `AgentSelfModel` class (before line 6087)
+2. Removed duplicate code from inside `AgentHypothesisSystem`
+
+**Verification**:
+```
+[OK] classify_click_behavior IS in AgentSelfModel class!
+Class spans lines 26-6477
+```
+
+**All Methods Now Available**:
+- `classify_click_behavior()` - Classifies click behavior type
+- `_save_click_behavior_classification()` - Saves to database
+- `get_click_behavior()` - Retrieves known behaviors
+- `systematic_click_discovery()` - Suggests next click for testing
+
+---
+
+#### Current Status
+
+| Component | Status |
+|-----------|--------|
+| Database migration (columns) | DONE |
+| CODS reasoning-based testing | DONE |
+| core_gameplay CODS integration | DONE |
+| Click behavior methods | FIXED (placement bug resolved) |
+| Integration into discovery phase | PENDING |
+| Full system test | PENDING |
+
+---
+
+#### Files Modified This Session
+
+| File | Changes |
+|------|---------|
+| `audit_cods.py` | NEW - Comprehensive CODS/self-model audit script |
+| `cods_engine.py` | Updated `update_frame()` for reasoning-based testing |
+| `core_gameplay.py` | Pass reasoning to CODS |
+| `agent_self_model.py` | Added click behavior classification system (~400 lines) |
+
+---
+
+#### Current Failure/Blocker
+
+**NONE** - Placement bug is fixed. Next step is integrating click behavior classification into the agent discovery phase so it gets called during actual gameplay.
+
+---
+
+#### Next Steps
+
+1. Wire `classify_click_behavior()` into agent discovery phase
+2. Wire `systematic_click_discovery()` to suggest click tests
+3. Run evolution to test full system
+4. Verify object_selection_state populates with correct `is_button`, `is_trigger`, `is_selectable` values
+
+---
+
 ## Session: December 25, 2025 (7:38 PM) - CRITICAL BUG FIX
 
 ---

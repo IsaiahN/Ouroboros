@@ -92,7 +92,223 @@ except ImportError:
     CODSEngine = None
     CODSGameContext = None
 
+# Seed Primitives - Baby-derived cognitive primitives for perception and decision-making
+try:
+    from seed_primitives import get_seed_primitives, SeedPrimitiveRegistry
+    PRIMITIVES_AVAILABLE = True
+except ImportError:
+    PRIMITIVES_AVAILABLE = False
+    get_seed_primitives = None
+    SeedPrimitiveRegistry = None
+
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# PRIMITIVE HELPER - Bridges seed_primitives into gameplay decisions
+# ============================================================================
+class PrimitiveHelper:
+    """
+    Provides easy access to baby-derived cognitive primitives during gameplay.
+    
+    Wraps the seed_primitives registry to provide perception, attention, 
+    and metacognition capabilities for decision-making.
+    """
+    
+    def __init__(self):
+        """Initialize primitive helper with seed primitives registry."""
+        self._registry = None
+        self._initialized = False
+        
+        if PRIMITIVES_AVAILABLE and get_seed_primitives:
+            try:
+                self._registry = get_seed_primitives()
+                self._initialized = True
+                logger.debug("[PRIMITIVES] Primitive helper initialized with seed primitives")
+            except Exception as e:
+                logger.warning(f"[PRIMITIVES] Failed to initialize: {e}")
+    
+    @property
+    def available(self) -> bool:
+        """Check if primitives are available."""
+        return self._initialized and self._registry is not None
+    
+    def analyze_frame_changes(
+        self,
+        frame_before: List,
+        frame_after: List
+    ) -> Dict[str, Any]:
+        """
+        Use attention primitives to analyze what changed between frames.
+        
+        Returns:
+            Dict with change detection, motion, and attention guidance
+        """
+        if not self.available:
+            return {'available': False}
+        
+        try:
+            changes = self._registry.call('detect_change', frame_before, frame_after)
+            motion = self._registry.call('detect_motion', frame_before, frame_after)
+            
+            return {
+                'available': True,
+                'changed_positions': changes or [],
+                'moving_objects': motion or [],
+                'has_changes': bool(changes),
+                'has_motion': bool(motion)
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] Frame analysis failed: {e}")
+            return {'available': False, 'error': str(e)}
+    
+    def check_stuck(
+        self,
+        score_history: List[float],
+        action_history: List[int]
+    ) -> Dict[str, Any]:
+        """
+        Use metacognition primitives to detect if agent is stuck.
+        
+        Returns:
+            Dict with stuck detection and suggestions
+        """
+        if not self.available:
+            return {'stuck': False, 'available': False}
+        
+        try:
+            is_stuck = self._registry.call('detect_stuck', score_history, action_history)
+            
+            return {
+                'available': True,
+                'stuck': bool(is_stuck),
+                'score_stagnant': len(set(score_history[-5:])) <= 1 if len(score_history) >= 5 else False,
+                'action_repeating': len(set(action_history[-10:])) <= 2 if len(action_history) >= 10 else False
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] Stuck detection failed: {e}")
+            return {'stuck': False, 'available': False, 'error': str(e)}
+    
+    def analyze_action_contingency(
+        self,
+        action: int,
+        frame_before: List,
+        frame_after: List
+    ) -> Dict[str, Any]:
+        """
+        Use attention primitives to check if action caused observable effect.
+        
+        Returns:
+            Dict with contingency detection (did action cause change?)
+        """
+        if not self.available:
+            return {'contingent': False, 'available': False}
+        
+        try:
+            contingency = self._registry.call('detect_contingency', action, frame_before, frame_after)
+            
+            return {
+                'available': True,
+                'contingent': bool(contingency.get('contingent', False)) if isinstance(contingency, dict) else bool(contingency),
+                'details': contingency if isinstance(contingency, dict) else {}
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] Contingency detection failed: {e}")
+            return {'contingent': False, 'available': False, 'error': str(e)}
+    
+    def get_novelty_bonus(
+        self,
+        current_state: str,
+        state_history: List[str]
+    ) -> float:
+        """
+        Use motivation primitives to calculate novelty bonus for exploration.
+        
+        Returns:
+            Float bonus value (0.0 to 1.0)
+        """
+        if not self.available:
+            return 0.5  # Default neutral
+        
+        try:
+            bonus = self._registry.call('novelty_bonus', current_state, state_history)
+            return float(bonus) if bonus is not None else 0.5
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] Novelty bonus failed: {e}")
+            return 0.5
+    
+    def classify_object_affordance(
+        self,
+        object_id: str,
+        frame: List,
+        movement_history: Optional[List] = None
+    ) -> Dict[str, Any]:
+        """
+        Use affordance primitives to classify what an object is for.
+        
+        Returns:
+            Dict with affordance classification
+        """
+        if not self.available:
+            return {'available': False}
+        
+        try:
+            is_movable = self._registry.call('is_movable', object_id, movement_history or [])
+            is_obstacle = self._registry.call('is_obstacle', object_id, frame)
+            is_interactive = self._registry.call('is_interactive', object_id, [])  # Needs interaction history
+            is_container = self._registry.call('is_container', object_id, frame)
+            
+            return {
+                'available': True,
+                'object_id': object_id,
+                'is_movable': bool(is_movable),
+                'is_obstacle': bool(is_obstacle),
+                'is_interactive': bool(is_interactive),
+                'is_container': bool(is_container)
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] Affordance classification failed: {e}")
+            return {'available': False, 'error': str(e)}
+    
+    def detect_negative_space(
+        self,
+        frame: List
+    ) -> Dict[str, Any]:
+        """
+        Use negative space primitives to detect holes, open edges, and absences.
+        Critical for SP80-type water physics games.
+        
+        Returns:
+            Dict with negative space detection results
+        """
+        if not self.available:
+            return {'available': False}
+        
+        try:
+            enclosed = self._registry.call('detect_enclosed_empty', frame)
+            open_edges = self._registry.call('detect_open_edge', frame)
+            
+            return {
+                'available': True,
+                'enclosed_regions': enclosed or [],
+                'open_edges': open_edges or [],
+                'has_containers': bool(enclosed),
+                'has_open_edges': bool(open_edges)
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] Negative space detection failed: {e}")
+            return {'available': False, 'error': str(e)}
+
+
+# Global primitive helper instance
+_primitive_helper: Optional[PrimitiveHelper] = None
+
+def get_primitive_helper() -> PrimitiveHelper:
+    """Get or create the global primitive helper instance."""
+    global _primitive_helper
+    if _primitive_helper is None:
+        _primitive_helper = PrimitiveHelper()
+    return _primitive_helper
 
 
 @dataclass
@@ -198,6 +414,15 @@ class GameplayEngine:
             except Exception as e:
                 self.cods_engine = None
                 logger.warning(f"Failed to initialize CODS engine: {e}")
+        
+        # BABY PRIMITIVES - Seed cognitive primitives (from seed_primitives.py)
+        # Provides baby-derived attention, affordance, negative space, metacognition
+        # These are the building blocks for all higher cognition
+        self.primitive_helper = get_primitive_helper()
+        if self.primitive_helper.available:
+            logger.info("Baby primitives initialized (seed_primitives integration)")
+        else:
+            logger.debug("Baby primitives not available (seed_primitives import failed)")
         else:
             self.cods_engine = None
         
@@ -2071,10 +2296,14 @@ class GameplayEngine:
                         # CODS: Update frame for operator discovery and primitive learning
                         if self.cods_engine and game_state.frame:
                             try:
+                                # Pass reasoning to CODS for intelligent operator testing
+                                # This triggers tests based on what agent is thinking about
+                                current_reasoning = reasoning if 'reasoning' in dir() else None
                                 self.cods_engine.update_frame(
                                     game_state.frame,
                                     game_state.score,
-                                    action_count
+                                    action_count,
+                                    reasoning=current_reasoning
                                 )
                             except Exception as e:
                                 logger.debug(f"CODS frame update failed: {e}")
@@ -4541,6 +4770,55 @@ class GameplayEngine:
                         )
                     except Exception as e:
                         logger.debug(f"ACTION6 availability tracking failed (non-critical): {e}")
+                
+                # ================================================================
+                # PRIMITIVE-BASED POST-ACTION ANALYSIS (Added 2025-XX-XX)
+                # ================================================================
+                # Use baby-derived primitives to analyze what just happened.
+                # This builds the cognitive foundation for all higher reasoning.
+                # ================================================================
+                if hasattr(self, 'primitive_helper') and self.primitive_helper.available and new_state:
+                    try:
+                        # Get score and action history from session
+                        score_history = getattr(self, '_score_history', [])
+                        action_history = getattr(self, '_action_history', [])
+                        
+                        # Append current data
+                        if hasattr(new_state, 'score'):
+                            score_history.append(float(new_state.score))
+                            self._score_history = score_history[-20:]  # Keep last 20
+                        
+                        action_num = int(action_num) if action_num.isdigit() else 0
+                        if action_num:
+                            action_history.append(action_num)
+                            self._action_history = action_history[-20:]  # Keep last 20
+                        
+                        # Run primitive analysis
+                        primitive_analysis = self._analyze_situation_with_primitives(
+                            frame_before=frame_before,
+                            frame_after=new_state.frame,
+                            action_taken=action_num,
+                            score_history=self._score_history,
+                            action_history=self._action_history
+                        )
+                        
+                        # Store for next action selection
+                        self._last_primitive_analysis = primitive_analysis
+                        
+                        # Log recommendations from primitives
+                        if primitive_analysis.get('recommendations'):
+                            for rec in primitive_analysis['recommendations'][:2]:
+                                logger.debug(f"[PRIMITIVE] {rec}")
+                        
+                        # If primitives detect stuck, set flag for escape mode
+                        if primitive_analysis.get('stuck_status', {}).get('stuck'):
+                            self._is_stuck = True
+                            logger.info("[PRIMITIVE] Stuck pattern detected by primitives")
+                        else:
+                            self._is_stuck = False
+                            
+                    except Exception as e:
+                        logger.debug(f"Primitive post-action analysis failed (non-critical): {e}")
                 
                 return new_state
             else:
@@ -7770,6 +8048,108 @@ class GameplayEngine:
             logger.debug(f"Error getting agent operating mode: {e}")
         
         return None
+
+    def _analyze_situation_with_primitives(
+        self,
+        frame_before: Optional[List],
+        frame_after: Optional[List],
+        action_taken: Optional[int] = None,
+        score_history: Optional[List[float]] = None,
+        action_history: Optional[List[int]] = None
+    ) -> Dict[str, Any]:
+        """
+        Use baby-derived primitives to analyze the current gameplay situation.
+        
+        This provides low-level cognitive capabilities that inform higher-level
+        decision-making. Babies use these primitives from birth to understand
+        their environment - we wire them into gameplay the same way.
+        
+        PRIMITIVES USED:
+        - detect_change: What changed between frames?
+        - detect_motion: What moved?
+        - detect_stuck: Am I making progress?
+        - detect_contingency: Did my action cause an effect?
+        - detect_enclosed_empty: Where are the containers/holes?
+        - detect_open_edge: Where can things fall/escape?
+        
+        Args:
+            frame_before: Frame state before action
+            frame_after: Frame state after action
+            action_taken: The action that was just taken
+            score_history: Recent score values
+            action_history: Recent action numbers
+            
+        Returns:
+            Dict with primitive analysis results
+        """
+        result = {
+            'available': False,
+            'frame_changes': {},
+            'stuck_status': {},
+            'contingency': {},
+            'negative_space': {},
+            'recommendations': []
+        }
+        
+        if not hasattr(self, 'primitive_helper') or not self.primitive_helper.available:
+            return result
+        
+        result['available'] = True
+        
+        # 1. Frame Change Analysis
+        if frame_before and frame_after:
+            result['frame_changes'] = self.primitive_helper.analyze_frame_changes(
+                frame_before, frame_after
+            )
+            
+            # If action caused no frame change, note it
+            if not result['frame_changes'].get('has_changes', True):
+                result['recommendations'].append(
+                    "Last action had no visible effect - try different action"
+                )
+        
+        # 2. Stuck Detection
+        if score_history and action_history:
+            result['stuck_status'] = self.primitive_helper.check_stuck(
+                score_history, action_history
+            )
+            
+            if result['stuck_status'].get('stuck'):
+                result['recommendations'].append(
+                    "Stuck pattern detected - need to break routine"
+                )
+            
+            if result['stuck_status'].get('action_repeating'):
+                result['recommendations'].append(
+                    "Repeating same actions - try ACTION5 (wait) or ACTION6 (click) to break cycle"
+                )
+        
+        # 3. Contingency Detection (did action cause change?)
+        if action_taken and frame_before and frame_after:
+            result['contingency'] = self.primitive_helper.analyze_action_contingency(
+                action_taken, frame_before, frame_after
+            )
+            
+            if not result['contingency'].get('contingent'):
+                result['recommendations'].append(
+                    f"ACTION{action_taken} had no contingent effect - may not be the right action"
+                )
+        
+        # 4. Negative Space Detection (for water physics, container games)
+        if frame_after:
+            result['negative_space'] = self.primitive_helper.detect_negative_space(frame_after)
+            
+            if result['negative_space'].get('has_open_edges'):
+                result['recommendations'].append(
+                    "Open edges detected - objects may fall/escape from these locations"
+                )
+            
+            if result['negative_space'].get('has_containers'):
+                result['recommendations'].append(
+                    "Container/enclosed regions detected - may need to fill or empty them"
+                )
+        
+        return result
 
     def _is_frontier_level(self, game_id: str, level: int) -> bool:
         """
