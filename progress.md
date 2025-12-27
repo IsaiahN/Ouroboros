@@ -1,5 +1,121 @@
 # Ouroboros Progress Log
 
+## Session: December 26, 2025 (Night) - Q1-Q5 Emergent Reasoning Not Using Frame Data
+
+---
+
+### Approach: Debug Why Reasoning Shows "0 Actions" Despite Frame Changes Detected
+
+**Timestamp**: 8:37:19 PM  
+**Status**: IN PROGRESS - Root cause found and fixed, awaiting verification
+
+---
+
+### Context
+
+After the 6:33 PM session fixed the remaining feedback loop gaps, user provided 4 post-fix game logs (as66, ls20, lp85, vc33) for review to verify fixes were working.
+
+**Critical Finding**: Q1-Q5 emergent reasoning is NOT working as expected:
+- `2_delta.frame_changes` shows 21+ actual changes (frame detection WORKS)
+- `3_understanding.Q1_what_is_happening` shows "Observed 0 actions that change state" (Q1 is BROKEN)
+- Confidence stuck at 0.3 (never bootstraps up)
+- All reasoning outputs show "NULL - 425 Too Early" placeholders
+
+---
+
+### Investigation Steps
+
+| Step | What | Finding |
+|------|------|---------|
+| 1 | Grep for "Observed 0 actions" | Found at `core_gameplay.py:6848` - Q1 reads from `q1_data.get('actions_that_changed_state', [])` |
+| 2 | Trace `q1_data` source | Comes from `context.get('q1_change_vs_fixed', {})` built by `_build_emergent_reasoning_context()` |
+| 3 | Trace Q1 analysis | `_analyze_change_vs_invariance()` at line 6920 checks `if not self._recent_action_traces: return empty` |
+| 4 | Find `_recent_action_traces` init | Only initialized at line 2416 inside `agent_self_model` conditional block! |
+
+---
+
+### Root Cause
+
+Two bugs in `core_gameplay.py`:
+
+**Bug 1: Initialization Gate**
+```python
+# Line 2369-2416 (BEFORE FIX)
+if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+    if hasattr(self, '_recent_action_traces'):
+        # append trace
+    else:
+        self._recent_action_traces = []  # <-- Only inits here, never populates first iteration!
+```
+
+**Bug 2: Wrong Conditional Nesting**
+The action trace population was nested inside `agent_self_model` check, but Q1 needs traces regardless of whether self-model is active.
+
+**Why `frame_changes` works but Q1 doesn't:**
+- `2_delta.frame_changes` = Built by `_build_delta_section()` using direct numpy frame comparison
+- `3_understanding.Q1` = Built by `_build_emergent_reasoning_context()` using `_recent_action_traces` (which was empty!)
+
+---
+
+### Fix Applied
+
+**Change 1: Initialize in `__init__`** (line 381)
+```python
+# FIX: Initialize action traces for Q1-Q5 emergent reasoning
+# These traces track frame changes per action for learning what changes vs what's fixed
+self._recent_action_traces = []
+```
+
+**Change 2: Decouple trace population from self-model** (lines 2369-2388)
+```python
+# Q1-Q5 EMERGENT REASONING: Track action traces for what changes vs fixed
+# FIX: Moved outside agent_self_model check - Q1 needs traces regardless
+try:
+    score_change = game_state.score - previous_score
+    outcome_type = 'neutral' / 'score_increase' / 'game_over'
+    
+    self._recent_action_traces.append({
+        'action_type': action,
+        'frame_before': self.action_handler.last_frame,
+        'frame_after': game_state.frame,
+        'score_change': score_change,
+        'outcome_type': outcome_type
+    })
+    self._recent_action_traces = self._recent_action_traces[-10:]
+except Exception as e:
+    logger.debug(f"Action trace recording failed: {e}")
+
+# Self-model: Track controlled objects (now SEPARATE from trace population)
+if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+    # ... self-model specific logic that USES the traces
+```
+
+---
+
+### Expected Result After Fix
+
+| Before | After |
+|--------|-------|
+| Q1: "Observed 0 actions that change state" | Q1: "Actions [1,3,4] cause state changes" |
+| Confidence: 0.3 (frozen) | Confidence: 0.45-0.75 (bootstraps up) |
+| Q2-Q5: "NULL - 425 Too Early" | Q2-Q5: Actual analysis based on trace data |
+
+---
+
+### Files Modified
+
+- `core_gameplay.py` (+5 lines in `__init__`, refactored ~45 lines in gameplay loop)
+
+---
+
+### Next Steps
+
+1. Run evolution to verify fix works
+2. Review post-fix reasoning logs to confirm Q1 shows actual action analysis
+3. Verify confidence increases above 0.3 as traces accumulate
+
+---
+
 ## Session: December 26, 2025 (Evening) - Closing Remaining Feedback Loop Gaps
 
 ---

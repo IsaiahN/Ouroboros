@@ -377,6 +377,10 @@ class GameplayEngine:
         self.agent_self_model = AgentSelfModel(db_path)  # Self-model: Track controlled objects
         self.object_detector = ObjectDetector(db_path)  # Object detection for tetrahedral perception
         
+        # FIX: Initialize action traces for Q1-Q5 emergent reasoning
+        # These traces track frame changes per action for learning what changes vs what's fixed
+        self._recent_action_traces = []
+        
         # Two-Streams: Weaving reporter for self-reflection in every action
         self.weaving_reporter = WeavingReporter(self.db)
         
@@ -2362,58 +2366,59 @@ class GameplayEngine:
                         if len(recent_action_hashes) > CYCLE_DETECTION_WINDOW:
                             recent_action_hashes.pop(0)
                         
+                        # Q1-Q5 EMERGENT REASONING: Track action traces for what changes vs fixed
+                        # FIX: Moved outside agent_self_model check - Q1 needs traces regardless
+                        try:
+                            score_change = game_state.score - previous_score
+                            outcome_type = 'neutral'
+                            if score_change > 0:
+                                outcome_type = 'score_increase'
+                            elif game_state.state == 'GAME_OVER' and game_state.score == 0:
+                                outcome_type = 'game_over'
+                            
+                            self._recent_action_traces.append({
+                                'action_type': action,
+                                'frame_before': self.action_handler.last_frame,
+                                'frame_after': game_state.frame,
+                                'score_change': score_change,  # Q5: score delta
+                                'outcome_type': outcome_type   # Q5: neutral/score_increase/game_over
+                            })
+                            # Keep last 10 actions for control detection
+                            self._recent_action_traces = self._recent_action_traces[-10:]
+                        except Exception as e:
+                            logger.debug(f"Action trace recording failed: {e}")
+                        
                         # Self-model: Track controlled objects on every exploration action
+                        # (Uses the action traces populated above)
                         if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
                             try:
-                                # Build action trace for recent actions in this session
-                                if hasattr(self, '_recent_action_traces'):
-                                    # Q5 enhancement: track score changes and outcome types
-                                    score_change = game_state.score - previous_score
-                                    outcome_type = 'neutral'
-                                    if score_change > 0:
-                                        outcome_type = 'score_increase'
-                                    elif game_state.state == 'GAME_OVER' and game_state.score == 0:
-                                        outcome_type = 'game_over'
+                                # Every 5 actions, analyze control patterns
+                                if len(self._recent_action_traces) >= 5:
+                                    action_sequence = [t for t in self._recent_action_traces]
+                                    frame_sequence = [{'grid': t.get('frame_before', [])} for t in self._recent_action_traces]
+                                    frame_sequence.append({'grid': game_state.frame or []})
                                     
-                                    self._recent_action_traces.append({
-                                        'action_type': action,
-                                        'frame_before': self.action_handler.last_frame,
-                                        'frame_after': game_state.frame,
-                                        'score_change': score_change,  # Q5: score delta
-                                        'outcome_type': outcome_type   # Q5: neutral/score_increase/game_over
-                                    })
-                                    # Keep last 10 actions for control detection
-                                    self._recent_action_traces = self._recent_action_traces[-10:]
+                                    controlled, confidence = self.agent_self_model.identify_controlled_objects(
+                                        game_id, current_level, action_sequence, frame_sequence
+                                    )
                                     
-                                    # Every 5 actions, analyze control patterns
-                                    if len(self._recent_action_traces) >= 5:
-                                        action_sequence = [t for t in self._recent_action_traces]
-                                        frame_sequence = [{'grid': t.get('frame_before', [])} for t in self._recent_action_traces]
-                                        frame_sequence.append({'grid': game_state.frame or []})
-                                        
-                                        controlled, confidence = self.agent_self_model.identify_controlled_objects(
-                                            game_id, current_level, action_sequence, frame_sequence
+                                    # Store if confident
+                                    if controlled and confidence > 0.5:
+                                        self.agent_self_model.store_control_map(
+                                            agent_id, game_id, current_level, controlled, confidence
                                         )
                                         
-                                        # Store if confident
-                                        if controlled and confidence > 0.5:
-                                            self.agent_self_model.store_control_map(
-                                                agent_id, game_id, current_level, controlled, confidence
-                                            )
-                                            
-                                            # Share discovery to network for cross-agent validation
-                                            action_response_map = self._build_action_response_map(self._recent_action_traces)
-                                            self.agent_self_model.share_control_discovery_to_network(
-                                                agent_id=agent_id,
-                                                game_id=game_id,
-                                                level=current_level,
-                                                controlled_objects=controlled,
-                                                action_response_map=action_response_map,
-                                                confidence=confidence,
-                                                generation=self.game_config.get('generation', 0)
-                                            )
-                                else:
-                                    self._recent_action_traces = []
+                                        # Share discovery to network for cross-agent validation
+                                        action_response_map = self._build_action_response_map(self._recent_action_traces)
+                                        self.agent_self_model.share_control_discovery_to_network(
+                                            agent_id=agent_id,
+                                            game_id=game_id,
+                                            level=current_level,
+                                            controlled_objects=controlled,
+                                            action_response_map=action_response_map,
+                                            confidence=confidence,
+                                            generation=self.game_config.get('generation', 0)
+                                        )
                             except Exception as e:
                                 logger.debug(f"Self-model action update failed: {e}")
                         
@@ -6938,6 +6943,12 @@ class GameplayEngine:
         
         if not hasattr(self, '_recent_action_traces') or not self._recent_action_traces:
             return result
+        
+        # DEBUG: Log once when traces start working (remove after verification)
+        trace_count = len(self._recent_action_traces)
+        if trace_count > 0 and not getattr(self, '_q1_trace_logged', False):
+            self._q1_trace_logged = True
+            logger.info(f"[Q1-FIX] Action traces now working: {trace_count} traces available")
         
         actions_moved = set()
         actions_static = set()
