@@ -28,14 +28,16 @@ class BreakthroughBudgetAllocator:
         self.db = db
         
         # Budget levels by discovery phase
-        self.DISCOVERY_BUDGET = 800    # High: unbeaten games need exploration
-        self.EXPANSION_BUDGET = 400    # Medium: partial wins, expand knowledge
-        self.EXPLOITATION_BUDGET = 150 # Low: beaten games, just optimize
+        # BUGFIX: Previous budgets (800/400/150) were too low - replay alone can consume 50-100 actions
+        # Need enough budget AFTER replay to explore frontier levels
+        self.DISCOVERY_BUDGET = 2000   # High: unbeaten games need full exploration
+        self.EXPANSION_BUDGET = 1500   # Medium: partial wins, still need to explore new levels
+        self.EXPLOITATION_BUDGET = 800 # Low: beaten games, but still need budget for optimization runs
         
         # Per-level budgets (total budget / expected levels)
-        self.DISCOVERY_PER_LEVEL = 300
-        self.EXPANSION_PER_LEVEL = 200
-        self.EXPLOITATION_PER_LEVEL = 100
+        self.DISCOVERY_PER_LEVEL = 400
+        self.EXPANSION_PER_LEVEL = 300
+        self.EXPLOITATION_PER_LEVEL = 200
         
     def calculate_game_budget(self, game_id: str, agent_id: Optional[str] = None) -> dict:
         """

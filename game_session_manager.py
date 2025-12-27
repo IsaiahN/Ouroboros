@@ -572,6 +572,24 @@ class GameSessionManager:
         else:
             status = 'failed'
         
+        # CRITICAL FIX (2025-12-27): Get accurate action count from action_traces
+        # Previous bug: fallback to session_stats['total_actions'] which is CUMULATIVE
+        # across all games in session, causing inflated counts like 1633, 25346, etc.
+        # Now we count actual action_traces for this game if actions_taken is 0
+        actual_actions = actions_taken
+        if actual_actions <= 0:
+            try:
+                trace_count = self.db.execute_query("""
+                    SELECT COUNT(*) as cnt FROM action_traces
+                    WHERE session_id = ? AND game_id = ?
+                """, (self.current_session_id, self.current_game_id))
+                if trace_count and trace_count[0]['cnt'] > 0:
+                    actual_actions = trace_count[0]['cnt']
+                else:
+                    actual_actions = 0  # No traces = no actions (don't use cumulative!)
+            except Exception:
+                actual_actions = 0  # On error, use 0 rather than inflated cumulative
+        
         self.db.save_game_result({
             'game_id': self.current_game_id,
             'session_id': self.current_session_id,
@@ -579,7 +597,7 @@ class GameSessionManager:
             'end_time': datetime.now(),
             'status': status,
             'final_score': final_score,
-            'total_actions': actions_taken if actions_taken > 0 else self.session_stats['total_actions'],  # CRITICAL FIX: Use per-game count!
+            'total_actions': actual_actions,  # Fixed: actual count from traces, not cumulative session counter
             'win_detected': final_state == 'WIN',
             'level_completions': level_completions,  # CRITICAL FIX: Store level completions!
             'generation': self._current_generation  # Track generation for cleanup

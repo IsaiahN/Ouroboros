@@ -161,15 +161,49 @@ if game_state.state == "WIN":
 
 ---
 
-### Current Status
+### Root Cause #3: Budget Too Low for Beaten Games
+
+**Timestamp**: 6:50:12 AM (Dec 27)
+
+**Symptom**: Games like AS66 ending with only 65 actions despite reaching score=2.0
+
+**Evidence**:
+```
+Game as66-821a4dcad9c2 completed: NOT_FINISHED, Score: 2.0, Actions: 65, Levels Completed: 2/3
+```
+
+**Root Cause**: `BreakthroughBudgetAllocator` had extremely low budgets:
+- `EXPLOITATION_BUDGET = 150` (3+ level wins)
+- `EXPANSION_BUDGET = 400` (1-2 level wins)
+- `DISCOVERY_BUDGET = 800` (0 level wins)
+
+For AS66 with 3 level wins in `winning_sequences`, it got only 150 actions total. After replaying ~65 actions to reach score=2.0, there were only 85 actions left for Level 3 exploration - not enough!
+
+**Fix Applied** (`breakthrough_budget_allocator.py`):
+```python
+# OLD (too low - replay consumes most of budget)
+DISCOVERY_BUDGET = 800
+EXPANSION_BUDGET = 400
+EXPLOITATION_BUDGET = 150
+
+# NEW (enough budget AFTER replay for exploration)
+DISCOVERY_BUDGET = 2000
+EXPANSION_BUDGET = 1500
+EXPLOITATION_BUDGET = 800
+```
+
+---
+
+### Current Status (Updated 6:50 AM Dec 27)
 
 All identified bugs have been fixed:
 1. Premature WIN detection (3 locations) -> Now checks `win_score`
 2. Stale network coordinates -> Now validates against current frame
 3. Score display bug -> State variables reset at game start
 4. Q1-Q5 trace population -> Moved outside self-model gate
+5. **Budget too low** -> Increased EXPLOITATION from 150 to 800, EXPANSION from 400 to 1500
 
-**Next Step**: Run SP80 evolution to verify games now use full action budget and continue past Level 1.
+**Next Step**: Run evolution to verify games now use full action budget and continue past replay phase.
 
 ---
 
@@ -4447,3 +4481,201 @@ python network_health_report.py --json
 ---
 
 **SESSION COMPLETE: December 25, 2025 - 7:10:19 AM**
+
+---
+
+## Session: December 27, 2025 (Morning) - AS66 Agents Not Reaching L4
+
+---
+
+### Approach: Debug Why Agents Get Stuck at L2/L3 Despite L4 Sequences Existing
+
+**Timestamp**: 7:52:18 AM  
+**Status**: IN PROGRESS - Multiple fixes implemented, working on reset protection
+
+---
+
+### Context
+
+User noticed AS66 games showing scores of 2.0 and 3.0 when L4 sequences exist (41-89 actions). Agents should be reaching L4 (score=4) but are getting stuck at lower levels.
+
+**Evidence from Reasoning Log** (`[LOG] as66 reasoning log-sample.md`):
+```
+- Agent starts replaying sequence seq_b977b4478cf84106 (86 actions, L4)
+- Game reset detected (score_change: -2)
+- Agent enters "self_directed" mode with network_invalid: true
+- Agent explores randomly instead of using sequences
+- Never re-checks for sequences when completing subsequent levels
+```
+
+---
+
+### Root Causes Identified
+
+| # | Issue | Impact |
+|---|-------|--------|
+| 1 | Agents enter self-directed mode after escape but never re-query for sequences | Stuck exploring when good sequences exist |
+| 2 | Sequence replay starts from L1 even when agent is at L3 | Wastes actions replaying completed levels |
+| 3 | Game/level resets penalize sequences unfairly | Good sequences get `consecutive_failures++` for external resets |
+
+---
+
+### Fixes Applied
+
+#### Fix 1: Level Breakpoints for Partial Replay
+
+**Problem**: Cumulative sequences store L1→LN actions. If agent is at L3, replaying from L1 wastes actions.
+
+**Solution**: Track where each level starts in the sequence.
+
+**Database Schema Change**:
+```sql
+ALTER TABLE winning_sequences ADD COLUMN level_breakpoints TEXT;
+-- Format: JSON {"1": 0, "2": 15, "3": 32, "4": 41}
+-- Means: L1 starts at action 0, L2 at 15, L3 at 32, L4 at 41
+```
+
+**Capture Logic** (lines 8908-8919):
+```python
+# Calculate level breakpoints from action traces
+level_breakpoints = {}
+if action_traces:
+    for i, trace in enumerate(action_traces):
+        trace_level = trace.get('level_number', 1)
+        if trace_level not in level_breakpoints:
+            level_breakpoints[trace_level] = i
+```
+
+**Replay Logic** (lines 9830-9863):
+```python
+# PARTIAL REPLAY: Skip to current level using breakpoints
+current_level = int(game_state.score) + 1
+if current_level > 1 and level_breakpoints:
+    breakpoints = json.loads(level_breakpoints) if isinstance(level_breakpoints, str) else level_breakpoints
+    if str(current_level) in breakpoints:
+        start_index = breakpoints[str(current_level)]
+        logger.info(f"[PARTIAL REPLAY] Skipping to L{current_level} (action {start_index})")
+```
+
+---
+
+#### Fix 2: Mid-Game Sequence Replay Trigger
+
+**Problem**: Agent enters self-directed mode after reset, completes levels manually, but never re-checks if sequences are available.
+
+**Solution**: Set pending replay flag when exiting self-directed mode.
+
+**Flag Setting** (lines 2761-2775):
+```python
+# When exiting self_directed mode, trigger sequence re-check
+if self._operating_mode == "self_directed":
+    self._pending_sequence_replay = True
+    self._pending_replay_from_level = current_level
+    logger.info(f"[MODE] Exiting self_directed at L{current_level} - will check for sequences")
+```
+
+**Handler After Level Completion** (lines 2968-3017):
+```python
+# Execute pending sequence replay after level completion
+if getattr(self, '_pending_sequence_replay', False):
+    current_level = int(game_state.score) + 1
+    ranked_sequences = self._get_ranked_cumulative_sequences(game_id, current_level)
+    if ranked_sequences:
+        # Found sequences - replay from current level
+        self._pending_sequence_replay = False
+        # ... trigger replay ...
+```
+
+---
+
+#### Fix 3: Reset Detection and Protection
+
+**Problem**: When game/level resets occur (external to sequence), the sequence gets flagged as failed.
+
+**Solution**: Detect score drops and protect sequences from false penalties.
+
+**Detection** (lines 10085-10105):
+```python
+# RESET DETECTION: Track score to detect unexpected resets
+highest_score_achieved = game_state.score
+reset_detected = False
+
+# During replay loop:
+if game_state.score < highest_score_achieved - 0.5:
+    drop_amount = highest_score_achieved - game_state.score
+    reset_type = "GAME RESET" if game_state.score < 0.5 else "LEVEL RESET"
+    logger.warning(f"[{reset_type}] Score dropped {drop_amount:.0f} - not sequence's fault!")
+    reset_detected = True
+    break
+```
+
+**Protection in 3-TRY Blocks** (lines 593, 1941):
+```python
+# Check if this was a game/level reset (not sequence's fault)
+if replay_result and replay_result.get('reset_detected'):
+    logger.info(f"[3-TRY] Reset detected: {sequence_id[:12]} - NOT penalized")
+    # Don't call _flag_sequence_failure()
+else:
+    # Actual failure - flag the sequence
+    self._flag_sequence_failure(sequence_id, failure_reason)
+```
+
+**Return Value Updated**:
+```python
+return {'game_state': game_state, 'success': replay_success, 'reset_detected': reset_detected}
+```
+
+---
+
+### Files Modified
+
+| File | Lines | Change |
+|------|-------|--------|
+| `core_gameplay.py` | 8908-8919 | Calculate `level_breakpoints` from action traces |
+| `core_gameplay.py` | 9089-9104 | Store `level_breakpoints` in INSERT query |
+| `core_gameplay.py` | 9830-9863 | Partial replay - skip to current level |
+| `core_gameplay.py` | 2761-2775 | Set `_pending_sequence_replay` when exiting self-directed |
+| `core_gameplay.py` | 2968-3017 | Execute pending replay after level completion |
+| `core_gameplay.py` | 10085-10105 | Reset detection (game and level) |
+| `core_gameplay.py` | 10617-10626 | Return `reset_detected` flag |
+| `core_gameplay.py` | 593, 1941 | Check `reset_detected` before flagging failures |
+| `complete_database_schema.sql` | - | Added `level_breakpoints TEXT` column |
+
+---
+
+### Current Status
+
+**Completed**:
+1. ✅ Level breakpoints calculation during sequence capture
+2. ✅ Partial replay logic (skip to current level using breakpoints)
+3. ✅ `_pending_sequence_replay` flag when exiting self-directed mode
+4. ✅ Mid-game sequence replay handler after level completion
+5. ✅ Game reset detection (score → 0)
+6. ✅ Level reset detection (score drops by 1+)
+7. ✅ Protection from false sequence failure flags
+
+**Current Focus**: All fixes implemented - ready for testing
+
+---
+
+### Expected Behavior After Fixes
+
+1. **Agent at L3 with L4 sequence available**:
+   - Sequence replays starting from L3 (not L1)
+   - Uses `level_breakpoints` to skip first 32 actions
+   - Only executes L3→L4 portion (~9 actions)
+
+2. **Agent escapes self-directed mode at L2**:
+   - `_pending_sequence_replay = True` set
+   - After completing L2 manually, checks for L3+ sequences
+   - If found, triggers partial replay from L3
+
+3. **Game/level resets mid-replay**:
+   - Score drop detected immediately
+   - `reset_detected = True` returned
+   - Sequence NOT penalized with `consecutive_failures++`
+   - Agent can retry with same sequence
+
+---
+
+**NEXT STEP**: Run evolution to verify agents now use partial replay and reach L4

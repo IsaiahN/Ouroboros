@@ -247,6 +247,22 @@ class DatabaseInterface:
             raise ValueError(f"Missing required fields: {required_fields}")
 
         with self._get_connection() as conn:
+            # BUG FIX (2025-12-27): Preserve original start_time when updating game result
+            # Previously INSERT OR REPLACE would overwrite start_time with datetime.now()
+            # when finishing a game, making start_time == end_time
+            existing_start_time = None
+            if 'start_time' not in game_data:
+                cursor = conn.execute("""
+                    SELECT start_time FROM game_results 
+                    WHERE game_id = ? AND session_id = ?
+                """, (game_data['game_id'], game_data['session_id']))
+                row = cursor.fetchone()
+                if row:
+                    existing_start_time = row[0]
+            
+            # Use existing start_time if found, otherwise use provided or now()
+            start_time = game_data.get('start_time') or existing_start_time or datetime.now()
+            
             conn.execute("""
                 INSERT OR REPLACE INTO game_results (
                     game_id, session_id, scorecard_id, start_time, end_time, status,
@@ -258,7 +274,7 @@ class DatabaseInterface:
                 game_data['game_id'],
                 game_data['session_id'],
                 game_data.get('scorecard_id'),  # Store ARC scorecard ID
-                game_data.get('start_time', datetime.now()),
+                start_time,  # Fixed: preserve original start_time
                 game_data.get('end_time', datetime.now()),
                 game_data['status'],
                 game_data.get('final_score', 0.0),

@@ -589,13 +589,22 @@ class GameplayEngine:
                     """, (sequence_id,))
                     return result  # Exit early - we found a working sequence
                 else:
-                    # FAILURE - flag this sequence
-                    failure_reason = f"replay_failed_attempt_{try_num}"
+                    # Check if this was a game/level reset (not sequence's fault)
+                    if replay_result and replay_result.get('reset_detected'):
+                        logger.info(f"[3-TRY] Reset detected on attempt {try_num}: {sequence_id[:12]} - NOT penalized")
+                        # Don't flag the sequence - it's not at fault
+                    else:
+                        # FAILURE - flag this sequence
+                        failure_reason = f"replay_failed_attempt_{try_num}"
+                        if replay_result and replay_result.get('game_state'):
+                            result.game_state = replay_result['game_state']
+                            failure_reason = f"reached_score_{result.game_state.score}_not_target"
+                        self._flag_sequence_failure(sequence_id, failure_reason)
+                        logger.warning(f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}")
+                    
+                    # Update game_state even on reset
                     if replay_result and replay_result.get('game_state'):
                         result.game_state = replay_result['game_state']
-                        failure_reason = f"reached_score_{result.game_state.score}_not_target"
-                    self._flag_sequence_failure(sequence_id, failure_reason)
-                    logger.warning(f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}")
                     
                     # FULL GAME RESET before trying next sequence
                     if try_num < min(3, len(ranked_sequences)):
@@ -1928,13 +1937,22 @@ class GameplayEngine:
                             """, (sequence_id,))
                             break  # Exit the loop - we found a working sequence
                         else:
-                            # FAILURE - flag this sequence
-                            failure_reason = f"replay_failed_attempt_{try_num}"
+                            # Check if this was a game/level reset (not sequence's fault)
+                            if replay_result and replay_result.get('reset_detected'):
+                                logger.info(f"[3-TRY] Reset detected on attempt {try_num}: {sequence_id[:12]} - NOT penalized")
+                                # Don't flag the sequence - it's not at fault
+                            else:
+                                # FAILURE - flag this sequence
+                                failure_reason = f"replay_failed_attempt_{try_num}"
+                                if replay_result:
+                                    game_state = replay_result['game_state']  # Update state even on failure
+                                    failure_reason = f"reached_score_{game_state.score}_not_target"
+                                self._flag_sequence_failure(sequence_id, failure_reason)
+                                logger.warning(f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}")
+                            
+                            # Update game_state even on reset
                             if replay_result:
-                                game_state = replay_result['game_state']  # Update state even on failure
-                                failure_reason = f"reached_score_{game_state.score}_not_target"
-                            self._flag_sequence_failure(sequence_id, failure_reason)
-                            logger.warning(f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}")
+                                game_state = replay_result['game_state']
                             
                             # FULL GAME RESET before trying next sequence
                             # Each sequence may target different levels, so we reset to level 1
@@ -2761,6 +2779,18 @@ class GameplayEngine:
                                 # Network has wisdom for next level - exit self-directed mode
                                 logger.info(f"[SELF-DIRECTED] Level {int(game_state.score)} completed! Network has sequences for L{next_level}+, switching to network guidance")
                                 self._self_directed_mode = False
+                                
+                                # ================================================================
+                                # CRITICAL FIX: Trigger sequence replay for remaining levels
+                                # ================================================================
+                                # When exiting self-directed mode, we need to actually USE the
+                                # sequences, not just continue exploring. Set a flag to trigger
+                                # mid-game sequence replay after this action completes.
+                                # ================================================================
+                                self._pending_sequence_replay = True
+                                self._pending_replay_from_level = next_level
+                                logger.info(f"[SELF-DIRECTED] Queuing sequence replay from L{next_level}")
+                                
                                 # Restore original self-network bias if we boosted it
                                 if agent_id and hasattr(self, '_original_self_bias'):
                                     try:
@@ -2952,7 +2982,51 @@ class GameplayEngine:
                             else:
                                 # Premature WIN - level complete but not full game
                                 logger.debug(f"[CONTINUE] Level complete (score {game_state.score}/{game_state.win_score}) - continuing to next level")
-
+                    
+                    # ================================================================
+                    # PENDING SEQUENCE REPLAY: Trigger after exiting self-directed mode
+                    # ================================================================
+                    # When an agent exits self-directed mode (after completing a level),
+                    # we should try to replay the remaining portion of a known sequence
+                    # rather than continuing random exploration.
+                    # ================================================================
+                    if getattr(self, '_pending_sequence_replay', False):
+                        pending_level = getattr(self, '_pending_replay_from_level', current_level)
+                        logger.info(f"[MID-GAME REPLAY] Triggering sequence replay from L{pending_level}")
+                        
+                        # Clear flags first
+                        self._pending_sequence_replay = False
+                        self._pending_replay_from_level = None
+                        
+                        # Get best sequence for remaining levels
+                        try:
+                            ranked_sequences = self._get_ranked_cumulative_sequences(game_id, limit=1)
+                            if ranked_sequences:
+                                seq = ranked_sequences[0]
+                                seq_level = int(seq.get('total_score', 0))
+                                if seq_level >= pending_level:
+                                    logger.info(f"[MID-GAME REPLAY] Found L{seq_level} sequence ({seq['total_actions']} actions), replaying from L{pending_level} portion")
+                                    
+                                    # Replay sequence - it will automatically skip to current level
+                                    # because of the level_breakpoints and current score check
+                                    replay_result = await self._replay_sequence_inline(game_state, seq)
+                                    
+                                    if replay_result and replay_result.get('success'):
+                                        game_state = replay_result['game_state']
+                                        logger.info(f"[MID-GAME REPLAY] Success! Now at score {game_state.score}")
+                                        # Check for win
+                                        if game_state.state == "WIN":
+                                            if game_state.win_score > 0 and game_state.score >= game_state.win_score:
+                                                logger.info(f"[WIN] Full game win via mid-game replay!")
+                                                break
+                                    else:
+                                        logger.warning(f"[MID-GAME REPLAY] Sequence replay failed, continuing exploration")
+                                else:
+                                    logger.debug(f"[MID-GAME REPLAY] Best sequence only reaches L{seq_level}, need L{pending_level}+")
+                            else:
+                                logger.debug(f"[MID-GAME REPLAY] No sequences found for {game_id}")
+                        except Exception as e:
+                            logger.warning(f"[MID-GAME REPLAY] Error: {e}")
                     
                     # Check if exceeded max actions for this level
                     if level_action_count >= self.game_config['max_actions_per_level']:
@@ -8910,6 +8984,22 @@ class GameplayEngine:
             
             # Extract sequence
             actions = [t['action_number'] for t in action_traces]
+            
+            # ================================================================
+            # LEVEL BREAKPOINTS: Track where each level starts in the sequence
+            # ================================================================
+            # This enables partial replay - if agent is at L3, skip to L3 portion
+            # Format: {"1": 0, "2": 7, "3": 19, "4": 31} = L1 starts at 0, L2 at 7, etc.
+            # ================================================================
+            level_breakpoints = {}
+            current_level = None
+            for idx, trace in enumerate(action_traces):
+                trace_level = trace.get('level_number', 1)
+                if trace_level != current_level:
+                    level_breakpoints[str(trace_level)] = idx
+                    current_level = trace_level
+            logger.debug(f"[PKG] Level breakpoints: {level_breakpoints}")
+            
             coordinates = []
             for t in action_traces:
                 if t['action_number'] == 6 and t.get('coordinates'):
@@ -9075,15 +9165,15 @@ class GameplayEngine:
                         sequence_id, game_id, level_number, agent_id, session_id, scorecard_id,
                         action_sequence, coordinate_sequence, total_actions, total_score,
                         efficiency_score, initial_frame, final_frame, frame_transitions,
-                        pattern_tags, game_type, discovered_at, generation_discovered
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        pattern_tags, game_type, discovered_at, generation_discovered, level_breakpoints
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     sequence_id, game_id, level_number, agent_id, session_id, scorecard_id,
                     json.dumps(actions), json.dumps(coordinates), len(actions),
                     final_score, efficiency, json.dumps(initial_frame),
                     json.dumps(final_frame), json.dumps(frame_transitions),
                     json.dumps(pattern_tags), game_type, datetime.now().isoformat(),
-                    generation
+                    generation, json.dumps(level_breakpoints)  # Store level breakpoints for partial replay
                 ))
                 
                 # CRITICAL: Force immediate commit to ensure sequence is saved
@@ -9781,6 +9871,39 @@ class GameplayEngine:
             level_number = sequence.get('level_number') or 1
             logger.info(f" Replaying sequence {sequence_id} inline (level {level_number})")
             
+            # ================================================================
+            # PARTIAL REPLAY: Skip to current level if agent is already past L1
+            # ================================================================
+            # If agent is at L3 (score=2), skip L1 and L2 portions of sequence
+            # Uses level_breakpoints stored in sequence to find start point
+            # ================================================================
+            current_score = int(game_state.score)
+            current_agent_level = current_score + 1  # Score 2 = on level 3
+            
+            if current_agent_level > 1 and start_index == 0:
+                # Agent is past L1, check if we can skip ahead
+                level_breakpoints = sequence.get('level_breakpoints')
+                if level_breakpoints:
+                    if isinstance(level_breakpoints, str):
+                        try:
+                            level_breakpoints = json.loads(level_breakpoints)
+                        except:
+                            level_breakpoints = None
+                    
+                    if level_breakpoints:
+                        # Find start index for current level
+                        bp_key = str(current_agent_level)
+                        if bp_key in level_breakpoints:
+                            start_index = level_breakpoints[bp_key]
+                            logger.info(f"[PARTIAL REPLAY] Agent at L{current_agent_level} (score={current_score}), "
+                                       f"skipping to action {start_index} (L{current_agent_level} portion of sequence)")
+                        else:
+                            # No breakpoint for this level - agent might be ahead of sequence
+                            logger.warning(f"[PARTIAL REPLAY] No breakpoint for L{current_agent_level} in sequence, "
+                                          f"replaying from start")
+                else:
+                    logger.debug(f"[PARTIAL REPLAY] No level_breakpoints in sequence, replaying from start")
+            
             # Track that this agent is using a sequence for this level
             agent_id = self.game_config.get('agent_id', 'unknown')
             session_id = self.session_manager.current_session_id
@@ -9957,10 +10080,32 @@ class GameplayEngine:
             action_count = 0
             coord_index = start_index  # Start from checkpoint for coordinates
             
+            # ================================================================
+            # RESET DETECTION: Track score to detect unexpected resets
+            # ================================================================
+            # If score drops (e.g., 3->0 game reset, or 3->2 level reset),
+            # this is NOT the sequence's fault - don't penalize it.
+            # Covers both full game resets AND individual level resets.
+            # ================================================================
+            highest_score_achieved = game_state.score
+            reset_detected = False
+            
             # Execute actions starting from checkpoint
             for idx, action_num in enumerate(actions[start_index:], start=start_index):
                 if game_state.state != "NOT_FINISHED":
                     break
+                
+                # Check for game/level reset (score dropped unexpectedly)
+                if game_state.score < highest_score_achieved - 0.5:  # 0.5 tolerance for float precision
+                    drop_amount = highest_score_achieved - game_state.score
+                    reset_type = "GAME RESET" if game_state.score < 0.5 else "LEVEL RESET"
+                    logger.warning(f"[{reset_type}] Score dropped {drop_amount:.0f} (from {highest_score_achieved} to {game_state.score}) - not sequence's fault!")
+                    reset_detected = True
+                    break
+                
+                # Update highest score achieved
+                if game_state.score > highest_score_achieved:
+                    highest_score_achieved = game_state.score
                 
                 # ================================================================
                 # BUG FIX: Use ACTUAL level (from score) not sequence's level_number
@@ -10469,10 +10614,16 @@ class GameplayEngine:
                     logger.debug(f"Inferred beliefs extraction during replay failed (non-critical): {e}")
                 
             else:
-                logger.warning(f"[FAIL] Inline replay failed for {sequence_id}. "
-                             f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
+                # ================================================================
+                # RESET PROTECTION: Don't penalize sequence for external resets
+                # ================================================================
+                if reset_detected:
+                    logger.info(f"[PROTECTED] Sequence {sequence_id[:12]} NOT penalized - game/level was reset externally")
+                else:
+                    logger.warning(f"[FAIL] Inline replay failed for {sequence_id}. "
+                                 f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
             
-            return {'game_state': game_state, 'success': replay_success}
+            return {'game_state': game_state, 'success': replay_success, 'reset_detected': reset_detected}
             
         except ValueError as e:
             # Frame corruption or other critical errors - re-raise to abort game
