@@ -1632,9 +1632,68 @@ class GameplayEngine:
                     game_state.score,
                     action_count=0
                 )
+                # Bootstrap CODS operators if none exist
+                if not getattr(self.cods_engine, '_operators', None):
+                    bootstrap_count = self.cods_engine.bootstrap_operators_from_patterns(limit=10)
+                    if bootstrap_count > 0:
+                        logger.info(f"[CODS] Bootstrapped {bootstrap_count} operators for {game_id}")
                 logger.debug(f"[CODS] Context initialized for {game_id} level 1")
             except Exception as e:
                 logger.debug(f"CODS context init failed (non-critical): {e}")
+        
+        # ================================================================
+        # FIX 1.1: BOOTSTRAP EMERGENT REASONING
+        # Initialize reasoning context at game start instead of waiting
+        # This prevents "NULL - 425 Too Early" placeholders everywhere
+        # ================================================================
+        self._last_emergent_reasoning = {
+            'Q1': f"Starting game {game_id}, observing initial state",
+            'Q2': "Neutral - no actions taken yet",
+            'Q3': "No history yet - will observe what works",
+            'Q4': "Explore to understand game mechanics",
+            'Q5': 0.3,  # Low initial confidence
+            'confidence': 0.3,
+            'q1_change_vs_fixed': {
+                'status': 'initializing',
+                'actions_that_changed_state': [],
+                'actions_with_no_effect': [],
+                'confidence': 0.1
+            },
+            'q2_reward_punishment': {
+                'status': 'initializing',
+                'rewarding_objects': [],
+                'dangerous_objects': [],
+                'confidence': 0.1
+            },
+            'q3_salient_target': {
+                'status': 'initializing',
+                'top_salient': [],
+                'confidence': 0.1
+            },
+            'q4_working_theory': {
+                'status': 'initializing',
+                'theory': 'Observing game mechanics',
+                'confidence': 0.1
+            },
+            'q5_goal_variables': {
+                'status': 'initializing',
+                'actions_with_score_increase': [],
+                'actions_causing_game_over': [],
+                'confidence': 0.1
+            },
+            'q7_familiarity': {
+                'is_frontier': True,
+                'network_max_level': 0,
+                'current_level': 1
+            }
+        }
+        self._last_cods_operators_used = []  # Track CODS usage for reasoning logs
+        self._q1_failure_count = 0  # Track reasoning failures
+        self._q2_failure_count = 0
+        self._q3_failure_count = 0
+        self._q4_failure_count = 0
+        self._q5_failure_count = 0
+        logger.debug(f"[EMERGENT] Bootstrapped reasoning context for {game_id}")
         
         # ================================================================
         # SESSION 25: INITIAL REGION CLASSIFICATION
@@ -2083,11 +2142,17 @@ class GameplayEngine:
             CYCLE_DETECTION_WINDOW = 8  # Check last 8 actions for cycles
             
             # STUCK STATE ESCAPE: Before giving up, try intelligent escape actions
-            # Increased from 5 to 10 since we now use intelligent action selection
-            # that considers network hypotheses, sensation state, self-model, and pariah avoidance
-            ESCAPE_ATTEMPTS_MAX = 10  # Try 10 different intelligent escape actions before giving up
+            # FIX 2.2: Increased to 21 attempts in 3 phases:
+            # Phase 1 (1-7): Intelligent escape using CODS, Q1-Q5, network wisdom
+            # Phase 2 (8-14): Reset biases, try different strategies
+            # Phase 3 (15-21): Pure random exploration (last resort)
+            ESCAPE_ATTEMPTS_PHASE1 = 7   # Intelligent escape with CODS
+            ESCAPE_ATTEMPTS_PHASE2 = 7   # After resetting biases
+            ESCAPE_ATTEMPTS_PHASE3 = 7   # Pure random (last resort)
+            ESCAPE_ATTEMPTS_MAX = ESCAPE_ATTEMPTS_PHASE1 + ESCAPE_ATTEMPTS_PHASE2 + ESCAPE_ATTEMPTS_PHASE3  # 21 total
             escape_attempts = 0  # Track escape attempts
             in_escape_mode = False  # Flag for escape mode
+            pure_exploration_mode = False  # Flag for pure exploration after escape fails
             
             # Track queried hypotheses for later contradiction if they don't help
             queried_hypothesis_ids = []  # IDs of hypotheses used this game
@@ -2504,9 +2569,32 @@ class GameplayEngine:
                                             logger.debug(f"Help request failed: {e}")
                                     
                                     if is_frontier_level:
-                                        # ANYONE at frontier should stop wasting actions when truly stuck
-                                        logger.info(f"   Terminating exploration at frontier L{current_level} to avoid wasting actions")
-                                        break  # Exit game loop for ANY agent at frontier
+                                        # FIX 2.3: Don't terminate immediately - use remaining budget
+                                        remaining_budget = self.game_config['max_total_actions'] - action_count
+                                        if remaining_budget < 100:
+                                            # Very little budget left - OK to terminate
+                                            logger.info(f"   Frontier stuck with <100 actions remaining - ending game")
+                                            break
+                                        else:
+                                            # Still have budget! Enter pure exploration mode
+                                            logger.warning(f"[FRONTIER-STUCK] Escape failed but {remaining_budget} actions remain. "
+                                                          f"Entering PURE EXPLORATION mode - random walk with learning.")
+                                            in_escape_mode = False
+                                            escape_attempts = 0
+                                            consecutive_no_frame_change = 0
+                                            pure_exploration_mode = True
+                                            self._pure_exploration_mode = True
+                                            self._pure_exploration_start = action_count
+                                            
+                                            # Record stuck point for network learning
+                                            self._record_stuck_point(
+                                                agent_id=agent_id,
+                                                game_id=game_id,
+                                                level=current_level,
+                                                action_count=action_count,
+                                                escape_attempts=ESCAPE_ATTEMPTS_MAX
+                                            )
+                                            # Continue loop - don't break!
                                     else:
                                         # Non-frontier levels: reset escape mode and continue
                                         # They have sequences to follow that might work on next cycle
@@ -2584,6 +2672,40 @@ class GameplayEngine:
                                 )
                             except Exception:
                                 pass  # Non-critical
+                        
+                        # ================================================================
+                        # FIX 3.1: WRITE WIN STRATEGY ON LEVEL COMPLETION
+                        # This fuels CODS "Teacher Model" by recording what worked
+                        # CODS parses these strategies for capability keywords
+                        # ================================================================
+                        try:
+                            emergent = getattr(self, '_last_emergent_reasoning', {})
+                            strategy = self._generate_win_strategy(
+                                agent_id=agent_id or 'unknown',
+                                game_id=game_id,
+                                level=current_level,
+                                actions_taken=level_action_count,
+                                emergent_reasoning=emergent
+                            )
+                            if strategy and agent_id:
+                                game_type = game_id[:4] if game_id else 'unknown'
+                                hint_id = f"win_{game_id}_{current_level}_{uuid.uuid4().hex[:8]}"
+                                self.db.execute_query("""
+                                    INSERT INTO network_failure_hypotheses 
+                                    (hypothesis_id, game_type, level_number, source_agent_id, 
+                                     win_strategy, wins, losses, recorded_at)
+                                    VALUES (?, ?, ?, ?, ?, 1, 0, ?)
+                                """, (
+                                    hint_id,
+                                    game_type,
+                                    current_level,
+                                    agent_id,
+                                    strategy,
+                                    datetime.now().isoformat()
+                                ))
+                                logger.info(f"[WIN-STRATEGY] L{current_level}: {strategy[:80]}...")
+                        except Exception as e:
+                            logger.debug(f"Win strategy recording failed: {e}")
                         
                         # Reset level-specific counters for next level
                         level_api_resets = 0  # Fresh reset budget for new level
@@ -4016,6 +4138,10 @@ class GameplayEngine:
         # CODS - COGNITIVE OPERATOR DISCOVERY SYSTEM
         # Use composed operators and unlocked primitives to suggest actions.
         # CODS provides analysis through discovered operators (symmetry, shapes, etc.)
+        # FIX 4: Adaptive threshold based on frontier status
+        # - At frontier: lower threshold (0.35) to encourage CODS exploration
+        # - At beaten levels: higher threshold (0.6) to rely on proven sequences
+        # - Also track operators used for reasoning log
         # ===================================================================
         if self.cods_engine and game_state.frame:
             try:
@@ -4026,14 +4152,32 @@ class GameplayEngine:
                     action_num = cods_suggestion['action']
                     confidence = cods_suggestion.get('confidence', 0.0)
                     operator_name = cods_suggestion.get('operator', 'unknown')
+                    operators_used = cods_suggestion.get('operators', [operator_name])
                     
-                    # Use CODS suggestion if confidence is high enough (0.6 threshold)
-                    if confidence >= 0.6:
-                        reasoning = f"CODS operator '{operator_name}' suggests ACTION{action_num} (confidence: {confidence:.2f})"
+                    # FIX 4: Track operators for reasoning log (Fix 6 will consume this)
+                    self._last_cods_operators_used = operators_used if isinstance(operators_used, list) else [operators_used]
+                    
+                    # FIX 4: Adaptive threshold based on frontier status
+                    # At frontier (is_frontier already computed above in sensation section)
+                    # Use lower threshold to encourage CODS-guided exploration
+                    if is_frontier:
+                        cods_threshold = 0.35  # Lower for frontier exploration
+                        threshold_reason = "frontier"
+                    elif is_self_directed:
+                        cods_threshold = 0.30  # Even lower when agent is exploring on its own
+                        threshold_reason = "self-directed"
+                    else:
+                        cods_threshold = 0.55  # Standard threshold for beaten levels
+                        threshold_reason = "standard"
+                    
+                    # Use CODS suggestion if confidence exceeds adaptive threshold
+                    if confidence >= cods_threshold:
+                        reasoning = f"CODS operator '{operator_name}' suggests ACTION{action_num} (confidence: {confidence:.2f}, threshold: {cods_threshold} [{threshold_reason}])"
                         logger.info(f"[CODS] {reasoning}")
                         return f"ACTION{action_num}", reasoning
                     else:
-                        logger.debug(f"[CODS] Low confidence suggestion ({confidence:.2f}) from '{operator_name}'")
+                        # Still log but at debug level
+                        logger.debug(f"[CODS] Below threshold ({confidence:.2f} < {cods_threshold}): '{operator_name}' -> ACTION{action_num}")
             except Exception as e:
                 logger.debug(f"CODS suggestion failed (non-critical): {e}")
         
@@ -5435,6 +5579,176 @@ class GameplayEngine:
                 'strategy_adjustment': 'explore'
             }
     
+    # ========================================================================
+    # FIX 3.2: WIN STRATEGY GENERATION
+    # Generate capability-keyword-rich strategies for CODS to parse
+    # ========================================================================
+    
+    def _generate_win_strategy(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int,
+        actions_taken: int,
+        emergent_reasoning: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Generate a win strategy description that CODS can parse for capability needs.
+        
+        Uses emergent reasoning to describe what worked in terms that map to primitives.
+        These keywords are parsed by cods_engine.parse_strategy_for_needs() to trigger unlocks.
+        
+        Args:
+            agent_id: Agent that won
+            game_id: Game ID
+            level: Level completed
+            actions_taken: Actions used
+            emergent_reasoning: Q1-Q5 reasoning context
+            
+        Returns:
+            Strategy string with capability keywords, or None if can't generate
+        """
+        parts = []
+        game_type = game_id[:4] if game_id else "unknown"
+        
+        try:
+            # Q1: What changed vs fixed
+            q1 = emergent_reasoning.get('q1_change_vs_fixed', {})
+            if q1.get('actions_that_changed_state'):
+                actions = q1['actions_that_changed_state']
+                parts.append(f"Actions {actions} caused state changes")
+            
+            # Q2: Rewards/punishments
+            q2 = emergent_reasoning.get('q2_reward_punishment', {})
+            if q2.get('rewarding_objects'):
+                parts.append(f"Interacting with {len(q2['rewarding_objects'])} rewarding objects helped")
+            if q2.get('dangerous_objects'):
+                parts.append(f"Avoided {len(q2['dangerous_objects'])} dangerous objects")
+            
+            # Q3: Salient targets
+            q3 = emergent_reasoning.get('q3_salient_target', {})
+            if q3.get('top_salient'):
+                parts.append(f"Focused on salient objects: {q3['top_salient'][:3]}")
+            
+            # Q4: Working theory
+            q4 = emergent_reasoning.get('q4_working_theory', {})
+            if q4.get('theory') and q4.get('theory') != 'Exploring to discover rules':
+                parts.append(f"Theory: {q4['theory']}")
+            
+            # Add capability keywords that CODS can parse
+            # These map to locked primitives in primitive_unlock_manager.py
+            capability_hints = []
+            reasoning_str = str(emergent_reasoning).lower()
+            
+            # Pattern detection hints (these keywords trigger unlock checks in CODS)
+            if 'symmetry' in reasoning_str or 'symmetric' in reasoning_str:
+                capability_hints.append("used symmetry detection")
+            if any(word in reasoning_str for word in ['flood', 'fill', 'connected', 'region']):
+                capability_hints.append("used flood fill to find connected regions")
+            if any(word in reasoning_str for word in ['pattern', 'repeating', 'tile']):
+                capability_hints.append("detected repeating patterns")
+            if any(word in reasoning_str for word in ['edge', 'boundary', 'border']):
+                capability_hints.append("detected edges and boundaries")
+            if any(word in reasoning_str for word in ['goal', 'target', 'destination']):
+                capability_hints.append("estimated goal distance")
+            if any(word in reasoning_str for word in ['shape', 'object', 'detect']):
+                capability_hints.append("detected distinct shapes")
+            if any(word in reasoning_str for word in ['cycle', 'loop', 'oscillat']):
+                capability_hints.append("detected cycles in state")
+            if any(word in reasoning_str for word in ['path', 'route', 'navigate']):
+                capability_hints.append("found navigation path")
+            if any(word in reasoning_str for word in ['contain', 'enclos', 'seal']):
+                capability_hints.append("checked containment boundaries")
+            
+            if capability_hints:
+                parts.append("Capabilities needed: " + ", ".join(capability_hints))
+            
+            # Add efficiency metrics
+            parts.append(f"Completed level {level} in {actions_taken} actions")
+            
+            if not parts:
+                return None
+            
+            return f"[{game_type}] " + " | ".join(parts)
+            
+        except Exception as e:
+            logger.debug(f"Win strategy generation failed: {e}")
+            return f"[{game_type}] Completed level {level} in {actions_taken} actions"
+    
+    def _record_stuck_point(
+        self,
+        agent_id: Optional[str],
+        game_id: str,
+        level: int,
+        action_count: int,
+        escape_attempts: int
+    ) -> None:
+        """
+        Record a stuck point for network learning.
+        
+        This helps future agents avoid or prepare for known stuck states.
+        The stuck point is identified by game type, level, and action signature.
+        
+        Args:
+            agent_id: Agent that got stuck
+            game_id: Game ID
+            level: Level where stuck
+            action_count: Actions taken before stuck
+            escape_attempts: Number of escape attempts made
+        """
+        try:
+            game_type = game_id[:4] if game_id else "unknown"
+            
+            # Create signature from recent actions
+            recent = getattr(self, '_recent_action_traces', [])[-10:]
+            action_pattern = [t.get('action_type', '') for t in recent]
+            signature = str(hash(str(action_pattern)) % (2**32))
+            
+            # Check if table exists (create if not)
+            table_exists = self.db.execute_query("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='network_stuck_points'
+            """)
+            
+            if not table_exists:
+                # Create the stuck points table
+                self.db.execute_query("""
+                    CREATE TABLE IF NOT EXISTS network_stuck_points (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        game_type TEXT NOT NULL,
+                        level_number INTEGER NOT NULL,
+                        stuck_signature TEXT,
+                        times_hit INTEGER DEFAULT 1,
+                        times_escaped INTEGER DEFAULT 0,
+                        escape_action INTEGER,
+                        avg_actions_before_stuck REAL,
+                        first_hit_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        last_hit_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        escape_strategy TEXT,
+                        UNIQUE(game_type, level_number, stuck_signature)
+                    )
+                """)
+                self.db.execute_query("""
+                    CREATE INDEX IF NOT EXISTS idx_stuck_points_game_level 
+                    ON network_stuck_points(game_type, level_number)
+                """)
+            
+            # Record or update stuck point
+            self.db.execute_query("""
+                INSERT INTO network_stuck_points 
+                (game_type, level_number, stuck_signature, times_hit, avg_actions_before_stuck, last_hit_at)
+                VALUES (?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(game_type, level_number, stuck_signature) DO UPDATE SET
+                    times_hit = times_hit + 1,
+                    avg_actions_before_stuck = (avg_actions_before_stuck * (times_hit - 1) + ?) / times_hit,
+                    last_hit_at = CURRENT_TIMESTAMP
+            """, (game_type, level, signature, action_count, action_count))
+            
+            logger.debug(f"[STUCK-POINT] Recorded: {game_type} L{level} @ action {action_count} (sig={signature[:8]})")
+            
+        except Exception as e:
+            logger.debug(f"Failed to record stuck point: {e}")
+    
     def _apply_self_awareness_to_strategy(self, agent_id: str, base_config: Dict) -> Dict:
         """
         Apply self-awareness insights to adjust agent strategy.
@@ -5573,6 +5887,51 @@ class GameplayEngine:
         reasoning_parts = [f"Available: {sorted(available_nums)}"]
         
         try:
+            # === FIX 2.1: TRY CODS FIRST (lowered threshold for escape) ===
+            # CODS may have operator suggestions that can help break the stuck state
+            if hasattr(self, 'cods_engine') and self.cods_engine and game_state.frame:
+                try:
+                    cods_result = self.cods_engine.suggest_action(
+                        frame=game_state.frame,
+                        confidence_threshold=0.35  # Lower threshold for escape mode
+                    )
+                    if cods_result and cods_result.get('suggested_action'):
+                        cods_action = cods_result['suggested_action']
+                        cods_confidence = cods_result.get('confidence', 0.0)
+                        cods_reasoning = cods_result.get('reasoning', 'pattern match')
+                        
+                        # If CODS has good confidence and action not recently tried, use it
+                        if cods_action in available_nums and cods_action not in recent_actions[-3:]:
+                            if cods_confidence >= 0.5:
+                                # High confidence - use CODS suggestion directly
+                                self._last_cods_operators_used = cods_result.get('operators', [])
+                                return cods_action, f"CODS ESCAPE #{escape_attempt}: ACTION{cods_action} ({cods_reasoning}, conf={cods_confidence:.2f})"
+                            else:
+                                # Medium confidence - boost the score
+                                action_scores[cods_action] += 0.4 * cods_confidence
+                                reasoning_parts.append(f"CODS suggests A{cods_action}")
+                except Exception as e:
+                    logger.debug(f"CODS escape suggestion failed: {e}")
+            
+            # === TRY Q5 SCORE-INCREASING ACTIONS ===
+            # Actions that previously caused score increases are good candidates
+            emergent = getattr(self, '_last_emergent_reasoning', {})
+            q5_data = emergent.get('q5_goal_variables', {})
+            score_actions = q5_data.get('actions_with_score_increase', [])
+            for action in score_actions:
+                if action in available_nums and action not in recent_actions[-5:]:
+                    action_scores[action] += 0.35
+                    reasoning_parts.append(f"Q5: A{action} scored before")
+            
+            # === TRY Q1 STATE-CHANGING ACTIONS ===
+            # Actions that changed frame state are worth trying
+            q1_data = emergent.get('q1_change_vs_fixed', {})
+            change_actions = q1_data.get('actions_that_changed_state', [])
+            for action in change_actions:
+                if action in available_nums and action not in recent_actions[-5:]:
+                    action_scores[action] += 0.25
+                    reasoning_parts.append(f"Q1: A{action} changes state")
+            
             # === 1. PENALIZE RECENT ACTIONS (avoid oscillation) ===
             if recent_actions:
                 for i, action in enumerate(recent_actions[:5]):  # Last 5 actions
@@ -6240,8 +6599,14 @@ class GameplayEngine:
         }
         
         try:
-            # Track CODS operators if engine is available
-            if self.cods_engine:
+            # FIX 6: Use tracked CODS operators from action selection
+            # _last_cods_operators_used is set in escape mode and normal action selection
+            tracked_operators = getattr(self, '_last_cods_operators_used', [])
+            if tracked_operators:
+                context['cods_operators_used'] = tracked_operators
+            
+            # Also try to get from CODS engine directly
+            if self.cods_engine and not context['cods_operators_used']:
                 try:
                     # Get operators applied this level
                     if hasattr(self.cods_engine, 'get_operators_used_this_level'):
@@ -6345,8 +6710,17 @@ class GameplayEngine:
             q1_context = self._analyze_change_vs_invariance(game_state)
             context['q1_change_vs_fixed'] = q1_context
         except Exception as e:
-            logger.debug(f"Q1 analysis failed: {e}")
-            context['q1_change_vs_fixed'] = {'error': str(e)[:50]}
+            # FIX 1.2: Log warnings for first N failures, then degrade gracefully
+            self._q1_failure_count = getattr(self, '_q1_failure_count', 0) + 1
+            if self._q1_failure_count <= 3:
+                logger.warning(f"[EMERGENT-Q1] Analysis failed ({self._q1_failure_count}/3): {e}")
+            context['q1_change_vs_fixed'] = {
+                'status': 'fallback',
+                'reason': str(e)[:100],
+                'actions_that_changed_state': [],
+                'actions_with_no_effect': list(range(1, 8)),  # Assume all actions are exploratory
+                'confidence': 0.1
+            }
         
         # ===================================================================
         # Q2: WHAT PUNISHES ME AND WHAT REWARDS ME?
@@ -6356,8 +6730,16 @@ class GameplayEngine:
             q2_context = self._analyze_reward_punishment(agent_id, navigation_state)
             context['q2_reward_punishment'] = q2_context
         except Exception as e:
-            logger.debug(f"Q2 analysis failed: {e}")
-            context['q2_reward_punishment'] = {'error': str(e)[:50]}
+            self._q2_failure_count = getattr(self, '_q2_failure_count', 0) + 1
+            if self._q2_failure_count <= 3:
+                logger.warning(f"[EMERGENT-Q2] Analysis failed ({self._q2_failure_count}/3): {e}")
+            context['q2_reward_punishment'] = {
+                'status': 'fallback',
+                'reason': str(e)[:100],
+                'rewarding_objects': [],
+                'dangerous_objects': [],
+                'confidence': 0.1
+            }
         
         # ===================================================================
         # Q3: WHAT IS THE MOST SALIENT VARIABLE?
@@ -6367,8 +6749,15 @@ class GameplayEngine:
             q3_context = self._analyze_salience(game_state, agent_id)
             context['q3_salient_target'] = q3_context
         except Exception as e:
-            logger.debug(f"Q3 analysis failed: {e}")
-            context['q3_salient_target'] = {'error': str(e)[:50]}
+            self._q3_failure_count = getattr(self, '_q3_failure_count', 0) + 1
+            if self._q3_failure_count <= 3:
+                logger.warning(f"[EMERGENT-Q3] Analysis failed ({self._q3_failure_count}/3): {e}")
+            context['q3_salient_target'] = {
+                'status': 'fallback',
+                'reason': str(e)[:100],
+                'top_salient': [],
+                'confidence': 0.1
+            }
         
         # ===================================================================
         # Q4: WHAT RULE EXPLAINS THIS ACROSS CONTEXTS?
@@ -6380,8 +6769,15 @@ class GameplayEngine:
             )
             context['q4_working_theory'] = q4_context
         except Exception as e:
-            logger.debug(f"Q4 analysis failed: {e}")
-            context['q4_working_theory'] = {'error': str(e)[:50]}
+            self._q4_failure_count = getattr(self, '_q4_failure_count', 0) + 1
+            if self._q4_failure_count <= 3:
+                logger.warning(f"[EMERGENT-Q4] Analysis failed ({self._q4_failure_count}/3): {e}")
+            context['q4_working_theory'] = {
+                'status': 'fallback',
+                'reason': str(e)[:100],
+                'theory': 'Exploring to discover rules',
+                'confidence': 0.1
+            }
         
         # ===================================================================
         # Q7: AM I AT THE FRONTIER? (ARC3-specific familiarity)
@@ -6399,7 +6795,7 @@ class GameplayEngine:
             }
         except Exception as e:
             logger.debug(f"Q7 analysis failed: {e}")
-            context['q7_familiarity'] = {'is_frontier': True, 'error': str(e)[:50]}
+            context['q7_familiarity'] = {'is_frontier': True, 'current_level': current_level, 'error': str(e)[:50]}
         
         # ===================================================================
         # Q5: WHAT ACTIONS CAUSE SCORE CHANGES OR GAME-OVER?
@@ -6409,8 +6805,50 @@ class GameplayEngine:
             q5_context = self._analyze_goal_variables(game_id, current_level)
             context['q5_goal_variables'] = q5_context
         except Exception as e:
-            logger.debug(f"Q5 analysis failed: {e}")
-            context['q5_goal_variables'] = {'error': str(e)[:50]}
+            self._q5_failure_count = getattr(self, '_q5_failure_count', 0) + 1
+            if self._q5_failure_count <= 3:
+                logger.warning(f"[EMERGENT-Q5] Analysis failed ({self._q5_failure_count}/3): {e}")
+            context['q5_goal_variables'] = {
+                'status': 'fallback',
+                'reason': str(e)[:100],
+                'actions_with_score_increase': [],
+                'actions_causing_game_over': [],
+                'confidence': 0.1
+            }
+        
+        # ===================================================================
+        # FIX 1.3: CONFIDENCE BOOTSTRAPPING
+        # Build confidence from what we've learned, starting with base confidence
+        # ===================================================================
+        base_confidence = 0.3  # Start with some confidence
+        confidence_boosts = 0.0
+        
+        # Boost confidence based on what we've learned
+        q1_data = context.get('q1_change_vs_fixed', {})
+        if q1_data.get('actions_that_changed_state'):
+            confidence_boosts += 0.1  # Learned what changes things
+        
+        q2_data = context.get('q2_reward_punishment', {})
+        if q2_data.get('rewarding_objects'):
+            confidence_boosts += 0.1  # Learned what rewards
+        
+        q3_data = context.get('q3_salient_target', {})
+        if q3_data.get('top_salient'):
+            confidence_boosts += 0.1  # Found focus target
+        
+        q5_data = context.get('q5_goal_variables', {})
+        if q5_data.get('actions_with_score_increase'):
+            confidence_boosts += 0.15  # Learned success patterns
+        
+        # Overall confidence
+        context['confidence'] = min(0.95, base_confidence + confidence_boosts)
+        context['Q5'] = context['confidence']  # Also set shorthand for reasoning logs
+        
+        # Build human-readable Q1-Q4 summaries for reasoning logs
+        context['Q1'] = q1_data.get('insight', f"Observed {len(q1_data.get('actions_that_changed_state', []))} actions that change state")
+        context['Q2'] = q2_data.get('insight', f"Found {len(q2_data.get('rewarding_objects', []))} rewarding, {len(q2_data.get('dangerous_objects', []))} dangerous objects")
+        context['Q3'] = q3_data.get('insight', f"Top salient: {q3_data.get('top_salient', ['none'])[:2]}")
+        context['Q4'] = context.get('q4_working_theory', {}).get('theory', 'Exploring to discover rules')
         
         return context
     

@@ -1,5 +1,221 @@
 # Ouroboros Progress Log
 
+## Session: December 26, 2025 (Afternoon) - Reasoning System Overhaul Implementation
+
+---
+
+### Approach: Fix Broken Feedback Loop in Intelligence Systems
+
+**Timestamp**: 5:55:30 PM  
+**Status**: COMPLETED - All fixes implemented, 27/27 tests passing
+
+---
+
+### Context
+
+Deep analysis of reasoning logs revealed a **broken feedback loop** where the intelligence systems (emergent reasoning, CODS, win strategy learning) were either not bootstrapped, set to impossible thresholds, or failing silently. Agents were effectively playing blind because:
+
+1. **Cold Start Problem**: Emergent reasoning (Q1-Q5) failed silently, returning "NULL - 425 Too Early" placeholders
+2. **Impossible CODS Threshold**: 0.6 confidence required, but confidence came from learned knowledge that required CODS (chicken-and-egg)
+3. **Lost Win Strategies**: Wins weren't recording strategies for CODS to bootstrap operators from
+4. **Dead-End Escape Mode**: 7-10 attempts then terminate, wasting action budget at frontier
+5. **Untracked Operators**: `cods_operators_used` always empty, preventing operator effectiveness measurement
+
+**Root Cause**: The meta-problem was **silent failures** - exceptions caught and ignored with `logger.debug()`, making the system look functional while actually lobotomized.
+
+---
+
+### Fixes Implemented (Priority Order)
+
+#### Fix 1: Emergent Reasoning Bootstrap & Fallback
+
+**Problem**: Q1-Q5 questions returned NULL/placeholder values because analysis failed silently at game start.
+
+**Files Modified**: `core_gameplay.py`
+
+**Changes**:
+1. **Fix 1.1** (~lines 1622-1690): Bootstrap emergent reasoning at game start with seed values
+   - Initialize `_last_cods_operators_used = []`
+   - Set exploratory defaults for Q1-Q5 context
+   
+2. **Fix 1.2** (~lines 6428-6540): Stop silent exception swallowing
+   - Log warnings for first 3 failures (not just debug)
+   - Provide fallback contexts with exploratory defaults
+   - Every Q1-Q5 now returns valid structure even on failure
+   
+3. **Fix 1.3** (~lines 6540-6590): Confidence bootstrapping
+   - Formula: `confidence = 0.1 + min(0.4, learned_count * 0.05)`
+   - Agents with more learned knowledge get higher base confidence
+   - Prevents perpetual "Too Early" state
+
+---
+
+#### Fix 2: CODS-Guided Escape & Frontier Survival
+
+**Problem**: Escape mode used random actions, gave up after 7-10 attempts, and terminated games at frontier.
+
+**Files Modified**: `core_gameplay.py`
+
+**Changes**:
+1. **Fix 2.1** (~lines 5660-5710): CODS consultation in escape mode
+   - Try CODS first with lowered threshold (0.35)
+   - Use Q5 data (score-increasing actions) for weighted selection
+   - Use Q1 data (world model) for informed exploration
+   
+2. **Fix 2.2** (~lines 2086-2095): Increased escape attempts to 21
+   - Phase 1 (attempts 1-7): Actions 1-7 in order
+   - Phase 2 (attempts 8-14): Actions 7-1 in reverse
+   - Phase 3 (attempts 15-21): Weighted random based on Q5/Q1 data
+   
+3. **Fix 2.3** (~lines 2505-2540): Don't terminate at frontier
+   - If all 21 escape attempts fail AND at frontier level
+   - Enter pure exploration mode with remaining action budget
+   - Record stuck point for network learning
+
+---
+
+#### Fix 3: Win Strategy Recording
+
+**Problem**: Level completions didn't record strategies, so CODS couldn't bootstrap operators from wins.
+
+**Files Modified**: `core_gameplay.py`
+
+**Changes**:
+1. **Fix 3.1** (~lines 2665-2710): Write win strategy on level completion
+   - Record to `network_failure_hypotheses` table with `win_strategy` field
+   - Include agent_id, session_id, generation for tracking
+   
+2. **Fix 3.2** (~lines 5520-5530): Generate meaningful strategies
+   - New method `_generate_win_strategy()` creates keyword-rich descriptions
+   - Includes action patterns, capability keywords (translate, rotate, swap, etc.)
+   - CODS can parse these to bootstrap operators
+
+---
+
+#### Fix 4: CODS Adaptive Threshold in Normal Action Selection
+
+**Problem**: CODS had hard 0.6 threshold even at frontier where exploration guidance is most valuable.
+
+**Files Modified**: `core_gameplay.py` (~lines 4137-4190)
+
+**Changes**:
+- **Frontier levels**: 0.35 threshold (lower to encourage CODS exploration)
+- **Self-directed mode**: 0.30 threshold (lowest for agent autonomy)
+- **Standard levels**: 0.55 threshold (proven sequences exist)
+- Track operators used in `_last_cods_operators_used` for reasoning logs
+- Log threshold reason for debugging
+
+---
+
+#### Fix 5: Stuck Points Recording System
+
+**Problem**: No network learning from places where agents got stuck.
+
+**Files Modified**: `core_gameplay.py` (~lines 5600-5680)
+
+**Changes**:
+- New method `_record_stuck_point()` 
+- Records to `network_stuck_points` table (new)
+- Captures: game_id, level_number, stuck_frame, actions_tried, escape_attempts
+- Network can learn which game states are problematic
+
+---
+
+#### Fix 6: Populate cods_operators_used Properly
+
+**Problem**: `cods_operators_used` in reasoning logs always `[]`, preventing operator effectiveness measurement.
+
+**Files Modified**: `core_gameplay.py` (~lines 6574-6595)
+
+**Changes**:
+- Modified `_build_primitives_context()` to use `self._last_cods_operators_used`
+- Added `getattr()` fallback for missing attribute
+- CODS operators now tracked from both escape mode and normal action selection
+
+---
+
+### Unit Tests Created
+
+**File Created**: `tests/test_reasoning_system_fixes.py`
+
+**Test Count**: 27 tests (all passing)
+
+**Test Classes**:
+| Class | Tests | Coverage |
+|-------|-------|----------|
+| `TestEmergentReasoningBootstrap` | 3 | Fix 1: Fallback values, confidence formula, no NULL values |
+| `TestCODSGuidedEscape` | 4 | Fix 2: 21 attempts, threshold, CODS-first flow |
+| `TestFrontierExplorationMode` | 2 | Fix 2.3: No termination, budget usage |
+| `TestWinStrategyRecording` | 2 | Fix 3: Keywords, structure |
+| `TestStuckPointsRecording` | 1 | Fix 5: Record structure |
+| `TestCODSAdaptiveThreshold` | 4 | Fix 4: Frontier/self-directed/standard thresholds |
+| `TestCODSOperatorsUsedPopulation` | 4 | Fix 6: Tracking, fallback, empty handling |
+| `TestReasoningSystemIntegration` | 3 | Full context structure, escape flow, bootstrap trigger |
+| `TestEdgeCases` | 4 | None frame, malformed responses, edge cases |
+
+---
+
+### The Core Problem (Analysis Summary)
+
+**In One Sentence**: The agents were playing blind because the intelligence systems (emergent reasoning, CODS, win strategy learning) were either not bootstrapped, set to impossible thresholds, or failing silently - creating a broken feedback loop where learning never accumulated and wisdom never propagated.
+
+**The Feedback Loop That Never Closed**:
+```
+Agents play games → generate reasoning/experiences
+     ↓ (BROKEN: Q1-Q5 returned NULL)
+CODS analyzes patterns → unlocks primitives/operators
+     ↓ (BROKEN: 0.6 threshold never reached)
+Network accumulates wisdom → guides future agents
+     ↓ (BROKEN: win strategies never recorded)
+Agents use that wisdom → play better
+     ↓ (BROKEN: escape terminated instead of exploring)
+[Loop back to start]
+```
+
+**What The Fixes Repair**:
+| Fix | What It Repairs |
+|-----|-----------------|
+| Bootstrap emergent reasoning | Cold start: agents now have seed context |
+| Log exceptions, provide fallbacks | Silent failures become visible + recoverable |
+| Confidence bootstrapping | CODS can reach threshold based on learned knowledge |
+| CODS adaptive threshold (0.35/0.30) | Frontier exploration gets intelligent guidance |
+| 21 escape attempts in 3 phases | Stuck agents try harder before giving up |
+| Don't terminate at frontier | Learning opportunities aren't wasted |
+| Write win strategies with keywords | Successful patterns feed back to CODS |
+| Track stuck points | Network learns where games are hard |
+| Populate cods_operators_used | Operator effectiveness can be measured |
+
+**The loop should now close**: Play → Learn → Record → Bootstrap → Play Better
+
+---
+
+### Files Modified This Session
+
+| File | Changes |
+|------|---------|
+| `core_gameplay.py` | Fixes 1-6: Bootstrap, escape, strategies, thresholds, stuck points, operator tracking |
+| `tests/test_reasoning_system_fixes.py` | NEW - 27 unit tests for all fixes |
+
+---
+
+### Current Status
+
+**NO BLOCKERS** - All identified issues fixed and tested.
+
+**Test Results**:
+```
+============================= 27 passed in 0.50s =============================
+```
+
+**Next Steps**:
+1. Run evolution to verify fixes in live gameplay
+2. Monitor reasoning logs for populated Q1-Q5 values
+3. Verify CODS activates at frontier with 0.35 threshold
+4. Check win strategies appear in database
+5. Confirm stuck points are recorded
+
+---
+
 ## Session: December 26, 2025 (Morning) - Terminal Foresight + Level-Aware Pariahs + System Audit
 
 ---
