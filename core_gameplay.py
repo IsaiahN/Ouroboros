@@ -738,7 +738,14 @@ class GameplayEngine:
             # game_state is guaranteed to exist if success is True
             assert game_state is not None, "game_state must exist on success"
             
-            if game_state.state == "WIN":
+            # BUGFIX: Check for TRUE full win, not premature WIN after level completion
+            is_full_win = (
+                game_state.state == "WIN" and 
+                game_state.win_score > 0 and 
+                game_state.score >= game_state.win_score
+            )
+            
+            if is_full_win:
                 # Full win from replay! Finish and return
                 level_completions = int(game_state.score)
                 actions_taken = len(json.loads(known_sequence['action_sequence']))
@@ -1697,6 +1704,15 @@ class GameplayEngine:
         self._q3_failure_count = 0
         self._q4_failure_count = 0
         self._q5_failure_count = 0
+        
+        # FIX: Reset delta tracking for new game
+        # This prevents score_change calculation from using previous game's values
+        self._previous_score = game_state.score  # Start fresh for this game
+        self._previous_frame = game_state.frame  # Start fresh
+        self._previous_level = 1  # Starting level
+        self._recent_action_traces = []  # Reset action traces for Q1-Q5
+        self._q1_trace_logged = False  # Reset debug flag
+        
         logger.debug(f"[EMERGENT] Bootstrapped reasoning context for {game_id}")
         
         # ================================================================
@@ -2045,7 +2061,15 @@ class GameplayEngine:
             if replay_success and successful_sequence:
                 known_sequence = successful_sequence
                 
-                if game_state.state == "WIN":
+                # BUGFIX: Check for TRUE full win, not premature WIN after level completion
+                # Some games (like sp80, ls20) report WIN after each level, not just the final one
+                is_full_win = (
+                    game_state.state == "WIN" and 
+                    game_state.win_score > 0 and 
+                    game_state.score >= game_state.win_score
+                )
+                
+                if is_full_win:
                     # Full win from replay! Finish and return
                     level_completions = int(game_state.score)  # Each level = 1 point
                     actions_taken = len(json.loads(known_sequence['action_sequence']))
@@ -2919,9 +2943,15 @@ class GameplayEngine:
                         # Now using cumulative sequence approach: replay best sequence ONCE to frontier
                         # See 3-TRY FALLBACK SYSTEM above for the new approach
                         
-                        # If we won via level completion, exit main game loop
+                        # If we achieved a TRUE full win, exit main game loop
+                        # BUGFIX: Check win_score to avoid premature exit on level completion
                         if game_state.state == "WIN":
-                            break
+                            if game_state.win_score > 0 and game_state.score >= game_state.win_score:
+                                logger.info(f"[WIN] Full game win! Score {game_state.score}/{game_state.win_score}")
+                                break
+                            else:
+                                # Premature WIN - level complete but not full game
+                                logger.debug(f"[CONTINUE] Level complete (score {game_state.score}/{game_state.win_score}) - continuing to next level")
 
                     
                     # Check if exceeded max actions for this level
@@ -3495,20 +3525,33 @@ class GameplayEngine:
                                 x_str, y_str = coords_str.split(',')
                                 target_x, target_y = int(x_str), int(y_str)
                                 
-                                # Store target for ACTION6
-                                self._selection_target = {
-                                    'x': target_x,
-                                    'y': target_y,
-                                    'object_color': best_selectable['object_color']
-                                }
-                                
-                                reasoning = (
-                                    f"Selection required: Clicking on selectable object "
-                                    f"(color {best_selectable['object_color']}) at ({target_x},{target_y}) "
-                                    f"before movement"
-                                )
-                                logger.info(f"[SELECTION] {reasoning}")
-                                return "ACTION6", reasoning
+                                # VALIDATE: Check coordinates against CURRENT frame bounds
+                                # API can return incomplete frames - don't use stale network coords
+                                frame = game_state.frame
+                                if frame and len(frame) > 0 and len(frame[0]) > 0:
+                                    frame_height = len(frame)
+                                    frame_width = len(frame[0])
+                                    if target_y >= frame_height or target_x >= frame_width:
+                                        logger.warning(
+                                            f"[SELECTION] Network coords ({target_x},{target_y}) invalid for "
+                                            f"frame {frame_height}x{frame_width} - skipping stale knowledge"
+                                        )
+                                        # Don't use invalid coordinates - fall through to other logic
+                                    else:
+                                        # Coordinates valid - use them
+                                        self._selection_target = {
+                                            'x': target_x,
+                                            'y': target_y,
+                                            'object_color': best_selectable['object_color']
+                                        }
+                                        
+                                        reasoning = (
+                                            f"Selection required: Clicking on selectable object "
+                                            f"(color {best_selectable['object_color']}) at ({target_x},{target_y}) "
+                                            f"before movement"
+                                        )
+                                        logger.info(f"[SELECTION] {reasoning}")
+                                        return "ACTION6", reasoning
                             except (ValueError, IndexError):
                                 pass  # Could not parse coordinates
                                 

@@ -10,7 +10,7 @@ Scorecards
 Ouroboros
 Ouroboros
 Sp80-0605ab9e5b2a
-Session: d340dbe9-9eeb-4214-88f7-f0a172c769a6
+Session: 8e8863e5-b06f-48d8-83db-b6f65a7b7d13
 Level: 1
 64 / 64
 
@@ -18,12 +18,12 @@ Level: 1
 
 
 
-1×
+2×
 Reasoning Log
 Frame 44
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -111,11 +111,11 @@ Frame 44
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -134,18 +134,12 @@ Frame 44
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:51.709068",
+    "timestamp": "2025-12-26T21:23:43.939408",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -209,7 +203,7 @@ Show less
 Frame 43
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -297,11 +291,11 @@ Frame 43
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -320,18 +314,12 @@ Frame 43
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:50.787997",
+    "timestamp": "2025-12-26T21:23:43.233042",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -395,7 +383,7 @@ Show less
 Frame 42
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -483,11 +471,11 @@ Frame 42
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -506,18 +494,12 @@ Frame 42
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:49.879457",
+    "timestamp": "2025-12-26T21:23:42.480389",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -581,7 +563,7 @@ Show less
 Frame 41
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -669,11 +651,11 @@ Frame 41
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -692,18 +674,12 @@ Frame 41
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:49.159539",
+    "timestamp": "2025-12-26T21:23:41.747997",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -767,7 +743,7 @@ Show less
 Frame 40
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -855,11 +831,11 @@ Frame 40
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -878,18 +854,12 @@ Frame 40
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:48.222543",
+    "timestamp": "2025-12-26T21:23:40.936829",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -953,7 +923,7 @@ Show less
 Frame 39
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -1041,11 +1011,11 @@ Frame 39
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -1064,18 +1034,12 @@ Frame 39
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:47.401748",
+    "timestamp": "2025-12-26T21:23:40.309700",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -1139,7 +1103,7 @@ Show less
 Frame 38
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -1227,11 +1191,11 @@ Frame 38
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -1250,18 +1214,12 @@ Frame 38
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:46.467533",
+    "timestamp": "2025-12-26T21:23:39.481479",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -1325,7 +1283,7 @@ Show less
 Frame 37
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -1413,11 +1371,11 @@ Frame 37
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -1436,18 +1394,12 @@ Frame 37
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:45.309136",
+    "timestamp": "2025-12-26T21:23:38.797115",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -1511,7 +1463,7 @@ Show less
 Frame 36
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -1599,11 +1551,11 @@ Frame 36
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -1622,18 +1574,12 @@ Frame 36
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:44.470822",
+    "timestamp": "2025-12-26T21:23:38.051643",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -1697,7 +1643,7 @@ Show less
 Frame 35
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -1784,11 +1730,11 @@ Frame 35
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -1807,18 +1753,12 @@ Frame 35
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:43.496887",
+    "timestamp": "2025-12-26T21:23:37.306164",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -1882,7 +1822,7 @@ Show less
 Frame 34
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -1950,11 +1890,11 @@ Frame 34
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -1973,18 +1913,12 @@ Frame 34
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:42.592244",
+    "timestamp": "2025-12-26T21:23:36.514140",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -2048,7 +1982,7 @@ Show less
 Frame 33
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -2116,11 +2050,11 @@ Frame 33
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -2139,18 +2073,12 @@ Frame 33
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:41.685540",
+    "timestamp": "2025-12-26T21:23:35.905963",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -2214,7 +2142,7 @@ Show less
 Frame 32
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -2282,11 +2210,11 @@ Frame 32
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -2305,18 +2233,12 @@ Frame 32
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:40.779961",
+    "timestamp": "2025-12-26T21:23:35.157895",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -2380,7 +2302,7 @@ Show less
 Frame 31
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -2448,11 +2370,11 @@ Frame 31
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -2471,18 +2393,12 @@ Frame 31
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:40.093390",
+    "timestamp": "2025-12-26T21:23:34.358584",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -2546,7 +2462,7 @@ Show less
 Frame 30
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -2614,11 +2530,11 @@ Frame 30
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -2637,18 +2553,12 @@ Frame 30
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:39.202820",
+    "timestamp": "2025-12-26T21:23:33.606398",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -2712,7 +2622,7 @@ Show less
 Frame 29
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -2799,11 +2709,11 @@ Frame 29
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -2822,18 +2732,12 @@ Frame 29
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:38.352210",
+    "timestamp": "2025-12-26T21:23:32.886277",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -2914,7 +2818,7 @@ Show less
 Frame 6
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -3002,11 +2906,11 @@ Frame 6
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -3025,18 +2929,12 @@ Frame 6
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:36.819582",
+    "timestamp": "2025-12-26T21:23:31.567065",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -3100,7 +2998,7 @@ Show less
 Frame 5
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -3188,11 +3086,11 @@ Frame 5
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -3211,18 +3109,12 @@ Frame 5
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:36.188389",
+    "timestamp": "2025-12-26T21:23:30.775906",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -3286,7 +3178,7 @@ Show less
 Frame 4
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -3374,11 +3266,11 @@ Frame 4
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -3397,18 +3289,12 @@ Frame 4
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:35.354843",
+    "timestamp": "2025-12-26T21:23:29.944806",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -3489,7 +3375,7 @@ Show less
 Frame 2
 {
   "1_identity": {
-    "agent_id": "offspring_6a383f2d",
+    "agent_id": "offspring_0b290422",
     "role": "pioneer",
     "generation": 293,
     "working_theory": "NULL - 425 Too Early",
@@ -3546,41 +3432,22 @@ Frame 2
     }
   },
   "2_delta": {
-    "last_action": "ACTION6",
+    "last_action": "ACTION4",
     "frame_changes": [
-      "color_14 object appeared at (6, 0)",
-      "color_14 object appeared at (7, 0)",
-      "color_14 object appeared at (8, 0)",
-      "color_14 object appeared at (9, 0)",
-      "color_14 object appeared at (10, 0)",
-      "color_14 object appeared at (11, 0)",
-      "color_14 object appeared at (12, 0)",
-      "color_14 object appeared at (13, 0)",
-      "color_14 object appeared at (14, 0)",
-      "color_14 object appeared at (15, 0)",
-      "color_14 object appeared at (16, 0)",
-      "color_14 object appeared at (17, 0)",
-      "color_14 object appeared at (18, 0)",
-      "color_14 object appeared at (19, 0)",
-      "color_14 object appeared at (20, 0)",
-      "color_14 object appeared at (21, 0)",
-      "color_14 object appeared at (22, 0)",
-      "color_14 object appeared at (23, 0)",
-      "color_14 object appeared at (24, 0)",
-      "color_14 object appeared at (25, 0)"
+      "NULL - 304 Not Modified"
     ],
-    "score_change": -1,
-    "level_change": true,
+    "score_change": 0,
+    "level_change": false,
     "self_model_update": "NULL - 425 Too Early",
     "world_model_update": "NULL - 425 Too Early",
     "theory_validation": "NULL - 425 Too Early"
   },
   "3_understanding": {
-    "Q1_what_is_happening": null,
-    "Q2_how_does_this_feel": null,
-    "Q3_what_worked_before": null,
-    "Q4_what_should_i_try": null,
-    "Q5_how_confident": 0.5
+    "Q1_what_is_happening": "Starting game sp80-0605ab9e5b2a, observing initial state",
+    "Q2_how_does_this_feel": "Neutral - no actions taken yet",
+    "Q3_what_worked_before": "No history yet - will observe what works",
+    "Q4_what_should_i_try": "Explore to understand game mechanics",
+    "Q5_how_confident": 0.3
   },
   "4_network_wisdom": {
     "private_memory": "NULL - 425 Too Early",
@@ -3599,18 +3466,12 @@ Frame 2
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-26T08:29:34.395401",
+    "timestamp": "2025-12-26T21:23:28.931237",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
     "frontier_status": "explored",
-    "exploration_mode": "self_directed",
-    "self_directed_context": {
-      "reason": "Broke out of stuck state, exploring independently",
-      "trust_self": true,
-      "network_invalid": true,
-      "start_action": 188
-    }
+    "exploration_mode": "network_guided"
   },
   "6_environment": {
     "obstacles": [
@@ -3688,4 +3549,4 @@ Frame 1
   "role_compliance": "pioneer following sequence script"
 }
 Show less
-© 2025 ARC Prize Foundation.ARC-AGI-3 Preview Replay: sp80-0605ab9e5b2a - d340dbe9-9eeb-4214-88f7-f0a172c769a6
+© 2025 ARC Prize Foundation.ARC-AGI-3 Preview Replay: sp80-0605ab9e5b2a - 8e8863e5-b06f-48d8-83db-b6f65a7b7d13

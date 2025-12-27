@@ -1,5 +1,178 @@
 # Ouroboros Progress Log
 
+## Session: December 26, 2025 (Night) - SP80 Games Ending Early Investigation
+
+---
+
+### Approach: Debug Why Games Complete With 23-69 Actions Instead of 2000
+
+**Timestamp**: 9:36:40 PM  
+**Status**: IN PROGRESS - Multiple bugs found and fixed, awaiting verification
+
+---
+
+### Context
+
+User ran SP80 games and noticed they were ending with only 23-69 actions instead of using the full 2000 action budget. Games were completing Level 1 but immediately terminating instead of continuing to Level 2+.
+
+**Evidence from Database**:
+```
+Recent SP80 game results:
+- 03:25:46 - 69 actions, final_score=1 (stopped after L1)
+- 03:24:45 - 46 actions, final_score=1 (stopped after L1)
+- 03:23:55 - 23 actions, final_score=1 (stopped after L1)
+
+Compare to earlier runs:
+- 14:30:03 - 740 actions (proper)
+- 07:39:34 - 2735 actions (proper)
+```
+
+---
+
+### Investigation Steps
+
+| Step | What | Finding |
+|------|------|---------|
+| 1 | Check SP80 reasoning log | Game reached Frame 44, agent playing correctly with sequence replay |
+| 2 | Query game_results table | Games have status='partial', final_score=1.0 - stopping after Level 1 |
+| 3 | Search for "WIN" state checks | Found multiple `if game_state.state == "WIN": break` without win_score validation |
+| 4 | Check coordinate error | Error showed `Invalid coordinates (40, 35) for frame size 20x64` |
+| 5 | Query object_selection_state | Found stale network coords `(40,35)` stored for sp80 L2 - invalid for current frame |
+
+---
+
+### Root Cause #1: Premature WIN Detection
+
+The ARC API reports `game_state.state == "WIN"` after **each level completion**, not just the final game win. The code was breaking out of the game loop when seeing "WIN" without checking if it was a true full game win.
+
+**Problematic Code Locations**:
+- Line 741 (`_handle_fallback_result`): `if game_state.state == "WIN": break`
+- Line 2057 (after replay success): `if game_state.state == "WIN": return`
+- Line 2940 (level completion): `if game_state.state == "WIN": break`
+
+**The Real Check** (already in line 2203):
+```python
+if game_state.score >= game_state.win_score and game_state.win_score > 0:
+    # TRUE full game win
+```
+
+---
+
+### Root Cause #2: Stale Network Coordinates
+
+The `object_selection_state` table had coordinates from previous runs that were invalid for the current frame size (API returned incomplete/truncated frame).
+
+**Database Data**:
+```
+sp80 Level 2: object_coordinates='(40,35)'
+Frame size: 20x64 (height=20, width=64)
+Result: y=35 >= height=20 -> INVALID
+```
+
+---
+
+### Fixes Applied
+
+#### Fix 1: Validate Network Coordinates Against Current Frame (Line ~3508)
+
+```python
+# VALIDATE: Check coordinates against CURRENT frame bounds
+# API can return incomplete frames - don't use stale network coords
+frame = game_state.frame
+if frame and len(frame) > 0 and len(frame[0]) > 0:
+    frame_height = len(frame)
+    frame_width = len(frame[0])
+    if target_y >= frame_height or target_x >= frame_width:
+        logger.warning(
+            f"[SELECTION] Network coords ({target_x},{target_y}) invalid for "
+            f"frame {frame_height}x{frame_width} - skipping stale knowledge"
+        )
+        # Don't use invalid coordinates - fall through to other logic
+    else:
+        # Coordinates valid - use them
+        self._selection_target = { ... }
+```
+
+#### Fix 2: True Full Win Check in _handle_fallback_result (Line ~743)
+
+```python
+# BUGFIX: Check for TRUE full win, not premature WIN after level completion
+is_full_win = (
+    game_state.state == "WIN" and 
+    game_state.win_score > 0 and 
+    game_state.score >= game_state.win_score
+)
+
+if is_full_win:
+    # Full win from replay! Finish and return
+```
+
+#### Fix 3: True Full Win Check After Replay Success (Line ~2057)
+
+```python
+# BUGFIX: Check for TRUE full win, not premature WIN after level completion
+is_full_win = (
+    game_state.state == "WIN" and 
+    game_state.win_score > 0 and 
+    game_state.score >= game_state.win_score
+)
+
+if is_full_win:
+    # Full win from replay! Finish and return
+```
+
+#### Fix 4: True Full Win Check on Level Completion (Line ~2940)
+
+```python
+# If we achieved a TRUE full win, exit main game loop
+# BUGFIX: Check win_score to avoid premature exit on level completion
+if game_state.state == "WIN":
+    if game_state.win_score > 0 and game_state.score >= game_state.win_score:
+        logger.info(f"[WIN] Full game win! Score {game_state.score}/{game_state.win_score}")
+        break
+    else:
+        # Premature WIN - level complete but not full game
+        logger.debug(f"[CONTINUE] Level complete (score {game_state.score}/{game_state.win_score}) - continuing to next level")
+```
+
+---
+
+### Previous Fixes This Session (from 8:37 PM)
+
+| Issue | Fix |
+|-------|-----|
+| `_recent_action_traces` not initialized | Added `self._recent_action_traces = []` in `__init__` |
+| Traces gated behind `agent_self_model` | Moved trace population outside the conditional |
+| `score_change: -2` display bug | Reset `_previous_score` at game start |
+| Action traces persisting across games | Reset `_recent_action_traces = []` at game start |
+
+---
+
+### Files Modified This Session
+
+- `core_gameplay.py`:
+  - Line ~381: Init `_recent_action_traces = []`
+  - Lines ~1698-1710: Reset state vars at game start
+  - Lines ~2369-2388: Decouple trace from self-model
+  - Lines ~3508-3540: Validate network coords against frame
+  - Lines ~743: `is_full_win` check in `_handle_fallback_result`
+  - Lines ~2057: `is_full_win` check after replay
+  - Lines ~2940: `is_full_win` check on level completion
+
+---
+
+### Current Status
+
+All identified bugs have been fixed:
+1. Premature WIN detection (3 locations) -> Now checks `win_score`
+2. Stale network coordinates -> Now validates against current frame
+3. Score display bug -> State variables reset at game start
+4. Q1-Q5 trace population -> Moved outside self-model gate
+
+**Next Step**: Run SP80 evolution to verify games now use full action budget and continue past Level 1.
+
+---
+
 ## Session: December 26, 2025 (Night) - Q1-Q5 Emergent Reasoning Not Using Frame Data
 
 ---
