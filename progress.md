@@ -1,5 +1,194 @@
 # Ouroboros Progress Log
 
+## Session: December 26, 2025 (Evening) - Closing Remaining Feedback Loop Gaps
+
+---
+
+### Approach: Implement Missing Analysis Pipelines for Self-Improving System
+
+**Timestamp**: 6:33:39 PM  
+**Status**: COMPLETED - All 4 gaps implemented and wired into evolution runner
+
+---
+
+### Context
+
+After the afternoon session fixed the broken feedback loop in intelligence systems (reasoning, CODS, win strategies), a review of `DOCS/remaining gaps.md` identified additional gaps that would make the system truly self-improving rather than just functional.
+
+**Gap Analysis Results:**
+
+| Claimed Gap | Reality | Verdict |
+|-------------|---------|---------|
+| 1. Win strategies -> operators | System unlocks primitives from keywords, not operator synthesis | **Partially valid** (but OK) |
+| 2. Stuck points -> primitive gaps | Data collected but never analyzed | **VALID - needs fix** |
+| 3. Concept -> Operator -> Primitive chain | Design exists but not wired | **VALID - needs fix** |
+| 4. Operator info -> reasoning | Already implemented via `_last_cods_operators_used` | **False gap** |
+| 5. Self-directed mode activation | Already implemented via escape success | **False gap** |
+
+**Key Insight**: The difference between "functional" and "self-improving":
+- Functional: Agents play, learn, record
+- Self-improving: System ANALYZES what's blocking progress and TRIGGERS unlocks
+
+---
+
+### Implementation Summary
+
+#### Gap #2: Stuck Points -> Primitive Gap Analysis
+
+**The Problem**: `network_stuck_points` table collects data on where agents get stuck, but nothing analyzes it to infer what primitives would help.
+
+**Solution**: New method `analyze_stuck_points_for_unlocks()` in `cods_engine.py`
+
+**Logic**:
+1. Query high-frequency stuck points (where many agents get stuck)
+2. For each hotspot, call `compare_winners_vs_losers()` (Gap #4)
+3. Map gap keywords to primitives via `STUCK_PATTERN_TO_PRIMITIVE` mapping
+4. Accumulate unlock pressure per primitive
+5. Trigger unlock when pressure exceeds threshold
+
+**New Mapping Added**:
+```python
+STUCK_PATTERN_TO_PRIMITIVE = {
+    r'boundary|edge|seal|overflow': ['boundary_detection', 'flood_fill', 'detect_containment'],
+    r'repeat|cycle|oscillat|loop': ['detect_symmetry', 'find_repeating_patterns'],
+    r'shape|object|region|blob': ['detect_shapes', 'detect_objects_in_frame'],
+    r'path|move|block|stuck|wall': ['is_movable', 'is_obstacle', 'pathfinding'],
+    r'goal|target|destination|end': ['goal_identification', 'distance_estimation'],
+    r'pattern|match|template|reference': ['find_pattern', 'reference_detection'],
+    r'click|control|interact|which': ['control_test', 'effect_scope', 'self_location'],
+    # ... and more
+}
+```
+
+---
+
+#### Gap #3: Concept -> Operator -> Primitive Chain
+
+**The Problem**: `ConceptDiscoveryEngine` discovers concepts and defines what primitives they need (in `CONCEPTUAL_PRIMITIVES`), but never checks if those primitives are unlocked or applies unlock pressure.
+
+**Solution**: New methods in `cods_engine.py`:
+- `check_concept_primitive_needs(concept_name, game_type)` - Check if concept's required primitives are available
+- `check_all_relevant_concepts(game_type)` - Check all relevant concepts for a game
+
+**Logic**:
+1. When a concept (e.g., 'containment') is relevant for a game
+2. Look up its required components from `CONCEPTUAL_PRIMITIVES`
+3. Check if each component primitive is LOCKED
+4. If locked, apply unlock pressure with `_attempt_need_based_unlock()`
+
+**Heuristics for concept selection**:
+```python
+if game_type.startswith('ft'):
+    concepts_to_check = ['containment', 'reference_semantics']
+elif game_type.startswith('sp'):
+    concepts_to_check = ['goal_directedness', 'causality']
+elif game_type.startswith('as'):
+    concepts_to_check = ['symmetry', 'conservation']
+```
+
+---
+
+#### Gap #4: Winner/Loser Comparison
+
+**The Problem**: To infer capability gaps, we need to compare what winners did vs what losers tried. The difference reveals what primitives would help.
+
+**Solution**: New method `compare_winners_vs_losers(game_type, level)` in `cods_engine.py`
+
+**Logic**:
+1. Query winner strategies from `network_failure_hypotheses` (where `win_strategy IS NOT NULL`)
+2. Query loser reasons from `game_results` (where status is STUCK/FAILED/etc.)
+3. Extract keywords from both sets
+4. Compute gap = winner_keywords - loser_keywords
+5. Return gap keywords for primitive mapping
+
+**Example**:
+- Winners mention: "boundary", "seal", "contain", "fill"
+- Losers mention: "stuck", "repeat", "nothing"
+- Gap keywords: "boundary", "seal", "contain", "fill"
+- Mapped primitives: `boundary_detection`, `flood_fill`, `detect_containment`
+
+---
+
+### Integration in Evolution Runner
+
+Added to `autonomous_evolution_runner.py` after existing CODS-TEACHER section:
+
+```python
+# STUCK POINT ANALYSIS (Gap #2)
+stuck_analysis = cods_instance.analyze_stuck_points_for_unlocks(
+    min_stuck_count=10,
+    min_confidence=0.5
+)
+# Prints gaps found and unlocks triggered
+
+# CONCEPT-DRIVEN UNLOCK (Gap #3)
+# For games with most stuck agents:
+concept_results = cods_instance.check_all_relevant_concepts(game_type)
+# Prints concept unlocks triggered
+```
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `cods_engine.py` | Added ~350 lines: `STUCK_PATTERN_TO_PRIMITIVE` mapping, `analyze_stuck_points_for_unlocks()`, `compare_winners_vs_losers()`, `_map_keywords_to_primitives()`, `check_concept_primitive_needs()`, `check_all_relevant_concepts()` |
+| `autonomous_evolution_runner.py` | Added ~40 lines: STUCK-ANALYSIS section, CONCEPT-UNLOCK section after CODS-TEACHER |
+
+---
+
+### The Complete Feedback Loop (After All Fixes)
+
+```
+Generation ends
+    |
+    v
+CODS-TEACHER: Parse win strategies for primitive unlock needs [existing]
+    |
+    v
+STUCK-ANALYSIS: Analyze stuck points [NEW]
+    |-- Query high-frequency stuck locations
+    |-- Compare winners vs losers for each [NEW - Gap #4]
+    |-- Map gap keywords to primitives
+    |-- Trigger unlocks when pressure threshold met
+    |
+    v
+CONCEPT-UNLOCK: For stuck games, check concepts [NEW - Gap #3]
+    |-- Identify relevant concepts based on game type
+    |-- Check if concept's primitives are unlocked
+    |-- Trigger unlocks for locked concept primitives
+    |
+    v
+INVENTORY: Display primitive status [existing]
+    |
+    v
+Next generation begins with potentially more capabilities
+```
+
+---
+
+### Current Status
+
+**NO BLOCKERS** - All identified gaps implemented and integrated.
+
+**What This Enables**:
+1. Stuck patterns automatically lead to primitive unlocks
+2. Concepts drive primitive availability (not just abstract organization)
+3. Winner/loser comparison provides grounded capability gap detection
+4. The system can now identify WHY agents are stuck and WHAT would help
+
+---
+
+### Next Steps
+
+1. Run evolution to verify new analysis pipelines execute
+2. Monitor for `[STUCK-ANALYSIS]` and `[CONCEPT-UNLOCK]` log messages
+3. Verify primitives are unlocked based on stuck point pressure
+4. Check if unlocked primitives actually help agents escape stuck points
+
+---
+
 ## Session: December 26, 2025 (Afternoon) - Reasoning System Overhaul Implementation
 
 ---
@@ -40,13 +229,6 @@ Deep analysis of reasoning logs revealed a **broken feedback loop** where the in
    
 2. **Fix 1.2** (~lines 6428-6540): Stop silent exception swallowing
    - Log warnings for first 3 failures (not just debug)
-   - Provide fallback contexts with exploratory defaults
-   - Every Q1-Q5 now returns valid structure even on failure
-   
-3. **Fix 1.3** (~lines 6540-6590): Confidence bootstrapping
-   - Formula: `confidence = 0.1 + min(0.4, learned_count * 0.05)`
-   - Agents with more learned knowledge get higher base confidence
-   - Prevents perpetual "Too Early" state
 
 ---
 

@@ -2241,6 +2241,52 @@ class AutonomousEvolutionRunner:
                 except Exception as e:
                     pass  # Silently skip on error (strategy unlock is supplemental)
                 
+                # STUCK POINT ANALYSIS (Gap #2): Identify primitive gaps from stuck patterns
+                try:
+                    cods_instance = CODSEngine() if CODSEngine else None
+                    if cods_instance:
+                        stuck_analysis = cods_instance.analyze_stuck_points_for_unlocks(
+                            min_stuck_count=10,
+                            min_confidence=0.5
+                        )
+                        if stuck_analysis.get('gaps_identified'):
+                            print(f"[STUCK-ANALYSIS] Found {len(stuck_analysis['gaps_identified'])} "
+                                  f"capability gaps from {stuck_analysis['hotspots_analyzed']} hotspots")
+                            # Show top gaps
+                            for gap in stuck_analysis['gaps_identified'][:3]:
+                                prims = ', '.join(gap['suggested_primitives'][:3])
+                                print(f"  [GAP] {gap['game_type']} L{gap['level']}: "
+                                      f"{gap['stuck_count']} stuck -> needs [{prims}]")
+                        if stuck_analysis.get('unlocks_triggered'):
+                            for unlock in stuck_analysis['unlocks_triggered']:
+                                print(f"  [STUCK-UNLOCK] {unlock['primitive']} "
+                                      f"({unlock['stuck_count']} agents stuck)")
+                except Exception as e:
+                    pass  # Supplemental analysis
+                
+                # CONCEPT-DRIVEN UNLOCK (Gap #3): Check concepts for games with stuck points
+                try:
+                    cods_instance = CODSEngine() if CODSEngine else None
+                    if cods_instance:
+                        # Get game types with most stuck agents
+                        stuck_games = self.db.execute_query("""
+                            SELECT game_type, SUM(times_hit) as total_stuck
+                            FROM network_stuck_points
+                            GROUP BY game_type
+                            ORDER BY total_stuck DESC
+                            LIMIT 5
+                        """)
+                        if stuck_games:
+                            for game in stuck_games:
+                                game_type = game['game_type']
+                                concept_results = cods_instance.check_all_relevant_concepts(game_type)
+                                if concept_results.get('unlocks'):
+                                    for unlock in concept_results['unlocks']:
+                                        print(f"  [CONCEPT-UNLOCK] {unlock['primitive']} "
+                                              f"(concept '{unlock.get('reason', 'unknown')}' for {game_type})")
+                except Exception as e:
+                    pass  # Supplemental analysis
+                
                 # PRIMITIVE INVENTORY: Show what network has access to
                 try:
                     cods_instance = CODSEngine() if CODSEngine else None

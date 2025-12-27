@@ -2245,6 +2245,419 @@ class CODSEngine:
         return suggestions.get(primitive_name)
     
     # ======================================================================
+    # STUCK POINT ANALYSIS (Gap #2)
+    # ======================================================================
+    # Analyze where agents get stuck and infer what primitives would help.
+    # Cross-references stuck points with winner/loser strategies.
+    # ======================================================================
+    
+    # Mapping of stuck patterns to primitives that would help
+    STUCK_PATTERN_TO_PRIMITIVE = {
+        # Boundary/containment issues
+        r'boundary|edge|seal|overflow': ['boundary_detection', 'flood_fill', 'detect_containment'],
+        # Repetition/oscillation (agent going in circles)
+        r'repeat|cycle|oscillat|loop': ['detect_symmetry', 'find_repeating_patterns', 'cycle_detection'],
+        # Object identification issues
+        r'shape|object|region|blob': ['detect_shapes', 'detect_objects_in_frame', 'extract_objects'],
+        # Hidden/discovery issues
+        r'hidden|reveal|uncover|find': ['analyze_spatial_relations', 'detect_containment', 'systematic_explore'],
+        # Navigation/movement issues
+        r'path|move|block|stuck|wall': ['is_movable', 'is_obstacle', 'pathfinding', 'trace_path'],
+        # Goal identification
+        r'goal|target|destination|end': ['goal_identification', 'distance_estimation', 'identify_goal'],
+        # Pattern matching
+        r'pattern|match|template|reference': ['find_pattern', 'reference_detection', 'schema_extraction'],
+        # Counting/quantity
+        r'count|number|quantity|total': ['count_objects', 'quantity_tracking'],
+        # Transformation
+        r'rotate|flip|transform|mirror': ['apply_transformation', 'detect_symmetry'],
+        # Control/interaction
+        r'click|control|interact|which': ['control_test', 'effect_scope', 'self_location'],
+    }
+    
+    def analyze_stuck_points_for_unlocks(
+        self,
+        min_stuck_count: int = 10,
+        min_confidence: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Analyze stuck points to identify primitive gaps and trigger unlocks.
+        
+        This is Gap #2: Using stuck point data to infer what capabilities
+        agents are missing. Cross-references with winner strategies to see
+        what successful agents did differently.
+        
+        Args:
+            min_stuck_count: Minimum times agents hit a stuck point to consider
+            min_confidence: Minimum confidence to trigger unlock pressure
+            
+        Returns:
+            Analysis results with suggested unlocks
+        """
+        import re
+        
+        results = {
+            'hotspots_analyzed': 0,
+            'gaps_identified': [],
+            'unlocks_triggered': [],
+            'primitives_with_pressure': {},
+            'error': None
+        }
+        
+        try:
+            # Step 1: Get high-frequency stuck points
+            hotspots = self.db.execute_query("""
+                SELECT game_type, level_number, stuck_signature,
+                       times_hit, times_escaped,
+                       (times_hit - COALESCE(times_escaped, 0)) as still_stuck_count,
+                       CASE WHEN times_hit > 0 
+                            THEN 1.0 * COALESCE(times_escaped, 0) / times_hit 
+                            ELSE 0 END as escape_rate,
+                       escape_strategy
+                FROM network_stuck_points
+                WHERE times_hit >= ?
+                ORDER BY still_stuck_count DESC
+                LIMIT 30
+            """, (min_stuck_count,))
+            
+            if not hotspots:
+                logger.debug("[STUCK-ANALYSIS] No stuck points meet threshold")
+                return results
+            
+            results['hotspots_analyzed'] = len(hotspots)
+            
+            for hotspot in hotspots:
+                game_type = hotspot['game_type']
+                level = hotspot['level_number']
+                escape_rate = hotspot['escape_rate'] or 0
+                
+                # Step 2: Get winner/loser comparison for this level
+                comparison = self.compare_winners_vs_losers(game_type, level)
+                
+                if comparison.get('gap_keywords'):
+                    # Step 3: Map gap keywords to primitives
+                    suggested_primitives = self._map_keywords_to_primitives(
+                        comparison['gap_keywords']
+                    )
+                    
+                    if suggested_primitives:
+                        gap = {
+                            'game_type': game_type,
+                            'level': level,
+                            'stuck_count': hotspot['times_hit'],
+                            'escape_rate': escape_rate,
+                            'gap_keywords': comparison['gap_keywords'],
+                            'suggested_primitives': suggested_primitives,
+                            'confidence': min(1.0, (1 - escape_rate) * 0.8 + 0.2)
+                        }
+                        results['gaps_identified'].append(gap)
+                        
+                        # Accumulate unlock pressure
+                        for prim in suggested_primitives:
+                            if prim not in results['primitives_with_pressure']:
+                                results['primitives_with_pressure'][prim] = {
+                                    'total_stuck': 0,
+                                    'confidence_sum': 0,
+                                    'sources': []
+                                }
+                            results['primitives_with_pressure'][prim]['total_stuck'] += hotspot['times_hit']
+                            results['primitives_with_pressure'][prim]['confidence_sum'] += gap['confidence']
+                            results['primitives_with_pressure'][prim]['sources'].append(
+                                f"{game_type}:L{level}"
+                            )
+            
+            # Step 4: Trigger unlocks for high-pressure primitives
+            for prim, data in results['primitives_with_pressure'].items():
+                avg_confidence = data['confidence_sum'] / len(data['sources']) if data['sources'] else 0
+                
+                if avg_confidence >= min_confidence and data['total_stuck'] >= min_stuck_count * 2:
+                    # Check if primitive is locked
+                    status = self.unlock_manager.get_status(prim)
+                    if status == PrimitiveStatus.LOCKED:
+                        success = self._attempt_need_based_unlock(
+                            prim,
+                            data['total_stuck'],
+                            [f"stuck_point:{src}" for src in data['sources'][:5]]
+                        )
+                        if success:
+                            results['unlocks_triggered'].append({
+                                'primitive': prim,
+                                'stuck_count': data['total_stuck'],
+                                'sources': data['sources'],
+                                'reason': 'stuck_point_pressure'
+                            })
+            
+            # Log summary
+            if results['gaps_identified']:
+                logger.info(f"[STUCK-ANALYSIS] Found {len(results['gaps_identified'])} gaps "
+                           f"across {results['hotspots_analyzed']} hotspots")
+            if results['unlocks_triggered']:
+                logger.info(f"[STUCK-ANALYSIS] Triggered {len(results['unlocks_triggered'])} unlocks!")
+                
+        except Exception as e:
+            logger.error(f"[STUCK-ANALYSIS] Error: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def compare_winners_vs_losers(
+        self,
+        game_type: str,
+        level: int
+    ) -> Dict[str, Any]:
+        """
+        Compare what winners did vs what losers tried (Gap #4).
+        
+        The key insight: What can winners do that losers can't?
+        This comparison reveals capability gaps that primitives could fill.
+        
+        Args:
+            game_type: Game type to analyze
+            level: Level number
+            
+        Returns:
+            Comparison results with gap keywords
+        """
+        import re
+        
+        results = {
+            'winner_keywords': set(),
+            'loser_keywords': set(),
+            'gap_keywords': [],
+            'winner_count': 0,
+            'loser_count': 0,
+            'winner_strategies': [],
+            'loser_reasons': []
+        }
+        
+        try:
+            # Get winner strategies (from network_failure_hypotheses with win_strategy)
+            winners = self.db.execute_query("""
+                SELECT win_strategy
+                FROM network_failure_hypotheses
+                WHERE game_type = ? 
+                  AND level_number = ?
+                  AND win_strategy IS NOT NULL
+                  AND win_strategy != ''
+                LIMIT 50
+            """, (game_type, level))
+            
+            # Get loser reasons (from game_results with failure status)
+            losers = self.db.execute_query("""
+                SELECT failure_reason, reasoning
+                FROM game_results
+                WHERE game_id LIKE ?
+                  AND level = ?
+                  AND status IN ('STUCK', 'TERMINATED', 'FAILED', 'NOT FINISHED')
+                LIMIT 50
+            """, (f"{game_type}%", level))
+            
+            results['winner_count'] = len(winners) if winners else 0
+            results['loser_count'] = len(losers) if losers else 0
+            
+            # Extract keywords from winners
+            if winners:
+                for w in winners:
+                    strategy = w.get('win_strategy', '') or ''
+                    results['winner_strategies'].append(strategy[:100])
+                    # Extract meaningful keywords (3+ chars, no common words)
+                    words = set(re.findall(r'\b[a-z]{3,}\b', strategy.lower()))
+                    words -= {'the', 'and', 'for', 'that', 'with', 'this', 'from', 'have', 'was', 'are'}
+                    results['winner_keywords'].update(words)
+            
+            # Extract keywords from losers
+            if losers:
+                for l in losers:
+                    reason = (l.get('failure_reason', '') or '') + ' ' + (l.get('reasoning', '') or '')
+                    results['loser_reasons'].append(reason[:100])
+                    words = set(re.findall(r'\b[a-z]{3,}\b', reason.lower()))
+                    words -= {'the', 'and', 'for', 'that', 'with', 'this', 'from', 'have', 'was', 'are'}
+                    results['loser_keywords'].update(words)
+            
+            # Gap = what winners mention that losers don't
+            gap = results['winner_keywords'] - results['loser_keywords']
+            results['gap_keywords'] = list(gap)[:20]  # Top 20 gap keywords
+            
+            # Convert sets to lists for JSON serialization
+            results['winner_keywords'] = list(results['winner_keywords'])[:30]
+            results['loser_keywords'] = list(results['loser_keywords'])[:30]
+            
+        except Exception as e:
+            logger.debug(f"[WINNER-LOSER] Comparison error: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def _map_keywords_to_primitives(self, keywords: List[str]) -> List[str]:
+        """Map gap keywords to suggested primitives."""
+        import re
+        
+        suggested = set()
+        keyword_text = ' '.join(keywords).lower()
+        
+        for pattern, primitives in self.STUCK_PATTERN_TO_PRIMITIVE.items():
+            if re.search(pattern, keyword_text):
+                suggested.update(primitives)
+        
+        return list(suggested)
+    
+    # ======================================================================
+    # CONCEPT-DRIVEN PRIMITIVE UNLOCK (Gap #3)
+    # ======================================================================
+    # When a concept is relevant, check if its required primitives are
+    # unlocked. If not, apply unlock pressure.
+    # ======================================================================
+    
+    def check_concept_primitive_needs(
+        self,
+        concept_name: str,
+        game_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Check if a concept's required primitives are unlocked (Gap #3).
+        
+        When a concept like 'containment' is relevant for a game, this checks
+        if the primitives that concept needs are available. If not, it applies
+        unlock pressure.
+        
+        Args:
+            concept_name: Name of the concept (e.g., 'containment')
+            game_type: Optional game type for context
+            
+        Returns:
+            Results showing needed primitives and any unlocks triggered
+        """
+        from concept_discovery_engine import CONCEPTUAL_PRIMITIVES
+        
+        results = {
+            'concept': concept_name,
+            'primitives_needed': [],
+            'primitives_available': [],
+            'primitives_locked': [],
+            'unlocks_triggered': [],
+            'error': None
+        }
+        
+        try:
+            concept_data = CONCEPTUAL_PRIMITIVES.get(concept_name)
+            if not concept_data:
+                results['error'] = f"Unknown concept: {concept_name}"
+                return results
+            
+            # Get required components (primitives)
+            components = concept_data.get('components', [])
+            results['primitives_needed'] = components
+            
+            for prim in components:
+                status = self.unlock_manager.get_status(prim)
+                
+                if status in [PrimitiveStatus.UNLOCKED, PrimitiveStatus.GRANDFATHERED]:
+                    results['primitives_available'].append(prim)
+                elif status == PrimitiveStatus.LOCKED:
+                    results['primitives_locked'].append(prim)
+                    
+                    # Apply unlock pressure from concept need
+                    success = self._attempt_need_based_unlock(
+                        prim,
+                        frequency=50,  # Concept-driven = high priority
+                        patterns=[f"concept:{concept_name}", f"game:{game_type or 'any'}"]
+                    )
+                    if success:
+                        results['unlocks_triggered'].append({
+                            'primitive': prim,
+                            'reason': f'concept_{concept_name}_needs',
+                            'game_type': game_type
+                        })
+            
+            # Log if unlocks happened
+            if results['unlocks_triggered']:
+                logger.info(f"[CONCEPT-UNLOCK] Concept '{concept_name}' triggered "
+                           f"{len(results['unlocks_triggered'])} unlocks")
+            
+        except ImportError:
+            results['error'] = "ConceptDiscoveryEngine not available"
+        except Exception as e:
+            logger.error(f"[CONCEPT-UNLOCK] Error: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def check_all_relevant_concepts(
+        self,
+        game_type: str,
+        level: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Check all concepts that might be relevant for a game and ensure
+        their primitives are available.
+        
+        Args:
+            game_type: Game type to check
+            level: Optional level number
+            
+        Returns:
+            Summary of concept checks and any unlocks
+        """
+        results = {
+            'game_type': game_type,
+            'concepts_checked': [],
+            'total_unlocks': 0,
+            'unlocks': []
+        }
+        
+        try:
+            # Try to get concept suggestions from the engine
+            if CONCEPT_ENGINE_AVAILABLE and self.concept_engine:
+                suggestions = self.concept_engine.suggest_concept_for_game(game_type)
+                
+                if suggestions.get('suggested_concepts'):
+                    for concept in suggestions['suggested_concepts'][:5]:  # Top 5
+                        concept_name = concept.get('name') or concept.get('concept_name')
+                        if concept_name:
+                            check_result = self.check_concept_primitive_needs(
+                                concept_name, game_type
+                            )
+                            results['concepts_checked'].append({
+                                'concept': concept_name,
+                                'locked_primitives': check_result['primitives_locked'],
+                                'unlocks': check_result['unlocks_triggered']
+                            })
+                            results['total_unlocks'] += len(check_result['unlocks_triggered'])
+                            results['unlocks'].extend(check_result['unlocks_triggered'])
+            else:
+                # Fallback: Check common concepts based on game type
+                from concept_discovery_engine import CONCEPTUAL_PRIMITIVES
+                
+                # Simple heuristic based on game prefix
+                if game_type.startswith('ft'):
+                    concepts_to_check = ['containment', 'reference_semantics']
+                elif game_type.startswith('sp'):
+                    concepts_to_check = ['goal_directedness', 'causality']
+                elif game_type.startswith('as'):
+                    concepts_to_check = ['symmetry', 'conservation']
+                else:
+                    concepts_to_check = ['causality', 'goal_directedness']
+                
+                for concept_name in concepts_to_check:
+                    if concept_name in CONCEPTUAL_PRIMITIVES:
+                        check_result = self.check_concept_primitive_needs(
+                            concept_name, game_type
+                        )
+                        results['concepts_checked'].append({
+                            'concept': concept_name,
+                            'locked_primitives': check_result['primitives_locked'],
+                            'unlocks': check_result['unlocks_triggered']
+                        })
+                        results['total_unlocks'] += len(check_result['unlocks_triggered'])
+                        results['unlocks'].extend(check_result['unlocks_triggered'])
+                        
+        except Exception as e:
+            logger.error(f"[CONCEPT-CHECK] Error: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    # ======================================================================
     # PRIMITIVE INVENTORY (Assessment Interface)
     # ======================================================================
     # Track what primitives the network has access to and is using
