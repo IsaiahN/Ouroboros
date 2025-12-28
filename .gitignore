@@ -71,3 +71,6 @@ cover/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Documentation (internal only)
+DOCS/

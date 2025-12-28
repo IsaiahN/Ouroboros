@@ -19,19 +19,6 @@ Here are some of the bigger collaborators/influences for the project:
 
 
 - We are grateful to our collaborators, acquaintences, friends, family and all connections (past/present/future) who contribute.
-  
-| Document | Hard Problem It Addresses | Link |
-|----------|---------------------------|------|
-| **Answering [Gödel's Incompleteness](https://en.wikipedia.org/wiki/G%C3%B6del%27s_incompleteness_theorems)** | Why no single unit can have all understanding - and how networks are evolution's workaround | [DOCS/answering for Godels Incompleteness Problem.md](DOCS/answering%20for%20Godels%20Incompleteness%20Problem.md) |
-| **Two-Streams** | Why individual AGI is impossible (plasticity-stability dilemma) and how collective intelligence solves it. This also ties in the [uncanny valley effect](https://en.wikipedia.org/wiki/Uncanny_valley) via [Schrödinger's cat](https://en.wikipedia.org/wiki/Schr%C3%B6dinger's_cat). | [DOCS/two-streams.md](DOCS/two-streams.md) |
-| **AGI Unified Theory** | The complete framework: 5 foundational principles, consciousness as weighted stream integration, evolutionary dynamics | [DOCS/agi_unified_theory.md](DOCS/agi_unified_theory.md) |
-| **Biome Theory** | Why the virus-bacteria network is the true model for AGI - 4 billion years of distributed intelligence | [DOCS/ouroboros - biome theory.md](DOCS/ouroboros%20-%20biome%20theory.md) |
-| **Understanding Metatheories** | The "99 bottles of beer" analogy - why having the formula beats brute force enumeration | [DOCS/Understanding How MetaTheories Work](DOCS/Understanding%20How%20MetaTheories%20Work) |
-| **Why Metatheory Requires Experts** | Horse + Rider: why you need RLVR grounding and domain expertise to apply the framework | [DOCS/why the metatheory requires problem space experts.md](DOCS/why%20the%20metatheory%20requires%20problem%20space%20experts.md) |
-| **The Cold Start Problem** | [Plato's Cave](https://en.wikipedia.org/wiki/Allegory_of_the_cave): why systems must stumble through brute force before extracting formulas | [DOCS/Entropy and the Cold Start Problem (platos cave).md](DOCS/Entropy%20and%20the%20Cold%20Start%20Problem%20(platos%20cave).md) |
-| **Agent Role Fairness** | Asymmetric evaluation: measuring growth from starting point, not absolute position | [DOCS/balancing the agent role fairness.md](DOCS/balancing%20the%20agent%20role%20fairness.md) |
-| **The Problem with Game Mechanics** | Why agents trained from scratch lack cultural context that LLMs inherit | [DOCS/the-problem-with-game-mechanics.md](DOCS/the-problem-with-game-mechanics.md) |
-
 
 ## Project that encapsulated the work to get the theory
 Ouroboros is an evolutionary system designed to solve the [ARC-AGI-3 challenge](https://arcprize.org/arc-agi/3/), an open source.
@@ -175,16 +162,16 @@ The system implements self-regulating metrics inspired by autopoiesis (self-main
 ## 📂 Key Files
 -   `run_evolution.py`: Main entry point.
 -   `core_data.db`: The "network" (SQLite database storing ALL knowledge).
--   `DOCS/how_the_system_works.md`: Detailed system architecture.
 
 **Core Modules**:
 -   `core_gameplay.py`: Main gameplay loop and action execution.
 -   `network_intelligence_engine.py`: Network-level learning and emergence tracking.
+-   `cods_engine.py`: Composed Operator Discovery System - failure-driven primitive learning.
+-   `concept_discovery_engine.py`: Semantic concept discovery across games.
+-   `terminal_pattern_detector.py`: Game-over foresight - learns fatal action patterns.
+-   `seed_primitives.py`: derived cognitive primitives (attention, affordance, physics priors, metacognition).
 -   `regulatory_signal_engine.py`: Adaptive signals for population control.
 -   `autopoiesis_monitor.py`: System health metrics and self-regulation.
--   `trigger_controller.py`: Anti-resonance controls for metric-driven adjustments.
--   `metric_rotator.py`: Anti-Goodhart metric rotation system.
--   `metric_confidence.py`: Meta-metric tracking and confidence scoring.
 
 ## 📊 Analysis Tools
 
@@ -194,15 +181,22 @@ Reusable tools for monitoring and debugging the system:
 # Gameplay progression analysis
 python manual_tools/gameplay_analyzer.py --hours 3 --compare
 
+# Network health diagnostics
+python network_health_report.py
+
+# Automated reasoning bug detection
+python investigate_bugs.py
+
 # Database schema inspection  
 python manual_tools/schema_inspector.py --table agents --sample
-python manual_tools/schema_inspector.py --find generation
 python manual_tools/schema_inspector.py --counts
 ```
 
 | Tool | Purpose |
 |------|--------|
 | `gameplay_analyzer.py` | Analyze game results, scores, level completions, baseline comparison |
+| `network_health_report.py` | Population stats, emergence gain, cognitive stages, sequence health |
+| `investigate_bugs.py` | Detect and investigate reasoning disconnects automatically |
 | `schema_inspector.py` | Inspect database tables, columns, row counts, sample data |
 
 ## 🛠️ Configuration
