@@ -2610,6 +2610,13 @@ class CODSEngine:
             if CONCEPT_ENGINE_AVAILABLE and self.concept_engine:
                 suggestions = self.concept_engine.suggest_concept_for_game(game_type)
                 
+                # Handle both dict and Concept object returns, or None
+                if suggestions is None:
+                    suggestions = {}
+                elif hasattr(suggestions, 'name'):
+                    # It's a Concept object, convert to expected format
+                    suggestions = {'suggested_concepts': [{'name': suggestions.name}]}
+                
                 if suggestions.get('suggested_concepts'):
                     for concept in suggestions['suggested_concepts'][:5]:  # Top 5
                         concept_name = concept.get('name') or concept.get('concept_name')

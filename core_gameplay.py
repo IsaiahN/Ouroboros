@@ -581,7 +581,16 @@ class GameplayEngine:
                     result.success = True
                     result.successful_sequence = candidate_sequence
                     result.game_state = replay_result['game_state']
-                    logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
+                    
+                    # Check if we reached frontier (sequence worked, now at unexplored territory)
+                    if replay_result.get('reached_frontier'):
+                        frontier_level = replay_result.get('frontier_level', 'unknown')
+                        logger.info(f"[3-TRY] SUCCESS: {sequence_id[:12]} brought us to frontier Level {frontier_level}!")
+                        # Mark for exploration mode continuation
+                        result.reached_frontier = True
+                        result.frontier_level = frontier_level
+                    else:
+                        logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
                     
                     # Reset consecutive failures on success
                     self.db.execute_query("""
@@ -1929,7 +1938,13 @@ class GameplayEngine:
                             successful_sequence = candidate_sequence
                             known_sequence = candidate_sequence  # Update for later use
                             game_state = replay_result['game_state']
-                            logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
+                            
+                            # Check if we reached frontier (sequence worked, now at unexplored territory)
+                            if replay_result.get('reached_frontier'):
+                                frontier_level = replay_result.get('frontier_level', 'unknown')
+                                logger.info(f"[3-TRY] SUCCESS: {sequence_id[:12]} brought us to frontier Level {frontier_level}!")
+                            else:
+                                logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
                             
                             # Reset consecutive failures on success
                             self.db.execute_query("""
@@ -2286,6 +2301,27 @@ class GameplayEngine:
                                         )
                                         if pattern_id:
                                             logger.info(f"[FORESIGHT] Recorded terminal pattern: {pattern_id[:20]}")
+                                        
+                                        # ================================================================
+                                        # DEATH ZONE RECORDING - Spatial danger tracking
+                                        # ================================================================
+                                        # Also record WHERE the death happened (spatial zone)
+                                        # Get controlled object positions if available
+                                        controlled_objects = None
+                                        if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                            controlled = self.agent_self_model.get_controlled_objects()
+                                            if controlled:
+                                                controlled_objects = controlled
+                                        
+                                        game_type = game_id.split('-')[0] if game_id else 'unknown'
+                                        zone_id = self.terminal_detector.record_death_zone(
+                                            game_type=game_type,
+                                            level_number=current_level,
+                                            frame_before_death=frame_before,
+                                            controlled_objects=controlled_objects
+                                        )
+                                        if zone_id:
+                                            logger.info(f"[FORESIGHT] Recorded death zone: {zone_id[:20]}")
                                 except Exception as e:
                                     logger.debug(f"Terminal pattern recording failed: {e}")
                         break
@@ -2708,6 +2744,28 @@ class GameplayEngine:
                         logger.info(f" Level {current_level} completed! Score: {previous_score} -> {game_state.score} (+{score_increase})")
                         logger.info(f" Level {current_level} stats: {level_action_count} actions, {level_api_resets} API resets used")
                         
+                        # ================================================================
+                        # Clear frontier tried colors for completed level
+                        # Next level will start fresh enumeration
+                        # ================================================================
+                        if hasattr(self, '_frontier_tried_colors'):
+                            key = f"{current_game_id}_{current_level}"
+                            if key in self._frontier_tried_colors:
+                                del self._frontier_tried_colors[key]
+                        
+                        # ================================================================
+                        # CRITICAL FIX: Record what color worked (success learning)
+                        # This closes the loop: clicking color X -> level complete -> learn X works
+                        # Next level, the visual_analyzer will PRIORITIZE color X
+                        # ================================================================
+                        if hasattr(self, '_last_clicked_color') and hasattr(self.action_handler, 'visual_analyzer'):
+                            try:
+                                clicked_color = self._last_clicked_color
+                                self.action_handler.visual_analyzer.record_color_success(clicked_color)
+                                logger.info(f"[SUCCESS-LEARN] Color {clicked_color} led to level {current_level} completion - will prioritize!")
+                            except Exception as e:
+                                logger.debug(f"Success learning failed: {e}")
+                        
                         # CODS: Record level completion for failure-driven learning
                         if hasattr(self, 'cods_engine') and self.cods_engine:
                             try:
@@ -2756,6 +2814,17 @@ class GameplayEngine:
                         
                         # Reset level-specific counters for next level
                         level_api_resets = 0  # Fresh reset budget for new level
+                        
+                        # Reset meta-learning pattern tracker for new level
+                        # Each level may have completely different patterns
+                        if hasattr(self, '_meta_pattern_tracker'):
+                            logger.info(f"[META] Resetting pattern tracker for new level")
+                            self._meta_pattern_tracker['current_pattern_id'] = None
+                            self._meta_pattern_tracker['applications'] = 0
+                            self._meta_pattern_tracker['no_progress_count'] = 0
+                            # NOTE: Keep failed_patterns - they may be universal failures
+                        if hasattr(self, '_pattern_action_queue'):
+                            self._pattern_action_queue = []
                         
                         # SMART SELF-DIRECTED MODE EXIT on level completion
                         # Check if network has wisdom for the NEXT level before exiting
@@ -3013,7 +3082,14 @@ class GameplayEngine:
                                     
                                     if replay_result and replay_result.get('success'):
                                         game_state = replay_result['game_state']
-                                        logger.info(f"[MID-GAME REPLAY] Success! Now at score {game_state.score}")
+                                        
+                                        # Check if we reached frontier
+                                        if replay_result.get('reached_frontier'):
+                                            frontier_level = replay_result.get('frontier_level', 'unknown')
+                                            logger.info(f"[MID-GAME REPLAY] Reached frontier Level {frontier_level}! Continuing with exploration.")
+                                            # Continue with exploration loop - don't break
+                                        else:
+                                            logger.info(f"[MID-GAME REPLAY] Success! Now at score {game_state.score}")
                                         # Check for win
                                         if game_state.state == "WIN":
                                             if game_state.win_score > 0 and game_state.score >= game_state.win_score:
@@ -3628,6 +3704,57 @@ class GameplayEngine:
                                         return "ACTION6", reasoning
                             except (ValueError, IndexError):
                                 pass  # Could not parse coordinates
+                    
+                    # ===================================================================
+                    # SHAPE-BASED FRONTIER EXPLORATION (Added 2025-12-27)
+                    # ===================================================================
+                    # On frontier levels, use shape generalization:
+                    # If we know "horizontal bars are selectable" from previous levels,
+                    # enumerate ALL horizontal bars on this level and try clicking each.
+                    # ===================================================================
+                    is_frontier = self._is_frontier_level(current_game_id, current_level)
+                    
+                    if is_frontier and not current_selection:
+                        # Get tried colors this session (to avoid re-clicking same objects)
+                        tried_colors = getattr(self, '_frontier_tried_colors', {}).get(
+                            f"{current_game_id}_{current_level}", []
+                        )
+                        
+                        # Query shape-based objects to try
+                        objects_to_try = self.agent_self_model.get_untried_objects_for_frontier(
+                            game_type=game_type,
+                            level=current_level,
+                            frame=game_state.frame,
+                            tried_colors=tried_colors
+                        )
+                        
+                        if objects_to_try:
+                            # Pick the first untried object
+                            next_object = objects_to_try[0]
+                            target_x, target_y = next_object['center']
+                            
+                            # Track that we're trying this color
+                            if not hasattr(self, '_frontier_tried_colors'):
+                                self._frontier_tried_colors = {}
+                            key = f"{current_game_id}_{current_level}"
+                            if key not in self._frontier_tried_colors:
+                                self._frontier_tried_colors[key] = []
+                            self._frontier_tried_colors[key].append(next_object['color'])
+                            
+                            # Set selection target for ACTION6
+                            self._selection_target = {
+                                'x': target_x,
+                                'y': target_y,
+                                'object_color': next_object['color']
+                            }
+                            
+                            reasoning = (
+                                f"[SHAPE ENUM] Frontier L{current_level}: trying {next_object['shape_signature']} "
+                                f"(color {next_object['color']}) at ({target_x},{target_y}) - "
+                                f"{len(objects_to_try)} objects to try"
+                            )
+                            logger.info(f"[SHAPE] {reasoning}")
+                            return "ACTION6", reasoning
                                 
             except Exception as e:
                 logger.debug(f"Selection-aware check failed (non-critical): {e}")
@@ -4210,40 +4337,101 @@ class GameplayEngine:
                 logger.debug(f"Phase 3 influence error: {e}")
         
         # Try meta-learning pattern detection
+        # FIX: Added pattern failure tracking and abandonment
         if (self.game_config.get('enable_pattern_learning', True) and 
             game_state.frame is not None):
             
             try:
-                # Convert frame to numpy array if needed
+                # Initialize pattern tracking if needed
+                if not hasattr(self, '_meta_pattern_tracker'):
+                    self._meta_pattern_tracker = {
+                        'current_pattern_id': None,
+                        'applications': 0,
+                        'last_score': 0,
+                        'last_frame_hash': None,
+                        'failed_patterns': set(),  # Blacklist
+                        'no_progress_count': 0
+                    }
+                
+                tracker = self._meta_pattern_tracker
+                current_score = getattr(game_state, 'score', 0) or 0
+                
+                # Calculate frame hash for change detection
                 frame = game_state.frame
                 if not isinstance(frame, np.ndarray):
                     frame = np.array(frame)
+                frame_hash = hash(frame.tobytes()) if frame.size > 0 else 0
                 
-                pattern_result = self._meta_learn_pattern_from_frame(frame)
-                
-                if pattern_result and pattern_result.get('confidence', 0) > 0.5:
-                    logger.info(f"[META] Meta-learner detected pattern: {pattern_result['pattern_type']}")
-                    logger.info(f"   Rule: {pattern_result['rule']['type']}, Confidence: {pattern_result['confidence']:.2f}")
+                # Check if previous pattern application made progress
+                if tracker['current_pattern_id'] and tracker['applications'] > 0:
+                    made_progress = (current_score > tracker['last_score'] or 
+                                    frame_hash != tracker['last_frame_hash'])
                     
-                    actions = pattern_result.get('actions', [])
-                    if actions:
-                        # Store the discovered pattern for future use
-                        self._store_discovered_pattern(pattern_result)
+                    if made_progress:
+                        # Pattern is working - reset no-progress counter
+                        tracker['no_progress_count'] = 0
+                        logger.debug(f"[META] Pattern progress detected, continuing")
+                    else:
+                        tracker['no_progress_count'] += 1
                         
-                        # Execute first action from the pattern
-                        first_action = actions[0]
-                        if first_action['type'] == 'ACTION6':
-                            coord = first_action['coordinate']
-                            logger.info(f" Applying meta-learned pattern: ACTION6 at {coord}")
-                            logger.info(f"   Reason: {first_action['reason']}")
+                        # ABANDON pattern if no progress after 10 applications
+                        if tracker['no_progress_count'] >= 10:
+                            failed_id = tracker['current_pattern_id']
+                            tracker['failed_patterns'].add(failed_id)
+                            logger.warning(f"[META] ABANDONING pattern {failed_id[:16]} - no progress after {tracker['applications']} applications")
                             
-                            # Store remaining actions for next iterations
-                            if not hasattr(self, '_pattern_action_queue'):
+                            # Clear the queue and reset tracker
+                            if hasattr(self, '_pattern_action_queue'):
                                 self._pattern_action_queue = []
-                            self._pattern_action_queue = actions[1:]  # Queue remaining actions
+                            tracker['current_pattern_id'] = None
+                            tracker['applications'] = 0
+                            tracker['no_progress_count'] = 0
+                
+                # Update tracking state
+                tracker['last_score'] = current_score
+                tracker['last_frame_hash'] = frame_hash
+                
+                # Try to detect new pattern (only if not already in a pattern)
+                if not tracker['current_pattern_id']:
+                    pattern_result = self._meta_learn_pattern_from_frame(frame)
+                    
+                    if pattern_result and pattern_result.get('confidence', 0) > 0.5:
+                        # Generate pattern ID for blacklist check
+                        import hashlib
+                        rule_str = json.dumps(pattern_result.get('rule', {}), sort_keys=True)
+                        pattern_id = f"meta_{hashlib.md5(rule_str.encode()).hexdigest()[:16]}"
+                        
+                        # Skip if pattern was already tried and failed
+                        if pattern_id in tracker['failed_patterns']:
+                            logger.info(f"[META] Skipping blacklisted pattern {pattern_id[:16]}")
+                        else:
+                            logger.info(f"[META] Meta-learner detected pattern: {pattern_result['pattern_type']}")
+                            logger.info(f"   Rule: {pattern_result['rule']['type']}, Confidence: {pattern_result['confidence']:.2f}")
                             
-                            reasoning = f"Meta-learned {pattern_result['pattern_type']} pattern (confidence: {pattern_result['confidence']:.2f})"
-                            return "ACTION6", reasoning  # Will be executed with stored coordinates
+                            actions = pattern_result.get('actions', [])
+                            if actions:
+                                # Store the discovered pattern for future use
+                                self._store_discovered_pattern(pattern_result)
+                                
+                                # Track this pattern
+                                tracker['current_pattern_id'] = pattern_id
+                                tracker['applications'] = 1
+                                tracker['no_progress_count'] = 0
+                                
+                                # Execute first action from the pattern
+                                first_action = actions[0]
+                                if first_action['type'] == 'ACTION6':
+                                    coord = first_action['coordinate']
+                                    logger.info(f" Applying meta-learned pattern: ACTION6 at {coord}")
+                                    logger.info(f"   Reason: {first_action['reason']}")
+                                    
+                                    # Store remaining actions for next iterations
+                                    if not hasattr(self, '_pattern_action_queue'):
+                                        self._pattern_action_queue = []
+                                    self._pattern_action_queue = actions[1:]  # Queue remaining actions
+                                    
+                                    reasoning = f"Meta-learned {pattern_result['pattern_type']} pattern (confidence: {pattern_result['confidence']:.2f})"
+                                    return "ACTION6", reasoning  # Will be executed with stored coordinates
                             
             except Exception as e:
                 logger.debug(f"Meta-learning error (falling back to default): {e}")
@@ -4252,9 +4440,27 @@ class GameplayEngine:
         if hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
             next_action = self._pattern_action_queue.pop(0)
             if next_action['type'] == 'ACTION6':
+                # Track application count
+                if hasattr(self, '_meta_pattern_tracker'):
+                    self._meta_pattern_tracker['applications'] += 1
                 reasoning = f"Continuing meta-learned pattern: {next_action['reason']}"
                 logger.info(f" {reasoning}: ACTION6 at {next_action['coordinate']}")
                 return "ACTION6", reasoning
+        elif hasattr(self, '_meta_pattern_tracker') and self._meta_pattern_tracker.get('current_pattern_id'):
+            # Queue is empty but pattern was active - pattern completed naturally
+            # Check if it was successful (made any progress during its run)
+            tracker = self._meta_pattern_tracker
+            if tracker['no_progress_count'] > 0:
+                # Pattern completed but made no progress - blacklist it
+                failed_id = tracker['current_pattern_id']
+                tracker['failed_patterns'].add(failed_id)
+                logger.warning(f"[META] Pattern {failed_id[:16]} completed but made no progress - blacklisting")
+            else:
+                logger.info(f"[META] Pattern {tracker['current_pattern_id'][:16]} completed successfully")
+            # Reset for next pattern
+            tracker['current_pattern_id'] = None
+            tracker['applications'] = 0
+            tracker['no_progress_count'] = 0
         
         # ===================================================================
         # CODS - COGNITIVE OPERATOR DISCOVERY SYSTEM
@@ -4723,6 +4929,23 @@ class GameplayEngine:
             if reasoning_json:
                 reasoning_json['coordinate'] = {'x': x, 'y': y}
                 reasoning_json['visual_reason'] = reason
+            
+            # ================================================================
+            # CRITICAL FIX: Track what color was clicked for success learning
+            # When level completes, we record this color as "what worked"
+            # ================================================================
+            try:
+                if game_state.frame and 0 <= y < len(game_state.frame) and 0 <= x < len(game_state.frame[0]):
+                    clicked_color = game_state.frame[y][x]
+                    self._last_clicked_color = clicked_color
+                    self._last_click_coords = (x, y)
+                    # Also update visual_analyzer with successful clicks as they happen
+                    if hasattr(self.action_handler, 'visual_analyzer'):
+                        # If this color is rare (not background), note it
+                        if clicked_color != 0:  # 0 is usually background
+                            logger.debug(f"[CLICK-TRACK] Clicked color {clicked_color} at ({x}, {y})")
+            except Exception as e:
+                logger.debug(f"Click color tracking failed: {e}")
             
             # Send ACTION6 with reasoning JSON
             new_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=reasoning_json, level_number=current_level)
@@ -10090,10 +10313,50 @@ class GameplayEngine:
             highest_score_achieved = game_state.score
             reset_detected = False
             
+            # ================================================================
+            # FRONTIER DETECTION: Stop replay when reaching frontier level
+            # ================================================================
+            # Per Master Ruleset: "PIONEERS: Full exploration, no subsequence 
+            # matching ON FRONTIER LEVELS"
+            # When agent reaches a level with no proven sequences, stop replay
+            # and return to exploration mode
+            # ================================================================
+            game_id_for_frontier = self.session_manager.current_game_id or ''
+            game_type_for_frontier = game_id_for_frontier.split('-')[0] if game_id_for_frontier else ''
+            frontier_check_enabled = True  # Can be disabled for optimizers
+            
             # Execute actions starting from checkpoint
             for idx, action_num in enumerate(actions[start_index:], start=start_index):
                 if game_state.state != "NOT_FINISHED":
                     break
+                
+                # ================================================================
+                # FRONTIER CHECK: Stop if we've reached a level with no sequences
+                # ================================================================
+                if frontier_check_enabled:
+                    current_replay_level = int(game_state.score) + 1
+                    if current_replay_level > 1:  # Only check after L1
+                        # Check if this level has any winning sequences
+                        frontier_check = self.db.execute_query("""
+                            SELECT COUNT(*) as seq_count 
+                            FROM winning_sequences 
+                            WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
+                        """, (f"{game_type_for_frontier}-%", current_replay_level))
+                        
+                        level_has_sequences = frontier_check and frontier_check[0]['seq_count'] > 0
+                        
+                        if not level_has_sequences:
+                            logger.info(f"[FRONTIER-REPLAY] Reached frontier Level {current_replay_level} "
+                                       f"(no sequences exist) - stopping replay to explore")
+                            # Return success with current state - caller should continue with exploration
+                            return {
+                                'game_state': game_state,
+                                'success': True,
+                                'reached_frontier': True,
+                                'frontier_level': current_replay_level,
+                                'actions_replayed': action_count,
+                                'sequence_id': sequence_id
+                            }
                 
                 # Check for game/level reset (score dropped unexpectedly)
                 if game_state.score < highest_score_achieved - 0.5:  # 0.5 tolerance for float precision
@@ -10113,17 +10376,108 @@ class GameplayEngine:
                 # Previously, actions during replay were logged with the sequence's
                 # level_number (e.g., L2 or L3), even when score was 0 (L1).
                 # This caused capture to fail because:
-                # 1. Agent wins L1 (score 0→1)
+                # 1. Agent wins L1 (score 0->1)
                 # 2. Capture queries WHERE level_number = 1
-                # 3. But all replay actions were logged as L2 → no matches!
+                # 3. But all replay actions were logged as L2 -> no matches!
                 # 
                 # FIX: Use score-based level_number: int(score) + 1
                 # Score 0 = on level 1, Score 1 = on level 2, etc.
                 # ================================================================
                 actual_level = int(game_state.score) + 1
                 
-                # Execute action
-                if action_num == 6 and coord_index < len(coordinates):
+                # ================================================================
+                # TERMINAL FORESIGHT CHECK (OPTIMIZED - only near sequence end)
+                # ================================================================
+                # Game-overs typically happen at the VERY END of sequences.
+                # Only check foresight when:
+                # 1. In last 10% of sequence (progress >= 0.90)
+                # 2. Stuck (no score progress for 15+ actions)
+                # 3. Last 5 actions of sequence (regardless of length)
+                # This avoids unnecessary overhead during proven sequence portions.
+                # ================================================================
+                action_to_execute = action_num
+                sequence_progress = (idx + 1) / len(actions) if len(actions) > 0 else 1.0
+                remaining_actions = len(actions) - idx - 1
+                
+                # Determine if we should check foresight
+                should_check_foresight = (
+                    sequence_progress >= 0.90 or           # Near end (last 10%)
+                    actions_since_progress >= 15 or       # Stuck
+                    remaining_actions <= 5                 # Last 5 actions
+                )
+                
+                if should_check_foresight and hasattr(self, 'terminal_detector') and self.terminal_detector and game_state.frame:
+                    try:
+                        game_type_for_zones = game_id_for_frontier
+                        
+                        # ================================================================
+                        # DEATH ZONE CHECK (spatial foresight)
+                        # ================================================================
+                        # Check if controlled objects are in/approaching death zones
+                        # This is more intuitive: "being in region X = danger"
+                        # ================================================================
+                        if action_num <= 4:  # Movement action
+                            # Get controlled object positions from self_model or frame analysis
+                            controlled_positions = []
+                            if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                controlled = self.agent_self_model.get_controlled_objects()
+                                for obj in controlled:
+                                    if 'x' in obj and 'y' in obj:
+                                        controlled_positions.append((obj['x'], obj['y']))
+                            
+                            if controlled_positions:
+                                zone_danger = self.terminal_detector.check_death_zones(
+                                    game_type=game_type_for_zones.split('-')[0] if game_type_for_zones else '',
+                                    level_number=actual_level,
+                                    object_positions=controlled_positions,
+                                    planned_direction=action_num,
+                                    min_danger=0.6
+                                )
+                                
+                                if zone_danger and zone_danger.get('warning'):
+                                    safe_dir = zone_danger.get('safe_direction', action_num)
+                                    if safe_dir != action_num:
+                                        logger.info(f"[DEATH-ZONE] Avoiding ACTION{action_num} "
+                                                   f"(entering death zone with {zone_danger.get('death_count', 0)} deaths) "
+                                                   f"-> ACTION{safe_dir}")
+                                        action_to_execute = safe_dir
+                        
+                        # ================================================================
+                        # TERMINAL PATTERN CHECK (action pattern foresight)
+                        # ================================================================
+                        # Only if death zone didn't already override
+                        if action_to_execute == action_num:
+                            # Get recent actions for pattern matching
+                            recent_action_nums = []
+                            if hasattr(self, '_recent_action_traces') and self._recent_action_traces:
+                                for t in self._recent_action_traces[-5:]:
+                                    act = t.get('action_type', '')
+                                    if isinstance(act, str) and act.upper().startswith('ACTION'):
+                                        recent_action_nums.append(int(act.upper().replace('ACTION', '')))
+                                    elif isinstance(act, int):
+                                        recent_action_nums.append(act)
+                            
+                            game_id = self.session_manager.current_game_id or ''
+                            danger = self.terminal_detector.check_for_terminal_danger(
+                                game_id=game_id,
+                                level_number=actual_level,
+                                current_frame=game_state.frame,
+                                recent_actions=recent_action_nums,
+                                planned_action=action_num,
+                                min_confidence=0.65
+                            )
+                            
+                            if danger and danger.get('warning'):
+                                alt_action = danger.get('alternative_action', action_num)
+                                if alt_action != action_num:
+                                    logger.info(f"[FORESIGHT-REPLAY] Avoiding ACTION{action_num} during sequence replay "
+                                           f"(caused game_over {danger.get('confirmed_lethal', 0)} times) -> ACTION{alt_action}")
+                                action_to_execute = alt_action
+                    except Exception as e:
+                        logger.debug(f"Terminal foresight check during replay failed: {e}")
+                
+                # Execute action (possibly modified by foresight)
+                if action_to_execute == 6 and coord_index < len(coordinates):
                     coord = coordinates[coord_index]
                     # Handle both dict and list formats
                     if isinstance(coord, dict):
@@ -10154,9 +10508,11 @@ class GameplayEngine:
                     game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning, level_number=actual_level)
                     coord_index += 1
                 else:
-                    action = f"ACTION{action_num}"
+                    action = f"ACTION{action_to_execute}"
                     # Use actual_level (score-based) not sequence's level_number
-                    game_state = await self._execute_action(action, game_state, "", actual_level)
+                    # Add foresight indicator to reasoning if action was changed
+                    foresight_indicator = "" if action_to_execute == action_num else f" (foresight: avoided ACTION{action_num})"
+                    game_state = await self._execute_action(action, game_state, foresight_indicator, actual_level)
                 
                 # ================================================================
                 # ADAPTIVE REPLAY: Track progress and adapt if stuck

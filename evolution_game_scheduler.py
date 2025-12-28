@@ -176,7 +176,7 @@ class EvolutionGameScheduler:
         
         # Summary
         total_assigned = sum(len(games) for games in assignments.values())
-        print(f"\n✓ Assigned {total_assigned} games to {len(assignments)} agents")
+        print(f"\n[OK] Assigned {total_assigned} games to {len(assignments)} agents")
         print(f"  Active game types: {len(self.scheduler.get_active_games())}")
         
         return assignments

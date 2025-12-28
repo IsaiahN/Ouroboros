@@ -33,6 +33,13 @@ class VisualAnalyzer:
         # Agent mode tracking (for mode-specific behavior)
         self.current_agent_mode = None  # 'pioneer', 'optimizer', 'generalist', or None
         
+        # CRITICAL FIX: Priority targeting from reasoning system (Q3)
+        # When the agent learns "color 11 worked before", this tells the visual_analyzer
+        # to prioritize that color instead of cycling through random rare colors
+        self.priority_color: Optional[int] = None  # Color that worked before
+        self.priority_color_reason: str = ""  # Why this color is prioritized
+        self.colors_that_worked: Dict[int, int] = {}  # color -> success_count (persistent learning)
+        
         # Adaptive exploration parameters
         self.exploration_radius = 5  # Start with focused exploration
         self.min_exploration_radius = 3
@@ -48,6 +55,39 @@ class VisualAnalyzer:
         self.recent_targets = []  # Track last N targets to detect oscillation
         self.max_target_history = 10
         self.oscillation_detected = False
+    
+    def set_priority_color(self, color: int, reason: str = "learned from previous success"):
+        """Set a priority color to target based on what worked before.
+        
+        Called by reasoning system when Q3 identifies a successful color.
+        This breaks the random rare-color cycling.
+        
+        Args:
+            color: The color value that should be prioritized
+            reason: Why this color is prioritized (for logging)
+        """
+        self.priority_color = color
+        self.priority_color_reason = reason
+        logger.info(f"[PRIORITY] Visual analyzer will prioritize color {color}: {reason}")
+    
+    def record_color_success(self, color: int):
+        """Record that clicking on a color led to success (level advance, score increase).
+        
+        Builds persistent memory of what colors work across levels.
+        
+        Args:
+            color: The color that was clicked when success occurred
+        """
+        self.colors_that_worked[color] = self.colors_that_worked.get(color, 0) + 1
+        # Auto-set as priority if it worked multiple times
+        if self.colors_that_worked[color] >= 2:
+            self.set_priority_color(color, f"worked {self.colors_that_worked[color]} times")
+        logger.info(f"[SUCCESS] Color {color} worked! (count: {self.colors_that_worked[color]})")
+    
+    def clear_priority_on_new_game(self):
+        """Clear priority when starting a new game (but keep colors_that_worked)."""
+        self.priority_color = None
+        self.priority_color_reason = ""
 
     def update_frame_change_tracking(self, new_frame: List[List[int]], current_score: Optional[float] = None) -> bool:
         """Track whether the frame changed after an action.
@@ -332,6 +372,20 @@ class VisualAnalyzer:
                 # Clamp to frame bounds
                 avg_x = max(0, min(width - 1, avg_x))
                 avg_y = max(0, min(height - 1, avg_y))
+                
+                # CRITICAL FIX: Priority boost for colors that worked before
+                base_priority = 0.9  # High priority - rare colors are interesting
+                
+                # Boost priority for priority_color (from Q3 reasoning)
+                if self.priority_color is not None and color == self.priority_color:
+                    base_priority = 1.5  # Much higher - we KNOW this works!
+                    logger.info(f"[PRIORITY] Boosting color {color} (learned: {self.priority_color_reason})")
+                
+                # Boost priority for colors with success history
+                elif color in self.colors_that_worked:
+                    success_count = self.colors_that_worked[color]
+                    base_priority = 0.9 + (0.1 * min(success_count, 5))  # Up to 1.4 priority
+                    logger.debug(f"[LEARNED] Color {color} has {success_count} successes, priority={base_priority:.2f}")
 
                 targets.append({
                     "x": avg_x,
@@ -339,7 +393,7 @@ class VisualAnalyzer:
                     "type": "rare_color",
                     "color": color,
                     "count": len(positions),
-                    "priority": 0.9,  # High priority - rare colors are interesting
+                    "priority": base_priority,
                     "reason": f"Rare color {color} ({len(positions)} pixels)"
                 })
 

@@ -192,6 +192,12 @@ class AgentSelfModel:
             ('affects_objects', 'TEXT'),
             ('state_changes_observed', 'INTEGER DEFAULT 0'),
             ('movement_test_count', 'INTEGER DEFAULT 0'),
+            # Shape-based generalization columns (2025-12-27)
+            # Allows agents to learn "all horizontal bars are clickable" not just "color 9 is clickable"
+            ('shape_signature', 'TEXT'),  # e.g., "horizontal_bar", "vertical_bar", "square", "blob"
+            ('shape_width', 'INTEGER'),   # Bounding box width
+            ('shape_height', 'INTEGER'),  # Bounding box height
+            ('shape_density', 'REAL'),    # Fill density (cells / bbox_area)
         ]
         for col_name, col_type in click_behavior_columns:
             try:
@@ -203,6 +209,12 @@ class AgentSelfModel:
         self.db.execute_query("""
             CREATE INDEX IF NOT EXISTS idx_object_selection_game 
             ON object_selection_state(game_type, level_number, is_selectable)
+        """)
+        
+        # Index for shape-based generalization (find all games where shape X is selectable)
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_object_selection_shape 
+            ON object_selection_state(game_type, shape_signature, is_selectable)
         """)
         
         # =====================================================================
@@ -3068,6 +3080,21 @@ class AgentSelfModel:
         movement_matches = (expected == movement_direction)
         
         if movement_matches:
+            # Extract shape info from positions_before
+            shape_info = None
+            if positions_before:
+                xs = [p[0] for p in positions_before]
+                ys = [p[1] for p in positions_before]
+                bbox_width = max(xs) - min(xs) + 1
+                bbox_height = max(ys) - min(ys) + 1
+                bbox_area = bbox_width * bbox_height
+                density = len(positions_before) / bbox_area if bbox_area > 0 else 1.0
+                shape_info = {
+                    'width': bbox_width,
+                    'height': bbox_height,
+                    'density': density
+                }
+            
             # Confirmed: This object is selectable and moveable
             self._save_selectable_object(
                 game_type=game_type,
@@ -3076,7 +3103,8 @@ class AgentSelfModel:
                 object_coords=current_selection.get('selected_object_coords'),
                 is_moveable=True,
                 control_actions=[movement_action],
-                confidence=0.8
+                confidence=0.8,
+                shape_info=shape_info
             )
             
             logger.info(
@@ -3162,10 +3190,43 @@ class AgentSelfModel:
         object_coords: Optional[str],
         is_moveable: bool,
         control_actions: List[str],
-        confidence: float
+        confidence: float,
+        shape_info: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Save a discovered selectable object to network knowledge."""
+        """
+        Save a discovered selectable object to network knowledge.
+        
+        Args:
+            game_type: Game type (e.g., 'sp80')
+            level: Level number
+            object_color: Color of the selectable object
+            object_coords: "(x,y)" coordinates string
+            is_moveable: Whether object responds to ACTION1-4
+            control_actions: List of actions that control this object
+            confidence: Discovery confidence
+            shape_info: Optional dict with shape properties:
+                - width: Bounding box width
+                - height: Bounding box height
+                - density: Fill density
+                (Shape signature will be computed from these)
+        """
         import json
+        
+        # Compute shape signature if shape_info provided
+        shape_signature = None
+        shape_width = None
+        shape_height = None
+        shape_density = None
+        
+        if shape_info:
+            shape_width = shape_info.get('width')
+            shape_height = shape_info.get('height')
+            shape_density = shape_info.get('density', 1.0)
+            
+            if shape_width and shape_height:
+                shape_signature = self.compute_shape_signature(
+                    shape_width, shape_height, shape_density
+                )
         
         # Check if entry exists
         existing = self.db.execute_query("""
@@ -3186,31 +3247,54 @@ class AgentSelfModel:
             # Bayesian confidence update
             new_confidence = (old_confidence * old_count + confidence) / (old_count + 1)
             
-            self.db.execute_query("""
-                UPDATE object_selection_state
-                SET is_selectable = TRUE,
-                    is_moveable = ?,
-                    object_coordinates = COALESCE(?, object_coordinates),
-                    control_actions = ?,
-                    confidence = ?,
-                    discovery_count = discovery_count + 1,
-                    last_observed = CURRENT_TIMESTAMP
-                WHERE game_type = ? AND level_number = ? AND object_color = ?
-            """, (is_moveable, object_coords, json.dumps(merged_actions), 
-                  new_confidence, game_type, level, object_color))
+            # Build update query - include shape fields if we have them
+            if shape_signature:
+                self.db.execute_query("""
+                    UPDATE object_selection_state
+                    SET is_selectable = TRUE,
+                        is_moveable = ?,
+                        object_coordinates = COALESCE(?, object_coordinates),
+                        control_actions = ?,
+                        confidence = ?,
+                        discovery_count = discovery_count + 1,
+                        last_observed = CURRENT_TIMESTAMP,
+                        shape_signature = COALESCE(?, shape_signature),
+                        shape_width = COALESCE(?, shape_width),
+                        shape_height = COALESCE(?, shape_height),
+                        shape_density = COALESCE(?, shape_density)
+                    WHERE game_type = ? AND level_number = ? AND object_color = ?
+                """, (is_moveable, object_coords, json.dumps(merged_actions), 
+                      new_confidence, shape_signature, shape_width, shape_height,
+                      shape_density, game_type, level, object_color))
+            else:
+                self.db.execute_query("""
+                    UPDATE object_selection_state
+                    SET is_selectable = TRUE,
+                        is_moveable = ?,
+                        object_coordinates = COALESCE(?, object_coordinates),
+                        control_actions = ?,
+                        confidence = ?,
+                        discovery_count = discovery_count + 1,
+                        last_observed = CURRENT_TIMESTAMP
+                    WHERE game_type = ? AND level_number = ? AND object_color = ?
+                """, (is_moveable, object_coords, json.dumps(merged_actions), 
+                      new_confidence, game_type, level, object_color))
         else:
-            # Insert new entry
+            # Insert new entry with shape info
             self.db.execute_query("""
                 INSERT INTO object_selection_state
                 (game_type, level_number, object_color, object_coordinates,
-                 is_selectable, is_moveable, is_button, control_actions, confidence)
-                VALUES (?, ?, ?, ?, TRUE, ?, FALSE, ?, ?)
+                 is_selectable, is_moveable, is_button, control_actions, confidence,
+                 shape_signature, shape_width, shape_height, shape_density)
+                VALUES (?, ?, ?, ?, TRUE, ?, FALSE, ?, ?, ?, ?, ?, ?)
             """, (game_type, level, object_color, object_coords, 
-                  is_moveable, json.dumps(control_actions), confidence))
+                  is_moveable, json.dumps(control_actions), confidence,
+                  shape_signature, shape_width, shape_height, shape_density))
         
+        shape_msg = f" shape={shape_signature}" if shape_signature else ""
         logger.info(
             f"[NETWORK] Saved selectable object: {game_type} L{level} "
-            f"color={object_color} moveable={is_moveable}"
+            f"color={object_color} moveable={is_moveable}{shape_msg}"
         )
     
     def get_selectable_objects(
@@ -3250,6 +3334,279 @@ class AgentSelfModel:
             })
         return objects
     
+    # =========================================================================
+    # SHAPE-BASED GENERALIZATION (2025-12-27)
+    # =========================================================================
+    # Instead of just learning "color 9 is selectable", learn "horizontal bars
+    # are selectable". This allows agents to enumerate ALL matching objects
+    # on frontier levels, not just the specific color they saw before.
+    # =========================================================================
+    
+    def compute_shape_signature(
+        self,
+        width: int,
+        height: int,
+        density: float = 1.0
+    ) -> str:
+        """
+        Compute a shape signature from bounding box dimensions.
+        
+        Shape signatures allow generalization across colors:
+        - "horizontal_bar": width >= 3 * height (wide and thin)
+        - "vertical_bar": height >= 3 * width (tall and thin)
+        - "square": 0.7 <= aspect <= 1.4 (roughly square)
+        - "wide_rect": 1.4 < aspect < 3.0 (moderately wide)
+        - "tall_rect": 0.33 < aspect < 0.7 (moderately tall)
+        - "blob": density < 0.5 (sparse, non-rectangular)
+        - "small": size < 4 pixels (too small to classify)
+        
+        Args:
+            width: Bounding box width
+            height: Bounding box height
+            density: Fill density (cells / bbox_area), default 1.0
+            
+        Returns:
+            Shape signature string
+        """
+        if width <= 0 or height <= 0:
+            return "unknown"
+        
+        # Small objects are hard to classify
+        if width * height < 4:
+            return "small"
+        
+        # Sparse objects are "blobs"
+        if density < 0.5:
+            return "blob"
+        
+        aspect = width / height
+        
+        if aspect >= 3.0:
+            return "horizontal_bar"
+        elif aspect <= 0.33:
+            return "vertical_bar"
+        elif 0.7 <= aspect <= 1.4:
+            return "square"
+        elif aspect > 1.4:
+            return "wide_rect"
+        else:  # 0.33 < aspect < 0.7
+            return "tall_rect"
+    
+    def get_selectable_shapes_for_game(
+        self,
+        game_type: str,
+        min_confidence: float = 0.6
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all shape signatures that are known to be selectable for a game type.
+        
+        This is the KEY method for generalization:
+        - Query across ALL levels to find what shapes work
+        - Returns shape signatures, not specific colors
+        - Agents use this to enumerate objects on frontier levels
+        
+        Args:
+            game_type: Game type to query (e.g., 'sp80')
+            min_confidence: Minimum confidence threshold
+            
+        Returns:
+            List of dicts with shape_signature and aggregate stats
+        """
+        results = self.db.execute_query("""
+            SELECT 
+                shape_signature,
+                COUNT(*) as occurrence_count,
+                AVG(confidence) as avg_confidence,
+                MAX(confidence) as max_confidence,
+                GROUP_CONCAT(DISTINCT object_color) as colors_seen
+            FROM object_selection_state
+            WHERE game_type = ? 
+                  AND is_selectable = TRUE 
+                  AND shape_signature IS NOT NULL
+                  AND confidence >= ?
+            GROUP BY shape_signature
+            ORDER BY avg_confidence DESC, occurrence_count DESC
+        """, (game_type, min_confidence))
+        
+        shapes = []
+        for row in results or []:
+            if row['shape_signature']:  # Skip NULL
+                shapes.append({
+                    'shape_signature': row['shape_signature'],
+                    'occurrence_count': row['occurrence_count'],
+                    'avg_confidence': row['avg_confidence'],
+                    'max_confidence': row['max_confidence'],
+                    'colors_seen': row['colors_seen'].split(',') if row['colors_seen'] else []
+                })
+        return shapes
+    
+    def find_objects_matching_shape(
+        self,
+        frame: List[List[int]],
+        target_shapes: List[str],
+        exclude_colors: Optional[List[int]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Find all objects in the current frame that match target shape signatures.
+        
+        This is used on FRONTIER levels to enumerate all objects the agent
+        should TRY clicking, based on shape generalization from previous levels.
+        
+        Args:
+            frame: Current game frame (2D grid of colors)
+            target_shapes: List of shape signatures to match (e.g., ["horizontal_bar"])
+            exclude_colors: Colors to skip (e.g., background, already tried)
+            
+        Returns:
+            List of matching objects with position, color, and shape info
+        """
+        if not frame or not target_shapes:
+            return []
+        
+        exclude_colors = exclude_colors or [0]  # Default: exclude background
+        
+        import numpy as np
+        grid = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+        height, width = grid.shape
+        
+        # Find connected components (shapes)
+        visited = np.zeros_like(grid, dtype=bool)
+        matching_objects = []
+        
+        def flood_fill(start_y, start_x, color):
+            """Find connected component of same color."""
+            stack = [(start_y, start_x)]
+            cells = []
+            
+            while stack:
+                y, x = stack.pop()
+                if y < 0 or y >= height or x < 0 or x >= width:
+                    continue
+                if visited[y, x] or grid[y, x] != color:
+                    continue
+                
+                visited[y, x] = True
+                cells.append((y, x))
+                
+                # 4-connected neighbors
+                stack.extend([(y+1, x), (y-1, x), (y, x+1), (y, x-1)])
+            
+            return cells
+        
+        # Scan grid for objects
+        for y in range(height):
+            for x in range(width):
+                if visited[y, x]:
+                    continue
+                    
+                color = int(grid[y, x])
+                if color in exclude_colors:
+                    visited[y, x] = True
+                    continue
+                
+                cells = flood_fill(y, x, color)
+                
+                if len(cells) < 2:  # Skip single-pixel objects
+                    continue
+                
+                # Compute bounding box
+                rows = [c[0] for c in cells]
+                cols = [c[1] for c in cells]
+                min_row, max_row = min(rows), max(rows)
+                min_col, max_col = min(cols), max(cols)
+                
+                bbox_width = max_col - min_col + 1
+                bbox_height = max_row - min_row + 1
+                bbox_area = bbox_width * bbox_height
+                density = len(cells) / bbox_area if bbox_area > 0 else 0
+                
+                # Compute shape signature
+                shape_sig = self.compute_shape_signature(bbox_width, bbox_height, density)
+                
+                # Check if this shape matches any target
+                if shape_sig in target_shapes:
+                    center_y = sum(rows) // len(rows)
+                    center_x = sum(cols) // len(cols)
+                    
+                    matching_objects.append({
+                        'color': color,
+                        'shape_signature': shape_sig,
+                        'center': (center_x, center_y),  # (x, y) for click coords
+                        'bounding_box': {
+                            'left': min_col,
+                            'top': min_row,
+                            'width': bbox_width,
+                            'height': bbox_height
+                        },
+                        'size': len(cells),
+                        'density': density
+                    })
+        
+        return matching_objects
+    
+    def get_untried_objects_for_frontier(
+        self,
+        game_type: str,
+        level: int,
+        frame: List[List[int]],
+        tried_colors: Optional[List[int]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get objects the agent should try clicking on a frontier level.
+        
+        This is the main entry point for frontier exploration with shape generalization:
+        1. Query what shapes are selectable in this game (from previous levels)
+        2. Find all objects in current frame matching those shapes
+        3. Filter out objects already tried
+        4. Return prioritized list of objects to try
+        
+        Args:
+            game_type: Game type (e.g., 'sp80')
+            level: Current level number
+            frame: Current game frame
+            tried_colors: Colors already tried this session
+            
+        Returns:
+            List of objects to try, prioritized by confidence
+        """
+        tried_colors = tried_colors or []
+        
+        # Step 1: Get selectable shapes for this game
+        selectable_shapes = self.get_selectable_shapes_for_game(game_type, min_confidence=0.5)
+        
+        if not selectable_shapes:
+            # No shape data yet - fall back to trying any non-background object
+            logger.debug(f"[SHAPE] No selectable shapes known for {game_type} - exploring blindly")
+            return []
+        
+        # Step 2: Extract shape signatures
+        target_shapes = [s['shape_signature'] for s in selectable_shapes]
+        logger.info(f"[SHAPE] {game_type} known selectable shapes: {target_shapes}")
+        
+        # Step 3: Find matching objects in current frame
+        exclude = [0] + tried_colors  # Background + already tried
+        matching = self.find_objects_matching_shape(frame, target_shapes, exclude)
+        
+        if not matching:
+            logger.debug(f"[SHAPE] No matching objects found in frame for shapes {target_shapes}")
+            return []
+        
+        # Step 4: Prioritize by shape confidence
+        shape_confidence = {s['shape_signature']: s['avg_confidence'] for s in selectable_shapes}
+        
+        for obj in matching:
+            obj['shape_confidence'] = shape_confidence.get(obj['shape_signature'], 0.5)
+        
+        # Sort by confidence (highest first)
+        matching.sort(key=lambda x: x['shape_confidence'], reverse=True)
+        
+        logger.info(
+            f"[SHAPE] Found {len(matching)} objects to try on {game_type} L{level}: "
+            f"{[(o['color'], o['shape_signature']) for o in matching[:5]]}"
+        )
+        
+        return matching
+
     def discover_selectable_objects(
         self,
         game_id: str,
@@ -3335,6 +3692,21 @@ class AgentSelfModel:
                     
                     # Did it move?
                     if abs(dx) >= 0.5 or abs(dy) >= 0.5:
+                        # Extract shape info from positions before movement
+                        shape_info = None
+                        if pos_before:
+                            xs = [p[0] for p in pos_before]
+                            ys = [p[1] for p in pos_before]
+                            bbox_width = max(xs) - min(xs) + 1
+                            bbox_height = max(ys) - min(ys) + 1
+                            bbox_area = bbox_width * bbox_height
+                            density = len(pos_before) / bbox_area if bbox_area > 0 else 1.0
+                            shape_info = {
+                                'width': bbox_width,
+                                'height': bbox_height,
+                                'density': density
+                            }
+                        
                         # Object moved after being clicked - it's selectable!
                         self._save_selectable_object(
                             game_type=game_type,
@@ -3343,20 +3715,25 @@ class AgentSelfModel:
                             object_coords=f"({pending_click['click_x']},{pending_click['click_y']})",
                             is_moveable=True,
                             control_actions=[action_type],
-                            confidence=0.85
+                            confidence=0.85,
+                            shape_info=shape_info
                         )
                         
                         discovered.append({
                             'object_color': clicked_color,
                             'click_coords': (pending_click['click_x'], pending_click['click_y']),
                             'movement_action': action_type,
-                            'confirmed': True
+                            'confirmed': True,
+                            'shape_signature': self.compute_shape_signature(
+                                shape_info['width'], shape_info['height'], shape_info['density']
+                            ) if shape_info else None
                         })
                         
+                        shape_msg = f" shape={discovered[-1].get('shape_signature')}" if shape_info else ""
                         logger.info(
                             f"[DISCOVERY] Selectable object found: color {clicked_color} "
                             f"at ({pending_click['click_x']},{pending_click['click_y']}) "
-                            f"responds to {action_type} after ACTION6 selection"
+                            f"responds to {action_type} after ACTION6 selection{shape_msg}"
                         )
                 
                 # Clear pending click after movement action (successful or not)

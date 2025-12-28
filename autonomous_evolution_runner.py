@@ -65,6 +65,7 @@ from sequence_pruning_system import SequencePruningSystem  # NEW: Automatic bad 
 from optimization_threshold_system import OptimizationThresholdSystem  # NEW: Track optimized levels
 from breakthrough_budget_allocator import BreakthroughBudgetAllocator  # Tier 1: Dynamic budgets (+50%)
 from automated_assessment_runner import AutomatedAssessmentRunner  # Other AI #3: Auto-metrics
+from pariah_validator import PariahValidator, run_pariah_validation  # False pariah detection/cleanup
 # GameDiversityPreserver import removed - prestige-only protection now
 
 # Autopoiesis Monitor - system health and emergence tracking
@@ -91,6 +92,20 @@ try:
 except ImportError:
     SCHEMA_MAINTENANCE_AVAILABLE = False
     SchemaAutoMaintenance = None
+
+# Oracle Health Monitor - self-diagnostic and experimentation system
+try:
+    from oracle_health_monitor import OracleHealthMonitor, HealthStatus
+    from console_metrics_capture import (
+        ConsoleMetricsCapture, get_metrics_capture, reset_metrics_capture,
+        record_game_start, record_game_end, record_cods, record_stuck
+    )
+    ORACLE_HEALTH_AVAILABLE = True
+except ImportError:
+    ORACLE_HEALTH_AVAILABLE = False
+    OracleHealthMonitor = None
+    HealthStatus = None
+    ConsoleMetricsCapture = None
 
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
@@ -214,6 +229,15 @@ class AutonomousEvolutionRunner:
         self.shutdown_requested = False
         self.shutdown_press_count = 0
         self.shutdown_last_press_time = None
+        
+        # ORACLE HEALTH MONITOR - self-diagnostic and experimentation system
+        if ORACLE_HEALTH_AVAILABLE and OracleHealthMonitor:
+            self.oracle_health = OracleHealthMonitor(db=self.db)
+            self.metrics_capture = ConsoleMetricsCapture(generation=0)
+            print("[OK] Oracle Health Monitor initialized (autonomous diagnostics enabled)")
+        else:
+            self.oracle_health = None
+            self.metrics_capture = None
         self.current_task = None
         
         # Setup signal handlers for graceful shutdown
@@ -1245,8 +1269,22 @@ class AutonomousEvolutionRunner:
                         # Play game - REAL ARC API CALL
                         # Wrap in cancellable task for graceful shutdown
                         try:
+                            # ORACLE METRICS: Record game start
+                            if self.metrics_capture:
+                                game_type = game_id[:4] if len(game_id) >= 4 else 'unknown'
+                                self.metrics_capture.start_game(game_id, game_type, agent_id)
+                            
                             game_task = asyncio.create_task(engine.play_single_game(game_id, agent_id=agent_id))
                             result = await game_task
+                            
+                            # ORACLE METRICS: Record game end
+                            if self.metrics_capture:
+                                self.metrics_capture.end_game(
+                                    game_id,
+                                    result.get('final_score', 0),
+                                    result.get('levels_completed', 0),
+                                    result.get('actions_taken', 0)
+                                )
                         except asyncio.CancelledError:
                             # Game was cancelled during shutdown
                             print(f"[PAUSE]  Game {game_id[:8]} cancelled")
@@ -1708,6 +1746,27 @@ class AutonomousEvolutionRunner:
                 import traceback
                 traceback.print_exc()
             
+            # PARIAH VALIDATION: Detect and remove false pariahs
+            # False pariahs are as dangerous as prestige vampires - they block essential actions
+            print(f"\n[PARIAH VALIDATION] Checking for false pariahs in generation {self.current_generation}...")
+            try:
+                pariah_results = run_pariah_validation(self.db, self.current_generation)
+                
+                if pariah_results['pariahs_deactivated'] > 0:
+                    print(f"[OK] Deactivated {pariah_results['pariahs_deactivated']} false pariahs")
+                if pariah_results['stale_pariahs_decayed'] > 0:
+                    print(f"[OK] Decayed {pariah_results['stale_pariahs_decayed']} stale pariahs")
+                if pariah_results['awareness_cleaned'] > 0:
+                    print(f"[OK] Cleaned {pariah_results['awareness_cleaned']} stale awareness records")
+                if (pariah_results['pariahs_deactivated'] == 0 and 
+                    pariah_results['stale_pariahs_decayed'] == 0):
+                    print(f"[OK] All {pariah_results['pariahs_checked']} pariahs validated - no false positives")
+                    
+            except Exception as e:
+                print(f"[WARN] Pariah validation failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
             # OPTIMIZATION TRACKING: Update which levels are optimized vs need work
             print(f"\n[OPTIMIZATION] Updating level optimization status for generation {self.current_generation}...")
             try:
@@ -2134,6 +2193,10 @@ class AutonomousEvolutionRunner:
             print("[?] Shutdown requested - skipping cycle")
             return False
         
+        # ORACLE METRICS: Reset for new generation
+        if self.metrics_capture:
+            self.metrics_capture.reset(self.current_generation)
+        
         # Health check
         health = self.check_system_health()
         if not health['healthy']:
@@ -2217,10 +2280,10 @@ class AutonomousEvolutionRunner:
                 # This is the "Teacher Model" - CODS listens to what agents say they need
                 # and unlocks primitives when the network expresses a capability gap
                 try:
-                    cods_instance = CODSEngine() if CODSEngine else None
-                    if cods_instance:
+                    # Reuse the cods_engine instance created earlier (don't create a new one)
+                    if cods_engine:
                         # ADAPTIVE: threshold = 10% of active agents (floor 15, cap 100)
-                        strategy_results = cods_instance.process_agent_strategy_signals(
+                        strategy_results = cods_engine.process_agent_strategy_signals(
                             min_frequency=10,
                             unlock_threshold=None,  # Use adaptive
                             unlock_percentage=0.10  # 10% of network must express need
@@ -2243,9 +2306,9 @@ class AutonomousEvolutionRunner:
                 
                 # STUCK POINT ANALYSIS (Gap #2): Identify primitive gaps from stuck patterns
                 try:
-                    cods_instance = CODSEngine() if CODSEngine else None
-                    if cods_instance:
-                        stuck_analysis = cods_instance.analyze_stuck_points_for_unlocks(
+                    # Reuse cods_engine instance
+                    if cods_engine:
+                        stuck_analysis = cods_engine.analyze_stuck_points_for_unlocks(
                             min_stuck_count=10,
                             min_confidence=0.5
                         )
@@ -2266,8 +2329,8 @@ class AutonomousEvolutionRunner:
                 
                 # CONCEPT-DRIVEN UNLOCK (Gap #3): Check concepts for games with stuck points
                 try:
-                    cods_instance = CODSEngine() if CODSEngine else None
-                    if cods_instance:
+                    # Reuse cods_engine instance
+                    if cods_engine:
                         # Get game types with most stuck agents
                         stuck_games = self.db.execute_query("""
                             SELECT game_type, SUM(times_hit) as total_stuck
@@ -2279,7 +2342,7 @@ class AutonomousEvolutionRunner:
                         if stuck_games:
                             for game in stuck_games:
                                 game_type = game['game_type']
-                                concept_results = cods_instance.check_all_relevant_concepts(game_type)
+                                concept_results = cods_engine.check_all_relevant_concepts(game_type)
                                 if concept_results.get('unlocks'):
                                     for unlock in concept_results['unlocks']:
                                         print(f"  [CONCEPT-UNLOCK] {unlock['primitive']} "
@@ -2289,9 +2352,9 @@ class AutonomousEvolutionRunner:
                 
                 # PRIMITIVE INVENTORY: Show what network has access to
                 try:
-                    cods_instance = CODSEngine() if CODSEngine else None
-                    if cods_instance:
-                        inventory = cods_instance.get_primitive_inventory()
+                    # Reuse cods_engine instance
+                    if cods_engine:
+                        inventory = cods_engine.get_primitive_inventory()
                         summary = inventory.get('summary', {})
                         print(f"[CODS-INVENTORY] Available: {summary.get('total_available', 0)} primitives "
                               f"(seed={summary.get('seed_count', 0)}, "
@@ -2337,11 +2400,76 @@ class AutonomousEvolutionRunner:
                     self.current_generation, max_transfers_per_agent=2
                 )
                 if transfer_count > 0:
-                    print(f"[PHASE 5] 🧬 Horizontal transfers: {transfer_count} knowledge injections")
+                    print(f"[PHASE 5] [DNA] Horizontal transfers: {transfer_count} knowledge injections")
                 else:
-                    print(f"[PHASE 5] 🧬 No compatible transfers found this generation")
+                    print(f"[PHASE 5] [DNA] No compatible transfers found this generation")
             except Exception as e:
                 print(f"[PHASE 5]  Horizontal transfer error: {e}")
+            
+            # ================================================================
+            # ORACLE HEALTH MONITOR: Self-diagnostic and experimentation
+            # ================================================================
+            if self.oracle_health and self.metrics_capture:
+                print(f"\n[ORACLE] Running generation {self.current_generation} health check...")
+                try:
+                    # Get metrics from console capture
+                    console_metrics = self.metrics_capture.get_generation_summary()
+                    
+                    # Run health check
+                    health_report = self.oracle_health.check_generation_health(
+                        generation=self.current_generation,
+                        console_metrics=console_metrics
+                    )
+                    
+                    # Report status
+                    if health_report.status == HealthStatus.HEALTHY:
+                        print(f"[ORACLE] [OK] System healthy - {health_report.diagnosis}")
+                    elif health_report.status == HealthStatus.WARNING:
+                        print(f"[ORACLE] [WARN] {health_report.diagnosis}")
+                        for rec in health_report.recommendations[:3]:
+                            print(f"  - {rec}")
+                    elif health_report.status == HealthStatus.CRITICAL:
+                        print(f"[ORACLE] [X] CRITICAL: {health_report.diagnosis}")
+                        for pathology in health_report.pathologies[:2]:
+                            print(f"  - [{pathology['severity']}] {pathology['type']}")
+                        
+                        # Check for active experiment
+                        active_exp = self.oracle_health.get_active_experiment()
+                        
+                        if active_exp:
+                            # Experiment in progress - check if time to evaluate
+                            if self.oracle_health.should_evaluate_experiment(
+                                active_exp, self.current_generation
+                            ):
+                                result = self.oracle_health.evaluate_experiment(
+                                    active_exp, self.current_generation
+                                )
+                                print(f"[ORACLE-EXP] Experiment {result['verdict']}: "
+                                      f"{result['improvement']:+.1%} improvement")
+                            else:
+                                gens_remaining = (active_exp['started_generation'] + 
+                                                  active_exp['duration_generations'] - 
+                                                  self.current_generation)
+                                print(f"[ORACLE-EXP] Experiment in progress ({gens_remaining} gens remaining)")
+                        else:
+                            # No experiment - start one if critical
+                            experiment = self.oracle_health.select_experiment(
+                                health_report.pathologies,
+                                self.current_generation
+                            )
+                            if experiment:
+                                self.oracle_health.start_experiment(experiment)
+                    
+                    # Print metrics summary
+                    self.metrics_capture.print_summary()
+                    
+                    # Reset metrics for next generation
+                    self.metrics_capture.reset(self.current_generation + 1)
+                    
+                except Exception as e:
+                    print(f"[ORACLE] Health check failed: {e}")
+                    import traceback
+                    traceback.print_exc()
             
             if not success:
                 # Check if we hit max generations
@@ -2550,18 +2678,19 @@ class AutonomousEvolutionRunner:
             cursor = conn.cursor()
             
             # 1. Recent game results (last 3 hours or this session)
+            # Note: game_type is extracted from game_id prefix, agent_id from session_id
             cursor.execute("""
                 SELECT 
                     gr.game_id,
-                    gr.game_type,
+                    SUBSTR(gr.game_id, 1, INSTR(gr.game_id, '-') - 1) as game_type,
                     gr.final_score,
-                    gr.levels_completed,
+                    gr.level_completions,
                     gr.total_actions,
-                    gr.agent_id,
-                    gr.ended_at
+                    gr.session_id,
+                    gr.end_time
                 FROM game_results gr
-                WHERE gr.ended_at >= datetime('now', '-3 hours')
-                ORDER BY gr.ended_at DESC
+                WHERE gr.end_time >= datetime('now', '-3 hours')
+                ORDER BY gr.end_time DESC
                 LIMIT 25
             """)
             recent_games = cursor.fetchall()
@@ -2571,7 +2700,7 @@ class AutonomousEvolutionRunner:
                 
                 # Calculate stats
                 scores = [g['final_score'] or 0 for g in recent_games]
-                levels = [g['levels_completed'] or 0 for g in recent_games]
+                levels = [g['level_completions'] or 0 for g in recent_games]
                 actions = [g['total_actions'] or 0 for g in recent_games]
                 
                 positive_scores = sum(1 for s in scores if s > 0)
@@ -2592,7 +2721,7 @@ class AutonomousEvolutionRunner:
                         game_types[gt] = {'count': 0, 'total_score': 0, 'total_levels': 0}
                     game_types[gt]['count'] += 1
                     game_types[gt]['total_score'] += g['final_score'] or 0
-                    game_types[gt]['total_levels'] += g['levels_completed'] or 0
+                    game_types[gt]['total_levels'] += g['level_completions'] or 0
                 
                 print(f"\n  By Game Type:")
                 for gt, stats in sorted(game_types.items(), key=lambda x: -x[1]['count']):

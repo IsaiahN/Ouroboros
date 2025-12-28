@@ -1225,11 +1225,59 @@ class ViralPackageEngine:
                 # Apply decayed penalty
                 final_penalty = base_penalty * level_decay
                 
-                for action in actions:
+                # FIX (2025-01-XX): Use SET of unique actions to avoid over-penalizing
+                # sequences like [6,6,6...6] 100 times which was adding 100x penalty!
+                # The penalty should be "this sequence contains action 6" not 
+                # "this sequence has 100 action 6s so 100x more bad"
+                unique_actions = set(actions)
+                for action in unique_actions:
                     action_penalties[action] = action_penalties.get(action, 0.0) + final_penalty
                     
             except (json.JSONDecodeError, TypeError):
                 continue
+        
+        # ====================================================================
+        # ESSENTIAL ACTION PROTECTION (2025-01-XX)
+        # If an action appears in winning sequences for this game, reduce penalty
+        # This prevents blocking actions that are CORE to winning the game
+        # Example: VC33 uses ACTION6 as the primary mechanic - can't penalize it
+        # ====================================================================
+        if game_id and action_penalties:
+            try:
+                # Get winning sequences for this game type
+                winning_seqs = self.db.execute_query("""
+                    SELECT action_sequence 
+                    FROM winning_sequences 
+                    WHERE game_id LIKE ? AND is_active = 1
+                    LIMIT 20
+                """, (f"{game_id[:4]}%",))
+                
+                if winning_seqs:
+                    # Count action frequency in winning sequences
+                    action_in_wins = {}
+                    total_wins = len(winning_seqs)
+                    
+                    for seq in winning_seqs:
+                        try:
+                            actions = json.loads(seq['action_sequence'])
+                            unique = set(actions)
+                            for a in unique:
+                                action_in_wins[a] = action_in_wins.get(a, 0) + 1
+                        except:
+                            continue
+                    
+                    # If action appears in >50% of winning sequences, reduce penalty by 90%
+                    for action, penalty in list(action_penalties.items()):
+                        win_count = action_in_wins.get(action, 0)
+                        if total_wins > 0 and win_count / total_wins > 0.5:
+                            # This action is ESSENTIAL - almost always in wins
+                            action_penalties[action] = penalty * 0.1  # 90% reduction
+                        elif total_wins > 0 and win_count / total_wins > 0.25:
+                            # Action appears often in wins - moderate reduction
+                            action_penalties[action] = penalty * 0.3  # 70% reduction
+                            
+            except Exception as e:
+                pass  # If we can't check wins, keep penalties as-is
         
         return action_penalties
     

@@ -58,6 +58,7 @@ class GameScheduler:
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self.active_games: Dict[str, List[ActiveGame]] = {}  # game_id -> list of agents playing it
+        self.active_game_types: Dict[str, str] = {}  # game_type -> game_id (to allow 1 game per TYPE)
         self.game_type_mode_counts: Dict[str, Dict[str, int]] = {}
         self.last_assigned_game_type: Optional[str] = None
         self.current_generation: Optional[int] = None
@@ -97,10 +98,11 @@ class GameScheduler:
             self.game_type_mode_counts = {}
             # Clear active games from previous generation (they're done)
             self.active_games = {}
+            self.active_game_types = {}  # Reset game TYPE tracking too
             # Clear game info cache - will be rebuilt on first use
             self._game_info_cache = None
             self._cache_generation = None
-            print(f"  [SCHEDULER] Generation {generation} - Reset mode counters, cleared active games, and invalidated cache")
+            print(f"  [SCHEDULER] Generation {generation} - Reset mode counters, cleared active games/types, and invalidated cache")
         
         # Remove completed active games (older than 30 minutes)
         self._cleanup_stale_games()
@@ -111,27 +113,35 @@ class GameScheduler:
             self._cache_generation = generation
         game_infos = self._game_info_cache
         
-        # Filter out games currently being played
-        # EXCEPTION: Optimizers can share games (they work on different levels in parallel)
+        # Filter out games whose GAME TYPE is currently being played
+        # KEY: Allow 1 game per game_type simultaneously (e.g., 6 types = 6 parallel games)
+        # EXCEPTION: Optimizers can share game types (they work on different levels)
         if agent_mode == 'optimizer':
-            # Optimizers can work on any game, even if occupied
+            # Optimizers can work on any game, even if same type is occupied
             available_infos = game_infos
         else:
-            # Pioneers/generalists need exclusive access (avoid conflicting exploration)
-            # Block if game has any non-optimizer agent (pioneer/generalist)
+            # Pioneers/generalists need exclusive access PER GAME TYPE
+            # Block if this game_type already has a pioneer/generalist playing
             available_infos = []
             for info in game_infos:
-                if info.game_id not in self.active_games:
-                    # Game not occupied at all
+                game_type = info.game_type
+                
+                # Check if this game TYPE is already being played by a non-optimizer
+                if game_type not in self.active_game_types:
+                    # This game type is free - allow it
                     available_infos.append(info)
                 else:
-                    # Check if game only has optimizers (then pioneer/generalist CAN join)
-                    agents_on_game = self.active_games[info.game_id]
-                    has_non_optimizer = any(a.agent_mode != 'optimizer' for a in agents_on_game)
-                    if not has_non_optimizer:
-                        # Only optimizers present, this pioneer/generalist CAN join
+                    # Game type is occupied - check if only by optimizers
+                    active_game_id = self.active_game_types[game_type]
+                    if active_game_id in self.active_games:
+                        agents_on_type = self.active_games[active_game_id]
+                        has_non_optimizer = any(a.agent_mode != 'optimizer' for a in agents_on_type)
+                        if not has_non_optimizer:
+                            # Only optimizers on this type - pioneer/generalist can take it
+                            available_infos.append(info)
+                    else:
+                        # Stale reference - type is actually free
                         available_infos.append(info)
-                    # else: Game has pioneer/generalist, can't assign to another pioneer/generalist
         
         if not available_infos:
             if not self.is_shutting_down:
@@ -157,8 +167,11 @@ class GameScheduler:
                 session_id=session_id
             ))
             
-            # Track mode distribution
+            # Track which game TYPE is now active (for parallel play limiting)
             game_type = selected_game.game_type
+            self.active_game_types[game_type] = selected_game.game_id
+            
+            # Track mode distribution
             if game_type not in self.game_type_mode_counts:
                 self.game_type_mode_counts[game_type] = {}
             
@@ -168,7 +181,7 @@ class GameScheduler:
             self.last_assigned_game_type = game_type
             self.generation_game_type_assignments[game_type] = agent_mode  # Track for rotation
             
-            print(f"✓ Assigned {selected_game.game_id} to {agent_id} ({agent_mode})")
+            print(f"[OK] Assigned {selected_game.game_id} to {agent_id} ({agent_mode})")
             print(f"  Reason: {self._get_selection_reason(selected_game, agent_mode)}")
             
             return selected_game.game_id
@@ -190,20 +203,36 @@ class GameScheduler:
                 for i, active in enumerate(agents):
                     if active.agent_id == agent_id:
                         duration = (datetime.now() - active.started_at).total_seconds()
-                        print(f"✓ Released {game_id} (played for {duration:.1f}s by {agent_id})")
+                        print(f"[OK] Released {game_id} (played for {duration:.1f}s by {agent_id})")
                         agents.pop(i)
                         break
                 
                 # If no more agents on this game, remove it entirely
                 if not agents:
                     del self.active_games[game_id]
+                    # Also clear game TYPE tracking for this game
+                    self._clear_game_type_for_game_id(game_id)
             else:
                 # Release all agents from this game
                 agents = self.active_games[game_id]
                 for active in agents:
                     duration = (datetime.now() - active.started_at).total_seconds()
-                    print(f"✓ Released {game_id} (played for {duration:.1f}s by {active.agent_id})")
+                    print(f"[OK] Released {game_id} (played for {duration:.1f}s by {active.agent_id})")
                 del self.active_games[game_id]
+                # Also clear game TYPE tracking for this game
+                self._clear_game_type_for_game_id(game_id)
+    
+    def _clear_game_type_for_game_id(self, game_id: str):
+        """Remove the game type entry that corresponds to this game_id."""
+        # Find and remove the game_type that points to this game_id
+        type_to_remove = None
+        for game_type, tracked_game_id in self.active_game_types.items():
+            if tracked_game_id == game_id:
+                type_to_remove = game_type
+                break
+        if type_to_remove:
+            del self.active_game_types[type_to_remove]
+            print(f"  [SCHEDULER] Game type '{type_to_remove}' now available for new games")
     
     def get_active_games(self) -> List[ActiveGame]:
         """Get list of currently active games (flattened from all games)."""
@@ -214,7 +243,8 @@ class GameScheduler:
         self.is_shutting_down = True
         active_count = len(self.get_active_games())
         if active_count > 0:
-            print(f"  [SCHEDULER] Shutdown initiated - {active_count} games still active, no new assignments")
+            # Note: "active" means assigned but not yet completed - not running simultaneously
+            print(f"  [SCHEDULER] Shutdown initiated - {active_count} games assigned but not yet played will be cancelled")
     
     def _cleanup_stale_games(self):
         """Remove games that have been active too long (likely crashed/stuck)."""
