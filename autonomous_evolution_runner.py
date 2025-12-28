@@ -429,11 +429,24 @@ class AutonomousEvolutionRunner:
                     )
                 """)
                 
-                # Vacuum to reclaim space
-                self.db.execute_query("VACUUM")
+                # Check disk space before vacuum (requires 2x database size)
+                db_path = getattr(self.db, 'db_path', 'core_data.db')
+                if os.path.exists(db_path):
+                    db_size = os.path.getsize(db_path)
+                    drive = os.path.splitdrive(os.path.abspath(db_path))[0] or '/'
+                    try:
+                        import shutil
+                        free_space = shutil.disk_usage(drive).free
+                        if free_space > db_size * 2:
+                            self.db.execute_query("VACUUM")
+                            print(f"  [DB] Vacuumed database (had {free_space/(1024**3):.1f}GB free)")
+                        else:
+                            print(f"  [SKIP] VACUUM skipped - need {db_size*2/(1024**3):.1f}GB, have {free_space/(1024**3):.1f}GB free")
+                    except Exception as e:
+                        print(f"  [SKIP] VACUUM skipped - disk check failed: {e}")
                 
                 logs_removed = total_logs - 10000
-                print(f"  [?]  Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
+                print(f"  [DB] Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
                 
         except Exception as e:
             print(f"  [WARN]  Log cleanup failed (non-critical): {e}")

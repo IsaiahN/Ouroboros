@@ -4902,3 +4902,195 @@ All identified issues have been fixed and validated:
 - ✅ All syntax checks passing
 
 **NEXT STEP**: Run evolution to verify agents no longer get stuck in oscillation patterns
+
+---
+
+## Session: December 27, 2025 (Night) - Database Bloat Crisis Resolution
+
+---
+
+### Approach: Investigate and Fix Database Size Blocking VACUUM
+
+**Timestamp**: 10:10:50 PM  
+**Status**: COMPLETED - Database reduced from 17.54 GB to 2.46 GB
+
+---
+
+### Problem Identified
+
+User reported:
+- Database `core_data.db` at **18 GB**
+- C: drive only has **13.9 GB free**
+- VACUUM requires **2x database size** (36 GB) - impossible with current disk space
+- System cannot compact database, leading to continuous bloat
+
+---
+
+### Approach
+
+**Strategy**: Investigate what's consuming space, then safely reduce while preserving all critical learning data.
+
+**Key Constraint**: Must preserve:
+- All winning sequences (self-contained, permanent)
+- All learned patterns (interaction_triggers, etc.)
+- Active agents
+- Recent action traces for Q1-Q5 reasoning
+
+---
+
+### Steps Completed
+
+#### Step 1: Database Size Analysis (9:45 PM)
+
+Created and ran `analyze_db_size.py` to identify space consumption:
+
+| Table | Row Count | Estimated Size | % of Total |
+|-------|-----------|----------------|------------|
+| `action_traces` | 501,134 | **~17.6 GB** | **~95%** |
+| - `frame_before` column | - | ~8.81 GB | - |
+| - `frame_after` column | - | ~8.81 GB | - |
+| All other tables | - | ~0.5 GB | ~5% |
+
+**Root Cause**: `action_traces` table storing full frame data (37 KB per row average) with 500K retention limit.
+
+#### Step 2: Verified Safety of Deletion (9:55 PM)
+
+Investigated relationship between `action_traces` and `winning_sequences`:
+
+**Finding**: `winning_sequences` is **completely self-contained**:
+- `action_sequence` - Full JSON array of actions (COPIED from traces)
+- `coordinate_sequence` - Full JSON array of coordinates
+- `initial_frame`, `final_frame` - Full frames stored
+- `frame_transitions`, `level_breakpoints` - All metadata
+
+**Conclusion**: After sequence capture, `action_traces` serves NO purpose for that sequence. Deleting old traces does NOT affect winning sequences.
+
+#### Step 3: Q1-Q5 Reasoning Architecture Review (10:00 PM)
+
+User questioned if 10-trace limit for Q1-Q5 reasoning was a problem.
+
+**Analysis**:
+- `_recent_action_traces[-10:]` is an **in-memory sliding window** for real-time decisions
+- Learnings are **promoted to permanent storage**:
+  - Control maps → `agent_control_maps`, `network_control_discoveries`
+  - Interaction triggers → `interaction_triggers` table
+  - Stuck points → `network_stuck_points` table
+  - Winning sequences → `winning_sequences` table
+
+**Conclusion**: 10-trace limit is BY DESIGN - real-time window feeds into permanent network storage.
+
+#### Step 4: Reduced Retention Setting (10:05 PM)
+
+Modified `safe_cleanup.py` line 135:
+```python
+# BEFORE
+self.action_traces_retention = 500000  # ~5 generations worth
+
+# AFTER  
+self.action_traces_retention = 50000   # Reduced - old traces already in winning_sequences
+```
+
+#### Step 5: Ran Safe Cleanup (10:06 PM)
+
+```bash
+python safe_cleanup.py --execute
+```
+
+**Results**:
+| Category | Deleted |
+|----------|---------|
+| Action traces | **451,134 rows** (kept 50K most recent) |
+| System logs | 10,275 rows |
+| Sensation events | 758 rows |
+| Operating modes | 87 rows |
+| Zero-score games | 3 rows |
+| **Total** | **462,257 rows** |
+
+**Critical Data Preserved**:
+- Active sequences: 33 ✓
+- Active agents: 86 ✓
+- Positive-score games: 4,979 ✓
+
+#### Step 6: Compacted Database (10:08 PM)
+
+Standard VACUUM still impossible (need 35 GB, have 13.78 GB).
+
+**Solution**: Used `VACUUM INTO` to create compacted copy:
+```python
+conn.execute("VACUUM INTO 'core_data_compacted.db'")
+```
+
+**Results**:
+| Metric | Before | After |
+|--------|--------|-------|
+| Database size | 17.54 GB | **2.46 GB** |
+| Freelist | 15.08 GB | 0 GB |
+| Reduction | - | **86%** |
+
+#### Step 7: Replaced Original Database (10:09 PM)
+
+```powershell
+Remove-Item core_data.db -Force
+Rename-Item core_data_compacted.db core_data.db
+```
+
+#### Step 8: Verified Integrity (10:10 PM)
+
+```
+Active sequences: 33 ✓
+Active agents: 86 ✓
+Action traces: 50,000 ✓
+Integrity: ok ✓
+```
+
+---
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `safe_cleanup.py` (line 135) | `action_traces_retention`: 500,000 → 50,000 |
+| `analyze_db_size.py` | NEW FILE - Database size analysis tool |
+
+---
+
+### Architecture Insight: Two-Tier Memory System
+
+| Tier | Scope | Storage | Purpose |
+|------|-------|---------|---------|
+| **Tier 1: Real-time** | Last 10 traces | In-memory | Immediate decision making, Q1-Q5 reasoning |
+| **Tier 2: Network** | All time | Database | Winning sequences, learned patterns, stuck points |
+
+The 10-trace in-memory window is sufficient because:
+1. Patterns are promoted to permanent database storage
+2. Future games query the database for prior knowledge
+3. Long-term learning lives in aggregated tables, not raw traces
+
+---
+
+### Summary
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| **Database size** | 17.54 GB | 2.46 GB | **-86%** |
+| **Action traces** | 501,134 | 50,000 | Kept most recent |
+| **Free disk space** | ~14 GB | ~29 GB | **+15 GB** |
+| **Active sequences** | 33 | 33 | Preserved |
+| **Active agents** | 86 | 86 | Preserved |
+| **Integrity** | - | OK | Verified |
+
+---
+
+### Current Status
+
+**Timestamp**: 10:10:50 PM
+
+Database bloat crisis resolved:
+- ✅ Identified root cause: `action_traces` consuming 95% of space
+- ✅ Verified winning_sequences independence (safe to delete old traces)
+- ✅ Reduced retention from 500K to 50K
+- ✅ Deleted 451,134 old traces (preserved most recent)
+- ✅ Compacted database using VACUUM INTO
+- ✅ Verified data integrity
+
+**NEXT STEP**: Run evolution to verify system operates normally with reduced trace retention

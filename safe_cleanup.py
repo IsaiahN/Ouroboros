@@ -132,7 +132,7 @@ class SafeDatabaseCleaner:
         self.score_history_retention_days = 7
         self.system_logs_retention = 5000
         self.navigation_retention = 50000
-        self.action_traces_retention = 500000  # ~5 generations worth, allows sequence rebuild
+        self.action_traces_retention = 50000  # Reduced from 500K - old traces already captured in winning_sequences
         self.sensation_events_retention = 200000
         self.operating_modes_retention = 100000
         self.weaving_reports_retention = 50000
