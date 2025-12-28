@@ -109,6 +109,15 @@ except ImportError:
     TERMINAL_DETECTOR_AVAILABLE = False
     TerminalPatternDetector = None
 
+# Reasoning Log Capture - For Oracle to detect reasoning bugs
+try:
+    from console_metrics_capture import record_reasoning, get_reasoning_capture
+    REASONING_CAPTURE_AVAILABLE = True
+except ImportError:
+    REASONING_CAPTURE_AVAILABLE = False
+    record_reasoning = None
+    get_reasoning_capture = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -1731,6 +1740,11 @@ class GameplayEngine:
         self._recent_action_traces = []  # Reset action traces for Q1-Q5
         self._q1_trace_logged = False  # Reset debug flag
         
+        # ACTION AVAILABILITY TRACKING: Initialize for change detection
+        # Changes in available_actions = hints about object control
+        self._previous_available_actions = set(game_data.get('available_actions', []))
+        self._action_availability_changes = []  # Track changes for reasoning
+        
         logger.debug(f"[EMERGENT] Bootstrapped reasoning context for {game_id}")
         
         # ================================================================
@@ -2465,6 +2479,50 @@ class GameplayEngine:
                             self._recent_action_traces = self._recent_action_traces[-10:]
                         except Exception as e:
                             logger.debug(f"Action trace recording failed: {e}")
+                        
+                        # ================================================================
+                        # AVAILABLE_ACTIONS CHANGE DETECTION (Control Proof)
+                        # ================================================================
+                        # When available_actions changes after clicking an object,
+                        # this proves we control something (new actions unlocked).
+                        # e.g., ACTION6 click -> [1,2,3,4,5,6,7] from [5,6,7] = selected object
+                        # ================================================================
+                        try:
+                            current_available = set(game_state.available_actions or [])
+                            if hasattr(self, '_previous_available_actions'):
+                                new_actions = current_available - self._previous_available_actions
+                                lost_actions = self._previous_available_actions - current_available
+                                
+                                if new_actions or lost_actions:
+                                    change_record = {
+                                        'action_taken': action,
+                                        'new_actions': list(new_actions),
+                                        'lost_actions': list(lost_actions),
+                                        'frame_hash': hash(str(game_state.frame)[:100]) if game_state.frame else 0
+                                    }
+                                    self._action_availability_changes.append(change_record)
+                                    # Keep last 20 changes
+                                    self._action_availability_changes = self._action_availability_changes[-20:]
+                                    
+                                    # If movement actions (1-4) were unlocked, likely selected an object
+                                    if new_actions & {1, 2, 3, 4}:
+                                        logger.info(f"[CONTROL PROOF] {action} unlocked movement: +{list(new_actions)}")
+                                        
+                                        # Store in agent_self_model as strong control evidence
+                                        if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                            self.agent_self_model.record_availability_control_proof(
+                                                agent_id=agent_id,
+                                                game_id=game_id,
+                                                level=current_level,
+                                                trigger_action=action,
+                                                new_actions=list(new_actions),
+                                                frame_state=game_state.frame
+                                            )
+                                
+                            # Update for next comparison
+                            self._previous_available_actions = current_available
+                        except Exception as e:
+                            logger.debug(f"Available actions change detection failed: {e}")
                         
                         # Self-model: Track controlled objects on every exploration action
                         # (Uses the action traces populated above)
@@ -3633,6 +3691,142 @@ class GameplayEngine:
                 logger.debug(f"Rule query failed (falling back to other strategies): {e}")
         
         # ===================================================================
+        # WIN-VALIDATED CONTROL HYPOTHESES (Added 2025-01-XX)
+        # ===================================================================
+        # Prioritize clicking on objects that have been validated by actual wins.
+        # These are high-confidence targets - other agents confirmed control works.
+        # This is the STRONGEST signal for what we should interact with.
+        # ===================================================================
+        if hasattr(self, 'agent_self_model') and game_state.frame and not is_self_directed:
+            try:
+                current_game_id = self.session_manager.current_game_id
+                current_level = game_state.score + 1
+                
+                if current_game_id:
+                    # Query network hypotheses specifically for validated_by_win ones
+                    hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                        current_game_id, current_level, min_reliability=0.5
+                    )
+                    
+                    # Filter for win-validated hypotheses
+                    validated_hypotheses = [h for h in hypotheses if h.get('validated_by_win')]
+                    
+                    if validated_hypotheses:
+                        best_hypothesis = validated_hypotheses[0]
+                        controlled_objects = best_hypothesis.get('controlled_objects', [])
+                        action_response = best_hypothesis.get('action_response_map', {})
+                        
+                        # Check if hypothesis suggests ACTION6 to select something
+                        control_pattern = controlled_objects[0] if controlled_objects else None
+                        
+                        if control_pattern and isinstance(control_pattern, dict):
+                            # Hypothesis has selection info - use it
+                            if control_pattern.get('discovery_type') == 'availability_change':
+                                # This was discovered via available_actions change
+                                trigger_action = control_pattern.get('trigger_action', 'ACTION6')
+                                logger.info(
+                                    f"[WIN-VALIDATED] Using proven control pattern from hypothesis "
+                                    f"{best_hypothesis['hypothesis_id']} (reliability: {best_hypothesis['reliability']:.2f})"
+                                )
+                                reasoning = f"Win-validated control: {trigger_action} proven to unlock movement"
+                                return trigger_action, reasoning
+                        
+                        # If we have action_response mapping, suggest a direction
+                        if action_response:
+                            # Pick the first mapped action
+                            for action_name, response in action_response.items():
+                                if 'ACTION' in action_name:
+                                    action_num = action_name.replace('ACTION', '')
+                                    logger.info(
+                                        f"[WIN-VALIDATED] Using action {action_name} from validated hypothesis "
+                                        f"(response: {response})"
+                                    )
+                                    reasoning = f"Win-validated: ACTION{action_num} causes {response}"
+                                    return f"ACTION{action_num}", reasoning
+                        
+            except Exception as e:
+                logger.debug(f"Win-validated hypothesis check failed: {e}")
+        
+        # ===================================================================
+        # GAP FIX 5: USE INFERRED_GOALS FOR ACTION SELECTION (Added 2025-12-28)
+        # ===================================================================
+        # If world_model identified rare colors/objects as inferred goals,
+        # use that information to guide action selection - move toward goals!
+        # This connects the inferred_goals data to actual behavior.
+        # ===================================================================
+        if game_state.frame and not is_self_directed:
+            try:
+                # Get inferred goals from frame analysis
+                inferred_goals = self._infer_goals_from_frame(game_state.frame)
+                
+                if inferred_goals:
+                    # Get current agent position if known
+                    agent_pos = getattr(self, '_current_agent_position', None)
+                    controlled_objects = getattr(self, '_last_controlled_objects', [])
+                    
+                    # If we don't have agent position, try to infer from controlled objects
+                    if not agent_pos and controlled_objects:
+                        # Calculate centroid of controlled objects
+                        coords = []
+                        for coord in controlled_objects[:10]:
+                            if isinstance(coord, str) and ',' in coord:
+                                parts = coord.replace('x:', '').replace('y:', '').split(',')
+                                if len(parts) == 2:
+                                    try:
+                                        coords.append((int(parts[0]), int(parts[1])))
+                                    except ValueError:
+                                        pass
+                        if coords:
+                            avg_x = sum(c[0] for c in coords) // len(coords)
+                            avg_y = sum(c[1] for c in coords) // len(coords)
+                            agent_pos = (avg_x, avg_y)
+                    
+                    if agent_pos:
+                        # Find closest inferred goal
+                        closest_goal = None
+                        min_dist = float('inf')
+                        for goal in inferred_goals:
+                            goal_pos = goal.get('position', [])
+                            if len(goal_pos) >= 2:
+                                gx, gy = goal_pos[0], goal_pos[1]
+                                dist = abs(gx - agent_pos[0]) + abs(gy - agent_pos[1])  # Manhattan
+                                if dist < min_dist:
+                                    min_dist = dist
+                                    closest_goal = goal
+                        
+                        # If goal is close enough and we're not on it, move toward it
+                        if closest_goal and min_dist > 0 and min_dist < 20:
+                            goal_pos = closest_goal.get('position', [])
+                            gx, gy = goal_pos[0], goal_pos[1]
+                            ax, ay = agent_pos
+                            
+                            # Determine direction to goal
+                            if abs(gx - ax) >= abs(gy - ay):
+                                # Horizontal priority
+                                if gx > ax:
+                                    action = "ACTION4"  # Right
+                                    dir_name = "right"
+                                else:
+                                    action = "ACTION3"  # Left
+                                    dir_name = "left"
+                            else:
+                                # Vertical priority
+                                if gy > ay:
+                                    action = "ACTION2"  # Down
+                                    dir_name = "down"
+                                else:
+                                    action = "ACTION1"  # Up
+                                    dir_name = "up"
+                            
+                            goal_reason = closest_goal.get('reason', 'rare object')
+                            reasoning = f"[INFERRED GOAL] Moving {dir_name} toward {goal_reason} at ({gx},{gy}), dist={min_dist}"
+                            logger.info(reasoning)
+                            return action, reasoning
+                            
+            except Exception as e:
+                logger.debug(f"Inferred goals action selection failed: {e}")
+        
+        # ===================================================================
         # SELECTION-AWARE ACTION (Added 2025-12-08)
         # ===================================================================
         # Before using ACTION1-4 to move, check if we need to select an object.
@@ -4201,6 +4395,39 @@ class GameplayEngine:
                     logger.debug(f"[DM-2] Q2 boosting ACTION6 for {len(rewarding)} rewarding objects")
                 if dangerous:
                     dm_biases[6] = dm_biases.get(6, 0) - 0.15 * len(dangerous[:3])  # Reduce click if dangerous
+                
+                # ---------------------------------------------------------
+                # DM-3: Q1 HYPOTHESIS-DRIVEN ACTION (New!)
+                # If Q1 formed a hypothesis about what an action does,
+                # use that knowledge to make deliberate choices.
+                # e.g., "ACTION6 changes color_12 to color_9" -> repeat if helpful
+                # ---------------------------------------------------------
+                q1_data = emergent_reasoning.get('q1_change_vs_fixed', {})
+                hypothesis = q1_data.get('hypothesis', {})
+                actions_that_work = q1_data.get('actions_that_changed_state', [])
+                
+                if hypothesis and hypothesis.get('confidence', 0) > 0.5:
+                    # We have a confident hypothesis about what an action does
+                    hyp_action = hypothesis.get('action', '')
+                    effect = hypothesis.get('effect', '')
+                    change_count = hypothesis.get('change_count', 0)
+                    
+                    try:
+                        action_num = int(hyp_action.upper().replace('ACTION', ''))
+                        
+                        # If the action causes significant changes, it's a "lever"
+                        # Boost it if we're exploring, or use it deliberately
+                        if change_count >= 5:
+                            dm_biases[action_num] = dm_biases.get(action_num, 0) + 0.3
+                            dm_reasoning = f"Hypothesis: {hyp_action} is a lever ({effect})"
+                            logger.info(f"[DM-3] Boosting {hyp_action} based on hypothesis: {effect}")
+                    except (ValueError, AttributeError):
+                        pass
+                
+                # Boost actions we've observed to cause changes (exploration value)
+                for action_num in actions_that_work[:3]:
+                    if action_num not in gameover_actions:
+                        dm_biases[action_num] = dm_biases.get(action_num, 0) + 0.15
                 
                 # ---------------------------------------------------------
                 # DM-4: Inferred Goals -> Navigate Toward
@@ -4889,6 +5116,28 @@ class GameplayEngine:
             game_state=game_state,
             current_level=current_level
         )
+        
+        # ================================================================
+        # REASONING LOG CAPTURE - For Oracle automated bug detection
+        # Captures reasoning payload so Oracle can detect issues like:
+        # - Q1 says "no actions" but frame_changes has 20+ items
+        # - Working theory stuck as "425 Too Early" for 400+ frames
+        # ================================================================
+        if REASONING_CAPTURE_AVAILABLE and record_reasoning and reasoning_json:
+            try:
+                game_id = self.game_config.get('current_game_id', '')
+                agent_id = self.game_config.get('agent_id', '')
+                action_counter = getattr(self, '_action_counter', 0)
+                record_reasoning(
+                    game_id=game_id,
+                    agent_id=agent_id,
+                    level=current_level,
+                    action_index=action_counter,
+                    action_taken=action,
+                    reasoning_payload=reasoning_json
+                )
+            except Exception as e:
+                logger.debug(f"Reasoning capture failed: {e}")
         
         if action == "ACTION6":
             # Priority 1: Check if we have a selection target from selection-aware logic
@@ -6652,6 +6901,35 @@ class GameplayEngine:
                 if result:
                     context['control_confidence'] = result[0]['confidence']
             
+            # ===============================================================
+            # GAP FIX 1: Bootstrap from network hypotheses if no local data
+            # ===============================================================
+            # If agent has no local controlled objects but network has hypotheses,
+            # adopt network's best hypothesis as initial belief for this agent.
+            # This prevents the disconnect where network_hypotheses has data but
+            # objects_agent_controls stays empty.
+            # ===============================================================
+            if not controlled:
+                network_hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                    game_id, level, min_reliability=0.6
+                )
+                if network_hypotheses:
+                    # Use highest reliability hypothesis (prefer win-validated)
+                    best_hypothesis = None
+                    for h in network_hypotheses:
+                        if h.get('validated_by_win'):
+                            best_hypothesis = h
+                            break
+                    if not best_hypothesis:
+                        best_hypothesis = network_hypotheses[0]
+                    
+                    # Bootstrap from network knowledge
+                    network_controlled = best_hypothesis.get('controlled_objects', [])[:10]
+                    if network_controlled:
+                        context['objects_agent_controls'] = network_controlled
+                        context['control_confidence'] = best_hypothesis.get('reliability', 0.6)
+                        context['control_source'] = 'network_bootstrap'  # Mark as borrowed
+            
             # Get network-validated control hypotheses (other agents' discoveries)
             network_hypotheses = self.agent_self_model.get_network_control_hypotheses(
                 game_id, level, min_reliability=0.4
@@ -6885,6 +7163,53 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"World model state extraction failed: {e}")
         
+        # ================================================================
+        # INFER AGENT_POSITION FROM CONTROLLED OBJECTS (Added 2025-01-XX)
+        # ================================================================
+        # If world_model didn't provide agent_position, infer it from
+        # the centroid of objects we know we control.
+        # This uses the self-model knowledge we've been building.
+        # ================================================================
+        if context['agent_position'] is None and frame:
+            try:
+                agent_id = self.game_config.get('agent_id')
+                if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+                    # Get controlled objects from self-model
+                    controlled = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
+                    
+                    if controlled:
+                        # Calculate centroid of controlled objects
+                        positions = []
+                        for ctrl in controlled[:5]:  # Limit to 5 for performance
+                            if isinstance(ctrl, tuple) and len(ctrl) >= 3:
+                                color = ctrl[0]
+                                # Find this color in the frame
+                                for y, row in enumerate(frame):
+                                    for x, cell in enumerate(row):
+                                        if cell == color:
+                                            positions.append((x, y))
+                                            break
+                                    if positions:
+                                        break
+                            elif isinstance(ctrl, str) and ':' in ctrl:
+                                # Parse "x:N,y:M" format
+                                try:
+                                    parts = ctrl.split(',')
+                                    x = int(parts[0].split(':')[1])
+                                    y = int(parts[1].split(':')[1])
+                                    positions.append((x, y))
+                                except (ValueError, IndexError):
+                                    pass
+                        
+                        if positions:
+                            # Calculate centroid
+                            avg_x = sum(p[0] for p in positions) / len(positions)
+                            avg_y = sum(p[1] for p in positions) / len(positions)
+                            context['agent_position'] = [int(avg_x), int(avg_y)]
+                            logger.debug(f"[AGENT_POS] Inferred from controlled objects: ({avg_x:.1f}, {avg_y:.1f})")
+            except Exception as e:
+                logger.debug(f"Agent position inference failed: {e}")
+        
         # Task 4: If no goals from world model, infer from frame
         if not context['goals'] and frame:
             context['inferred_goals'] = self._infer_goals_from_frame(frame)
@@ -6912,6 +7237,39 @@ class GameplayEngine:
                 ]
         except Exception as e:
             logger.debug(f"Network hypotheses query failed: {e}")
+        
+        # ===================================================================
+        # GAP FIX 6: Also populate from network_object_control_hypotheses
+        # ===================================================================
+        # The learned_rules table may be empty for new games, but we might
+        # have control hypotheses from other agents. Include those as well.
+        # ===================================================================
+        if not context['network_hypotheses']:
+            try:
+                game_type = game_id[:4] if game_id else ""
+                # Try network_object_control_hypotheses as fallback
+                ctrl_hypos = self.db.execute_query("""
+                    SELECT hypothesis_id, reliability, validated_by_win, 
+                           success_count, failure_count
+                    FROM network_object_control_hypotheses
+                    WHERE game_id LIKE ?
+                      AND reliability > 0.5
+                    ORDER BY validated_by_win DESC, reliability DESC
+                    LIMIT 3
+                """, (f'{game_type}%',))
+                
+                if ctrl_hypos:
+                    context['network_hypotheses'] = [
+                        {
+                            'rule_id': h['hypothesis_id'][:12],
+                            'type': 'object_control',
+                            'confidence': round(h['reliability'], 2),
+                            'validated_by_win': h['validated_by_win'] or 0
+                        }
+                        for h in ctrl_hypos
+                    ]
+            except Exception as e:
+                logger.debug(f"Control hypothesis fallback failed: {e}")
         
         # Get FAILURE HYPOTHESES from network (what to avoid, what might help)
         try:
@@ -6993,6 +7351,50 @@ class GameplayEngine:
             if hasattr(self, '_using_sequence') and self._using_sequence:
                 context['decision_contributors']['sequence_matching'] = 1.0
                 context['features_activated'].append('SEQUENCE_REPLAY')
+            
+            # ================================================================
+            # ENHANCED DECISION_CONTRIBUTORS (Added 2025-01-XX)
+            # ================================================================
+            # Track all systems that influenced the current action decision.
+            # This helps analyze which features are actually being used.
+            # ================================================================
+            
+            # Track win-validated hypotheses contribution
+            if hasattr(self, '_used_validated_hypothesis') and self._used_validated_hypothesis:
+                context['decision_contributors']['win_validated_hypothesis'] = 1.0
+            
+            # Track availability change detection
+            if hasattr(self, '_action_availability_changes') and self._action_availability_changes:
+                context['decision_contributors']['availability_tracking'] = len(self._action_availability_changes)
+            
+            # Track self-model contribution (controlled objects knowledge)
+            if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                agent_id = self.game_config.get('agent_id')
+                game_id = self.game_config.get('current_game_id', '')
+                if agent_id and game_id:
+                    try:
+                        controlled = self.agent_self_model.get_controlled_objects(agent_id, game_id, 1)
+                        if controlled:
+                            context['decision_contributors']['self_model'] = len(controlled)
+                    except Exception:
+                        pass
+            
+            # Track CODS contribution
+            if tracked_operators:
+                context['decision_contributors']['cods_engine'] = len(tracked_operators)
+            
+            # Track subgoal planner contribution
+            if hasattr(self, 'subgoal_planner') and self.subgoal_planner:
+                if hasattr(self, '_following_subgoal_plan') and self._following_subgoal_plan:
+                    context['decision_contributors']['subgoal_planner'] = 1.0
+            
+            # Track viral package influence
+            if hasattr(self, '_viral_influence') and self._viral_influence:
+                context['decision_contributors']['viral_packages'] = self._viral_influence
+            
+            # Track failure hypothesis influence
+            if hasattr(self, '_queried_hypothesis_ids') and self._queried_hypothesis_ids:
+                context['decision_contributors']['failure_hypotheses'] = len(self._queried_hypothesis_ids)
             
         except Exception as e:
             logger.debug(f"Error building primitives context: {e}")
@@ -7346,13 +7748,59 @@ class GameplayEngine:
         sample_size = len(self._recent_action_traces)
         result['confidence'] = min(0.9, 0.3 + (sample_size * 0.06))
         
-        # Generate human-readable insight
-        if actions_moved and actions_static:
-            result['insight'] = f"Actions {sorted(actions_moved)} cause changes; {sorted(actions_static - actions_moved)} have no effect"
-        elif actions_moved:
-            result['insight'] = f"Actions {sorted(actions_moved)} cause state changes"
-        else:
-            result['insight'] = "No actions observed to change state yet"
+        # ===================================================================
+        # FIX: Use delta frame_changes when action traces show no changes
+        # ===================================================================
+        # The agent logs show 20+ frame_changes in delta but Q1 says
+        # "no actions observed". Connect these data sources!
+        # ===================================================================
+        delta_changes = getattr(self, '_last_delta_frame_changes', [])
+        last_action = getattr(self, '_last_action_taken', None)
+        
+        # If we have delta changes but traces show no movement, incorporate delta
+        if not actions_moved and delta_changes and last_action:
+            # Frame clearly changed - the last action DID something
+            try:
+                action_num = int(last_action.upper().replace('ACTION', ''))
+                actions_moved.add(action_num)
+                result['actions_that_changed_state'] = sorted(list(actions_moved))
+                
+                # Analyze the changes to form a hypothesis
+                color_changes = {}
+                for change in delta_changes[:10]:
+                    if isinstance(change, str) and 'changed from' in change:
+                        import re
+                        colors = re.findall(r'color_(\d+)', change)
+                        if len(colors) >= 2:
+                            from_color, to_color = int(colors[0]), int(colors[1])
+                            color_changes[(from_color, to_color)] = color_changes.get((from_color, to_color), 0) + 1
+                
+                if color_changes:
+                    # Form hypothesis about what the action does
+                    most_common = max(color_changes.items(), key=lambda x: x[1])
+                    (from_c, to_c), count = most_common
+                    result['hypothesis'] = {
+                        'action': last_action,
+                        'effect': f"Changes color_{from_c} to color_{to_c}",
+                        'change_count': count,
+                        'confidence': min(0.8, 0.3 + count * 0.05)
+                    }
+                    result['insight'] = f"{last_action} changed {count} pixels (color_{from_c}->color_{to_c})"
+                    result['confidence'] = min(0.8, 0.4 + count * 0.03)
+                else:
+                    result['insight'] = f"{last_action} caused {len(delta_changes)} frame changes"
+                    result['confidence'] = 0.5
+            except (ValueError, AttributeError):
+                pass
+        
+        # Generate human-readable insight (original logic as fallback)
+        if 'insight' not in result:
+            if actions_moved and actions_static:
+                result['insight'] = f"Actions {sorted(actions_moved)} cause changes; {sorted(actions_static - actions_moved)} have no effect"
+            elif actions_moved:
+                result['insight'] = f"Actions {sorted(actions_moved)} cause state changes"
+            else:
+                result['insight'] = "No actions observed to change state yet"
         
         return result
     
@@ -7949,9 +8397,27 @@ class GameplayEngine:
         # ===================================================================
         # TIER 1: IDENTITY - Who am I, what do I believe
         # ===================================================================
+        
+        # ALWAYS compute sensation_context if not already available
+        # This ensures tetrahedral_perception is populated in every payload
+        sensation_context = getattr(self, '_last_sensation_context', None)
+        if not sensation_context and agent_id and game_state.frame:
+            try:
+                frame_data = self._convert_game_state_for_sensation_analysis(game_state)
+                sensation_context = self._analyze_sensation_context(
+                    frame_data,
+                    agent_id,
+                    game_id=game_id,
+                    level=current_level
+                )
+                # Cache for future use
+                self._last_sensation_context = sensation_context
+            except Exception as e:
+                logger.debug(f"Sensation context computation failed: {e}")
+        
         self_model = self._build_self_model_context(
             agent_id, game_id, current_level, frame=game_state.frame,
-            sensation_context=getattr(self, '_last_sensation_context', None)
+            sensation_context=sensation_context
         )
         
         # Extract or build working theory
@@ -7962,6 +8428,68 @@ class GameplayEngine:
             # Infer theory from self-model
             ctrl_obj = self_model.get('controlled_object_type')
             working_theory = f"I control the {ctrl_obj} and can move it through actions"
+        # ===================================================================
+        # GAP FIX 2: Generate working_theory from multiple sources
+        # ===================================================================
+        # Don't leave working_theory as "425 Too Early" for 400+ frames.
+        # Build theory from whatever evidence we have.
+        # ===================================================================
+        elif self_model:
+            # Try to build theory from available evidence
+            ctrl_objects = self_model.get('objects_agent_controls', [])
+            network_hypos = self_model.get('network_control_hypotheses', [])
+            tetra = self_model.get('tetrahedral_perception', {})
+            goal_objects = tetra.get('goal_objects', [])
+            
+            if ctrl_objects:
+                # We have controlled objects - build movement theory
+                working_theory = f"I control {len(ctrl_objects)} objects and move with directional actions"
+            elif network_hypos:
+                # Network has hypotheses - form tentative theory
+                best_h = network_hypos[0] if network_hypos else {}
+                rel = best_h.get('reliability', 0)
+                if rel > 0.8:
+                    working_theory = f"Network suggests object control with {rel:.0%} confidence"
+                else:
+                    working_theory = f"Exploring - network has {len(network_hypos)} control hypotheses"
+            elif goal_objects:
+                # We identified goals - form goal-seeking theory
+                working_theory = f"Seeking goal objects: {len(goal_objects)} identified"
+            elif game_state.score > 0:
+                # We've made progress - form progress-based theory
+                working_theory = f"Current approach works - score {game_state.score} achieved"
+            else:
+                # Still exploring - at least acknowledge the state
+                working_theory = "Exploring game mechanics - no pattern confirmed yet"
+        
+        # ===================================================================
+        # GAP FIX 3: Fetch genome from agents table if not provided
+        # ===================================================================
+        if not genome and agent_id:
+            try:
+                agent_row = self.db.execute_query("""
+                    SELECT agent_type, exploration_rate, learning_rate, mutation_rate,
+                           feature_weights, species
+                    FROM agents WHERE agent_id = ?
+                """, (agent_id,))
+                if agent_row:
+                    a = agent_row[0]
+                    genome = {
+                        'agent_type': a.get('agent_type', 'generalist'),
+                        'exploration_rate': a.get('exploration_rate', 0.3),
+                        'learning_rate': a.get('learning_rate', 0.1),
+                        'mutation_rate': a.get('mutation_rate', 0.05),
+                        'species': a.get('species', 'unknown')
+                    }
+                    # Parse feature_weights if available
+                    if a.get('feature_weights'):
+                        try:
+                            fw = json.loads(a['feature_weights']) if isinstance(a['feature_weights'], str) else a['feature_weights']
+                            genome['feature_focus'] = sorted(fw.items(), key=lambda x: -x[1])[:3]  # Top 3
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+            except Exception as e:
+                logger.debug(f"Genome fetch failed: {e}")
         
         identity = {
             'agent_id': agent_id or self._null_status(404),
@@ -7972,7 +8500,8 @@ class GameplayEngine:
             'genome': {
                 'agent_type': genome.get('agent_type') if genome else self._null_status(404),
                 'exploration_rate': genome.get('exploration_rate') if genome else self._null_status(425),
-                'learning_rate': genome.get('learning_rate') if genome else self._null_status(425)
+                'learning_rate': genome.get('learning_rate') if genome else self._null_status(425),
+                'species': genome.get('species') if genome else None
             } if genome else {'status': self._null_status(404)}
         }
         
@@ -7987,6 +8516,19 @@ class GameplayEngine:
             level_change=level_change
         )
         
+        # ===================================================================
+        # CACHE FRAME_CHANGES FOR Q1 ANALYSIS (Fix for observation loop)
+        # ===================================================================
+        # Q1 needs to know what actually changed to form hypotheses.
+        # Cache the delta's frame_changes so _analyze_change_vs_invariance
+        # can use them even when action traces don't have frame data.
+        # ===================================================================
+        frame_changes = delta.get('frame_changes', [])
+        if frame_changes and not any('NULL' in str(c) for c in frame_changes[:1]):
+            self._last_delta_frame_changes = frame_changes
+        else:
+            self._last_delta_frame_changes = []
+        
         # Update self/world model change status if applicable
         if self_model and 'controlled_objects' in self_model:
             prev_controlled = getattr(self, '_previous_controlled_objects', set())
@@ -7994,6 +8536,104 @@ class GameplayEngine:
             if curr_controlled != prev_controlled:
                 delta['self_model_update'] = f"Now control: {list(curr_controlled)}"
                 self._previous_controlled_objects = curr_controlled
+        
+        # ===================================================================
+        # FRAME_CHANGES -> SELF_MODEL LEARNING (Added 2025-01-XX)
+        # ===================================================================
+        # When frame_changes say "color_X moved [direction]", correlate with
+        # the last action to learn what we control.
+        # e.g., "color_9 moved left" after ACTION3 -> we control color_9
+        # ===================================================================
+        if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+            try:
+                frame_changes = delta.get('frame_changes', [])
+                action_direction_map = {
+                    'ACTION1': 'up', 'ACTION2': 'down', 
+                    'ACTION3': 'left', 'ACTION4': 'right'
+                }
+                expected_direction = action_direction_map.get(last_action)
+                
+                if expected_direction and frame_changes:
+                    for change in frame_changes:
+                        if isinstance(change, str) and 'moved' in change and expected_direction in change:
+                            # Pattern: "color_X object moved [direction]"
+                            # Extract color number
+                            import re
+                            color_match = re.search(r'color_(\d+)', change)
+                            if color_match:
+                                controlled_color = int(color_match.group(1))
+                                
+                                # This is strong evidence we control this object!
+                                logger.info(
+                                    f"[FRAME->SELF] {last_action} caused color_{controlled_color} to move {expected_direction}"
+                                )
+                                
+                                # Update self-model with this discovery
+                                delta['self_model_update'] = f"Learned: control color_{controlled_color}"
+                                
+                                # Store in agent_self_model database
+                                self.agent_self_model.learn_from_movement_correlation(
+                                    agent_id=agent_id,
+                                    game_id=game_id,
+                                    level=current_level,
+                                    action=last_action,
+                                    direction=expected_direction,
+                                    controlled_color=controlled_color,
+                                    generation=generation or 0
+                                )
+                                break  # Only process first match
+            except Exception as e:
+                logger.debug(f"Frame changes self-model learning failed: {e}")
+        
+        # ===================================================================
+        # HYPOTHESIS TESTING / THEORY VALIDATION (Closes the loop!)
+        # ===================================================================
+        # Check if frame_changes match our current hypothesis.
+        # If hypothesis said "ACTION6 changes color_12 to color_9" and that
+        # happened, VALIDATE the hypothesis. If not, REJECT it.
+        # ===================================================================
+        current_hypothesis = getattr(self, '_current_hypothesis', None)
+        if current_hypothesis and frame_changes:
+            try:
+                hyp_action = current_hypothesis.get('action', '')
+                hyp_effect = current_hypothesis.get('effect', '')  # e.g., "Changes color_12 to color_9"
+                
+                # Check if this action matches our hypothesis
+                if hyp_action == last_action:
+                    # Did the expected effect happen?
+                    effect_observed = False
+                    for change in frame_changes:
+                        if isinstance(change, str):
+                            # Check if the color change matches
+                            if 'color_' in hyp_effect and 'color_' in change:
+                                import re
+                                hyp_colors = re.findall(r'color_(\d+)', hyp_effect)
+                                change_colors = re.findall(r'color_(\d+)', change)
+                                if hyp_colors and change_colors and hyp_colors == change_colors:
+                                    effect_observed = True
+                                    break
+                    
+                    if effect_observed:
+                        # HYPOTHESIS VALIDATED!
+                        delta['theory_validation'] = f"CONFIRMED: {hyp_action} -> {hyp_effect}"
+                        current_hypothesis['validated'] = True
+                        current_hypothesis['confidence'] = min(0.95, current_hypothesis.get('confidence', 0.5) + 0.2)
+                        logger.info(f"[THEORY] Hypothesis VALIDATED: {hyp_action} -> {hyp_effect}")
+                    else:
+                        # Effect didn't happen - lower confidence but don't reject yet
+                        current_hypothesis['confidence'] = max(0.1, current_hypothesis.get('confidence', 0.5) - 0.1)
+                        delta['theory_validation'] = f"Testing: {hyp_action} (effect not observed this time)"
+                    
+                    self._current_hypothesis = current_hypothesis
+            except Exception as e:
+                logger.debug(f"Hypothesis validation failed: {e}")
+        
+        # Store current Q1 hypothesis for next round's validation
+        if hasattr(self, '_last_emergent_reasoning') and self._last_emergent_reasoning:
+            q1_data = self._last_emergent_reasoning.get('q1_change_vs_fixed', {})
+            new_hyp = q1_data.get('hypothesis')
+            if new_hyp and new_hyp.get('confidence', 0) > 0.4:
+                self._current_hypothesis = new_hyp
         
         # ===================================================================
         # TIER 3: UNDERSTANDING - Q1-Q5 cognitive state
@@ -8068,10 +8708,39 @@ class GameplayEngine:
         # ===================================================================
         # TIER 7: ACTION - What I'm doing
         # ===================================================================
+        # GAP FIX 4: Compute emotional_state from multiple sources
+        # Don't rely solely on self_reflection which may not have 'emotion'
+        emotional_state = self._null_status(425)
+        if self_reflection and self_reflection.get('emotion'):
+            emotional_state = self_reflection['emotion']
+        elif sensation_context:
+            # Derive from sensation mood vector
+            mood = sensation_context.get('mood_vector', {})
+            valence = mood.get('valence', 0)
+            if valence > 0.3:
+                emotional_state = 'confident'
+            elif valence > 0:
+                emotional_state = 'curious'
+            elif valence > -0.3:
+                emotional_state = 'neutral'
+            else:
+                emotional_state = 'frustrated'
+        elif hasattr(self, '_navigation_state'):
+            # Derive from cached navigation state
+            nav = getattr(self, '_navigation_state', 0)
+            if nav > 0.3:
+                emotional_state = 'confident'
+            elif nav > 0:
+                emotional_state = 'curious'
+            elif nav > -0.3:
+                emotional_state = 'neutral'
+            else:
+                emotional_state = 'frustrated'
+        
         action_tier = {
             'action_code': action,
             'reasoning': reasoning_text,
-            'emotional_state': self_reflection.get('emotion') if self_reflection else self._null_status(425)
+            'emotional_state': emotional_state
         }
         
         # ===================================================================
@@ -8828,7 +9497,12 @@ class GameplayEngine:
                     'failure': h['failure_reason'][:100],  # Truncate for JSON size
                     'strategy': h['win_strategy'][:150],
                     'confidence': round(effective_confidence, 2),
-                    'validated': bool(h.get('validated_by_win'))
+                    'validated': bool(h.get('validated_by_win')),
+                    # Machine-actionable fields parsed from text
+                    'actionable': self._parse_actionable_from_hypothesis(
+                        h['failure_reason'] or '',
+                        h['win_strategy'] or ''
+                    )
                 })
             
             # Update last_referenced for these hypotheses
@@ -8905,6 +9579,108 @@ class GameplayEngine:
             logger.debug(f"Contradicted hypothesis {hypothesis_id[:12]}: {reason}")
         except Exception as e:
             logger.debug(f"Failed to contradict hypothesis: {e}")
+    
+    def _parse_actionable_from_hypothesis(
+        self,
+        failure_text: str,
+        strategy_text: str
+    ) -> Dict[str, Any]:
+        """
+        Parse human-readable failure/strategy text into machine-actionable fields.
+        
+        Extracts structured information like:
+        - avoid_actions: List of actions to avoid
+        - prefer_actions: List of actions to prefer  
+        - avoid_directions: Directions to avoid (up/down/left/right)
+        - prefer_directions: Directions to prefer
+        - avoid_colors: Object colors to avoid
+        - target_colors: Object colors to target
+        
+        Args:
+            failure_text: Human-readable failure reason
+            strategy_text: Human-readable win strategy
+            
+        Returns:
+            Dict with machine-actionable fields
+        """
+        actionable = {
+            'avoid_actions': [],
+            'prefer_actions': [],
+            'avoid_directions': [],
+            'prefer_directions': [],
+            'avoid_colors': [],
+            'target_colors': [],
+            'patterns_detected': []
+        }
+        
+        failure_lower = failure_text.lower()
+        strategy_lower = strategy_text.lower()
+        
+        # Parse failure patterns (what to AVOID)
+        direction_keywords = {
+            'up': ['stuck top', 'trapped top', 'ceiling', 'top edge', 'moved up and stuck'],
+            'down': ['stuck bottom', 'trapped bottom', 'fell down', 'bottom edge', 'dropped'],
+            'left': ['stuck left', 'left edge', 'left wall', 'trapped left'],
+            'right': ['stuck right', 'right edge', 'right wall', 'trapped right']
+        }
+        
+        for direction, keywords in direction_keywords.items():
+            if any(kw in failure_lower for kw in keywords):
+                actionable['avoid_directions'].append(direction)
+                # Map to action numbers
+                action_map = {'up': 1, 'down': 2, 'left': 3, 'right': 4}
+                actionable['avoid_actions'].append(action_map[direction])
+        
+        # Detect oscillation/loop patterns
+        if any(kw in failure_lower for kw in ['oscillat', 'loop', 'repeat', 'same action', 'back and forth']):
+            actionable['patterns_detected'].append('oscillation')
+            # Suggest breaking patterns with click or wait
+            actionable['prefer_actions'].extend([5, 6])
+        
+        # Detect timeout/inefficiency
+        if any(kw in failure_lower for kw in ['timeout', 'ran out', 'too slow', 'inefficient']):
+            actionable['patterns_detected'].append('inefficiency')
+            actionable['avoid_actions'].append(5)  # Avoid wait
+        
+        # Parse strategy patterns (what to PREFER)
+        strategy_direction_keywords = {
+            'up': ['move up', 'go up', 'navigate up', 'climb', 'ascend'],
+            'down': ['move down', 'go down', 'descend', 'drop', 'fall'],
+            'left': ['move left', 'go left', 'navigate left'],
+            'right': ['move right', 'go right', 'navigate right']
+        }
+        
+        for direction, keywords in strategy_direction_keywords.items():
+            if any(kw in strategy_lower for kw in keywords):
+                actionable['prefer_directions'].append(direction)
+                action_map = {'up': 1, 'down': 2, 'left': 3, 'right': 4}
+                actionable['prefer_actions'].append(action_map[direction])
+        
+        # Detect click/interact suggestions
+        if any(kw in strategy_lower for kw in ['click', 'select', 'interact', 'activate', 'pick up']):
+            actionable['prefer_actions'].append(6)
+        
+        # Detect wait/timing suggestions
+        if any(kw in strategy_lower for kw in ['wait', 'pause', 'timing', 'time it']):
+            actionable['prefer_actions'].append(5)
+        
+        # Extract color references
+        import re
+        color_matches = re.findall(r'color[_\s]*(\d+)', failure_lower + ' ' + strategy_lower)
+        for color in color_matches:
+            color_int = int(color)
+            if 'avoid' in failure_lower and f'color {color}' in failure_lower:
+                actionable['avoid_colors'].append(color_int)
+            elif 'target' in strategy_lower or 'goal' in strategy_lower:
+                actionable['target_colors'].append(color_int)
+        
+        # Remove duplicates
+        actionable['avoid_actions'] = list(set(actionable['avoid_actions']))
+        actionable['prefer_actions'] = list(set(actionable['prefer_actions']))
+        actionable['avoid_directions'] = list(set(actionable['avoid_directions']))
+        actionable['prefer_directions'] = list(set(actionable['prefer_directions']))
+        
+        return actionable
 
     def _get_agent_operating_mode(self, agent_id: Optional[str]) -> Optional[str]:
         """

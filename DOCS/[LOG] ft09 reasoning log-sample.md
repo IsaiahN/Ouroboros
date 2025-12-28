@@ -1,6 +1,7 @@
 
 ARC-AGI-3
 Preview
+
 Games
 Overview
 Docs
@@ -17,7 +18,7 @@ Level: 1
 
 
 
-1×
+5×
 Reasoning Log
 Frame 323
 {

@@ -108,6 +108,27 @@
   - All learned knowledge (rules, patterns, etc.)
 - **Why**: Prevents database bloat while preserving all critical learning data
 
+### **RULE 13: Automated Bug Investigation After Evolutions**
+- After EVERY evolution run, check for reasoning bugs:
+  ```bash
+  python investigate_bugs.py
+  ```
+- If bugs detected (especially CRITICAL severity):
+  1. Run `python investigate_bugs.py --investigate` to get investigation prompt
+  2. Follow fix suggestions - search codebase for mentioned functions
+  3. Implement the fix in the relevant file
+  4. Test the fix with a short evolution run (1-2 generations)
+  5. Mark bug as fixed: `python investigate_bugs.py --fix BUG_ID "description"`
+- **Bug Types to Watch**:
+  - `Q1_DISCONNECT` (CRITICAL): Q1 says no actions but frame has changes
+  - `EMERGENT_COGNITION_DEAD` (CRITICAL): Q-fields empty after 20+ actions
+  - `WORKING_THEORY_STUCK` (WARNING): Theory stuck as "425 Too Early"
+  - `HYPOTHESIS_UNUSED` (WARNING): DM-3 not using available hypotheses
+  - `NO_SELF_MODEL` (WARNING): No controlled objects after 100+ actions
+- **Workflow**: Bugs are auto-detected during evolution, saved to `oracle_reasoning_bugs` table
+- **Priority**: Fix CRITICAL bugs before continuing evolution
+- **DO NOT** ignore repeated warnings - they indicate systematic issues
+
 ---
 
 ## 🧬 NETWORK-CENTRIC DESIGN PHILOSOPHY
@@ -372,6 +393,23 @@ prestige = (
 - Agent stuck on "easy" level
 - Zero-score games increasing
 - Database approaching 10 GB
+- **Reasoning bugs detected** (see Rule 13)
+
+### **Bug Investigation** (NEW - Rule 13)
+**Frequency**: After EVERY evolution run
+**Workflow**:
+1. Run `python investigate_bugs.py` to check for bugs
+2. If CRITICAL bugs exist:
+   - Run `python investigate_bugs.py --investigate`
+   - Read the investigation prompt
+   - Search for mentioned functions in codebase
+   - Implement the fix
+   - Test with 1-2 generation run
+   - Mark fixed: `python investigate_bugs.py --fix BUG_ID "description"`
+3. If only WARNINGS exist:
+   - Fix after 3+ consecutive detections
+   - Track in database for patterns
+4. Continue evolution only when CRITICAL bugs resolved
 
 ### **Communication**
 **Frequency**: Daily email updates to `isaiahnwu@gmail.com`

@@ -5094,3 +5094,316 @@ Database bloat crisis resolved:
 - ✅ Verified data integrity
 
 **NEXT STEP**: Run evolution to verify system operates normally with reduced trace retention
+
+---
+
+## Session: December 28, 2025 - Reasoning Log Data Usage Gap Analysis & Oracle Bug Detection System
+
+---
+
+### Approach: Fix the Observation→Hypothesis→Action Loop
+
+**Timestamp**: 12:45:57 PM  
+**Status**: COMPLETED - Full automated bug detection system implemented
+
+---
+
+### Problem Statement
+
+User provided 5 ARC-AGI reasoning log files and asked: **"Why aren't agents making progress on levels despite 300+ frames?"**
+
+Analysis of logs (e.g., `as66 reasoning log-sample.md`) revealed a critical issue:
+- Frame analysis shows 20+ pixel changes (`delta_frame_changes`)
+- But Q1 reports: "No actions observed since last frame"
+- Agent never forms hypotheses from observations
+- Action selection ignores all collected data
+
+**THE CORE PROBLEM**: The observation→hypothesis→action loop is broken.
+
+---
+
+### Phase 1: Initial Data Usage Gap Analysis
+
+**Timestamp**: ~10:00 AM
+
+Analyzed reasoning logs and identified 8 initial gaps where data was collected but never used:
+
+| Gap # | Data Collected | Status |
+|-------|----------------|--------|
+| 1 | Available actions change (1-4→1-7 after click) | Fixed |
+| 2 | Movement correlation (ACTION1 = up movement) | Fixed |
+| 3 | Agent position inference from controlled objects | Fixed |
+| 4 | Failure insights (direction avoidance) | Fixed |
+| 5 | Decision contributors tracking | Fixed |
+| 6 | Tetrahedral perception structure | Fixed |
+| 7 | Win-validated hypotheses prioritization | Fixed |
+| 8 | Network bootstrap for empty local data | Fixed |
+
+**Files Modified**: `core_gameplay.py`, created `tests/test_reasoning_data_usage.py` (26 tests)
+
+---
+
+### Phase 2: Additional Gap Fixes
+
+**Timestamp**: ~10:30 AM
+
+Found 6 more critical gaps:
+
+| Gap # | Issue | Fix Location |
+|-------|-------|--------------|
+| 1 | `objects_agent_controls` always empty | Bootstrap from network hypotheses (line ~6742) |
+| 2 | `working_theory` stuck as "425 Too Early" | Generate from multiple sources (line ~8173) |
+| 3 | `genome` not populated in payload | Fetch from agents table (line ~8212) |
+| 4 | `emotional_state` always None | Derive from sensation context (line ~8363) |
+| 5 | `inferred_goals` not used in action selection | Use goals for directional hints (line ~3740) |
+| 6 | `network_hypotheses` empty when rules empty | Fallback to control hypotheses (line ~7177) |
+
+---
+
+### Phase 3: The Core Bug - Q1 Disconnect
+
+**Timestamp**: ~11:00 AM
+
+**Root Cause**: Q1 observation analysis was NOT using the delta frame changes that were being calculated.
+
+**Evidence from logs**:
+```
+delta_frame_changes: 22 items (significant changes!)
+Q1_observable: "No actions observed since last frame" (WRONG!)
+```
+
+**Fixes Implemented**:
+
+1. **Fixed Q1 to use delta_frame_changes** (line ~7680-7740):
+   - Q1 now reads `_last_delta_frame_changes` 
+   - Reports actual change count in observations
+   - Forms hypotheses from color change patterns
+
+2. **Cache delta frame changes for Q1** (line ~8487-8499):
+   - Added `_cache_delta_frame_changes()` method
+   - Called before Q1 analysis
+
+3. **DM-3 hypothesis-driven action selection** (line ~4390-4422):
+   - When hypotheses suggest an action causes effects, boost that action
+   - Connects hypotheses to actual decisions
+
+4. **Theory validation loop** (line ~8553-8615):
+   - After each action, check if hypothesis predicted correctly
+   - Update confidence based on whether effect was observed
+
+**Tests Added**: 6 new tests for hypothesis formation/validation (32 total passing)
+
+---
+
+### Phase 4: Automated Bug Detection System
+
+**Timestamp**: ~11:30 AM - 12:45 PM
+
+User asked: **"How to make the Oracle do this hard work of finding bugs?"**
+
+Problem: Reasoning logs require manual copying from ARC-AGI interface - no API to query them.
+
+**Solution**: Capture reasoning payloads during gameplay and analyze them automatically.
+
+---
+
+#### Implementation: ReasoningLogCapture System
+
+**New Classes in `console_metrics_capture.py`**:
+
+```python
+@dataclass
+class ReasoningSnapshot:
+    """Captures key fields from each reasoning payload"""
+    q1_observable: str
+    q2_uncertainty: str
+    # ... Q3-Q5
+    frame_changes_count: int
+    delta_frame_changes_count: int
+    hypotheses_active: int
+    working_theory: str
+    controlled_objects: List[str]
+    # etc.
+
+@dataclass  
+class ReasoningDiagnostic:
+    """Represents a detected bug"""
+    bug_type: str        # Q1_DISCONNECT, WORKING_THEORY_STUCK, etc.
+    severity: str        # critical, warning
+    description: str
+    evidence: Dict
+    
+class ReasoningLogCapture:
+    """Captures and analyzes reasoning payloads"""
+    def record_reasoning_payload(...)  # Called after each action
+    def _run_live_diagnostics(...)     # Detects bugs in real-time
+    def get_diagnostics_summary(...)   # For Oracle consumption
+```
+
+**Bug Types Detected**:
+
+| Bug Type | Severity | Detection Logic |
+|----------|----------|-----------------|
+| `Q1_DISCONNECT` | CRITICAL | Q1 says "no actions" but delta_changes > 10 |
+| `EMERGENT_COGNITION_DEAD` | CRITICAL | 4+/5 Q-fields empty after 20+ actions |
+| `WORKING_THEORY_STUCK` | WARNING | Theory = "425 Too Early" after 50+ actions |
+| `HYPOTHESIS_UNUSED` | WARNING | Hypotheses exist but not in decision_contributors |
+| `NO_SELF_MODEL` | WARNING | No controlled objects after 100+ actions |
+
+---
+
+#### Integration Points
+
+**1. core_gameplay.py** (line ~5113-5139):
+```python
+# After building reasoning_json
+if REASONING_CAPTURE_AVAILABLE and record_reasoning:
+    record_reasoning(game_id, agent_id, level, action_index, action, reasoning_json)
+```
+
+**2. oracle_health_monitor.py**:
+- Added `oracle_reasoning_bugs` table for persistence
+- Added `_check_reasoning_diagnostics()` to health checks
+- Added `_save_reasoning_bugs()` to save detected bugs
+- Added LLM investigation methods:
+  - `get_open_bugs(severity)`
+  - `get_bug_investigation_prompt(bug_id)` 
+  - `mark_bug_fixed(bug_id, description)`
+  - `print_bug_report()`
+
+**3. autonomous_evolution_runner.py** (line ~237-250, 2484-2504):
+- Initialize reasoning capture on startup
+- Print reasoning diagnostics after each generation
+- Reset capture for next generation
+
+---
+
+#### New CLI Tool: investigate_bugs.py
+
+```bash
+# Check for bugs
+python investigate_bugs.py
+
+# Get investigation prompt for highest priority bug
+python investigate_bugs.py --investigate
+
+# Mark bug as fixed after implementing solution
+python investigate_bugs.py --fix BUG_ID "description of fix"
+
+# Full report with history
+python investigate_bugs.py --report
+```
+
+**Sample Investigation Prompt Output**:
+```
+# REASONING BUG INVESTIGATION
+
+## Bug Details
+- **Bug ID**: 0f001a25-265
+- **Type**: Q1_DISCONNECT
+- **Severity**: CRITICAL
+- **Occurrences**: 30
+
+## Description
+Q1 observation system disconnected: Q1 reported no actions 
+despite significant frame changes.
+
+## Fix Suggestions
+- Check _analyze_emergent_q1() is using _last_delta_frame_changes
+- Verify _cache_delta_frame_changes() called before Q1 analysis
+
+## Files to Check
+- core_gameplay.py: _analyze_emergent_q1(), _cache_delta_frame_changes()
+- core_gameplay.py: Lines around 7680-7740
+```
+
+---
+
+#### Database Schema Addition
+
+```sql
+CREATE TABLE oracle_reasoning_bugs (
+    bug_id TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    bug_type TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    description TEXT,
+    evidence_json TEXT,
+    affected_games_json TEXT,
+    occurrence_count INTEGER DEFAULT 1,
+    first_seen_at TIMESTAMP,
+    last_seen_at TIMESTAMP,
+    status TEXT DEFAULT 'open',  -- open, fixed, wont_fix
+    fix_attempted BOOLEAN DEFAULT FALSE,
+    fix_description TEXT,
+    resolved_at TIMESTAMP
+);
+```
+
+---
+
+#### Copilot Instructions Updated
+
+Added **Rule 13: Automated Bug Investigation After Evolutions** to `.github/copilot-instructions.md`:
+
+- After EVERY evolution run, check `python investigate_bugs.py`
+- If CRITICAL bugs: investigate, fix, test, mark as fixed
+- If warnings: fix after 3+ consecutive detections
+- DO NOT ignore repeated warnings
+
+Also added **Bug Investigation** section to Autonomous Operation Cadence.
+
+---
+
+### Files Modified This Session
+
+| File | Changes |
+|------|---------|
+| `core_gameplay.py` | 8 gap fixes, Q1 fix, hypothesis formation, DM-3 integration, theory validation, reasoning capture hook |
+| `console_metrics_capture.py` | Added ReasoningSnapshot, ReasoningDiagnostic, ReasoningLogCapture classes (~300 lines) |
+| `oracle_health_monitor.py` | Added oracle_reasoning_bugs table, _check_reasoning_diagnostics, LLM investigation methods (~250 lines) |
+| `autonomous_evolution_runner.py` | Reasoning capture initialization and reporting |
+| `investigate_bugs.py` | NEW FILE - CLI for LLM bug investigation |
+| `tests/test_reasoning_data_usage.py` | 32 tests for all data usage fixes |
+| `.github/copilot-instructions.md` | Added Rule 13, Bug Investigation workflow |
+
+---
+
+### Test Results
+
+```
+============================= 32 passed in 0.40s =============================
+```
+
+All 32 tests passing:
+- 26 original data usage tests
+- 6 new hypothesis formation/validation tests
+
+---
+
+### Current Status
+
+**Timestamp**: 12:45:57 PM
+
+The observation→hypothesis→action loop is now:
+1. **Observable**: Q1 reads actual delta frame changes
+2. **Hypothesis Formation**: Color changes trigger hypothesis creation
+3. **Decision Integration**: DM-3 boosts actions suggested by hypotheses
+4. **Validation**: Theory validation loop confirms/rejects hypotheses
+
+Oracle now automatically:
+1. Captures reasoning payloads during gameplay
+2. Detects bugs in real-time (5 bug types)
+3. Saves bugs to database for persistence
+4. Provides investigation prompts for LLM debugging
+5. Tracks bug resolution status
+
+---
+
+### Next Steps
+
+1. **Run evolution** to see reasoning capture in action
+2. **Check** `python investigate_bugs.py` after evolution completes
+3. **Verify** Q1 now reports actual frame changes (not "no actions")
+4. **Monitor** for any new bug types that emerge
+5. **Fix** any CRITICAL bugs before continuing

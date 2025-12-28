@@ -10,38 +10,225 @@ Scorecards
 Ouroboros
 Ouroboros
 Sp80-0605ab9e5b2a
-Session: b5f469cc-2808-46ac-b230-39b459b29ee3
+Session: 230bb730-2b22-4372-98bc-ea218e38f803
 Level: 1
-235 / 235
+242 / 242
 
 
 
 
 
-4×
+1×
 Reasoning Log
-Frame 234
+Frame 241
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
+      "objects_agent_controls": [],
       "aggregated_controlled": [],
-      "control_confidence": 0.5777777777777777,
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION4",
+    "frame_changes": [
+      "Grid size changed"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T23:00:05.117312",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION5",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 240
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -121,21 +308,26 @@ Frame 234
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:42:09.463693",
+    "timestamp": "2025-12-27T22:59:55.467008",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -181,15 +373,15 @@ Frame 234
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -197,7 +389,7 @@ Frame 234
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -207,7 +399,7 @@ Frame 234
     ]
   },
   "7_action": {
-    "action_code": "ACTION5",
+    "action_code": "ACTION4",
     "reasoning": "Network hypotheses (3 insights, 0 validated)",
     "emotional_state": "NULL - 425 Too Early"
   },
@@ -224,3366 +416,17 @@ Frame 234
   }
 }
 Show less
-Frame 208
+Frame 214
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION3",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:41:52.571469",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION5",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 207
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION1",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:41:37.007556",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION3",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 206
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION4",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:41:20.811054",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION1",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 205
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION4",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:41:04.612791",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION4",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 204
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION3",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:40:49.347299",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION4",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 203
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION4",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:40:34.052882",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION3",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 202
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION6",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:40:18.013111",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION4",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 201
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION6",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:40:02.630942",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION6",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  },
-  "coordinate": {
-    "x": 38,
-    "y": 0
-  },
-  "visual_reason": "Rare color 0 (51 pixels)"
-}
-Show less
-Frame 200
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION4",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:39:47.432250",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION6",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  },
-  "coordinate": {
-    "x": 6,
-    "y": 0
-  },
-  "visual_reason": "Rare color 14 (13 pixels)"
-}
-Show less
-Frame 199
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION2",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:39:32.301536",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION4",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 198
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION1",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_14 (Rare color (only 0.3% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:39:17.101772",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION2",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 197
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -3690,307 +533,19 @@ Frame 197
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:39:01.676266",
+    "timestamp": "2025-12-27T22:59:45.781676",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION1",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 196
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
     }
   },
-  "2_delta": {
-    "last_action": "ACTION3",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:38:45.968389",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
   "6_environment": {
     "obstacles": [
       {
@@ -4035,15 +590,15 @@ Frame 196
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -4051,7 +606,7 @@ Frame 196
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -4078,119 +633,17 @@ Frame 196
   }
 }
 Show less
-Frame 195
+Frame 213
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -4244,7 +697,7 @@ Frame 195
     }
   },
   "2_delta": {
-    "last_action": "ACTION2",
+    "last_action": "ACTION6",
     "frame_changes": [
       "Grid size changed"
     ],
@@ -4270,20 +723,27 @@ Frame 195
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:38:30.508758",
+    "timestamp": "2025-12-27T22:59:36.473409",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -4329,15 +789,15 @@ Frame 195
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -4345,7 +805,7 @@ Frame 195
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -4355,7 +815,7 @@ Frame 195
     ]
   },
   "7_action": {
-    "action_code": "ACTION3",
+    "action_code": "ACTION5",
     "reasoning": "Network hypotheses (3 insights, 0 validated)",
     "emotional_state": "NULL - 425 Too Early"
   },
@@ -4372,28 +832,17 @@ Frame 195
   }
 }
 Show less
-Frame 194
+Frame 212
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
+      "objects_agent_controls": [],
       "aggregated_controlled": [],
-      "control_confidence": 0.5777777777777777,
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -4473,20 +922,27 @@ Frame 194
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:38:14.541034",
+    "timestamp": "2025-12-27T22:59:27.107151",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -4532,15 +988,15 @@ Frame 194
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -4548,7 +1004,7 @@ Frame 194
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -4558,7 +1014,7 @@ Frame 194
     ]
   },
   "7_action": {
-    "action_code": "ACTION2",
+    "action_code": "ACTION6",
     "reasoning": "Network hypotheses (3 insights, 0 validated)",
     "emotional_state": "NULL - 425 Too Early"
   },
@@ -4572,122 +1028,25 @@ Frame 194
       "VISUAL_ANALYSIS"
     ],
     "decision_contributors": {}
-  }
+  },
+  "coordinate": {
+    "x": 0,
+    "y": 12
+  },
+  "visual_reason": "Rare color (14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) (26 pixels)"
 }
 Show less
-Frame 168
+Frame 186
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -4741,7 +1100,7 @@ Frame 168
     }
   },
   "2_delta": {
-    "last_action": "ACTION3",
+    "last_action": "ACTION4",
     "frame_changes": [
       "NULL - 304 Not Modified"
     ],
@@ -4767,20 +1126,27 @@ Frame 168
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:37:58.941211",
+    "timestamp": "2025-12-27T22:59:17.466256",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -4826,15 +1192,15 @@ Frame 168
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -4842,7 +1208,7 @@ Frame 168
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -4869,119 +1235,215 @@ Frame 168
   }
 }
 Show less
-Frame 167
+Frame 185
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
         {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
           ],
-          "raw_coord": "x:0,y:0"
+          "reliability": 1,
+          "validated_by_win": 0
         },
         {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
           ],
-          "raw_coord": "x:1,y:0"
+          "reliability": 1,
+          "validated_by_win": 0
         },
         {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
           ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
+          "reliability": 0.75,
+          "validated_by_win": 0
         }
       ],
-      "control_confidence": 0.5777777777777777,
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION1",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:59:07.928606",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION4",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 184
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -5080,20 +1542,27 @@ Frame 167
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:37:43.818255",
+    "timestamp": "2025-12-27T22:58:58.514824",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -5139,15 +1608,15 @@ Frame 167
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -5155,7 +1624,7 @@ Frame 167
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -5165,7 +1634,7 @@ Frame 167
     ]
   },
   "7_action": {
-    "action_code": "ACTION3",
+    "action_code": "ACTION1",
     "reasoning": "Network hypotheses (3 insights, 0 validated)",
     "emotional_state": "NULL - 425 Too Early"
   },
@@ -5182,119 +1651,17 @@ Frame 167
   }
 }
 Show less
-Frame 166
+Frame 183
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -5348,7 +1715,7 @@ Frame 166
     }
   },
   "2_delta": {
-    "last_action": "ACTION3",
+    "last_action": "ACTION6",
     "frame_changes": [
       "NULL - 304 Not Modified"
     ],
@@ -5374,21 +1741,26 @@ Frame 166
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:37:28.583036",
+    "timestamp": "2025-12-27T22:58:49.166569",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -5434,15 +1806,15 @@ Frame 166
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -5450,7 +1822,7 @@ Frame 166
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -5477,119 +1849,17 @@ Frame 166
   }
 }
 Show less
-Frame 165
+Frame 182
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -5677,307 +1947,19 @@ Frame 165
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:37:13.304503",
+    "timestamp": "2025-12-27T22:58:39.829787",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION3",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 164
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
     }
   },
-  "2_delta": {
-    "last_action": "ACTION6",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:36:57.134610",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
   "6_environment": {
     "obstacles": [
       {
@@ -6022,15 +2004,15 @@ Frame 164
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -6038,301 +2020,7 @@ Frame 164
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION3",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 163
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION6",
-    "frame_changes": [
-      "Grid size changed"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:36:41.753931",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -6364,28 +2052,17 @@ Frame 163
   "visual_reason": "Rare color 0 (106 pixels)"
 }
 Show less
-Frame 162
+Frame 181
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
+      "objects_agent_controls": [],
       "aggregated_controlled": [],
-      "control_confidence": 0.5777777777777777,
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -6439,9 +2116,9 @@ Frame 162
     }
   },
   "2_delta": {
-    "last_action": "ACTION5",
+    "last_action": "ACTION3",
     "frame_changes": [
-      "Grid size changed"
+      "NULL - 304 Not Modified"
     ],
     "score_change": 0,
     "level_change": false,
@@ -6473,12 +2150,18 @@ Frame 162
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:36:26.094663",
+    "timestamp": "2025-12-27T22:58:30.551694",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -6524,15 +2207,15 @@ Frame 162
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -6540,7 +2223,7 @@ Frame 162
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -6550,13 +2233,13 @@ Frame 162
     ]
   },
   "7_action": {
-    "action_code": "ACTION6",
+    "action_code": "ACTION3",
     "reasoning": "Network hypotheses (3 insights, 0 validated)",
     "emotional_state": "NULL - 425 Too Early"
   },
   "8_primitives": {
     "cods_operators_used": [
-      "random"
+      "detect_shapes"
     ],
     "features_activated": [
       "PATTERN_LEARNING",
@@ -6564,127 +2247,20 @@ Frame 162
       "VISUAL_ANALYSIS"
     ],
     "decision_contributors": {}
-  },
-  "coordinate": {
-    "x": 0,
-    "y": 12
-  },
-  "visual_reason": "Rare color (14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) (26 pixels)"
+  }
 }
 Show less
-Frame 136
+Frame 180
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -6772,12 +2348,18 @@ Frame 136
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:36:10.096404",
+    "timestamp": "2025-12-27T22:58:21.219431",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -6823,15 +2405,15 @@ Frame 136
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -6839,7 +2421,7 @@ Frame 136
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -6849,7 +2431,7 @@ Frame 136
     ]
   },
   "7_action": {
-    "action_code": "ACTION5",
+    "action_code": "ACTION3",
     "reasoning": "Network hypotheses (3 insights, 0 validated)",
     "emotional_state": "NULL - 425 Too Early"
   },
@@ -6866,119 +2448,17 @@ Frame 136
   }
 }
 Show less
-Frame 135
+Frame 179
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -7066,12 +2546,18 @@ Frame 135
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:35:54.016668",
+    "timestamp": "2025-12-27T22:58:11.695126",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
   },
   "6_environment": {
     "obstacles": [
@@ -7117,15 +2603,15 @@ Frame 135
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -7133,7 +2619,7 @@ Frame 135
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -7160,1600 +2646,17 @@ Frame 135
   }
 }
 Show less
-Frame 134
+Frame 178
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION6",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:35:38.652739",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION1",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 133
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION4",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:35:23.437479",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION6",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  },
-  "coordinate": {
-    "x": 50,
-    "y": 0
-  },
-  "visual_reason": "Rare color 0 (26 pixels)"
-}
-Show less
-Frame 132
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION4",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:35:07.657217",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION4",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 131
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION6",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:34:52.382875",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION4",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 130
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION1",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:34:36.881041",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION6",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  },
-  "coordinate": {
-    "x": 18,
-    "y": 0
-  },
-  "visual_reason": "Rare color 14 (38 pixels)"
-}
-Show less
-Frame 129
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -8809,301 +2712,7 @@ Frame 129
   "2_delta": {
     "last_action": "ACTION3",
     "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:34:20.578680",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION1",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 128
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION3",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
+      "Grid size changed"
     ],
     "score_change": 0,
     "level_change": false,
@@ -9136,307 +2745,19 @@ Frame 128
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:34:05.275775",
+    "timestamp": "2025-12-27T22:58:02.012913",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION3",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 127
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
     }
   },
-  "2_delta": {
-    "last_action": "ACTION3",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:33:50.078558",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
   "6_environment": {
     "obstacles": [
       {
@@ -9481,15 +2802,15 @@ Frame 127
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -9497,596 +2818,7 @@ Frame 127
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION3",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 126
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION1",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:33:34.121357",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION3",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 125
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION1",
-    "frame_changes": [
-      "NULL - 304 Not Modified"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:33:18.812305",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -10113,119 +2845,215 @@ Frame 125
   }
 }
 Show less
-Frame 124
+Frame 177
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
         {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
           ],
-          "raw_coord": "x:0,y:0"
+          "reliability": 1,
+          "validated_by_win": 0
         },
         {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
           ],
-          "raw_coord": "x:1,y:0"
+          "reliability": 1,
+          "validated_by_win": 0
         },
         {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
           ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
+          "reliability": 0.75,
+          "validated_by_win": 0
         }
       ],
-      "control_confidence": 0.5777777777777777,
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION5",
+    "frame_changes": [
+      "Grid size changed"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:57:52.571322",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION3",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "random"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 151
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -10332,307 +3160,19 @@ Frame 124
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:33:03.440409",
+    "timestamp": "2025-12-27T22:57:42.927565",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
     "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION1",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "detect_shapes"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 123
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
     }
   },
-  "2_delta": {
-    "last_action": "ACTION1",
-    "frame_changes": [
-      "Grid size changed"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:32:47.397432",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
   "6_environment": {
     "obstacles": [
       {
@@ -10677,15 +3217,15 @@ Frame 123
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -10693,7 +3233,7 @@ Frame 123
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -10720,322 +3260,17 @@ Frame 123
   }
 }
 Show less
-Frame 122
+Frame 150
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
+      "objects_agent_controls": [],
       "aggregated_controlled": [],
-      "control_confidence": 0.5777777777777777,
-      "object_dependencies": [],
-      "network_control_hypotheses": [
-        {
-          "id": "oc_sp80_L2_534d9326",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_356bf247",
-          "controlled": [
-            "x:0,y:0",
-            "x:0,y:1",
-            "x:0,y:10",
-            "x:0,y:11",
-            "x:0,y:12"
-          ],
-          "reliability": 1,
-          "validated_by_win": 0
-        },
-        {
-          "id": "oc_sp80_L2_1a742fda",
-          "controlled": [
-            "x:32,y:48",
-            "x:33,y:48",
-            "x:34,y:48"
-          ],
-          "reliability": 0.75,
-          "validated_by_win": 0
-        }
-      ],
-      "tetrahedral_perception": {
-        "self_objects": [],
-        "goal_objects": [],
-        "threat_objects": [],
-        "mood": {
-          "valence": 0,
-          "arousal": 0,
-          "dominance": 0
-        }
-      }
-    },
-    "genome": {
-      "status": "NULL - 404 Not Found"
-    }
-  },
-  "2_delta": {
-    "last_action": "ACTION5",
-    "frame_changes": [
-      "Grid size changed"
-    ],
-    "score_change": 0,
-    "level_change": false,
-    "self_model_update": "NULL - 425 Too Early",
-    "world_model_update": "NULL - 425 Too Early",
-    "theory_validation": "NULL - 425 Too Early"
-  },
-  "3_understanding": {
-    "Q1_what_is_happening": "No actions observed to change state yet",
-    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
-    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
-    "Q4_what_should_i_try": "Exploring to discover rules",
-    "Q5_how_confident": 0.3
-  },
-  "4_network_wisdom": {
-    "private_memory": "NULL - 425 Too Early",
-    "network_strength": "NULL - 425 Too Early",
-    "self_trust_bias": "NULL - 425 Too Early",
-    "decision_weight": "NULL - 425 Too Early",
-    "conflict_detected": false,
-    "two_streams_narrative": "NULL - 425 Too Early"
-  },
-  "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
-  },
-  "5_context": {
-    "game_id": "sp80-0605ab9e5b2a",
-    "level": 2,
-    "score": 1,
-    "timestamp": "2025-12-27T14:32:32.153857",
-    "strategy": "balanced",
-    "learning_mode": "smart_exploration",
-    "is_frontier": true,
-    "frontier_status": "NULL - 451 Frontier Level",
-    "exploration_mode": "frontier_exploration"
-  },
-  "6_environment": {
-    "obstacles": [
-      {
-        "position": [
-          0,
-          31
-        ],
-        "color": 14
-      },
-      {
-        "position": [
-          29,
-          31
-        ],
-        "color": 12
-      },
-      {
-        "position": [
-          17,
-          21
-        ],
-        "color": 9
-      },
-      {
-        "position": [
-          55,
-          21
-        ],
-        "color": 11
-      },
-      {
-        "position": [
-          55,
-          45
-        ],
-        "color": 11
-      }
-    ],
-    "goals": [],
-    "inferred_goals": [],
-    "agent_position": null,
-    "network_hypotheses": [],
-    "failure_insights": [
-      {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
-        "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      },
-      {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
-        "level": 2,
-        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
-        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
-        "confidence": 0.5,
-        "validated": false
-      }
-    ]
-  },
-  "7_action": {
-    "action_code": "ACTION1",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
-    "emotional_state": "NULL - 425 Too Early"
-  },
-  "8_primitives": {
-    "cods_operators_used": [
-      "random"
-    ],
-    "features_activated": [
-      "PATTERN_LEARNING",
-      "SENSATION_NAVIGATION",
-      "VISUAL_ANALYSIS"
-    ],
-    "decision_contributors": {}
-  }
-}
-Show less
-Frame 96
-{
-  "1_identity": {
-    "agent_id": "offspring_094b3f02",
-    "role": "generalist",
-    "generation": 295,
-    "working_theory": "NULL - 425 Too Early",
-    "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -11123,7 +3358,1399 @@ Frame 96
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:32:16.197549",
+    "timestamp": "2025-12-27T22:57:33.579991",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION5",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 149
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION6",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:57:24.295022",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION4",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 148
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION2",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:57:14.839299",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION6",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  },
+  "coordinate": {
+    "x": 57,
+    "y": 48
+  },
+  "visual_reason": "Rare color 0 (93 pixels)"
+}
+Show less
+Frame 147
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION1",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:57:04.603559",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION2",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 146
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION4",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:56:54.545969",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION1",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 145
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION3",
+    "frame_changes": [
+      "Grid size changed"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:56:45.169134",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION4",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 144
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION5",
+    "frame_changes": [
+      "Grid size changed"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:56:35.600275",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "self_directed",
+    "self_directed_context": {
+      "reason": "Broke out of stuck state, exploring independently",
+      "trust_self": true,
+      "network_invalid": true,
+      "start_action": 30
+    }
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION3",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "random"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 118
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION6",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:56:25.966103",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
@@ -11174,15 +4801,15 @@ Frame 96
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -11190,7 +4817,7 @@ Frame 96
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -11201,7 +4828,7 @@ Frame 96
   },
   "7_action": {
     "action_code": "ACTION5",
-    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "reasoning": "ESCAPE MODE: Trying ACTION5 to break out of frozen state",
     "emotional_state": "NULL - 425 Too Early"
   },
   "8_primitives": {
@@ -11217,119 +4844,215 @@ Frame 96
   }
 }
 Show less
-Frame 95
+Frame 117
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
         {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
           ],
-          "raw_coord": "x:0,y:0"
+          "reliability": 1,
+          "validated_by_win": 0
         },
         {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
           ],
-          "raw_coord": "x:1,y:0"
+          "reliability": 1,
+          "validated_by_win": 0
         },
         {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
           ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
+          "reliability": 0.75,
+          "validated_by_win": 0
         }
       ],
-      "control_confidence": 0.5777777777777777,
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION2",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:56:17.929963",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION6",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  },
+  "coordinate": {
+    "x": 26,
+    "y": 43
+  },
+  "visual_reason": "Rare color 8 (112 pixels)"
+}
+Show less
+Frame 116
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -11417,7 +5140,7 @@ Frame 95
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:32:00.125775",
+    "timestamp": "2025-12-27T22:56:07.990803",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
@@ -11468,15 +5191,15 @@ Frame 95
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -11484,7 +5207,391 @@ Frame 95
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION2",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 115
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION4",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:55:58.394505",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION3",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 114
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION1",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:55:49.047252",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -11511,119 +5618,1948 @@ Frame 95
   }
 }
 Show less
-Frame 94
+Frame 113
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
         {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
           ],
-          "raw_coord": "x:0,y:0"
+          "reliability": 1,
+          "validated_by_win": 0
         },
         {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
           ],
-          "raw_coord": "x:1,y:0"
+          "reliability": 1,
+          "validated_by_win": 0
         },
         {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
           ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
+          "reliability": 0.75,
+          "validated_by_win": 0
         }
       ],
-      "control_confidence": 0.5777777777777777,
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION4",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:55:39.723682",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION1",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 112
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION6",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:55:30.435570",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION4",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 111
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION4",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:55:21.068572",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION6",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  },
+  "coordinate": {
+    "x": 57,
+    "y": 0
+  },
+  "visual_reason": "Rare color 0 (13 pixels)"
+}
+Show less
+Frame 110
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION3",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:55:11.590104",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION4",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 109
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION3",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:55:02.072944",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION3",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 108
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION2",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:54:52.538847",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION3",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 107
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION2",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:54:43.182328",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION2",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 106
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION1",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:54:33.827781",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION2",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 105
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION6",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:54:24.060221",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION1",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 104
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION3",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:54:14.707632",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION6",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  },
+  "coordinate": {
+    "x": 25,
+    "y": 0
+  },
+  "visual_reason": "Rare color 14 (51 pixels)"
+}
+Show less
+Frame 103
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -11730,7 +7666,7 @@ Frame 94
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:31:45.024513",
+    "timestamp": "2025-12-27T22:54:05.085122",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
@@ -11781,15 +7717,15 @@ Frame 94
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -11797,7 +7733,7 @@ Frame 94
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -11824,119 +7760,17 @@ Frame 94
   }
 }
 Show less
-Frame 93
+Frame 102
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -11990,9 +7824,9 @@ Frame 93
     }
   },
   "2_delta": {
-    "last_action": "ACTION3",
+    "last_action": "ACTION4",
     "frame_changes": [
-      "Grid size changed"
+      "NULL - 304 Not Modified"
     ],
     "score_change": 0,
     "level_change": false,
@@ -12016,15 +7850,16 @@ Frame 93
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:31:29.537206",
+    "timestamp": "2025-12-27T22:53:55.648679",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
@@ -12075,15 +7910,15 @@ Frame 93
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -12091,7 +7926,7 @@ Frame 93
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -12118,28 +7953,401 @@ Frame 93
   }
 }
 Show less
-Frame 92
+Frame 101
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
+      "objects_agent_controls": [],
       "aggregated_controlled": [],
-      "control_confidence": 0.5777777777777777,
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION4",
+    "frame_changes": [
+      "NULL - 304 Not Modified"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:53:46.148275",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION4",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 100
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION6",
+    "frame_changes": [
+      "Grid size changed"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:53:36.090763",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION4",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 99
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -12227,7 +8435,7 @@ Frame 92
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:31:14.170426",
+    "timestamp": "2025-12-27T22:53:26.726925",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
@@ -12278,15 +8486,15 @@ Frame 92
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -12294,7 +8502,650 @@ Frame 92
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION6",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "random"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  },
+  "coordinate": {
+    "x": 33,
+    "y": 16
+  },
+  "visual_reason": "Rare color (14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14) (58 pixels)"
+}
+Show less
+Frame 73
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION1",
+    "frame_changes": [
+      "color_9 object moved up",
+      "position (36, 44) changed from color_12 to color_9",
+      "position (37, 44) changed from color_12 to color_9",
+      "position (38, 44) changed from color_12 to color_9",
+      "position (39, 44) changed from color_12 to color_9",
+      "position (40, 44) changed from color_12 to color_9",
+      "position (41, 44) changed from color_12 to color_9",
+      "position (42, 44) changed from color_12 to color_9",
+      "position (43, 44) changed from color_12 to color_9",
+      "position (44, 44) changed from color_12 to color_9",
+      "position (45, 44) changed from color_12 to color_9",
+      "position (46, 44) changed from color_12 to color_9",
+      "position (47, 44) changed from color_12 to color_9",
+      "position (36, 45) changed from color_12 to color_9",
+      "position (37, 45) changed from color_12 to color_9",
+      "position (38, 45) changed from color_12 to color_9",
+      "position (39, 45) changed from color_12 to color_9",
+      "position (40, 45) changed from color_12 to color_9",
+      "position (41, 45) changed from color_12 to color_9",
+      "position (42, 45) changed from color_12 to color_9",
+      "position (43, 45) changed from color_12 to color_9"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:53:17.060070",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION5",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 72
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION3",
+    "frame_changes": [
+      "color_9 object moved left",
+      "position (36, 48) changed from color_12 to color_9",
+      "position (37, 48) changed from color_12 to color_9",
+      "position (38, 48) changed from color_12 to color_9",
+      "position (39, 48) changed from color_12 to color_9",
+      "position (48, 48) changed from color_9 to color_12",
+      "position (49, 48) changed from color_9 to color_12",
+      "position (50, 48) changed from color_9 to color_12",
+      "position (51, 48) changed from color_9 to color_12",
+      "position (36, 49) changed from color_12 to color_9",
+      "position (37, 49) changed from color_12 to color_9",
+      "position (38, 49) changed from color_12 to color_9",
+      "position (39, 49) changed from color_12 to color_9",
+      "position (48, 49) changed from color_9 to color_12",
+      "position (49, 49) changed from color_9 to color_12",
+      "position (50, 49) changed from color_9 to color_12",
+      "position (51, 49) changed from color_9 to color_12",
+      "position (36, 50) changed from color_12 to color_9",
+      "position (37, 50) changed from color_12 to color_9",
+      "position (38, 50) changed from color_12 to color_9",
+      "position (39, 50) changed from color_12 to color_9"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:53:07.321001",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION1",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 71
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION2",
+    "frame_changes": [
+      "color_9 object moved down",
+      "position (40, 44) changed from color_9 to color_12",
+      "position (41, 44) changed from color_9 to color_12",
+      "position (42, 44) changed from color_9 to color_12",
+      "position (43, 44) changed from color_9 to color_12",
+      "position (44, 44) changed from color_9 to color_12",
+      "position (45, 44) changed from color_9 to color_12",
+      "position (46, 44) changed from color_9 to color_12",
+      "position (47, 44) changed from color_9 to color_12",
+      "position (48, 44) changed from color_9 to color_12",
+      "position (49, 44) changed from color_9 to color_12",
+      "position (50, 44) changed from color_9 to color_12",
+      "position (51, 44) changed from color_9 to color_12",
+      "position (40, 45) changed from color_9 to color_12",
+      "position (41, 45) changed from color_9 to color_12",
+      "position (42, 45) changed from color_9 to color_12",
+      "position (43, 45) changed from color_9 to color_12",
+      "position (44, 45) changed from color_9 to color_12",
+      "position (45, 45) changed from color_9 to color_12",
+      "position (46, 45) changed from color_9 to color_12",
+      "position (47, 45) changed from color_9 to color_12"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:52:57.719359",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -12310,7 +9161,855 @@ Frame 92
   },
   "8_primitives": {
     "cods_operators_used": [
-      "random"
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 70
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION2",
+    "frame_changes": [
+      "color_9 object moved down",
+      "position (40, 40) changed from color_9 to color_12",
+      "position (41, 40) changed from color_9 to color_12",
+      "position (42, 40) changed from color_9 to color_12",
+      "position (43, 40) changed from color_9 to color_12",
+      "position (44, 40) changed from color_9 to color_12",
+      "position (45, 40) changed from color_9 to color_12",
+      "position (46, 40) changed from color_9 to color_12",
+      "position (47, 40) changed from color_9 to color_12",
+      "position (48, 40) changed from color_9 to color_12",
+      "position (49, 40) changed from color_9 to color_12",
+      "position (50, 40) changed from color_9 to color_12",
+      "position (51, 40) changed from color_9 to color_12",
+      "position (40, 41) changed from color_9 to color_12",
+      "position (41, 41) changed from color_9 to color_12",
+      "position (42, 41) changed from color_9 to color_12",
+      "position (43, 41) changed from color_9 to color_12",
+      "position (44, 41) changed from color_9 to color_12",
+      "position (45, 41) changed from color_9 to color_12",
+      "position (46, 41) changed from color_9 to color_12",
+      "position (47, 41) changed from color_9 to color_12"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:52:48.256274",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION2",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 69
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION4",
+    "frame_changes": [
+      "color_9 object moved right",
+      "position (36, 40) changed from color_9 to color_12",
+      "position (37, 40) changed from color_9 to color_12",
+      "position (38, 40) changed from color_9 to color_12",
+      "position (39, 40) changed from color_9 to color_12",
+      "position (48, 40) changed from color_12 to color_9",
+      "position (49, 40) changed from color_12 to color_9",
+      "position (50, 40) changed from color_12 to color_9",
+      "position (51, 40) changed from color_12 to color_9",
+      "position (36, 41) changed from color_9 to color_12",
+      "position (37, 41) changed from color_9 to color_12",
+      "position (38, 41) changed from color_9 to color_12",
+      "position (39, 41) changed from color_9 to color_12",
+      "position (48, 41) changed from color_12 to color_9",
+      "position (49, 41) changed from color_12 to color_9",
+      "position (50, 41) changed from color_12 to color_9",
+      "position (51, 41) changed from color_12 to color_9",
+      "position (36, 42) changed from color_9 to color_12",
+      "position (37, 42) changed from color_9 to color_12",
+      "position (38, 42) changed from color_9 to color_12",
+      "position (39, 42) changed from color_9 to color_12"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:52:38.771048",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION2",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 68
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION2",
+    "frame_changes": [
+      "color_9 object moved down",
+      "position (36, 36) changed from color_9 to color_12",
+      "position (37, 36) changed from color_9 to color_12",
+      "position (38, 36) changed from color_9 to color_12",
+      "position (39, 36) changed from color_9 to color_12",
+      "position (40, 36) changed from color_9 to color_12",
+      "position (41, 36) changed from color_9 to color_12",
+      "position (42, 36) changed from color_9 to color_12",
+      "position (43, 36) changed from color_9 to color_12",
+      "position (44, 36) changed from color_9 to color_12",
+      "position (45, 36) changed from color_9 to color_12",
+      "position (46, 36) changed from color_9 to color_12",
+      "position (47, 36) changed from color_9 to color_12",
+      "position (36, 37) changed from color_9 to color_12",
+      "position (37, 37) changed from color_9 to color_12",
+      "position (38, 37) changed from color_9 to color_12",
+      "position (39, 37) changed from color_9 to color_12",
+      "position (40, 37) changed from color_9 to color_12",
+      "position (41, 37) changed from color_9 to color_12",
+      "position (42, 37) changed from color_9 to color_12",
+      "position (43, 37) changed from color_9 to color_12"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:52:29.256987",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION4",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
+    ],
+    "features_activated": [
+      "PATTERN_LEARNING",
+      "SENSATION_NAVIGATION",
+      "VISUAL_ANALYSIS"
+    ],
+    "decision_contributors": {}
+  }
+}
+Show less
+Frame 67
+{
+  "1_identity": {
+    "agent_id": "offspring_5583c15f",
+    "role": "generalist",
+    "generation": 295,
+    "working_theory": "NULL - 425 Too Early",
+    "self_model": {
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
+      "object_dependencies": [],
+      "network_control_hypotheses": [
+        {
+          "id": "oc_sp80_L2_534d9326",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_356bf247",
+          "controlled": [
+            "x:0,y:0",
+            "x:0,y:1",
+            "x:0,y:10",
+            "x:0,y:11",
+            "x:0,y:12"
+          ],
+          "reliability": 1,
+          "validated_by_win": 0
+        },
+        {
+          "id": "oc_sp80_L2_1a742fda",
+          "controlled": [
+            "x:32,y:48",
+            "x:33,y:48",
+            "x:34,y:48"
+          ],
+          "reliability": 0.75,
+          "validated_by_win": 0
+        }
+      ],
+      "tetrahedral_perception": {
+        "self_objects": [],
+        "goal_objects": [],
+        "threat_objects": [],
+        "mood": {
+          "valence": 0,
+          "arousal": 0,
+          "dominance": 0
+        }
+      }
+    },
+    "genome": {
+      "status": "NULL - 404 Not Found"
+    }
+  },
+  "2_delta": {
+    "last_action": "ACTION2",
+    "frame_changes": [
+      "color_9 object moved down",
+      "position (36, 32) changed from color_9 to color_12",
+      "position (37, 32) changed from color_9 to color_12",
+      "position (38, 32) changed from color_9 to color_12",
+      "position (39, 32) changed from color_9 to color_12",
+      "position (40, 32) changed from color_9 to color_12",
+      "position (41, 32) changed from color_9 to color_12",
+      "position (42, 32) changed from color_9 to color_12",
+      "position (43, 32) changed from color_9 to color_12",
+      "position (44, 32) changed from color_9 to color_12",
+      "position (45, 32) changed from color_9 to color_12",
+      "position (46, 32) changed from color_9 to color_12",
+      "position (47, 32) changed from color_9 to color_12",
+      "position (36, 33) changed from color_9 to color_12",
+      "position (37, 33) changed from color_9 to color_12",
+      "position (38, 33) changed from color_9 to color_12",
+      "position (39, 33) changed from color_9 to color_12",
+      "position (40, 33) changed from color_9 to color_12",
+      "position (41, 33) changed from color_9 to color_12",
+      "position (42, 33) changed from color_9 to color_12",
+      "position (43, 33) changed from color_9 to color_12"
+    ],
+    "score_change": 0,
+    "level_change": false,
+    "self_model_update": "NULL - 425 Too Early",
+    "world_model_update": "NULL - 425 Too Early",
+    "theory_validation": "NULL - 425 Too Early"
+  },
+  "3_understanding": {
+    "Q1_what_is_happening": "No actions observed to change state yet",
+    "Q2_how_does_this_feel": "No strong impressions yet. Feeling neutral.",
+    "Q3_what_worked_before": "Most salient: rare_color_4 (Rare color (only 0.6% of frame))",
+    "Q4_what_should_i_try": "Exploring to discover rules",
+    "Q5_how_confident": 0.3
+  },
+  "4_network_wisdom": {
+    "private_memory": "NULL - 425 Too Early",
+    "network_strength": "NULL - 425 Too Early",
+    "self_trust_bias": "NULL - 425 Too Early",
+    "decision_weight": "NULL - 425 Too Early",
+    "conflict_detected": false,
+    "two_streams_narrative": "NULL - 425 Too Early"
+  },
+  "4.5_resonance": {
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
+  },
+  "5_context": {
+    "game_id": "sp80-0605ab9e5b2a",
+    "level": 2,
+    "score": 1,
+    "timestamp": "2025-12-27T22:52:19.802009",
+    "strategy": "balanced",
+    "learning_mode": "smart_exploration",
+    "is_frontier": true,
+    "frontier_status": "NULL - 451 Frontier Level",
+    "exploration_mode": "frontier_exploration"
+  },
+  "6_environment": {
+    "obstacles": [
+      {
+        "position": [
+          0,
+          31
+        ],
+        "color": 14
+      },
+      {
+        "position": [
+          29,
+          31
+        ],
+        "color": 12
+      },
+      {
+        "position": [
+          17,
+          21
+        ],
+        "color": 9
+      },
+      {
+        "position": [
+          55,
+          21
+        ],
+        "color": 11
+      },
+      {
+        "position": [
+          55,
+          45
+        ],
+        "color": 11
+      }
+    ],
+    "goals": [],
+    "inferred_goals": [],
+    "agent_position": null,
+    "network_hypotheses": [],
+    "failure_insights": [
+      {
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
+        "level": 2,
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      },
+      {
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
+        "level": 2,
+        "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
+        "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
+        "confidence": 0.5,
+        "validated": false
+      }
+    ]
+  },
+  "7_action": {
+    "action_code": "ACTION2",
+    "reasoning": "Network hypotheses (3 insights, 0 validated)",
+    "emotional_state": "NULL - 425 Too Early"
+  },
+  "8_primitives": {
+    "cods_operators_used": [
+      "detect_shapes"
     ],
     "features_activated": [
       "PATTERN_LEARNING",
@@ -12324,116 +10023,14 @@ Show less
 Frame 66
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -12532,15 +10129,16 @@ Frame 66
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:30:57.652878",
+    "timestamp": "2025-12-27T22:52:10.172446",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
@@ -12591,15 +10189,15 @@ Frame 66
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -12607,7 +10205,7 @@ Frame 66
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -12617,7 +10215,7 @@ Frame 66
     ]
   },
   "7_action": {
-    "action_code": "ACTION5",
+    "action_code": "ACTION2",
     "reasoning": "Network hypotheses (3 insights, 0 validated)",
     "emotional_state": "NULL - 425 Too Early"
   },
@@ -12637,116 +10235,14 @@ Show less
 Frame 65
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_14_obj_1",
-          "color": 14,
-          "position": [
-            0,
-            0
-          ],
-          "raw_coord": "x:0,y:0"
-        },
-        {
-          "object_id": "color_14_obj_2",
-          "color": 14,
-          "position": [
-            1,
-            0
-          ],
-          "raw_coord": "x:1,y:0"
-        },
-        {
-          "object_id": "color_14_obj_3",
-          "color": 14,
-          "position": [
-            2,
-            0
-          ],
-          "raw_coord": "x:2,y:0"
-        },
-        {
-          "object_id": "color_14_obj_4",
-          "color": 14,
-          "position": [
-            3,
-            0
-          ],
-          "raw_coord": "x:3,y:0"
-        },
-        {
-          "object_id": "color_14_obj_5",
-          "color": 14,
-          "position": [
-            4,
-            0
-          ],
-          "raw_coord": "x:4,y:0"
-        },
-        {
-          "object_id": "color_14_obj_6",
-          "color": 14,
-          "position": [
-            5,
-            0
-          ],
-          "raw_coord": "x:5,y:0"
-        },
-        {
-          "object_id": "color_14_obj_7",
-          "color": 14,
-          "position": [
-            6,
-            0
-          ],
-          "raw_coord": "x:6,y:0"
-        },
-        {
-          "object_id": "color_14_obj_8",
-          "color": 14,
-          "position": [
-            7,
-            0
-          ],
-          "raw_coord": "x:7,y:0"
-        },
-        {
-          "object_id": "color_14_obj_9",
-          "color": 14,
-          "position": [
-            8,
-            0
-          ],
-          "raw_coord": "x:8,y:0"
-        },
-        {
-          "object_id": "color_14_obj_10",
-          "color": 14,
-          "position": [
-            9,
-            0
-          ],
-          "raw_coord": "x:9,y:0"
-        }
-      ],
-      "control_confidence": 0.5777777777777777,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -12800,7 +10296,7 @@ Frame 65
     }
   },
   "2_delta": {
-    "last_action": "ACTION4",
+    "last_action": "ACTION3",
     "frame_changes": [
       "Grid size changed"
     ],
@@ -12834,7 +10330,7 @@ Frame 65
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:30:42.561145",
+    "timestamp": "2025-12-27T22:51:59.836598",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
@@ -12885,15 +10381,15 @@ Frame 65
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -12901,7 +10397,7 @@ Frame 65
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -12936,25 +10432,14 @@ Show less
 Frame 64
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:0,y:0",
-        "x:1,y:0",
-        "x:2,y:0",
-        "x:3,y:0",
-        "x:4,y:0",
-        "x:5,y:0",
-        "x:6,y:0",
-        "x:7,y:0",
-        "x:8,y:0",
-        "x:9,y:0"
-      ],
+      "objects_agent_controls": [],
       "aggregated_controlled": [],
-      "control_confidence": 0.5777777777777777,
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -13034,16 +10519,15 @@ Frame 64
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 2,
     "score": 1,
-    "timestamp": "2025-12-27T14:30:41.687335",
+    "timestamp": "2025-12-27T22:51:58.981387",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": true,
@@ -13094,15 +10578,15 @@ Frame 64
     "network_hypotheses": [],
     "failure_insights": [
       {
-        "hypothesis_id": "9ae1a29b-0bde-440f-aa7b-c26302c846c1",
+        "hypothesis_id": "bd02fd69-5e87-47df-b943-d02a31f48906",
         "level": 2,
-        "failure": "Attempted 47 actions on level 2 without score increase. Early exploration attempt.",
+        "failure": "Game state frozen on level 2. Possibly reached dead end or unwinnable state.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2. May need to find the correct starting move or object to interact with.",
         "confidence": 0.5,
         "validated": false
       },
       {
-        "hypothesis_id": "60fa316c-1d6d-4109-b2b2-ff3694172a1a",
+        "hypothesis_id": "4dc68d0e-4632-47b4-af1d-4c61e5f7b710",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -13110,7 +10594,7 @@ Frame 64
         "validated": false
       },
       {
-        "hypothesis_id": "be8be9cf-34be-4ee7-9890-7492229d2127",
+        "hypothesis_id": "3a552e13-6c80-4b94-80a2-75357ed3c6b4",
         "level": 2,
         "failure": "Attempted 0 actions on level 2 without score increase. Early exploration attempt.",
         "strategy": "Levels 1-1 are solvable. Focus exploration on level 2.",
@@ -13120,7 +10604,7 @@ Frame 64
     ]
   },
   "7_action": {
-    "action_code": "ACTION4",
+    "action_code": "ACTION3",
     "reasoning": "Network hypotheses (3 insights, 0 validated)",
     "emotional_state": "NULL - 425 Too Early"
   },
@@ -13140,116 +10624,14 @@ Show less
 Frame 44
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_9_obj_1",
-          "color": 9,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_9_obj_2",
-          "color": 9,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_9_obj_3",
-          "color": 9,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_9_obj_4",
-          "color": 9,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_9_obj_5",
-          "color": 9,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_9_obj_6",
-          "color": 9,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_9_obj_7",
-          "color": 9,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_9_obj_8",
-          "color": 9,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_9_obj_9",
-          "color": 9,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_9_obj_10",
-          "color": 9,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -13353,7 +10735,7 @@ Frame 44
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:30:05.237005",
+    "timestamp": "2025-12-27T22:51:42.115512",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -13422,116 +10804,14 @@ Show less
 Frame 43
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -13627,15 +10907,16 @@ Frame 43
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:30:04.659596",
+    "timestamp": "2025-12-27T22:51:41.418819",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -13704,116 +10985,14 @@ Show less
 Frame 42
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -13917,7 +11096,7 @@ Frame 42
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:30:03.947465",
+    "timestamp": "2025-12-27T22:51:40.852503",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -13986,116 +11165,14 @@ Show less
 Frame 41
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -14199,7 +11276,7 @@ Frame 41
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:30:03.200867",
+    "timestamp": "2025-12-27T22:51:40.174702",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -14268,116 +11345,14 @@ Show less
 Frame 40
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -14473,16 +11448,15 @@ Frame 40
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:30:02.492657",
+    "timestamp": "2025-12-27T22:51:39.463764",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -14551,116 +11525,14 @@ Show less
 Frame 39
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -14756,15 +11628,16 @@ Frame 39
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:30:01.758967",
+    "timestamp": "2025-12-27T22:51:38.721341",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -14833,116 +11706,14 @@ Show less
 Frame 38
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -15038,15 +11809,16 @@ Frame 38
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:30:01.070695",
+    "timestamp": "2025-12-27T22:51:38.031182",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -15115,116 +11887,14 @@ Show less
 Frame 37
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -15320,15 +11990,16 @@ Frame 37
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:30:00.468039",
+    "timestamp": "2025-12-27T22:51:37.331798",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -15397,116 +12068,14 @@ Show less
 Frame 36
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -15610,7 +12179,7 @@ Frame 36
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:59.728895",
+    "timestamp": "2025-12-27T22:51:36.713490",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -15679,116 +12248,14 @@ Show less
 Frame 35
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -15891,7 +12358,7 @@ Frame 35
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:59.025303",
+    "timestamp": "2025-12-27T22:51:36.055918",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -15960,116 +12427,14 @@ Show less
 Frame 34
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -16145,15 +12510,16 @@ Frame 34
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:58.300900",
+    "timestamp": "2025-12-27T22:51:35.388196",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -16222,116 +12588,14 @@ Show less
 Frame 33
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -16407,16 +12671,15 @@ Frame 33
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:57.612734",
+    "timestamp": "2025-12-27T22:51:34.586535",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -16485,116 +12748,14 @@ Show less
 Frame 32
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -16670,15 +12831,16 @@ Frame 32
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:57.026087",
+    "timestamp": "2025-12-27T22:51:33.840998",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -16747,116 +12909,14 @@ Show less
 Frame 31
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -16932,16 +12992,15 @@ Frame 31
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": true,
-    "resonance_score": 0,
-    "status": "NULL - 204 No Content",
-    "reason": "No resonant patterns found for this game type"
+    "queried": false,
+    "status": "NULL - 102 Computation pending",
+    "reason": "Query gate: generalist at 0.00 novelty"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:56.405495",
+    "timestamp": "2025-12-27T22:51:33.156908",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -17010,116 +13069,14 @@ Show less
 Frame 30
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -17204,7 +13161,7 @@ Frame 30
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:55.685397",
+    "timestamp": "2025-12-27T22:51:32.564829",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -17273,116 +13230,14 @@ Show less
 Frame 29
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -17485,7 +13340,7 @@ Frame 29
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:54.964117",
+    "timestamp": "2025-12-27T22:51:31.870158",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -17554,8 +13409,8 @@ Show less
 Frame 28
 {
   "action": "ACTION6",
-  "reasoning": "PIONEER replaying proven sequence seq_732f (target: LNone)",
-  "agent_role": "pioneer",
+  "reasoning": "GENERALIST replaying proven sequence seq_732f (target: LNone)",
+  "agent_role": "generalist",
   "optimizer_target_level": null,
   "sequence_id": "seq_732f3fabe1e340be",
   "replay_step": 7,
@@ -17565,122 +13420,20 @@ Frame 28
     "y": 13
   },
   "checkpoint_validation": true,
-  "role_compliance": "pioneer following sequence script"
+  "role_compliance": "generalist following sequence script"
 }
 Show less
 Frame 6
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -17784,7 +13537,7 @@ Frame 6
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:53.951761",
+    "timestamp": "2025-12-27T22:51:30.860816",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -17853,116 +13606,14 @@ Show less
 Frame 5
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -18066,7 +13717,7 @@ Frame 5
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:53.228440",
+    "timestamp": "2025-12-27T22:51:30.139581",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -18135,116 +13786,14 @@ Show less
 Frame 4
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -18348,7 +13897,7 @@ Frame 4
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:52.523239",
+    "timestamp": "2025-12-27T22:51:29.468040",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -18417,8 +13966,8 @@ Show less
 Frame 3
 {
   "action": "ACTION6",
-  "reasoning": "PIONEER replaying proven sequence seq_732f (target: LNone)",
-  "agent_role": "pioneer",
+  "reasoning": "GENERALIST replaying proven sequence seq_732f (target: LNone)",
+  "agent_role": "generalist",
   "optimizer_target_level": null,
   "sequence_id": "seq_732f3fabe1e340be",
   "replay_step": 3,
@@ -18428,122 +13977,20 @@ Frame 3
     "y": 2
   },
   "checkpoint_validation": true,
-  "role_compliance": "pioneer following sequence script"
+  "role_compliance": "generalist following sequence script"
 }
 Show less
 Frame 2
 {
   "1_identity": {
-    "agent_id": "offspring_094b3f02",
+    "agent_id": "offspring_5583c15f",
     "role": "generalist",
     "generation": 295,
     "working_theory": "NULL - 425 Too Early",
     "self_model": {
-      "objects_agent_controls": [
-        "x:24,y:12",
-        "x:25,y:12",
-        "x:26,y:12",
-        "x:27,y:12",
-        "x:28,y:12",
-        "x:29,y:12",
-        "x:30,y:12",
-        "x:31,y:12",
-        "x:32,y:12",
-        "x:33,y:12"
-      ],
-      "aggregated_controlled": [
-        {
-          "object_id": "color_12_obj_1",
-          "color": 12,
-          "position": [
-            24,
-            12
-          ],
-          "raw_coord": "x:24,y:12"
-        },
-        {
-          "object_id": "color_12_obj_2",
-          "color": 12,
-          "position": [
-            25,
-            12
-          ],
-          "raw_coord": "x:25,y:12"
-        },
-        {
-          "object_id": "color_12_obj_3",
-          "color": 12,
-          "position": [
-            26,
-            12
-          ],
-          "raw_coord": "x:26,y:12"
-        },
-        {
-          "object_id": "color_12_obj_4",
-          "color": 12,
-          "position": [
-            27,
-            12
-          ],
-          "raw_coord": "x:27,y:12"
-        },
-        {
-          "object_id": "color_12_obj_5",
-          "color": 12,
-          "position": [
-            28,
-            12
-          ],
-          "raw_coord": "x:28,y:12"
-        },
-        {
-          "object_id": "color_12_obj_6",
-          "color": 12,
-          "position": [
-            29,
-            12
-          ],
-          "raw_coord": "x:29,y:12"
-        },
-        {
-          "object_id": "color_12_obj_7",
-          "color": 12,
-          "position": [
-            30,
-            12
-          ],
-          "raw_coord": "x:30,y:12"
-        },
-        {
-          "object_id": "color_12_obj_8",
-          "color": 12,
-          "position": [
-            31,
-            12
-          ],
-          "raw_coord": "x:31,y:12"
-        },
-        {
-          "object_id": "color_12_obj_9",
-          "color": 12,
-          "position": [
-            32,
-            12
-          ],
-          "raw_coord": "x:32,y:12"
-        },
-        {
-          "object_id": "color_12_obj_10",
-          "color": 12,
-          "position": [
-            33,
-            12
-          ],
-          "raw_coord": "x:33,y:12"
-        }
-      ],
-      "control_confidence": 0.7193675889328063,
+      "objects_agent_controls": [],
+      "aggregated_controlled": [],
+      "control_confidence": 0,
       "object_dependencies": [],
       "network_control_hypotheses": [
         {
@@ -18593,7 +14040,7 @@ Frame 2
     }
   },
   "2_delta": {
-    "last_action": "ACTION5",
+    "last_action": "ACTION6",
     "frame_changes": [
       "NULL - 304 Not Modified"
     ],
@@ -18619,15 +14066,16 @@ Frame 2
     "two_streams_narrative": "NULL - 425 Too Early"
   },
   "4.5_resonance": {
-    "queried": false,
-    "status": "NULL - 102 Computation pending",
-    "reason": "Query gate: generalist at 0.00 novelty"
+    "queried": true,
+    "resonance_score": 0,
+    "status": "NULL - 204 No Content",
+    "reason": "No resonant patterns found for this game type"
   },
   "5_context": {
     "game_id": "sp80-0605ab9e5b2a",
     "level": 1,
     "score": 0,
-    "timestamp": "2025-12-27T14:29:51.734257",
+    "timestamp": "2025-12-27T22:51:28.818164",
     "strategy": "balanced",
     "learning_mode": "smart_exploration",
     "is_frontier": false,
@@ -18696,8 +14144,8 @@ Show less
 Frame 1
 {
   "action": "ACTION6",
-  "reasoning": "PIONEER replaying proven sequence seq_732f (target: LNone)",
-  "agent_role": "pioneer",
+  "reasoning": "GENERALIST replaying proven sequence seq_732f (target: LNone)",
+  "agent_role": "generalist",
   "optimizer_target_level": null,
   "sequence_id": "seq_732f3fabe1e340be",
   "replay_step": 1,
@@ -18707,7 +14155,7 @@ Frame 1
     "y": 0
   },
   "checkpoint_validation": true,
-  "role_compliance": "pioneer following sequence script"
+  "role_compliance": "generalist following sequence script"
 }
 Show less
-© 2025 ARC Prize Foundation.ARC-AGI-3 Preview Replay: sp80-0605ab9e5b2a - b5f469cc-2808-46ac-b230-39b459b29ee3
+© 2025 ARC Prize Foundation.ARC-AGI-3 Preview Replay: sp80-0605ab9e5b2a - 230bb730-2b22-4372-98bc-ea218e38f803

@@ -101,7 +101,8 @@ try:
     from oracle_health_monitor import OracleHealthMonitor, HealthStatus
     from console_metrics_capture import (
         ConsoleMetricsCapture, get_metrics_capture, reset_metrics_capture,
-        record_game_start, record_game_end, record_cods, record_stuck
+        record_game_start, record_game_end, record_cods, record_stuck,
+        get_reasoning_capture, get_reasoning_diagnostics, ReasoningLogCapture
     )
     ORACLE_HEALTH_AVAILABLE = True
 except ImportError:
@@ -109,6 +110,9 @@ except ImportError:
     OracleHealthMonitor = None
     HealthStatus = None
     ConsoleMetricsCapture = None
+    get_reasoning_capture = None
+    get_reasoning_diagnostics = None
+    ReasoningLogCapture = None
 
 # Rule 2: Database-only logging
 logger = setup_database_logging(level='INFO')
@@ -237,10 +241,21 @@ class AutonomousEvolutionRunner:
         if ORACLE_HEALTH_AVAILABLE and OracleHealthMonitor:
             self.oracle_health = OracleHealthMonitor(db=self.db)
             self.metrics_capture = ConsoleMetricsCapture(generation=0)
+            # Initialize reasoning log capture for automated bug detection
+            if get_reasoning_capture:
+                try:
+                    self.reasoning_capture = get_reasoning_capture(0)
+                    print("[OK] Reasoning Log Capture initialized (automated reasoning bug detection)")
+                except Exception as e:
+                    self.reasoning_capture = None
+                    print(f"[WARN] Reasoning capture init failed: {e}")
+            else:
+                self.reasoning_capture = None
             print("[OK] Oracle Health Monitor initialized (autonomous diagnostics enabled)")
         else:
             self.oracle_health = None
             self.metrics_capture = None
+            self.reasoning_capture = None
         self.current_task = None
         
         # Setup signal handlers for graceful shutdown
@@ -2479,8 +2494,24 @@ class AutonomousEvolutionRunner:
                     # Print metrics summary
                     self.metrics_capture.print_summary()
                     
+                    # Print reasoning diagnostics summary (for automated bug detection)
+                    if get_reasoning_capture:
+                        try:
+                            reasoning_capture = get_reasoning_capture(self.current_generation)
+                            if reasoning_capture:
+                                reasoning_capture.print_diagnostics_report()
+                        except Exception as e:
+                            print(f"[REASONING-DIAG] Report failed: {e}")
+                    
                     # Reset metrics for next generation
                     self.metrics_capture.reset(self.current_generation + 1)
+                    
+                    # Reset reasoning capture for next generation
+                    if get_reasoning_capture:
+                        try:
+                            get_reasoning_capture(self.current_generation + 1)
+                        except Exception:
+                            pass
                     
                 except Exception as e:
                     print(f"[ORACLE] Health check failed: {e}")

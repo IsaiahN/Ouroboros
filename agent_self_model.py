@@ -2414,6 +2414,96 @@ class AgentSelfModel:
         
         return hypothesis_id
     
+    def learn_from_movement_correlation(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int,
+        action: str,
+        direction: str,
+        controlled_color: int,
+        generation: int = 0
+    ) -> None:
+        """
+        Learn object control from action-movement correlation.
+        
+        When frame_changes show "color_X moved [direction]" after an action
+        that corresponds to that direction, we learn that we control color_X.
+        
+        This is the core "I am this object" learning mechanism.
+        
+        Args:
+            agent_id: Agent making the discovery
+            game_id: Game identifier
+            level: Level number
+            action: Action taken (e.g., ACTION3)
+            direction: Direction object moved (e.g., "left")
+            controlled_color: Color number that moved
+            generation: Current evolution generation
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Create control pattern
+        control_pattern = {
+            'discovery_type': 'movement_correlation',
+            'controlled_color': controlled_color,
+            'action': action,
+            'direction': direction
+        }
+        
+        # Build action-response map
+        action_response = {action: direction}
+        
+        # Check if we already have this knowledge
+        existing = self.db.execute_query("""
+            SELECT hypothesis_id, reliability_score, validation_attempts
+            FROM network_object_control_hypotheses
+            WHERE game_type = ? AND level_number = ? 
+                  AND control_pattern LIKE ? AND is_active = TRUE
+        """, (game_type, level, f'%"controlled_color": {controlled_color}%'))
+        
+        if existing:
+            # Update existing - increase reliability
+            row = existing[0]
+            new_reliability = min(0.95, row['reliability_score'] + 0.1)
+            self.db.execute_query("""
+                UPDATE network_object_control_hypotheses
+                SET reliability_score = ?,
+                    validation_attempts = validation_attempts + 1,
+                    validation_successes = validation_successes + 1,
+                    last_validated = CURRENT_TIMESTAMP
+                WHERE hypothesis_id = ?
+            """, (new_reliability, row['hypothesis_id']))
+            logger.debug(f"[MOVEMENT] Updated hypothesis for color_{controlled_color}: reliability {new_reliability:.2f}")
+        else:
+            # Create new hypothesis
+            hypothesis_id = self._generate_hypothesis_id()
+            self.db.execute_query("""
+                INSERT INTO network_object_control_hypotheses
+                (hypothesis_id, game_type, level_number, control_pattern, action_response_map,
+                 discovered_by_agent, discovery_generation, reliability_score, discovery_method,
+                 validation_attempts, validation_successes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0.75, 'movement_correlation', 1, 1)
+            """, (
+                hypothesis_id, game_type, level, json.dumps(control_pattern),
+                json.dumps(action_response), agent_id, generation
+            ))
+            logger.info(
+                f"[MOVEMENT] Agent {agent_id[:8]} learned: {action} moves color_{controlled_color} {direction}"
+            )
+        
+        # Also store in agent's personal control map
+        try:
+            self.store_control_map(
+                agent_id=agent_id,
+                game_id=game_id,
+                level=level,
+                controlled=[(controlled_color, action, direction)],
+                confidence=0.75
+            )
+        except Exception as e:
+            logger.debug(f"Personal control map update failed: {e}")
+
     def get_network_control_hypotheses(
         self,
         game_id: str,
@@ -3951,6 +4041,90 @@ class AgentSelfModel:
             }
             for row in (results or [])
         ]
+
+    def record_availability_control_proof(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int,
+        trigger_action: str,
+        new_actions: List[int],
+        frame_state: Optional[List] = None
+    ) -> None:
+        """
+        Record proof of object control based on available_actions change.
+        
+        When clicking an object unlocks movement actions (1-4), this is strong
+        evidence that we selected something controllable. This updates the
+        network control hypotheses with high confidence.
+        
+        Args:
+            agent_id: Agent that discovered this
+            game_id: Game identifier
+            level: Level number
+            trigger_action: Action that caused the change (usually ACTION6)
+            new_actions: List of new actions that became available
+            frame_state: Current frame for object identification
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # This is strong control evidence - movement was unlocked
+        has_movement = any(a in [1, 2, 3, 4] for a in new_actions)
+        
+        if has_movement and trigger_action:
+            # Try to identify what was clicked by examining frame state
+            clicked_color = None
+            if frame_state:
+                # Look for recently selected object (usually has visual indicator)
+                # For now, log the event with frame hash
+                import hashlib
+                frame_hash = hashlib.md5(str(frame_state).encode()).hexdigest()[:16]
+            else:
+                frame_hash = None
+            
+            # Store as strong control discovery
+            # This gets shared to network_object_control_hypotheses
+            control_pattern = {
+                'discovery_type': 'availability_change',
+                'trigger_action': trigger_action,
+                'unlocked_actions': new_actions,
+                'confidence_source': 'movement_unlocked'
+            }
+            
+            action_response = {}
+            for action_num in new_actions:
+                if action_num == 1:
+                    action_response['ACTION1'] = 'up'
+                elif action_num == 2:
+                    action_response['ACTION2'] = 'down'
+                elif action_num == 3:
+                    action_response['ACTION3'] = 'left'
+                elif action_num == 4:
+                    action_response['ACTION4'] = 'right'
+            
+            # Share to network with high confidence (this is strong evidence)
+            try:
+                hypothesis_id = self._generate_hypothesis_id()
+                self.db.execute_query("""
+                    INSERT OR IGNORE INTO network_object_control_hypotheses
+                    (hypothesis_id, game_type, level_number, control_pattern, 
+                     action_response_map, reliability_score, discovery_method,
+                     validation_attempts, validation_successes, validated_by_win)
+                    VALUES (?, ?, ?, ?, ?, 0.85, 'availability_change', 1, 1, FALSE)
+                """, (hypothesis_id, game_type, level, 
+                      json.dumps(control_pattern), json.dumps(action_response)))
+                
+                logger.info(
+                    f"[CONTROL PROOF] Recorded availability change: {trigger_action} "
+                    f"unlocked {new_actions} in {game_type} L{level}"
+                )
+            except Exception as e:
+                logger.debug(f"Failed to record availability control proof: {e}")
+    
+    def _generate_hypothesis_id(self) -> str:
+        """Generate a unique hypothesis ID."""
+        import uuid
+        return str(uuid.uuid4())[:12]
 
     # ========================================================================
     # COLLISION/INTERACTION DETECTION (Added 2025-12-08)

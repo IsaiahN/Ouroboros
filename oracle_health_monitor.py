@@ -13,6 +13,8 @@ The Oracle's meta-cognitive layer that:
 
 This is the "immune system" that detects and responds to pathologies.
 
+ADDED: Reasoning log analysis for detecting observation->hypothesis loop bugs
+
 Rule 1: Disable pycache
 Rule 2: All data in database
 Rule 11: No unicode emojis
@@ -30,6 +32,15 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from database_interface import DatabaseInterface
+
+# Reasoning log capture for automated bug detection
+try:
+    from console_metrics_capture import get_reasoning_diagnostics, get_reasoning_capture
+    REASONING_CAPTURE_AVAILABLE = True
+except ImportError:
+    REASONING_CAPTURE_AVAILABLE = False
+    get_reasoning_diagnostics = None
+    get_reasoning_capture = None
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +227,40 @@ class OracleHealthMonitor:
             )
         """)
         
+        # Reasoning bugs table - for LLM investigation workflow
+        # Stores detected reasoning system bugs for autonomous debugging
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS oracle_reasoning_bugs (
+                bug_id TEXT PRIMARY KEY,
+                generation INTEGER NOT NULL,
+                bug_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                description TEXT,
+                evidence_json TEXT,
+                affected_games_json TEXT,
+                occurrence_count INTEGER DEFAULT 1,
+                first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'open',
+                fix_attempted BOOLEAN DEFAULT FALSE,
+                fix_commit TEXT,
+                fix_description TEXT,
+                resolved_at TIMESTAMP,
+                resolution_notes TEXT
+            )
+        """)
+        
+        # Index for reasoning bugs
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_bugs_status
+            ON oracle_reasoning_bugs(status, severity)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_reasoning_bugs_type
+            ON oracle_reasoning_bugs(bug_type, generation)
+        """)
+        
         # Index for fast lookups
         self.db.execute_query("""
             CREATE INDEX IF NOT EXISTS idx_oracle_obs_gen 
@@ -282,6 +327,14 @@ class OracleHealthMonitor:
         if unlock_issue:
             pathologies.append(unlock_issue)
             recommendations.extend(unlock_issue.get('recommendations', []))
+        
+        # Check 6: Reasoning log diagnostics (NEW)
+        # Detects bugs like "Q1 says no actions but frame_changes has 20+ items"
+        reasoning_issues = self._check_reasoning_diagnostics(generation)
+        if reasoning_issues:
+            pathologies.extend(reasoning_issues)
+            for issue in reasoning_issues:
+                recommendations.extend(issue.get('recommendations', []))
         
         # Determine overall status
         if any(p.get('severity') == 'critical' for p in pathologies):
@@ -548,6 +601,477 @@ class OracleHealthMonitor:
             }
         
         return None
+    
+    def _check_reasoning_diagnostics(self, generation: int) -> List[Dict[str, Any]]:
+        """
+        Check reasoning log capture for bugs in the observation->hypothesis loop.
+        
+        This is the Oracle's ability to automatically detect the bugs that used to
+        require manual reasoning log analysis, such as:
+        - Q1 says "no actions observed" but frame_changes has 20+ items
+        - Working theory stuck as "425 Too Early" for 400+ frames
+        - Hypotheses formed but never tested
+        - Decision contributors showing no system influence
+        
+        Returns:
+            List of pathology dicts for any reasoning bugs detected
+        """
+        issues = []
+        
+        if not REASONING_CAPTURE_AVAILABLE or not get_reasoning_diagnostics:
+            logger.debug("Reasoning capture not available for diagnostics")
+            return issues
+        
+        try:
+            diagnostics = get_reasoning_diagnostics()
+            if not diagnostics:
+                return issues
+            
+            # Check for critical reasoning bugs
+            critical_count = diagnostics.get('critical_count', 0)
+            warning_count = diagnostics.get('warning_count', 0)
+            by_type = diagnostics.get('by_type', {})
+            
+            # BUG TYPE 1: Q1 disconnected from frame changes
+            if 'Q1_DISCONNECT' in by_type:
+                q1_info = by_type['Q1_DISCONNECT']
+                if q1_info['count'] > 10:  # More than 10 occurrences = systematic bug
+                    issues.append({
+                        'type': PathologyType.BLIND_PLAY.value,
+                        'severity': 'critical',
+                        'evidence': {
+                            'bug_type': 'Q1_DISCONNECT',
+                            'occurrences': q1_info['count'],
+                            'affected_games': q1_info.get('affected_games', []),
+                            'sample': q1_info.get('sample_description', '')
+                        },
+                        'diagnosis': (
+                            f"Q1 observation system disconnected: {q1_info['count']} times "
+                            f"Q1 reported no actions despite significant frame changes. "
+                            f"The observation->hypothesis loop is broken."
+                        ),
+                        'recommendations': [
+                            'Check _analyze_emergent_q1() is using delta_frame_changes',
+                            'Verify _cache_delta_frame_changes() is being called before Q1',
+                            'Review hypothesis formation from frame changes'
+                        ]
+                    })
+            
+            # BUG TYPE 2: Working theory stuck 
+            if 'WORKING_THEORY_STUCK' in by_type:
+                theory_info = by_type['WORKING_THEORY_STUCK']
+                if theory_info['count'] > 5:
+                    issues.append({
+                        'type': 'theory_formation_failure',
+                        'severity': 'warning',
+                        'evidence': {
+                            'bug_type': 'WORKING_THEORY_STUCK',
+                            'occurrences': theory_info['count'],
+                            'affected_games': theory_info.get('affected_games', [])
+                        },
+                        'diagnosis': (
+                            f"Working theory not forming: {theory_info['count']} games have "
+                            f"theory stuck as '425 Too Early' after 50+ actions"
+                        ),
+                        'recommendations': [
+                            'Check _build_self_model_context() working_theory generation',
+                            'Verify fallback theory formation from network hypotheses',
+                            'Review GAP FIX 2 implementation'
+                        ]
+                    })
+            
+            # BUG TYPE 3: Hypotheses not used in decisions
+            if 'HYPOTHESIS_UNUSED' in by_type:
+                hyp_info = by_type['HYPOTHESIS_UNUSED']
+                if hyp_info['count'] > 20:
+                    issues.append({
+                        'type': 'hypothesis_integration_failure',
+                        'severity': 'warning',
+                        'evidence': {
+                            'bug_type': 'HYPOTHESIS_UNUSED',
+                            'occurrences': hyp_info['count'],
+                            'affected_games': hyp_info.get('affected_games', [])
+                        },
+                        'diagnosis': (
+                            f"Hypotheses not influencing decisions: {hyp_info['count']} times "
+                            f"hypotheses were available but DM-3 didn't activate"
+                        ),
+                        'recommendations': [
+                            'Check DM-3 hypothesis-driven action selection',
+                            'Verify _apply_hypothesis_driven_selection() is called',
+                            'Review decision_contributors population'
+                        ]
+                    })
+            
+            # BUG TYPE 4: Emergent cognition dead
+            if 'EMERGENT_COGNITION_DEAD' in by_type:
+                ec_info = by_type['EMERGENT_COGNITION_DEAD']
+                if ec_info['count'] > 5:
+                    issues.append({
+                        'type': PathologyType.BLIND_PLAY.value,
+                        'severity': 'critical',
+                        'evidence': {
+                            'bug_type': 'EMERGENT_COGNITION_DEAD',
+                            'occurrences': ec_info['count'],
+                            'affected_games': ec_info.get('affected_games', [])
+                        },
+                        'diagnosis': (
+                            f"Emergent cognition system not activating: {ec_info['count']} games "
+                            f"have 4+/5 Q-fields empty/null after 20+ actions"
+                        ),
+                        'recommendations': [
+                            'Check _analyze_emergent_q1() through _analyze_emergent_q5()',
+                            'Verify sensation_context is being built',
+                            'Review agent operating mode for sensation suppression'
+                        ]
+                    })
+            
+            # BUG TYPE 5: No self-model forming
+            if 'NO_SELF_MODEL' in by_type:
+                sm_info = by_type['NO_SELF_MODEL']
+                if sm_info['count'] > 5:
+                    issues.append({
+                        'type': 'self_model_failure',
+                        'severity': 'warning',
+                        'evidence': {
+                            'bug_type': 'NO_SELF_MODEL',
+                            'occurrences': sm_info['count'],
+                            'affected_games': sm_info.get('affected_games', [])
+                        },
+                        'diagnosis': (
+                            f"Self-model not forming: {sm_info['count']} games have no "
+                            f"controlled objects or goals identified after 100+ actions"
+                        ),
+                        'recommendations': [
+                            'Check agent_self_model.py track_action_effect()',
+                            'Verify objects_agent_controls is being populated',
+                            'Review network control hypotheses fallback'
+                        ]
+                    })
+            
+            # Log summary if any issues found
+            if issues:
+                logger.warning(
+                    f"[ORACLE] Reasoning diagnostics found {len(issues)} issues: "
+                    f"{[i['type'] for i in issues]}"
+                )
+                # Save bugs to database for LLM investigation
+                self._save_reasoning_bugs(generation, issues)
+            
+        except Exception as e:
+            logger.debug(f"Reasoning diagnostics check failed: {e}")
+        
+        return issues
+    
+    def _save_reasoning_bugs(self, generation: int, issues: List[Dict[str, Any]]):
+        """
+        Save detected reasoning bugs to database for LLM investigation.
+        
+        Upserts bugs - if same bug type already exists and is open,
+        increments occurrence count. Otherwise creates new record.
+        """
+        for issue in issues:
+            bug_type = issue.get('evidence', {}).get('bug_type', issue.get('type', 'unknown'))
+            severity = issue.get('severity', 'warning')
+            description = issue.get('diagnosis', issue.get('description', ''))
+            evidence = issue.get('evidence', {})
+            affected_games = evidence.get('affected_games', [])
+            
+            # Check if this bug type is already open
+            existing = self.db.execute_query("""
+                SELECT bug_id, occurrence_count FROM oracle_reasoning_bugs
+                WHERE bug_type = ? AND status = 'open'
+                ORDER BY last_seen_at DESC LIMIT 1
+            """, (bug_type,))
+            
+            if existing:
+                # Update existing bug
+                bug_id = existing[0]['bug_id']
+                new_count = existing[0]['occurrence_count'] + evidence.get('occurrences', 1)
+                self.db.execute_query("""
+                    UPDATE oracle_reasoning_bugs
+                    SET occurrence_count = ?,
+                        last_seen_at = CURRENT_TIMESTAMP,
+                        evidence_json = ?,
+                        affected_games_json = ?
+                    WHERE bug_id = ?
+                """, (
+                    new_count,
+                    json.dumps(evidence),
+                    json.dumps(affected_games),
+                    bug_id
+                ))
+            else:
+                # Create new bug record
+                bug_id = str(uuid.uuid4())[:12]
+                self.db.execute_query("""
+                    INSERT INTO oracle_reasoning_bugs
+                    (bug_id, generation, bug_type, severity, description,
+                     evidence_json, affected_games_json, occurrence_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    bug_id,
+                    generation,
+                    bug_type,
+                    severity,
+                    description,
+                    json.dumps(evidence),
+                    json.dumps(affected_games),
+                    evidence.get('occurrences', 1)
+                ))
+    
+    # =========================================================================
+    # LLM INVESTIGATION WORKFLOW
+    # =========================================================================
+    
+    def get_open_bugs(self, severity: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get all open reasoning bugs for LLM investigation.
+        
+        Args:
+            severity: Filter by severity ('critical', 'warning', or None for all)
+            
+        Returns:
+            List of bug records with evidence and fix suggestions
+        """
+        if severity:
+            results = self.db.execute_query("""
+                SELECT * FROM oracle_reasoning_bugs
+                WHERE status = 'open' AND severity = ?
+                ORDER BY 
+                    CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+                    occurrence_count DESC
+            """, (severity,))
+        else:
+            results = self.db.execute_query("""
+                SELECT * FROM oracle_reasoning_bugs
+                WHERE status = 'open'
+                ORDER BY 
+                    CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+                    occurrence_count DESC
+            """)
+        
+        bugs = []
+        for r in results or []:
+            bug = dict(r)
+            bug['evidence'] = json.loads(bug.get('evidence_json', '{}'))
+            bug['affected_games'] = json.loads(bug.get('affected_games_json', '[]'))
+            bug['fix_suggestions'] = self._get_fix_suggestions(bug['bug_type'])
+            bugs.append(bug)
+        
+        return bugs
+    
+    def get_bug_investigation_prompt(self, bug_id: Optional[str] = None) -> str:
+        """
+        Generate an LLM-ready investigation prompt for reasoning bugs.
+        
+        This is what the LLM (Claude) uses to understand and fix bugs.
+        
+        Args:
+            bug_id: Specific bug to investigate, or None for highest priority
+            
+        Returns:
+            Formatted investigation prompt for the LLM
+        """
+        if bug_id:
+            bugs = self.db.execute_query("""
+                SELECT * FROM oracle_reasoning_bugs WHERE bug_id = ?
+            """, (bug_id,))
+        else:
+            bugs = self.db.execute_query("""
+                SELECT * FROM oracle_reasoning_bugs
+                WHERE status = 'open'
+                ORDER BY 
+                    CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+                    occurrence_count DESC
+                LIMIT 1
+            """)
+        
+        if not bugs:
+            return "No open reasoning bugs to investigate."
+        
+        bug = dict(bugs[0])
+        evidence = json.loads(bug.get('evidence_json', '{}'))
+        affected_games = json.loads(bug.get('affected_games_json', '[]'))
+        fix_suggestions = self._get_fix_suggestions(bug['bug_type'])
+        
+        prompt = f"""
+# REASONING BUG INVESTIGATION
+
+## Bug Details
+- **Bug ID**: {bug['bug_id']}
+- **Type**: {bug['bug_type']}
+- **Severity**: {bug['severity'].upper()}
+- **First Seen**: Generation {bug['generation']}
+- **Occurrences**: {bug['occurrence_count']}
+
+## Description
+{bug['description']}
+
+## Evidence
+```json
+{json.dumps(evidence, indent=2)}
+```
+
+## Affected Games
+{', '.join(affected_games[:10]) if affected_games else 'Not tracked'}
+
+## Fix Suggestions
+{chr(10).join(f'- {s}' for s in fix_suggestions)}
+
+## Investigation Steps
+1. Search codebase for the relevant functions mentioned in fix suggestions
+2. Check if the data flow is correct (data exists but not used vs data not collected)
+3. Add logging to verify hypothesis
+4. Implement fix
+5. Mark bug as fixed with: oracle.mark_bug_fixed('{bug['bug_id']}', 'description of fix')
+
+## Files to Check
+{self._get_files_to_check(bug['bug_type'])}
+"""
+        return prompt
+    
+    def _get_fix_suggestions(self, bug_type: str) -> List[str]:
+        """Get fix suggestions based on bug type."""
+        suggestions = {
+            'Q1_DISCONNECT': [
+                "Check _analyze_emergent_q1() is using _last_delta_frame_changes",
+                "Verify _cache_delta_frame_changes() called before Q1 analysis",
+                "Ensure hypothesis formation from frame changes is triggered",
+                "Check if Q1 text template uses frame change count"
+            ],
+            'WORKING_THEORY_STUCK': [
+                "Check _build_self_model_context() working_theory generation",
+                "Verify GAP FIX 2 fallback theory formation",
+                "Check network hypothesis query for theory building",
+                "Ensure score-based theory formation triggers"
+            ],
+            'HYPOTHESIS_UNUSED': [
+                "Check DM-3 _apply_hypothesis_driven_selection() is called",
+                "Verify hypotheses are passed to action selection",
+                "Check decision_contributors population",
+                "Ensure hypothesis action mapping works"
+            ],
+            'EMERGENT_COGNITION_DEAD': [
+                "Check _analyze_emergent_q1() through _analyze_emergent_q5()",
+                "Verify sensation_context is being built",
+                "Check agent operating mode for sensation suppression",
+                "Ensure sensation engine is initialized"
+            ],
+            'NO_SELF_MODEL': [
+                "Check agent_self_model.py track_action_effect()",
+                "Verify objects_agent_controls population",
+                "Check network control hypotheses fallback",
+                "Ensure ACTION6 selection tracking works"
+            ]
+        }
+        return suggestions.get(bug_type, ["No specific suggestions - investigate manually"])
+    
+    def _get_files_to_check(self, bug_type: str) -> str:
+        """Get relevant files for bug type."""
+        files = {
+            'Q1_DISCONNECT': """
+- core_gameplay.py: _analyze_emergent_q1(), _cache_delta_frame_changes()
+- core_gameplay.py: Lines around 7680-7740 (Q1 analysis)
+- agent_self_model.py: hypothesis formation methods""",
+            'WORKING_THEORY_STUCK': """
+- core_gameplay.py: _build_self_model_context() 
+- core_gameplay.py: GAP FIX 2 section (around line 8173-8210)
+- core_gameplay.py: _format_reasoning_for_api()""",
+            'HYPOTHESIS_UNUSED': """
+- core_gameplay.py: _apply_hypothesis_driven_selection()
+- core_gameplay.py: DM-3 section (around line 4390-4422)
+- core_gameplay.py: _select_action_with_dm_integration()""",
+            'EMERGENT_COGNITION_DEAD': """
+- core_gameplay.py: _analyze_emergent_q1() through _analyze_emergent_q5()
+- sensation_engine.py: SensationEngine class
+- core_gameplay.py: _analyze_sensation_context()""",
+            'NO_SELF_MODEL': """
+- agent_self_model.py: track_action_effect(), get_controlled_objects()
+- core_gameplay.py: _build_self_model_context()
+- core_gameplay.py: GAP FIX 1 section (bootstrap from network)"""
+        }
+        return files.get(bug_type, "- core_gameplay.py: Search for bug_type keyword")
+    
+    def mark_bug_fixed(
+        self,
+        bug_id: str,
+        fix_description: str,
+        fix_commit: Optional[str] = None
+    ):
+        """
+        Mark a bug as fixed after LLM implements the fix.
+        
+        Args:
+            bug_id: The bug ID to mark as fixed
+            fix_description: Description of what was fixed
+            fix_commit: Optional git commit hash
+        """
+        self.db.execute_query("""
+            UPDATE oracle_reasoning_bugs
+            SET status = 'fixed',
+                fix_attempted = TRUE,
+                fix_description = ?,
+                fix_commit = ?,
+                resolved_at = CURRENT_TIMESTAMP
+            WHERE bug_id = ?
+        """, (fix_description, fix_commit, bug_id))
+        
+        logger.info(f"[ORACLE] Bug {bug_id} marked as fixed: {fix_description}")
+    
+    def mark_bug_wont_fix(self, bug_id: str, reason: str):
+        """Mark a bug as won't fix with reason."""
+        self.db.execute_query("""
+            UPDATE oracle_reasoning_bugs
+            SET status = 'wont_fix',
+                resolution_notes = ?,
+                resolved_at = CURRENT_TIMESTAMP
+            WHERE bug_id = ?
+        """, (reason, bug_id))
+    
+    def get_bug_history(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get history of all bugs (open and resolved)."""
+        results = self.db.execute_query("""
+            SELECT * FROM oracle_reasoning_bugs
+            ORDER BY 
+                CASE status WHEN 'open' THEN 0 ELSE 1 END,
+                last_seen_at DESC
+            LIMIT ?
+        """, (limit,))
+        
+        return [dict(r) for r in results] if results else []
+    
+    def print_bug_report(self):
+        """Print a summary of all reasoning bugs for console."""
+        open_bugs = self.get_open_bugs()
+        
+        print("\n" + "=" * 60)
+        print("ORACLE REASONING BUG REPORT")
+        print("=" * 60)
+        
+        if not open_bugs:
+            print("[OK] No open reasoning bugs")
+            print("=" * 60)
+            return
+        
+        critical = [b for b in open_bugs if b['severity'] == 'critical']
+        warnings = [b for b in open_bugs if b['severity'] == 'warning']
+        
+        print(f"Open Bugs: {len(open_bugs)} ({len(critical)} critical, {len(warnings)} warnings)")
+        print("-" * 60)
+        
+        for bug in open_bugs:
+            severity_tag = "[CRIT]" if bug['severity'] == 'critical' else "[WARN]"
+            print(f"\n{severity_tag} {bug['bug_type']} (ID: {bug['bug_id']})")
+            print(f"    Occurrences: {bug['occurrence_count']}")
+            print(f"    First seen: Gen {bug['generation']}")
+            print(f"    {bug['description'][:80]}...")
+            if bug['fix_suggestions']:
+                print(f"    Fix: {bug['fix_suggestions'][0]}")
+        
+        print("\n" + "=" * 60)
+        print("Run: oracle.get_bug_investigation_prompt() for detailed investigation")
+        print("=" * 60)
     
     def _get_metrics_from_db(self, generation: int) -> Dict[str, Any]:
         """Get metrics from database for a generation."""

@@ -5,6 +5,9 @@ Console Metrics Capture - Real-time metrics from console output
 Captures structured metrics during gameplay without needing API access
 to reasoning logs. Uses in-memory aggregation during each generation.
 
+ADDED: ReasoningLogCapture class for capturing reasoning payloads and
+detecting bugs that require manual analysis (Q1-Q5, hypotheses, etc.)
+
 Rule 1: Disable pycache
 Rule 2: All data in database (final metrics stored)
 Rule 11: No unicode emojis
@@ -16,11 +19,426 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 import json
 import logging
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# REASONING LOG CAPTURE - For detecting bugs like "Q1 says no actions but
+# frame_changes has 20+ items"
+# =============================================================================
+
+@dataclass
+class ReasoningSnapshot:
+    """Single reasoning payload snapshot for analysis."""
+    game_id: str
+    agent_id: str
+    level: int
+    action_index: int
+    action_taken: str
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    
+    # Q1-Q5 Emergent cognition
+    q1_observable: str = ""
+    q2_uncertainty: str = ""
+    q3_curiosity: str = ""
+    q4_fear: str = ""
+    q5_desire: str = ""
+    
+    # Frame analysis
+    frame_changes_count: int = 0
+    delta_frame_changes_count: int = 0
+    objects_in_scene: int = 0
+    
+    # Hypothesis state
+    hypotheses_active: int = 0
+    hypothesis_ids: List[str] = field(default_factory=list)
+    working_theory: str = ""
+    
+    # Decision contributors
+    decision_contributors: Dict[str, Any] = field(default_factory=dict)
+    cods_active: bool = False
+    
+    # Self model
+    controlled_objects: List[str] = field(default_factory=list)
+    inferred_goals: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ReasoningDiagnostic:
+    """Diagnostic result detecting reasoning bugs."""
+    bug_type: str
+    severity: str  # 'critical', 'warning', 'info'
+    description: str
+    evidence: Dict[str, Any]
+    snapshot: Optional[ReasoningSnapshot] = None
+
+
+class ReasoningLogCapture:
+    """
+    Capture reasoning payloads during gameplay for automated bug detection.
+    
+    The Oracle can use this to detect bugs like:
+    - Q1 says "no actions observed" but frame_changes has 20+ items
+    - Hypothesis formed but never tested
+    - Working theory stuck as "425 Too Early" for 400+ frames
+    - Decision contributors show no influence from any system
+    """
+    
+    def __init__(self, generation: int):
+        self.generation = generation
+        self.snapshots: Dict[str, List[ReasoningSnapshot]] = defaultdict(list)
+        self.diagnostics: List[ReasoningDiagnostic] = []
+        self._started_at = datetime.now()
+    
+    def reset(self, generation: int):
+        """Reset for new generation."""
+        self.generation = generation
+        self.snapshots.clear()
+        self.diagnostics.clear()
+        self._started_at = datetime.now()
+    
+    def record_reasoning_payload(
+        self,
+        game_id: str,
+        agent_id: str,
+        level: int,
+        action_index: int,
+        action_taken: str,
+        reasoning_payload: Dict[str, Any]
+    ):
+        """
+        Record a reasoning payload for analysis.
+        
+        Call this from core_gameplay.py after building the reasoning JSON.
+        
+        Args:
+            game_id: Current game ID
+            agent_id: Agent executing the action
+            level: Current level number
+            action_index: Action counter (how many actions taken this game)
+            action_taken: The action (e.g., "ACTION1")
+            reasoning_payload: The full reasoning JSON dict
+        """
+        snapshot = ReasoningSnapshot(
+            game_id=game_id,
+            agent_id=agent_id,
+            level=level,
+            action_index=action_index,
+            action_taken=action_taken
+        )
+        
+        # Extract understanding section (Q1-Q5)
+        understanding = reasoning_payload.get('understanding', {})
+        snapshot.q1_observable = str(understanding.get('Q1_observable', ''))
+        snapshot.q2_uncertainty = str(understanding.get('Q2_uncertainty', ''))
+        snapshot.q3_curiosity = str(understanding.get('Q3_curiosity', ''))
+        snapshot.q4_fear = str(understanding.get('Q4_fear', ''))
+        snapshot.q5_desire = str(understanding.get('Q5_desire', ''))
+        
+        # Extract delta section (frame changes)
+        delta = reasoning_payload.get('delta', {})
+        frame_changes = delta.get('frame_changes', [])
+        snapshot.frame_changes_count = len(frame_changes) if isinstance(frame_changes, list) else 0
+        
+        # Look for delta frame changes in various places
+        delta_changes = delta.get('delta_frame_changes', [])
+        if not delta_changes:
+            # Check identity section for self_model delta
+            identity = reasoning_payload.get('identity', {})
+            self_model = identity.get('self_model', {})
+            delta_changes = self_model.get('delta_frame_changes', [])
+        snapshot.delta_frame_changes_count = len(delta_changes) if isinstance(delta_changes, list) else 0
+        
+        # Extract environment section
+        environment = reasoning_payload.get('environment', {})
+        world_model = environment.get('world_model', {})
+        scene_obj = world_model.get('scene_objects', [])
+        snapshot.objects_in_scene = len(scene_obj) if isinstance(scene_obj, list) else 0
+        
+        # Extract network wisdom (hypotheses)
+        network = reasoning_payload.get('network_wisdom', {})
+        hypotheses = network.get('hypotheses', [])
+        snapshot.hypotheses_active = len(hypotheses) if isinstance(hypotheses, list) else 0
+        if isinstance(hypotheses, list):
+            snapshot.hypothesis_ids = [h.get('id', '')[:12] for h in hypotheses if isinstance(h, dict)]
+        
+        # Extract identity section for working theory
+        identity = reasoning_payload.get('identity', {})
+        snapshot.working_theory = str(identity.get('working_theory', ''))
+        
+        # Extract action section for decision contributors
+        action_section = reasoning_payload.get('action', {})
+        snapshot.decision_contributors = action_section.get('decision_contributors', {})
+        
+        # Check for CODS
+        cods_suggestion = action_section.get('cods_suggestion')
+        snapshot.cods_active = cods_suggestion is not None and cods_suggestion != ''
+        
+        # Extract self model for controlled objects
+        self_model = identity.get('self_model', {})
+        ctrl_objs = self_model.get('objects_agent_controls', [])
+        if isinstance(ctrl_objs, list):
+            snapshot.controlled_objects = [str(o) for o in ctrl_objs[:5]]
+        
+        goals = self_model.get('inferred_goals', [])
+        if isinstance(goals, list):
+            snapshot.inferred_goals = [str(g) for g in goals[:5]]
+        
+        # Store snapshot
+        self.snapshots[game_id].append(snapshot)
+        
+        # Run live diagnostics
+        self._run_live_diagnostics(snapshot)
+    
+    def _run_live_diagnostics(self, snapshot: ReasoningSnapshot):
+        """Run diagnostic checks on each snapshot as it arrives."""
+        
+        # BUG 1: Q1 says "no actions" but frame has changes
+        if snapshot.delta_frame_changes_count > 10:
+            q1_lower = snapshot.q1_observable.lower()
+            if 'no action' in q1_lower or 'no change' in q1_lower or '425' in q1_lower:
+                self.diagnostics.append(ReasoningDiagnostic(
+                    bug_type='Q1_DISCONNECT',
+                    severity='critical',
+                    description=(
+                        f"Q1 reports no actions but {snapshot.delta_frame_changes_count} "
+                        f"frame changes detected. Observation->Hypothesis loop broken."
+                    ),
+                    evidence={
+                        'q1_text': snapshot.q1_observable[:200],
+                        'delta_changes': snapshot.delta_frame_changes_count,
+                        'action_index': snapshot.action_index
+                    },
+                    snapshot=snapshot
+                ))
+        
+        # BUG 2: Working theory stuck as "425 Too Early" for too long
+        if '425' in snapshot.working_theory and snapshot.action_index > 50:
+            self.diagnostics.append(ReasoningDiagnostic(
+                bug_type='WORKING_THEORY_STUCK',
+                severity='warning',
+                description=(
+                    f"Working theory still '425 Too Early' after {snapshot.action_index} "
+                    f"actions. Should have formed a theory by now."
+                ),
+                evidence={
+                    'working_theory': snapshot.working_theory,
+                    'action_index': snapshot.action_index,
+                    'level': snapshot.level
+                },
+                snapshot=snapshot
+            ))
+        
+        # BUG 3: Hypotheses exist but no decision contributor uses them
+        if snapshot.hypotheses_active > 0:
+            contrib = snapshot.decision_contributors
+            # Check if any contributor mentions hypothesis
+            contrib_str = json.dumps(contrib).lower()
+            if 'hypothesis' not in contrib_str and 'dm-3' not in contrib_str:
+                self.diagnostics.append(ReasoningDiagnostic(
+                    bug_type='HYPOTHESIS_UNUSED',
+                    severity='warning',
+                    description=(
+                        f"{snapshot.hypotheses_active} hypotheses available but not used "
+                        f"in decision making. DM-3 not activating."
+                    ),
+                    evidence={
+                        'hypothesis_count': snapshot.hypotheses_active,
+                        'decision_contributors': contrib,
+                        'hypothesis_ids': snapshot.hypothesis_ids
+                    },
+                    snapshot=snapshot
+                ))
+        
+        # BUG 4: No controlled objects after many actions
+        if snapshot.action_index > 100 and len(snapshot.controlled_objects) == 0:
+            # Check if there's any self-model at all
+            if not snapshot.inferred_goals:
+                self.diagnostics.append(ReasoningDiagnostic(
+                    bug_type='NO_SELF_MODEL',
+                    severity='warning',
+                    description=(
+                        f"No controlled objects or goals identified after "
+                        f"{snapshot.action_index} actions. Self-model not forming."
+                    ),
+                    evidence={
+                        'action_index': snapshot.action_index,
+                        'objects_in_scene': snapshot.objects_in_scene,
+                        'level': snapshot.level
+                    },
+                    snapshot=snapshot
+                ))
+        
+        # BUG 5: All Q fields empty/null status codes
+        q_fields = [
+            snapshot.q1_observable,
+            snapshot.q2_uncertainty, 
+            snapshot.q3_curiosity,
+            snapshot.q4_fear,
+            snapshot.q5_desire
+        ]
+        null_count = sum(1 for q in q_fields if '425' in q or '404' in q or not q.strip())
+        if null_count >= 4 and snapshot.action_index > 20:
+            self.diagnostics.append(ReasoningDiagnostic(
+                bug_type='EMERGENT_COGNITION_DEAD',
+                severity='critical',
+                description=(
+                    f"{null_count}/5 Q-fields empty/null after {snapshot.action_index} "
+                    f"actions. Emergent cognition system not activating."
+                ),
+                evidence={
+                    'q1': snapshot.q1_observable[:100] if snapshot.q1_observable else 'EMPTY',
+                    'q2': snapshot.q2_uncertainty[:100] if snapshot.q2_uncertainty else 'EMPTY',
+                    'q3': snapshot.q3_curiosity[:100] if snapshot.q3_curiosity else 'EMPTY',
+                    'action_index': snapshot.action_index
+                },
+                snapshot=snapshot
+            ))
+    
+    def get_game_analysis(self, game_id: str) -> Dict[str, Any]:
+        """Get reasoning analysis for a specific game."""
+        snapshots = self.snapshots.get(game_id, [])
+        if not snapshots:
+            return {'game_id': game_id, 'status': 'no_data'}
+        
+        # Aggregate analysis
+        total_actions = len(snapshots)
+        
+        # Q1 disconnect rate
+        q1_disconnects = sum(
+            1 for s in snapshots 
+            if s.delta_frame_changes_count > 10 and 
+               ('no action' in s.q1_observable.lower() or '425' in s.q1_observable)
+        )
+        
+        # Hypothesis usage
+        actions_with_hypotheses = sum(1 for s in snapshots if s.hypotheses_active > 0)
+        
+        # Theory formation
+        theory_formed = any(
+            '425' not in s.working_theory and s.working_theory.strip() 
+            for s in snapshots
+        )
+        first_theory_action = next(
+            (i for i, s in enumerate(snapshots) 
+             if '425' not in s.working_theory and s.working_theory.strip()),
+            -1
+        )
+        
+        # Self-model formation
+        self_model_formed = any(s.controlled_objects for s in snapshots)
+        first_self_model_action = next(
+            (i for i, s in enumerate(snapshots) if s.controlled_objects),
+            -1
+        )
+        
+        return {
+            'game_id': game_id,
+            'total_actions': total_actions,
+            'q1_disconnect_rate': q1_disconnects / max(total_actions, 1),
+            'q1_disconnect_count': q1_disconnects,
+            'hypothesis_usage_rate': actions_with_hypotheses / max(total_actions, 1),
+            'theory_formed': theory_formed,
+            'first_theory_action': first_theory_action,
+            'self_model_formed': self_model_formed,
+            'first_self_model_action': first_self_model_action,
+            'final_level': snapshots[-1].level if snapshots else 0
+        }
+    
+    def get_diagnostics_summary(self) -> Dict[str, Any]:
+        """Get summary of all diagnostics for Oracle consumption."""
+        by_type = defaultdict(list)
+        for d in self.diagnostics:
+            by_type[d.bug_type].append(d)
+        
+        critical_count = sum(1 for d in self.diagnostics if d.severity == 'critical')
+        warning_count = sum(1 for d in self.diagnostics if d.severity == 'warning')
+        
+        return {
+            'generation': self.generation,
+            'total_diagnostics': len(self.diagnostics),
+            'critical_count': critical_count,
+            'warning_count': warning_count,
+            'by_type': {
+                bug_type: {
+                    'count': len(diags),
+                    'severity': diags[0].severity if diags else 'unknown',
+                    'sample_description': diags[0].description if diags else '',
+                    'affected_games': list(set(
+                        d.snapshot.game_id for d in diags if d.snapshot
+                    ))[:5]
+                }
+                for bug_type, diags in by_type.items()
+            },
+            'games_analyzed': len(self.snapshots),
+            'duration_seconds': (datetime.now() - self._started_at).total_seconds()
+        }
+    
+    def print_diagnostics_report(self):
+        """Print diagnostics report to console."""
+        summary = self.get_diagnostics_summary()
+        
+        print(f"\n[REASONING-DIAG] Generation {summary['generation']} Reasoning Diagnostics")
+        print("-" * 60)
+        print(f"  Games Analyzed: {summary['games_analyzed']}")
+        print(f"  Total Diagnostics: {summary['total_diagnostics']}")
+        print(f"  Critical: {summary['critical_count']}, Warnings: {summary['warning_count']}")
+        
+        if summary['by_type']:
+            print("\n  Bug Types Detected:")
+            for bug_type, info in summary['by_type'].items():
+                severity_marker = "[CRIT]" if info['severity'] == 'critical' else "[WARN]"
+                print(f"    {severity_marker} {bug_type}: {info['count']} occurrences")
+                print(f"        {info['sample_description'][:80]}...")
+        else:
+            print("\n  [OK] No reasoning bugs detected")
+        
+        print("-" * 60)
+
+
+# =============================================================================
+# GLOBAL REASONING CAPTURE SINGLETON
+# =============================================================================
+
+_global_reasoning_capture: Optional[ReasoningLogCapture] = None
+
+
+def get_reasoning_capture(generation: int = 0) -> ReasoningLogCapture:
+    """Get or create global reasoning capture instance."""
+    global _global_reasoning_capture
+    
+    if _global_reasoning_capture is None:
+        _global_reasoning_capture = ReasoningLogCapture(generation=generation)
+    elif _global_reasoning_capture.generation != generation:
+        _global_reasoning_capture.reset(generation)
+    
+    return _global_reasoning_capture
+
+
+def record_reasoning(
+    game_id: str,
+    agent_id: str,
+    level: int,
+    action_index: int,
+    action_taken: str,
+    reasoning_payload: Dict[str, Any]
+):
+    """Convenience function to record reasoning payload."""
+    if _global_reasoning_capture:
+        _global_reasoning_capture.record_reasoning_payload(
+            game_id, agent_id, level, action_index, action_taken, reasoning_payload
+        )
+
+
+def get_reasoning_diagnostics() -> Optional[Dict[str, Any]]:
+    """Get reasoning diagnostics summary."""
+    if _global_reasoning_capture:
+        return _global_reasoning_capture.get_diagnostics_summary()
+    return None
 
 
 @dataclass
