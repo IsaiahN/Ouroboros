@@ -98,6 +98,57 @@ class OperatorResult:
     success: bool
     output: Any
     execution_time_ms: float
+
+
+@dataclass
+class BayesianHypothesis:
+    """
+    Represents a hypothesis with Bayesian probability tracking.
+    
+    The core of evidence-driven operator synthesis:
+    - Hypotheses are created from failure patterns
+    - Evidence accumulates from game outcomes
+    - When posterior exceeds threshold, synthesis is triggered
+    """
+    hypothesis_id: str
+    hypothesis_type: str  # 'PRIMITIVE_NEED', 'OPERATOR_SYNTHESIS', 'PATTERN_DISCOVERY'
+    game_type: str
+    level_number: Optional[int]
+    description: str
+    
+    # What this hypothesis suggests
+    target_primitive: Optional[str] = None  # Primitive to unlock
+    suggested_composition: Optional[List[str]] = None  # Primitives to compose
+    
+    # Bayesian tracking
+    prior: float = 0.5
+    posterior: float = 0.5
+    evidence_for: int = 0
+    evidence_against: int = 0
+    
+    # Confidence interval (Wilson score)
+    confidence_low: float = 0.0
+    confidence_high: float = 1.0
+    
+    # Thresholds
+    confirmation_threshold: float = 0.85
+    refutation_threshold: float = 0.15
+    
+    # Status
+    status: str = 'active'  # 'active', 'confirmed', 'refuted', 'synthesized'
+    source_type: Optional[str] = None  # 'failure_analysis', 'counterfactual', 'near_miss'
+    
+    def is_confirmed(self) -> bool:
+        """Check if hypothesis has enough evidence to act on."""
+        return self.posterior >= self.confirmation_threshold
+    
+    def is_refuted(self) -> bool:
+        """Check if hypothesis should be abandoned."""
+        return self.posterior <= self.refutation_threshold
+    
+    def sample_size(self) -> int:
+        """Total evidence collected."""
+        return self.evidence_for + self.evidence_against
     error: Optional[str] = None
     operator_id: Optional[str] = None
 
@@ -1265,6 +1316,13 @@ class CODSEngine:
             # On failure, analyze what primitives might have helped
             if not passed:
                 self._analyze_level_failure(level, actions_used)
+            else:
+                # ==> BAYESIAN: Record success as counter-evidence
+                game_type = self._context.game_id.split('-')[0] if '-' in self._context.game_id else self._context.game_id
+                self.observe_success_pattern(
+                    game_type=game_type,
+                    level_number=level
+                )
                 
             logger.debug(f"[CODS] Level {level} outcome: {'PASS' if passed else 'FAIL'} "
                         f"({actions_used} actions, {score_gained} score)")
@@ -1409,6 +1467,26 @@ class CODSEngine:
                 self._context.generation,
                 datetime.now().isoformat()
             ))
+        
+        # ==> BAYESIAN: Record failure pattern for hypothesis tracking
+        game_type = self._context.game_id.split('-')[0] if '-' in self._context.game_id else self._context.game_id
+        failure_pattern = f"level_failure_at_L{level}"
+        
+        # Look for specific patterns from insights
+        if insights:
+            pattern_keywords = ['boundary', 'overflow', 'stuck', 'loop', 'collision']
+            for insight in insights:
+                output_lower = insight.get('output', '').lower()
+                for keyword in pattern_keywords:
+                    if keyword in output_lower:
+                        failure_pattern = f"{keyword}_pattern_L{level}"
+                        break
+        
+        self.observe_failure_pattern(
+            game_type=game_type,
+            level_number=level,
+            failure_pattern=failure_pattern
+        )
     
     def _analyze_game_failure(
         self,
@@ -1458,6 +1536,14 @@ class CODSEngine:
                                 prim['primitive_name'], game_type
                             )
                         })
+                        
+                        # ==> BAYESIAN: Create hypothesis for each gap
+                        self.observe_failure_pattern(
+                            game_type=game_type,
+                            level_number=max_level,
+                            failure_pattern=f"gap_{prim['primitive_name']}",
+                            suggested_primitive=prim['primitive_name']
+                        )
         
         # Sort by relevance
         gaps.sort(key=lambda x: x['relevance_score'], reverse=True)
@@ -2925,6 +3011,73 @@ class CODSEngine:
                 ON cods_primitive_hints(game_type, confidence DESC)
             """)
             
+            # ================================================================
+            # BAYESIAN HYPOTHESIS TABLE (Evidence-Driven Synthesis)
+            # ================================================================
+            # This is the core of the evolution engine:
+            # 1. Hypotheses created from failure patterns
+            # 2. Evidence accumulates from game outcomes  
+            # 3. When posterior > threshold -> trigger synthesis
+            # ================================================================
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS cods_bayesian_hypotheses (
+                    hypothesis_id TEXT PRIMARY KEY,
+                    
+                    -- Identity
+                    hypothesis_type TEXT NOT NULL,
+                    game_type TEXT NOT NULL,
+                    level_number INTEGER,
+                    description TEXT NOT NULL,
+                    
+                    -- What this hypothesis suggests
+                    target_primitive TEXT,
+                    suggested_composition TEXT,
+                    
+                    -- Bayesian tracking
+                    prior_probability REAL DEFAULT 0.5,
+                    evidence_for INTEGER DEFAULT 0,
+                    evidence_against INTEGER DEFAULT 0,
+                    posterior_probability REAL DEFAULT 0.5,
+                    
+                    -- Confidence interval (Wilson score)
+                    confidence_low REAL DEFAULT 0.0,
+                    confidence_high REAL DEFAULT 1.0,
+                    
+                    -- Thresholds
+                    confirmation_threshold REAL DEFAULT 0.85,
+                    refutation_threshold REAL DEFAULT 0.15,
+                    
+                    -- Status
+                    status TEXT DEFAULT 'active',
+                    source_type TEXT,
+                    source_games TEXT,
+                    
+                    -- Synthesis tracking
+                    synthesized_operator_id TEXT,
+                    synthesis_generation INTEGER,
+                    
+                    -- Validation tracking
+                    pre_synthesis_success_rate REAL,
+                    post_synthesis_success_rate REAL,
+                    validation_games INTEGER DEFAULT 0,
+                    
+                    -- Timestamps
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    confirmed_at TIMESTAMP,
+                    synthesized_at TIMESTAMP
+                )
+            """)
+            
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_cods_bayes_status 
+                ON cods_bayesian_hypotheses(status, posterior_probability DESC)
+            """)
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_cods_bayes_game 
+                ON cods_bayesian_hypotheses(game_type, level_number)
+            """)
+            
         except Exception as e:
             logger.error(f"[CODS] Error creating failure tables: {e}")
     
@@ -3113,6 +3266,1034 @@ class CODSEngine:
             f"[CODS] Stored test context: reason={test_reason}, "
             f"tested={operators_tested}, succeeded={operators_succeeded}"
         )
+
+    # ======================================================================
+    # BAYESIAN HYPOTHESIS SYSTEM (Evidence-Driven Synthesis)
+    # ======================================================================
+    # The core of operator evolution:
+    # 1. Create hypotheses from failure patterns
+    # 2. Accumulate evidence from game outcomes
+    # 3. When posterior > threshold -> trigger synthesis
+    # 4. Validate synthesized operators over generations
+    # ======================================================================
+    
+    def _bayesian_update(self, prior: float, evidence_for: int, evidence_against: int) -> float:
+        """
+        Calculate posterior probability using Bayesian update.
+        
+        Uses Beta-Binomial conjugate prior for clean updates.
+        
+        Args:
+            prior: Prior probability P(H)
+            evidence_for: Count of supporting observations
+            evidence_against: Count of contradicting observations
+            
+        Returns:
+            Posterior probability P(H|E)
+        """
+        # Convert prior to pseudo-counts (Beta distribution parameters)
+        # Prior of 0.5 = 2 pseudo-observations each way (weak prior)
+        alpha_prior = 2 * prior
+        beta_prior = 2 * (1 - prior)
+        
+        # Update with evidence
+        alpha_post = alpha_prior + evidence_for
+        beta_post = beta_prior + evidence_against
+        
+        # Posterior mean of Beta distribution
+        posterior = alpha_post / (alpha_post + beta_post)
+        
+        return posterior
+    
+    def _wilson_confidence_interval(
+        self, 
+        successes: int, 
+        total: int, 
+        confidence: float = 0.95
+    ) -> Tuple[float, float]:
+        """
+        Calculate Wilson score confidence interval.
+        
+        Better than normal approximation for small samples.
+        
+        Args:
+            successes: Number of positive outcomes
+            total: Total observations
+            confidence: Confidence level (default 0.95)
+            
+        Returns:
+            (lower_bound, upper_bound) tuple
+        """
+        import math
+        
+        if total == 0:
+            return (0.0, 1.0)
+        
+        # Z-score for confidence level
+        z = 1.96 if confidence == 0.95 else 2.576  # 95% or 99%
+        
+        p_hat = successes / total
+        n = total
+        
+        # Wilson score interval
+        denominator = 1 + z**2 / n
+        center = (p_hat + z**2 / (2*n)) / denominator
+        spread = z * math.sqrt((p_hat * (1 - p_hat) + z**2 / (4*n)) / n) / denominator
+        
+        lower = max(0.0, center - spread)
+        upper = min(1.0, center + spread)
+        
+        return (lower, upper)
+    
+    def create_hypothesis(
+        self,
+        hypothesis_type: str,
+        game_type: str,
+        description: str,
+        level_number: Optional[int] = None,
+        target_primitive: Optional[str] = None,
+        suggested_composition: Optional[List[str]] = None,
+        source_type: Optional[str] = None,
+        prior: float = 0.5
+    ) -> Optional[str]:
+        """
+        Create a new Bayesian hypothesis for potential operator synthesis.
+        
+        Args:
+            hypothesis_type: 'PRIMITIVE_NEED', 'OPERATOR_SYNTHESIS', 'PATTERN_DISCOVERY'
+            game_type: Game type this hypothesis applies to (e.g., 'sp80')
+            description: Human-readable description
+            level_number: Specific level (optional)
+            target_primitive: Primitive to unlock if confirmed
+            suggested_composition: List of primitives to compose if confirmed
+            source_type: How hypothesis was generated ('failure_analysis', 'counterfactual', etc.)
+            prior: Initial probability (default 0.5 = maximum uncertainty)
+            
+        Returns:
+            hypothesis_id if created, None on failure
+        """
+        try:
+            # Check for existing similar hypothesis
+            existing = self.db.fetch_one("""
+                SELECT hypothesis_id, evidence_for, evidence_against, posterior_probability
+                FROM cods_bayesian_hypotheses
+                WHERE game_type = ? AND description = ? AND status = 'active'
+            """, (game_type, description))
+            
+            if existing:
+                # Hypothesis already exists - just return its ID
+                logger.debug(f"[BAYES] Hypothesis already exists: {existing[0][:12]}")
+                return existing[0]
+            
+            hypothesis_id = str(uuid.uuid4())
+            
+            self.db.execute_query("""
+                INSERT INTO cods_bayesian_hypotheses
+                (hypothesis_id, hypothesis_type, game_type, level_number, description,
+                 target_primitive, suggested_composition, prior_probability, 
+                 posterior_probability, source_type, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+            """, (
+                hypothesis_id,
+                hypothesis_type,
+                game_type,
+                level_number,
+                description,
+                target_primitive,
+                json.dumps(suggested_composition) if suggested_composition else None,
+                prior,
+                prior,  # Initially posterior = prior
+                source_type
+            ))
+            
+            logger.info(f"[BAYES] Created hypothesis: {description[:50]} (P={prior:.2f})")
+            return hypothesis_id
+            
+        except Exception as e:
+            logger.error(f"[BAYES] Failed to create hypothesis: {e}")
+            return None
+    
+    def record_evidence(
+        self,
+        hypothesis_id: str,
+        supports: bool,
+        weight: float = 1.0,
+        source_game: Optional[str] = None
+    ) -> Optional[float]:
+        """
+        Record evidence for/against a hypothesis and update posterior.
+        
+        Args:
+            hypothesis_id: ID of hypothesis to update
+            supports: True if evidence supports hypothesis, False if contradicts
+            weight: Evidence weight (default 1.0, can be higher for strong evidence)
+            source_game: Game ID that provided this evidence
+            
+        Returns:
+            Updated posterior probability, or None on failure
+        """
+        try:
+            # Fetch current state
+            current = self.db.fetch_one("""
+                SELECT prior_probability, evidence_for, evidence_against, source_games
+                FROM cods_bayesian_hypotheses
+                WHERE hypothesis_id = ? AND status = 'active'
+            """, (hypothesis_id,))
+            
+            if not current:
+                logger.warning(f"[BAYES] Hypothesis not found or inactive: {hypothesis_id[:12]}")
+                return None
+            
+            prior, evidence_for, evidence_against, source_games_json = current
+            
+            # Update evidence counts
+            evidence_weight = int(weight)  # Round to integer for counts
+            if supports:
+                evidence_for += evidence_weight
+            else:
+                evidence_against += evidence_weight
+            
+            # Calculate new posterior
+            posterior = self._bayesian_update(prior, evidence_for, evidence_against)
+            
+            # Calculate confidence interval
+            total_evidence = evidence_for + evidence_against
+            conf_low, conf_high = self._wilson_confidence_interval(evidence_for, total_evidence)
+            
+            # Update source games
+            source_games = json.loads(source_games_json) if source_games_json else []
+            if source_game and source_game not in source_games:
+                source_games.append(source_game)
+                source_games = source_games[-50:]  # Keep last 50
+            
+            # Update database
+            self.db.execute_query("""
+                UPDATE cods_bayesian_hypotheses
+                SET evidence_for = ?,
+                    evidence_against = ?,
+                    posterior_probability = ?,
+                    confidence_low = ?,
+                    confidence_high = ?,
+                    source_games = ?,
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE hypothesis_id = ?
+            """, (
+                evidence_for,
+                evidence_against,
+                posterior,
+                conf_low,
+                conf_high,
+                json.dumps(source_games),
+                hypothesis_id
+            ))
+            
+            logger.debug(
+                f"[BAYES] Updated: +{evidence_weight if supports else 0}/-{evidence_weight if not supports else 0} "
+                f"-> P={posterior:.3f} (n={total_evidence})"
+            )
+            
+            return posterior
+            
+        except Exception as e:
+            logger.error(f"[BAYES] Failed to record evidence: {e}")
+            return None
+    
+    def observe_failure_pattern(
+        self,
+        game_type: str,
+        level_number: int,
+        failure_pattern: str,
+        suggested_primitive: Optional[str] = None,
+        suggested_composition: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """
+        Record a failure pattern and create/update hypothesis.
+        
+        This is the main entry point for failure-driven learning.
+        Called when agents fail at a level with a specific pattern.
+        
+        Args:
+            game_type: Game type (e.g., 'sp80')
+            level_number: Level where failure occurred
+            failure_pattern: Description of what went wrong (e.g., 'boundary_overflow')
+            suggested_primitive: Oracle's suggestion for what primitive might help
+            suggested_composition: Oracle's suggestion for operator composition
+            
+        Returns:
+            hypothesis_id (new or existing)
+        """
+        # Create descriptive hypothesis
+        description = f"{failure_pattern} at {game_type} L{level_number}"
+        
+        hypothesis_type = 'OPERATOR_SYNTHESIS' if suggested_composition else 'PRIMITIVE_NEED'
+        
+        # Create or get existing hypothesis
+        hypothesis_id = self.create_hypothesis(
+            hypothesis_type=hypothesis_type,
+            game_type=game_type,
+            description=description,
+            level_number=level_number,
+            target_primitive=suggested_primitive,
+            suggested_composition=suggested_composition,
+            source_type='failure_analysis'
+        )
+        
+        if hypothesis_id:
+            # Record this as supporting evidence (failure happened again)
+            self.record_evidence(
+                hypothesis_id=hypothesis_id,
+                supports=True,  # Failure pattern recurring = evidence we need this capability
+                weight=1.0,
+                source_game=f"{game_type}-failure-L{level_number}"
+            )
+        
+        return hypothesis_id
+    
+    def observe_success_pattern(
+        self,
+        game_type: str,
+        level_number: int,
+        hypothesis_id: Optional[str] = None
+    ):
+        """
+        Record when a level is successfully completed.
+        
+        This provides counter-evidence against "we need X to pass this level".
+        
+        Args:
+            game_type: Game type
+            level_number: Level completed
+            hypothesis_id: Specific hypothesis to update (optional)
+        """
+        try:
+            if hypothesis_id:
+                # Direct update
+                self.record_evidence(
+                    hypothesis_id=hypothesis_id,
+                    supports=False,  # Success without the capability = counter-evidence
+                    weight=1.0,
+                    source_game=f"{game_type}-success-L{level_number}"
+                )
+            else:
+                # Update all active hypotheses for this game/level
+                hypotheses = self.db.fetch_all("""
+                    SELECT hypothesis_id
+                    FROM cods_bayesian_hypotheses
+                    WHERE game_type = ? 
+                    AND (level_number = ? OR level_number IS NULL)
+                    AND status = 'active'
+                """, (game_type, level_number))
+                
+                for (h_id,) in hypotheses:
+                    self.record_evidence(
+                        hypothesis_id=h_id,
+                        supports=False,
+                        weight=0.5,  # Weaker counter-evidence for indirect match
+                        source_game=f"{game_type}-success-L{level_number}"
+                    )
+                    
+        except Exception as e:
+            logger.error(f"[BAYES] Failed to record success: {e}")
+    
+    def get_confirmed_hypotheses(self, min_posterior: float = 0.85) -> List[BayesianHypothesis]:
+        """
+        Get hypotheses that have accumulated enough evidence to act on.
+        
+        Args:
+            min_posterior: Minimum posterior probability (default 0.85)
+            
+        Returns:
+            List of BayesianHypothesis objects ready for synthesis
+        """
+        try:
+            rows = self.db.fetch_all("""
+                SELECT hypothesis_id, hypothesis_type, game_type, level_number,
+                       description, target_primitive, suggested_composition,
+                       prior_probability, evidence_for, evidence_against,
+                       posterior_probability, confidence_low, confidence_high,
+                       confirmation_threshold, refutation_threshold, status, source_type
+                FROM cods_bayesian_hypotheses
+                WHERE status = 'active'
+                AND posterior_probability >= ?
+                AND (evidence_for + evidence_against) >= 5
+                ORDER BY posterior_probability DESC
+            """, (min_posterior,))
+            
+            hypotheses = []
+            for row in rows:
+                h = BayesianHypothesis(
+                    hypothesis_id=row[0],
+                    hypothesis_type=row[1],
+                    game_type=row[2],
+                    level_number=row[3],
+                    description=row[4],
+                    target_primitive=row[5],
+                    suggested_composition=json.loads(row[6]) if row[6] else None,
+                    prior=row[7],
+                    evidence_for=row[8],
+                    evidence_against=row[9],
+                    posterior=row[10],
+                    confidence_low=row[11],
+                    confidence_high=row[12],
+                    confirmation_threshold=row[13],
+                    refutation_threshold=row[14],
+                    status=row[15],
+                    source_type=row[16]
+                )
+                hypotheses.append(h)
+            
+            return hypotheses
+            
+        except Exception as e:
+            logger.error(f"[BAYES] Failed to get confirmed hypotheses: {e}")
+            return []
+    
+    def synthesize_from_hypothesis(
+        self,
+        hypothesis: BayesianHypothesis,
+        generation: int = 0
+    ) -> Optional[str]:
+        """
+        Synthesize a new operator from a confirmed hypothesis.
+        
+        This is where evolution happens: accumulated evidence
+        triggers the creation of new cognitive capabilities.
+        
+        Args:
+            hypothesis: Confirmed hypothesis to synthesize from
+            generation: Current generation number
+            
+        Returns:
+            operator_id if synthesis successful, None otherwise
+        """
+        try:
+            if not hypothesis.is_confirmed():
+                logger.warning(f"[SYNTH] Hypothesis not confirmed: P={hypothesis.posterior:.2f}")
+                return None
+            
+            operator_id = None
+            
+            if hypothesis.suggested_composition:
+                # Compose new operator from suggested primitives
+                operator_name = f"synth_{hypothesis.game_type}_L{hypothesis.level_number or 'X'}_{uuid.uuid4().hex[:6]}"
+                
+                # Check that primitives are available
+                available_primitives = []
+                for prim_name in hypothesis.suggested_composition:
+                    status = self.unlock_manager.get_status(prim_name)
+                    if status in [PrimitiveStatus.UNLOCKED, PrimitiveStatus.GRANDFATHERED]:
+                        available_primitives.append(prim_name)
+                    elif self.seeds.get(prim_name):
+                        available_primitives.append(prim_name)
+                    else:
+                        logger.warning(f"[SYNTH] Primitive not available: {prim_name}")
+                
+                if len(available_primitives) < 2:
+                    logger.warning(f"[SYNTH] Not enough primitives for composition: {available_primitives}")
+                    return None
+                
+                # Create the composed operator
+                try:
+                    composed_op = self.compose_operator(
+                        primitives=available_primitives,
+                        name=operator_name
+                    )
+                    if composed_op:
+                        operator_id = composed_op.operator_id
+                        logger.info(
+                            f"[SYNTH] Created operator: {operator_name} "
+                            f"from {available_primitives}"
+                        )
+                        
+                        # ADDED 2025-12-28: Distribute operator via viral package system
+                        # This bridges the gap between CODS synthesis and agent learning
+                        try:
+                            from viral_package_engine import ViralPackageEngine
+                            viral_engine = ViralPackageEngine(self.db)
+                            
+                            # Get agent_id from context if available
+                            agent_id = self._context.agent_id if self._context else "system"
+                            
+                            package_id = viral_engine.create_viral_package_from_operator(
+                                operator_id=operator_id,
+                                operator_name=operator_name,
+                                primitives=available_primitives,
+                                agent_id=agent_id,
+                                generation=generation,
+                                game_type=hypothesis.game_type,
+                                level_number=hypothesis.level_number
+                            )
+                            if package_id:
+                                logger.info(f"[SYNTH->VIRAL] Operator distributed as package: {package_id}")
+                        except Exception as ve:
+                            logger.warning(f"[SYNTH->VIRAL] Failed to distribute operator: {ve}")
+                            
+                except Exception as e:
+                    logger.error(f"[SYNTH] Composition failed: {e}")
+                    return None
+                    
+            elif hypothesis.target_primitive:
+                # Unlock the suggested primitive
+                success = self.unlock_manager.attempt_unlock(
+                    primitive_name=hypothesis.target_primitive,
+                    unlock_reason=f"Bayesian confirmation: {hypothesis.description}",
+                    supporting_evidence={
+                        'posterior': hypothesis.posterior,
+                        'evidence_for': hypothesis.evidence_for,
+                        'evidence_against': hypothesis.evidence_against
+                    }
+                )
+                if success:
+                    operator_id = hypothesis.target_primitive
+                    logger.info(f"[SYNTH] Unlocked primitive: {hypothesis.target_primitive}")
+            
+            if operator_id:
+                # Mark hypothesis as synthesized
+                self.db.execute_query("""
+                    UPDATE cods_bayesian_hypotheses
+                    SET status = 'synthesized',
+                        synthesized_operator_id = ?,
+                        synthesis_generation = ?,
+                        synthesized_at = CURRENT_TIMESTAMP
+                    WHERE hypothesis_id = ?
+                """, (operator_id, generation, hypothesis.hypothesis_id))
+                
+                logger.info(
+                    f"[SYNTH] Hypothesis synthesized: {hypothesis.description[:40]} "
+                    f"-> {operator_id}"
+                )
+            
+            return operator_id
+            
+        except Exception as e:
+            logger.error(f"[SYNTH] Synthesis failed: {e}")
+            return None
+    
+    def check_and_synthesize(self, generation: int = 0) -> Dict[str, Any]:
+        """
+        Check for confirmed hypotheses and synthesize operators.
+        
+        Call this at the end of each generation.
+        
+        Args:
+            generation: Current generation number
+            
+        Returns:
+            Summary of synthesis actions taken
+        """
+        results = {
+            'hypotheses_checked': 0,
+            'syntheses_triggered': 0,
+            'operators_created': [],
+            'primitives_unlocked': []
+        }
+        
+        try:
+            confirmed = self.get_confirmed_hypotheses()
+            results['hypotheses_checked'] = len(confirmed)
+            
+            for hypothesis in confirmed:
+                operator_id = self.synthesize_from_hypothesis(hypothesis, generation)
+                
+                if operator_id:
+                    results['syntheses_triggered'] += 1
+                    if hypothesis.suggested_composition:
+                        results['operators_created'].append(operator_id)
+                    else:
+                        results['primitives_unlocked'].append(operator_id)
+            
+            if results['syntheses_triggered'] > 0:
+                logger.info(
+                    f"[SYNTH] Generation {generation}: "
+                    f"{results['syntheses_triggered']} syntheses from "
+                    f"{results['hypotheses_checked']} confirmed hypotheses"
+                )
+                
+        except Exception as e:
+            logger.error(f"[SYNTH] Check and synthesize failed: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def get_hypothesis_summary(self) -> Dict[str, Any]:
+        """Get summary of current hypothesis state for logging."""
+        try:
+            stats = self.db.fetch_one("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
+                    SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmed,
+                    SUM(CASE WHEN status = 'synthesized' THEN 1 ELSE 0 END) as synthesized,
+                    SUM(CASE WHEN status = 'refuted' THEN 1 ELSE 0 END) as refuted,
+                    AVG(posterior_probability) as avg_posterior,
+                    MAX(posterior_probability) as max_posterior,
+                    SUM(evidence_for + evidence_against) as total_evidence
+                FROM cods_bayesian_hypotheses
+            """)
+            
+            if stats:
+                return {
+                    'total': stats[0] or 0,
+                    'active': stats[1] or 0,
+                    'confirmed': stats[2] or 0,
+                    'synthesized': stats[3] or 0,
+                    'refuted': stats[4] or 0,
+                    'avg_posterior': round(stats[5] or 0, 3),
+                    'max_posterior': round(stats[6] or 0, 3),
+                    'total_evidence': stats[7] or 0
+                }
+            return {}
+            
+        except Exception as e:
+            logger.error(f"[BAYES] Failed to get summary: {e}")
+            return {'error': str(e)}
+    
+    def prune_refuted_hypotheses(self, max_age_days: int = 30) -> int:
+        """
+        Clean up hypotheses that have been refuted or are too old.
+        
+        Args:
+            max_age_days: Max age for inactive hypotheses
+            
+        Returns:
+            Number of hypotheses removed
+        """
+        try:
+            # Mark low-posterior hypotheses as refuted
+            self.db.execute_query("""
+                UPDATE cods_bayesian_hypotheses
+                SET status = 'refuted'
+                WHERE status = 'active'
+                AND posterior_probability < refutation_threshold
+                AND (evidence_for + evidence_against) >= 10
+            """)
+            
+            # Delete old refuted hypotheses
+            result = self.db.execute_query(f"""
+                DELETE FROM cods_bayesian_hypotheses
+                WHERE status = 'refuted'
+                AND last_updated < datetime('now', '-{max_age_days} days')
+            """)
+            
+            deleted = result.rowcount if hasattr(result, 'rowcount') else 0
+            
+            if deleted > 0:
+                logger.info(f"[BAYES] Pruned {deleted} refuted hypotheses")
+            
+            return deleted
+            
+        except Exception as e:
+            logger.error(f"[BAYES] Prune failed: {e}")
+            return 0
+
+    # ======================================================================
+    # AGENT PATTERN ANALYZER (Evidence-Driven Discovery)
+    # ======================================================================
+    # The species writes its own cookbook through gameplay.
+    # We analyze EXISTING data from agent exploration to find patterns.
+    # No hardcoded recipes - patterns emerge from agent behavior.
+    # ======================================================================
+    
+    # Keyword to primitive mapping for parsing win strategies
+    KEYWORD_TO_PRIMITIVE = {
+        # Boundary/containment
+        'boundary': 'detect_edges',
+        'edge': 'detect_edges',
+        'border': 'detect_edges',
+        'seal': 'is_enclosed',
+        'enclosed': 'is_enclosed',
+        'contain': 'detect_containment',
+        'overflow': 'flood_fill',
+        'fill': 'flood_fill',
+        'flood': 'flood_fill',
+        # Pattern/template
+        'pattern': 'extract_schema',
+        'template': 'apply_template',
+        'schema': 'extract_schema',
+        'reference': 'is_reference',
+        'match': 'pattern_matching',
+        # Navigation
+        'path': 'pathfinding',
+        'navigate': 'pathfinding',
+        'move': 'is_movable',
+        'obstacle': 'detect_obstacles',
+        'block': 'detect_obstacles',
+        # Objects
+        'object': 'find_distinct_objects',
+        'shape': 'detect_shapes',
+        'color': 'detect_colors',
+        'region': 'detect_regions',
+        # Transformation
+        'rotate': 'apply_transformation',
+        'flip': 'apply_transformation',
+        'mirror': 'detect_symmetry',
+        'symmetr': 'detect_symmetry',
+        # Control
+        'control': 'control_test',
+        'click': 'effect_scope',
+    }
+    
+    def analyze_agent_patterns(
+        self,
+        generation: int,
+        lookback_generations: int = 10,
+        min_sample_size: int = 5
+    ) -> Dict[str, Any]:
+        """
+        Analyze agent gameplay data to discover emerging primitive patterns.
+        
+        This is the core of agent-driven evolution:
+        1. Parse win strategies for primitive mentions
+        2. Correlate with game outcomes
+        3. Find primitive combinations that correlate with success
+        4. Create hypotheses for patterns with sufficient evidence
+        
+        Args:
+            generation: Current generation
+            lookback_generations: How many generations to analyze
+            min_sample_size: Minimum observations for a pattern to be considered
+            
+        Returns:
+            Summary of discovered patterns and created hypotheses
+        """
+        results = {
+            'strategies_analyzed': 0,
+            'patterns_discovered': [],
+            'hypotheses_created': 0,
+            'generation': generation,
+            'error': None
+        }
+        
+        try:
+            logger.info(f"\n{'='*60}")
+            logger.info(f"[AGENT-PATTERNS] Analyzing agent gameplay (Gen {generation})")
+            logger.info(f"{'='*60}")
+            
+            # Step 1: Get win strategies from successful games
+            success_strategies = self._get_success_strategies(
+                generation, lookback_generations
+            )
+            
+            # Step 2: Get failure strategies for comparison
+            failure_strategies = self._get_failure_strategies(
+                generation, lookback_generations
+            )
+            
+            results['strategies_analyzed'] = len(success_strategies) + len(failure_strategies)
+            
+            if len(success_strategies) < min_sample_size:
+                logger.info(f"[AGENT-PATTERNS] Not enough success data yet "
+                           f"({len(success_strategies)} < {min_sample_size})")
+                return results
+            
+            # Step 3: Extract primitive mentions from strategies
+            success_primitives = self._extract_primitives_from_strategies(success_strategies)
+            failure_primitives = self._extract_primitives_from_strategies(failure_strategies)
+            
+            # Step 4: Find differential patterns (appear more in success than failure)
+            patterns = self._find_differential_patterns(
+                success_primitives,
+                failure_primitives,
+                len(success_strategies),
+                len(failure_strategies) if failure_strategies else 1,
+                min_sample_size
+            )
+            
+            results['patterns_discovered'] = patterns
+            
+            # Step 5: Create Bayesian hypotheses for strong patterns
+            for pattern in patterns:
+                hypothesis_id = self._create_pattern_hypothesis(pattern, generation)
+                if hypothesis_id:
+                    results['hypotheses_created'] += 1
+            
+            if patterns:
+                logger.info(f"[AGENT-PATTERNS] Discovered {len(patterns)} patterns, "
+                           f"created {results['hypotheses_created']} hypotheses")
+            else:
+                logger.info(f"[AGENT-PATTERNS] No significant patterns found yet")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"[AGENT-PATTERNS] Analysis failed: {e}")
+            results['error'] = str(e)
+            return results
+    
+    def _get_success_strategies(
+        self, 
+        generation: int, 
+        lookback: int
+    ) -> List[Dict[str, Any]]:
+        """Get win strategies from games that succeeded (level 2+)."""
+        try:
+            strategies = self.db.fetch_all("""
+                SELECT 
+                    nfh.win_strategy,
+                    nfh.game_type,
+                    nfh.level_number,
+                    nfh.generation,
+                    nfh.final_score
+                FROM network_failure_hypotheses nfh
+                WHERE nfh.win_strategy IS NOT NULL
+                AND nfh.win_strategy != ''
+                AND nfh.level_number >= 2
+                AND nfh.generation BETWEEN ? AND ?
+                ORDER BY nfh.generation DESC
+                LIMIT 500
+            """, (generation - lookback, generation))
+            
+            return strategies if strategies else []
+            
+        except Exception as e:
+            logger.debug(f"[AGENT-PATTERNS] Error fetching success strategies: {e}")
+            return []
+    
+    def _get_failure_strategies(
+        self, 
+        generation: int, 
+        lookback: int
+    ) -> List[Dict[str, Any]]:
+        """Get strategies from games that failed (level 1 only)."""
+        try:
+            strategies = self.db.fetch_all("""
+                SELECT 
+                    nfh.failure_reason,
+                    nfh.game_type,
+                    nfh.level_number,
+                    nfh.generation
+                FROM network_failure_hypotheses nfh
+                WHERE nfh.level_number = 1
+                AND nfh.generation BETWEEN ? AND ?
+                ORDER BY nfh.generation DESC
+                LIMIT 500
+            """, (generation - lookback, generation))
+            
+            return strategies if strategies else []
+            
+        except Exception as e:
+            logger.debug(f"[AGENT-PATTERNS] Error fetching failure strategies: {e}")
+            return []
+    
+    def _extract_primitives_from_strategies(
+        self, 
+        strategies: List[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Extract primitive mentions from strategy texts.
+        
+        Parses win_strategy or failure_reason fields for keywords
+        that map to primitives.
+        
+        Returns:
+            Dict mapping primitive names to usage stats
+        """
+        primitive_stats = {}
+        
+        for strategy in strategies:
+            # Get text to parse
+            text = strategy.get('win_strategy') or strategy.get('failure_reason') or ''
+            text_lower = text.lower()
+            game_type = strategy.get('game_type', 'unknown')
+            
+            # Find primitives mentioned in this strategy
+            primitives_found = set()
+            
+            for keyword, primitive in self.KEYWORD_TO_PRIMITIVE.items():
+                if keyword in text_lower:
+                    primitives_found.add(primitive)
+            
+            # Track individual primitives
+            for prim in primitives_found:
+                if prim not in primitive_stats:
+                    primitive_stats[prim] = {
+                        'count': 0,
+                        'game_types': set(),
+                        'co_occurs_with': {}
+                    }
+                primitive_stats[prim]['count'] += 1
+                primitive_stats[prim]['game_types'].add(game_type)
+            
+            # Track co-occurrence (primitive pairs)
+            primitives_list = list(primitives_found)
+            for i, p1 in enumerate(primitives_list):
+                for p2 in primitives_list[i+1:]:
+                    # Bi-directional tracking
+                    if p2 not in primitive_stats[p1]['co_occurs_with']:
+                        primitive_stats[p1]['co_occurs_with'][p2] = 0
+                    primitive_stats[p1]['co_occurs_with'][p2] += 1
+                    
+                    if p1 not in primitive_stats[p2]['co_occurs_with']:
+                        primitive_stats[p2]['co_occurs_with'][p1] = 0
+                    primitive_stats[p2]['co_occurs_with'][p1] += 1
+        
+        # Convert sets to lists for JSON serialization
+        for prim in primitive_stats:
+            primitive_stats[prim]['game_types'] = list(primitive_stats[prim]['game_types'])
+        
+        return primitive_stats
+    
+    def _find_differential_patterns(
+        self,
+        success_primitives: Dict[str, Dict],
+        failure_primitives: Dict[str, Dict],
+        success_count: int,
+        failure_count: int,
+        min_sample_size: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Find primitive combinations that appear more in successes than failures.
+        
+        This is the key insight: patterns that correlate with success
+        are candidates for operator synthesis.
+        """
+        patterns = []
+        
+        # Analyze primitive pairs from success data
+        pair_success_rates = {}
+        
+        for prim1, stats in success_primitives.items():
+            for prim2, co_count in stats['co_occurs_with'].items():
+                pair = tuple(sorted([prim1, prim2]))
+                
+                if pair not in pair_success_rates:
+                    # Calculate success rate (how often pair appears in successes)
+                    success_rate = co_count / success_count if success_count > 0 else 0
+                    
+                    # Calculate failure rate
+                    failure_rate = 0
+                    if prim1 in failure_primitives and prim2 in failure_primitives.get(prim1, {}).get('co_occurs_with', {}):
+                        failure_co_count = failure_primitives[prim1]['co_occurs_with'].get(prim2, 0)
+                        failure_rate = failure_co_count / failure_count if failure_count > 0 else 0
+                    
+                    # Differential: how much more common in successes
+                    differential = success_rate - failure_rate
+                    
+                    pair_success_rates[pair] = {
+                        'primitives': list(pair),
+                        'success_rate': round(success_rate, 3),
+                        'failure_rate': round(failure_rate, 3),
+                        'differential': round(differential, 3),
+                        'success_count': co_count,
+                        'game_types': list(set(
+                            success_primitives[prim1].get('game_types', []) +
+                            success_primitives.get(prim2, {}).get('game_types', [])
+                        ))
+                    }
+        
+        # Filter for significant patterns
+        for pair, stats in pair_success_rates.items():
+            # Pattern must:
+            # 1. Appear in enough successes (min_sample_size)
+            # 2. Have positive differential (more common in success than failure)
+            # 3. Have at least 20% success rate
+            if (stats['success_count'] >= min_sample_size and
+                stats['differential'] > 0.1 and
+                stats['success_rate'] >= 0.2):
+                
+                stats['evidence_strength'] = (
+                    'strong' if stats['differential'] > 0.3 else
+                    'moderate' if stats['differential'] > 0.2 else
+                    'weak'
+                )
+                patterns.append(stats)
+        
+        # Sort by differential (strongest signal first)
+        patterns.sort(key=lambda p: p['differential'], reverse=True)
+        
+        return patterns[:10]  # Return top 10 patterns
+    
+    def _create_pattern_hypothesis(
+        self, 
+        pattern: Dict[str, Any],
+        generation: int
+    ) -> Optional[str]:
+        """
+        Create a Bayesian hypothesis from an agent-discovered pattern.
+        
+        This feeds into the synthesis system - when evidence accumulates,
+        the pattern can be synthesized into an operator.
+        """
+        primitives = pattern['primitives']
+        game_types = pattern.get('game_types', ['unknown'])
+        
+        # Create descriptive hypothesis
+        description = f"Agent pattern: {' + '.join(primitives)} (diff={pattern['differential']:.0%})"
+        
+        # Create hypothesis with suggested composition from agent data
+        hypothesis_id = self.create_hypothesis(
+            hypothesis_type='OPERATOR_SYNTHESIS',
+            game_type=game_types[0] if game_types else 'multi',
+            description=description,
+            suggested_composition=primitives,
+            source_type='agent_gameplay_analysis'
+        )
+        
+        if hypothesis_id:
+            # Record initial evidence based on the pattern strength
+            evidence_count = pattern['success_count']
+            for _ in range(min(evidence_count, 10)):  # Cap at 10 to avoid over-weighting
+                self.record_evidence(
+                    hypothesis_id=hypothesis_id,
+                    supports=True,
+                    weight=pattern['differential'],  # Stronger patterns = stronger evidence
+                    source_game=f"pattern_gen{generation}"
+                )
+            
+            logger.info(f"  [PATTERN] {' + '.join(primitives)}: "
+                       f"success={pattern['success_rate']:.0%}, "
+                       f"diff=+{pattern['differential']:.0%}, "
+                       f"strength={pattern['evidence_strength']}")
+        
+        return hypothesis_id
+    
+    def process_generation_patterns(self, generation: int) -> Dict[str, Any]:
+        """
+        Main entry point for agent-driven pattern discovery.
+        
+        Call this at the end of each generation to:
+        1. Analyze agent gameplay for emerging patterns
+        2. Create/update Bayesian hypotheses
+        3. Check for synthesis triggers
+        
+        Args:
+            generation: Current generation number
+            
+        Returns:
+            Combined results from pattern analysis and synthesis
+        """
+        results = {
+            'patterns': {},
+            'synthesis': {},
+            'generation': generation
+        }
+        
+        try:
+            # Step 1: Analyze agent patterns
+            pattern_results = self.analyze_agent_patterns(
+                generation=generation,
+                lookback_generations=10,
+                min_sample_size=5
+            )
+            results['patterns'] = pattern_results
+            
+            # Step 2: Check for synthesis triggers (uses existing Bayesian system)
+            synthesis_results = self.check_and_synthesize(generation=generation)
+            results['synthesis'] = synthesis_results
+            
+            # Step 3: Log summary
+            if pattern_results.get('patterns_discovered'):
+                logger.info(f"\n[GEN-{generation} SUMMARY]")
+                logger.info(f"  Patterns discovered: {len(pattern_results['patterns_discovered'])}")
+                logger.info(f"  Hypotheses created: {pattern_results['hypotheses_created']}")
+                logger.info(f"  Syntheses triggered: {synthesis_results.get('syntheses_triggered', 0)}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"[AGENT-PATTERNS] Generation processing failed: {e}")
+            results['error'] = str(e)
+            return results
 
 
 # ============================================================================

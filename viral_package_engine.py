@@ -252,6 +252,99 @@ class ViralPackageEngine:
             print(f"[VIRAL] Error creating package: {e}")
             return None
     
+    def create_viral_package_from_operator(
+        self,
+        operator_id: str,
+        operator_name: str,
+        primitives: List[str],
+        agent_id: str,
+        generation: int,
+        game_type: Optional[str] = None,
+        level_number: Optional[int] = None
+    ) -> Optional[str]:
+        """
+        Create a viral package from a synthesized CODS operator.
+        
+        This bridges the gap between CODS operator synthesis and viral distribution.
+        When CODS creates a new composed operator, this packages it as a "virus"
+        that can spread to other agents, teaching them to USE the operator.
+        
+        ADDED 2025-12-28: Fixes the Operator -> Viral distribution gap.
+        
+        Args:
+            operator_id: ID of the composed operator
+            operator_name: Human-readable name
+            primitives: List of primitive names in the composition
+            agent_id: Agent who triggered the synthesis
+            generation: Current generation
+            game_type: Optional game type this operator excels at
+            level_number: Optional level number
+            
+        Returns:
+            package_id if created, None if failed
+        """
+        # Check for existing package for this operator (deduplication)
+        existing = self.db.execute_query(
+            """SELECT package_id FROM viral_information_packages 
+               WHERE package_type = 'operator' AND meta_strategy_description LIKE ?
+               AND is_active = 1""",
+            (f"%{operator_id}%",)
+        )
+        if existing:
+            return existing[0]['package_id']
+        
+        package_id = f"viral_op_{uuid.uuid4().hex[:12]}"
+        
+        try:
+            # Build meta strategy description
+            primitives_str = " + ".join(primitives)
+            meta_strategy = f"OPERATOR: {operator_name}. Composition: {primitives_str}. "
+            if game_type:
+                meta_strategy += f"Discovered for {game_type}"
+                if level_number:
+                    meta_strategy += f" L{level_number}"
+                meta_strategy += ". "
+            meta_strategy += f"operator_id={operator_id}"
+            
+            # Store the primitives as a pseudo action sequence for compatibility
+            # Agents can use this to know which primitives to invoke
+            primitives_json = json.dumps(primitives)
+            
+            self.db.execute_query("""
+                INSERT INTO viral_information_packages (
+                    package_id, package_name, package_type,
+                    action_sequence, coordinate_pattern,
+                    virulence, transmission_rate, mutation_rate,
+                    discovery_generation, generation_discovered,
+                    is_active, last_successful_use_generation, meta_strategy_description
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                package_id,
+                f"Operator_{operator_name[:20]}_{generation}",
+                'operator',  # NEW package type for operators
+                primitives_json,  # Store primitives list instead of actions
+                None,  # No coordinates for operators
+                0.6,  # Higher virulence - operators are valuable
+                0.4,  # Higher transmission - spread good operators
+                0.02,  # Low mutation - operators should stay stable
+                generation,
+                generation,
+                True,  # is_active
+                generation,
+                meta_strategy
+            ))
+            
+            # Auto-infect the discoverer/synthesizer
+            self._infect_agent(agent_id, package_id, generation, 'discovery', None)
+            
+            print(f"[VIRAL-OP] Created operator package: {operator_name} ({primitives_str})")
+            
+            return package_id
+            
+        except Exception as e:
+            print(f"[VIRAL-OP] Error creating operator package: {e}")
+            return None
+
     def _generate_meta_strategy_description(
         self,
         action_sequence: str,
@@ -950,7 +1043,8 @@ class ViralPackageEngine:
         action_weights = {}
         
         # Track which packages were retrieved (Gap 5 fix: wire up tracking)
-        if track_retrieval and generation > 0:
+        # FIXED 2025-12-28: Removed generation > 0 guard - was preventing ALL tracking
+        if track_retrieval and infections:
             for infection in infections:
                 self.track_package_retrieval(infection['package_id'], generation)
         

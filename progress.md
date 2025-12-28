@@ -5520,3 +5520,241 @@ Dead code cleanup completed:
 ```bash
 python run_evolution.py --max-generations 3
 ```
+
+---
+
+## Session: December 28, 2025 - CODS Agent-Driven Pattern Discovery & Viral System Health Audit
+
+---
+
+### Approach: Build Species-Authored Oracle Composition Library
+
+**Timestamp**: 5:22:14 PM  
+**Status**: IN PROGRESS - Agent pattern discovery implemented, viral system gaps fixed
+
+---
+
+### Philosophy
+
+Per user directive: *"I don't think it would be wise to prefill the composition library because that would be like telling the species how to evolve. I need the species to put together its own cookbook."*
+
+**Core Principle**: No hardcoded Oracle recipes. The network discovers which primitive combinations work through actual gameplay. Agents ARE the random exploration engine - we analyze their success/failure patterns to discover emergent operator compositions.
+
+---
+
+### Part 1: Agent Pattern Analyzer (Completed Earlier Today)
+
+Built an agent-driven pattern discovery system that:
+1. Extracts primitives from `network_failure_hypotheses.win_strategy` using keyword mapping
+2. Tracks co-occurrence in successes vs failures
+3. Uses differential analysis (success_rate - failure_rate > 0.2) to find significant patterns
+4. Creates Bayesian hypotheses with `suggested_composition` populated from agent data
+5. When P > 0.85, triggers synthesis of new composed operators
+
+**Files Modified**:
+- `cods_engine.py`: Added ~350 lines for AgentPatternAnalyzer methods
+- `autonomous_evolution_runner.py`: Wired `process_generation_patterns()` call
+
+---
+
+### Part 2: Oracle Composition Validation (This Session)
+
+User provided validation document (oracle comp pt 5.md) with 3 critical questions:
+
+| Question | Answer | Status |
+|----------|--------|--------|
+| Q1: Will keyword extraction be too noisy? | Safeguards in place (min 2 primitives, min 5 samples, 20% differential) | ✅ OK |
+| Q2: Will Bayesian system actually synthesize? | YES - `suggested_composition` is read and `compose_operator()` is called | ✅ OK |
+| Q3: How does the operator get composed? | `operator_composer.py` chains primitives sequentially via composition tree | ✅ OK |
+
+---
+
+### Part 3: Viral Package Engine Health Audit
+
+Investigated the viral package engine and found critical issues:
+
+#### Database State at Audit Time
+
+| Component | Count | Issue |
+|-----------|-------|-------|
+| Viral packages | 115 total, 7 active | - |
+| Ever retrieved | **0** | CRITICAL |
+| Led to improvement | **0** | CRITICAL |
+| Composed operators | 199 | - |
+| Operators in viral packages | **0** | GAP |
+| Hypotheses synthesized | 0 | Expected (no evolution run yet) |
+| Pariahs | 6,284 total, 8 active | Heavily cleaned |
+
+#### Issues Identified
+
+| Issue | Severity | Root Cause |
+|-------|----------|------------|
+| Retrieval tracking never fires | CRITICAL | `generation > 0` guard in `get_package_action_weights()` prevented ALL tracking |
+| Operator → Viral distribution gap | HIGH | No pathway from `compose_operator()` to viral package creation |
+| Bayesian system dormant | MEDIUM | Expected - needs evolution runs to populate |
+
+---
+
+### Fixes Implemented
+
+#### Fix 1: Retrieval Tracking Guard (CRITICAL)
+
+**File**: `viral_package_engine.py` line ~953
+
+**Before**:
+```python
+if track_retrieval and generation > 0:
+    for infection in infections:
+        self.track_package_retrieval(infection['package_id'], generation)
+```
+
+**After**:
+```python
+# FIXED 2025-12-28: Removed generation > 0 guard - was preventing ALL tracking
+if track_retrieval and infections:
+    for infection in infections:
+        self.track_package_retrieval(infection['package_id'], generation)
+```
+
+#### Fix 2: New Method `create_viral_package_from_operator()` (HIGH)
+
+**File**: `viral_package_engine.py` lines 256-346 (new method)
+
+```python
+def create_viral_package_from_operator(
+    self,
+    operator_id: str,
+    operator_name: str,
+    primitives: List[str],
+    agent_id: str,
+    generation: int,
+    game_type: Optional[str] = None,
+    level_number: Optional[int] = None
+) -> Optional[str]:
+    """
+    Create a viral package from a synthesized CODS operator.
+    
+    This bridges the gap between CODS operator synthesis and viral distribution.
+    When CODS creates a new composed operator, this packages it as a "virus"
+    that can spread to other agents, teaching them to USE the operator.
+    
+    ADDED 2025-12-28: Fixes the Operator -> Viral distribution gap.
+    """
+```
+
+Key features:
+- Creates packages with `package_type = 'operator'`
+- Stores primitive composition as JSON
+- Higher virulence (0.6) and transmission (0.4) for valuable operators
+- Low mutation rate (0.02) for stability
+- Auto-infects synthesizing agent
+
+#### Fix 3: Wire CODS Synthesis to Viral Distribution
+
+**File**: `cods_engine.py` lines 3704-3725 (added after `compose_operator()` succeeds)
+
+```python
+# ADDED 2025-12-28: Distribute operator via viral package system
+try:
+    from viral_package_engine import ViralPackageEngine
+    viral_engine = ViralPackageEngine(self.db)
+    
+    agent_id = self._context.agent_id if self._context else "system"
+    
+    package_id = viral_engine.create_viral_package_from_operator(
+        operator_id=operator_id,
+        operator_name=operator_name,
+        primitives=available_primitives,
+        agent_id=agent_id,
+        generation=generation,
+        game_type=hypothesis.game_type,
+        level_number=hypothesis.level_number
+    )
+    if package_id:
+        logger.info(f"[SYNTH->VIRAL] Operator distributed as package: {package_id}")
+except Exception as ve:
+    logger.warning(f"[SYNTH->VIRAL] Failed to distribute operator: {ve}")
+```
+
+---
+
+### New Data Flow (Post-Fix)
+
+```
+Agent gameplay → win_strategy keywords → pattern detection
+    ↓
+Differential analysis (success_rate - failure_rate > 0.2)
+    ↓
+Bayesian hypothesis created with suggested_composition
+    ↓
+Evidence accumulates → P > 0.85 → synthesis triggered
+    ↓
+synthesize_from_hypothesis() → compose_operator()
+    ↓
+create_viral_package_from_operator() → viral_information_packages (type='operator')
+    ↓
+_infect_agent() → agent_viral_infections → horizontal spread to population
+```
+
+---
+
+### Pariah System Analysis
+
+**Question**: Do these changes affect the pariah system? Should they?
+
+| Question | Answer |
+|----------|--------|
+| Do changes affect pariahs? | **No** - pariah system untouched |
+| Should they? | **Not yet** - operators need to exist before tracking their failures |
+| Any related pariah bugs? | **No** - `get_pariah_action_penalties()` doesn't have tracking issue |
+
+**Future consideration**: If operators start synthesizing and some consistently fail on certain game types, could add `create_pariah_from_operator_failure()`. But this is premature until we have synthesis data.
+
+---
+
+### Verification
+
+All changes verified:
+```
+[OK] create_viral_package_from_operator method exists
+[OK] Parameters: ['operator_id', 'operator_name', 'primitives', 'agent_id', 'generation', 'game_type', 'level_number']
+[OK] cods_engine imports successfully
+[OK] CODS synthesis is wired to viral distribution
+```
+
+Syntax checks: No errors in `viral_package_engine.py` or `cods_engine.py`
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `viral_package_engine.py` | Fixed retrieval tracking guard, added `create_viral_package_from_operator()` (~95 lines) |
+| `cods_engine.py` | Wired `synthesize_from_hypothesis()` to viral distribution (~20 lines) |
+
+---
+
+### Current Status
+
+**Timestamp**: 5:22:14 PM
+
+Implementation complete:
+- ✅ Fixed retrieval tracking (was completely broken)
+- ✅ Added operator → viral distribution pathway
+- ✅ Wired CODS synthesis to viral system
+- ✅ Verified all imports and syntax
+- ✅ Analyzed pariah system (no changes needed)
+
+**Current Failure Being Worked On**: None - fixes implemented and verified.
+
+**What to Expect After Evolution Runs**:
+1. Retrieval counts will start incrementing (no longer stuck at 0)
+2. Bayesian hypotheses will populate from agent pattern analysis
+3. When synthesis occurs, new `package_type='operator'` packages will appear
+4. Operators will spread through the population like action sequences do
+
+**NEXT STEP**: Run evolution to populate the Bayesian hypothesis system and test the full pipeline:
+```bash
+python run_evolution.py --max-generations 5 --max-games 20
+```

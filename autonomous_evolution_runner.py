@@ -2402,6 +2402,50 @@ class AutonomousEvolutionRunner:
                             print(f"[CODS-INVENTORY] Most used: {usage_str}")
                 except Exception as e:
                     pass  # Silently skip inventory display on error
+                
+                # AGENT PATTERN DISCOVERY: Analyze agent gameplay for emerging patterns
+                # This is the species writing its own cookbook through gameplay
+                try:
+                    if cods_engine:
+                        # Run the full pattern discovery + synthesis pipeline
+                        pattern_results = cods_engine.process_generation_patterns(
+                            generation=self.current_generation
+                        )
+                        
+                        # Show pattern discovery results
+                        patterns = pattern_results.get('patterns', {})
+                        if patterns.get('patterns_discovered'):
+                            print(f"[AGENT-PATTERNS] Discovered {len(patterns['patterns_discovered'])} "
+                                  f"primitive combinations from agent gameplay")
+                            for p in patterns['patterns_discovered'][:3]:  # Top 3
+                                prims = ' + '.join(p['primitives'])
+                                print(f"  [{p['evidence_strength'].upper()}] {prims}: "
+                                      f"success={p['success_rate']:.0%}, diff=+{p['differential']:.0%}")
+                        
+                        # Show synthesis results (from patterns feeding Bayesian system)
+                        synth = pattern_results.get('synthesis', {})
+                        if synth.get('syntheses_triggered', 0) > 0:
+                            print(f"[CODS-SYNTH] Synthesized {synth['syntheses_triggered']} "
+                                  f"operators from {synth['hypotheses_checked']} confirmed hypotheses")
+                            for op_id in synth.get('operators_created', []):
+                                print(f"  [SYNTH] New operator: {op_id}")
+                            for prim in synth.get('primitives_unlocked', []):
+                                print(f"  [UNLOCK] Primitive unlocked: {prim}")
+                        
+                        # Show hypothesis summary
+                        hyp_summary = cods_engine.get_hypothesis_summary()
+                        if hyp_summary.get('active', 0) > 0:
+                            print(f"[CODS-BAYES] Hypotheses: {hyp_summary.get('active', 0)} active, "
+                                  f"{hyp_summary.get('synthesized', 0)} synthesized, "
+                                  f"max P={hyp_summary.get('max_posterior', 0):.2f}")
+                        
+                        # Prune refuted hypotheses periodically
+                        if self.current_generation % 5 == 0:
+                            pruned = cods_engine.prune_refuted_hypotheses(max_age_days=14)
+                            if pruned > 0:
+                                print(f"[CODS-BAYES] Pruned {pruned} refuted hypotheses")
+                except Exception as e:
+                    pass  # Supplemental - pattern discovery is optional
             except Exception as e:
                 print(f"[CODS] Unlock check skipped: {e}")
         
