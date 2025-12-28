@@ -781,9 +781,9 @@ class GameplayEngine:
                 if agent_id:
                     self.session_manager.deduct_actions_used(agent_id, game_id)
                 
+                # DISABLED 2025-12-28: Recombination system was 100% broken (INSERT silently failed)
+                # and redundant - organic cumulative sequences already capture L1->LN with level_breakpoints
                 recombinations = []
-                if agent_id:
-                    recombinations = self._explore_sequence_recombination(agent_id, game_id, level_completions)
                 
                 logger.info(f" COMPLETE WIN via cumulative sequence replay!")
                 return {
@@ -1326,11 +1326,9 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Cognitive competency update failed (non-critical): {e}")
 
-        # Knowledge Recombination
-        if agent_id:
-            recombinations = self._explore_sequence_recombination(agent_id, game_id, loop_state.current_level)
-            if recombinations:
-                results['recombinations_created'] = len(recombinations)
+        # Knowledge Recombination - DISABLED 2025-12-28
+        # Was 100% broken (INSERT failed silently) and redundant with organic cumulative sequences
+        # See progress.md "Recombination System Removal" section for details
 
         # Rule Induction: Extract transferable rules from wins
         # This enables the network to learn abstract strategies that generalize
@@ -2126,12 +2124,9 @@ class GameplayEngine:
                     if agent_id:
                         self.session_manager.deduct_actions_used(agent_id, game_id)
                     
-                    # PHASE 2.5: Knowledge Recombination (AUTOMATIC)
+                    # PHASE 2.5: Knowledge Recombination - DISABLED 2025-12-28
+                    # Was 100% broken and redundant with organic cumulative sequences
                     recombinations = []
-                    if agent_id:
-                        recombinations = self._explore_sequence_recombination(
-                            agent_id, game_id, level_completions
-                        )
                     
                     logger.info(f" COMPLETE WIN via cumulative sequence replay!")
                     return {
@@ -3315,17 +3310,9 @@ class GameplayEngine:
                 elif game_state.score > 0 and level_completions == 0:
                     logger.debug(f"Score {game_state.score} but no NEW level_completions - skipping sequence capture (likely from replay or shutdown)")
             
-            # PHASE 2.5: Knowledge Recombination (AUTOMATIC - runs after EVERY game)
-            # This is the viral evolution accelerator - opportunistic recombination
-            if agent_id:
-                recombinations = self._explore_sequence_recombination(
-                    agent_id, 
-                    game_id,
-                    current_level
-                )
-                if recombinations:
-                    results['recombinations_created'] = len(recombinations)
-                    logger.info(f"[RECOMB] Agent {agent_id[:8]} created {len(recombinations)} sequence recombinations")
+            # PHASE 2.5: Knowledge Recombination - DISABLED 2025-12-28
+            # Was 100% broken (INSERT missing NOT NULL columns, 75,880 orphaned dependencies)
+            # Redundant with organic cumulative sequences that already capture L1->LN with level_breakpoints
             
             # PHASE 3: Viral Packages & Pariahs (AUTOMATIC - runs after EVERY game)
             # Bidirectional evolution: extract success patterns AND failure patterns

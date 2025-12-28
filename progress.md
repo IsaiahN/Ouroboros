@@ -5758,3 +5758,96 @@ Implementation complete:
 ```bash
 python run_evolution.py --max-generations 5 --max-games 20
 ```
+
+---
+
+## Session: December 28, 2025 (Evening) - Recombination System Removal
+
+---
+
+### Approach: Remove Broken & Redundant System
+
+**Timestamp**: 5:45 PM  
+**Status**: COMPLETED - Recombination disabled, orphaned data cleaned
+
+---
+
+### Problem Statement
+
+User questioned the value of `[RECOMB] Agent offspring created 15 sequence recombinations` log message.
+
+**Investigation revealed the recombination system was 100% broken**:
+
+| Finding | Evidence |
+|---------|----------|
+| Recombined sequences created | **0** (is_recombination=1) |
+| Orphaned dependency records | **75,880** |
+| Root cause | INSERT missing 4 NOT NULL columns (session_id, efficiency_score, initial_frame, final_frame) |
+| INSERT behavior | `INSERT OR IGNORE` - silently failed every time |
+
+---
+
+### Why Recombination Was Also Redundant
+
+Even if it worked, recombination would provide **no value** because:
+
+| Feature | Already Exists | Recombination Would Add |
+|---------|----------------|------------------------|
+| L1->L4 sequences | Organic cumulative capture (`level_range = "1-4"`) | Synthetic chain of 4 separate sequences |
+| Level breakpoints | `level_breakpoints` column tracks where each level starts | Would need to calculate from separate sequences |
+| Frame transitions | Real transitions captured during actual gameplay | **Missing** - no transition between glued sequences |
+| Validation | Cumulative sequences were actually played successfully | **Never validated** as working together |
+
+**Verdict**: Organic cumulative sequences are superior because:
+1. They include real level transition actions
+2. Frame continuity is guaranteed
+3. They're validated by actual successful gameplay
+4. Partial replay already uses `level_breakpoints` to start from any level
+
+---
+
+### Changes Made
+
+#### 1. Disabled Recombination Calls (4 Sites)
+
+**File**: `core_gameplay.py`
+
+| Line | Before | After |
+|------|--------|-------|
+| ~786 | `self._explore_sequence_recombination(...)` | Commented out with explanation |
+| ~1331 | `self._explore_sequence_recombination(...)` | Commented out with explanation |
+| ~2132 | `self._explore_sequence_recombination(...)` | Commented out with explanation |
+| ~3321 | `self._explore_sequence_recombination(...)` + log message | Commented out with explanation |
+
+**Method `_explore_sequence_recombination()` retained** (lines 10197-10250) for reference but never called.
+
+#### 2. Cleaned Orphaned Data
+
+```sql
+DELETE FROM sequence_dependencies;
+-- Result: 75,880 orphaned records deleted
+```
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `core_gameplay.py` | Disabled 4 call sites (~25 lines replaced with comments) |
+| `core_data.db` | Deleted 75,880 orphaned `sequence_dependencies` records |
+
+---
+
+### Current Status
+
+**Timestamp**: 5:45 PM
+
+Recombination system removed:
+- Disabled all call sites with explanation comments
+- Cleaned 75,880 useless database records
+- `knowledge_recombination_engine.py` still exists but is now dead code (can delete later if desired)
+
+**Current Failure Being Worked On**: None - cleanup complete.
+
+**NEXT STEP**: Run evolution to verify system operates normally without recombination overhead.
