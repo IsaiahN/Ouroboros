@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Multi-Stage Sequence Matching Pipeline (Competitive Improvement #2, +40% expected gain)
 

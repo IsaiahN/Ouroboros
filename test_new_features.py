@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """Test the new click behavior and CODS reasoning features."""
 from agent_self_model import AgentSelfModel
 from cods_engine import CODSEngine

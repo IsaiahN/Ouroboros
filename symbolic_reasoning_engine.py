@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Symbolic Reasoning Engine for Complex ARC Games
 ================================================

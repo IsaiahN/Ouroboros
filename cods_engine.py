@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 CODS Engine - Main Orchestrator for Cognitive Operator Discovery System
 ========================================================================

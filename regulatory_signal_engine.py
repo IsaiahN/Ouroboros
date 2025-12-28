@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Regulatory Signal Engine - Phase 4: Distributed Regulation
 

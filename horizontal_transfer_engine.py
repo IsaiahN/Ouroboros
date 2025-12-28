@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Phase 5: Horizontal Gene Transfer with Emotional Intelligence
 

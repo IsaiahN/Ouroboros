@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Oracle Health Monitor - Self-Diagnostic System for Autonomous Evolution
 ========================================================================

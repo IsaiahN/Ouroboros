@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Primitive Unlock Manager - Track earned vs locked primitives
 =============================================================

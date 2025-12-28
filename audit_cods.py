@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """Audit CODS and self-model status across all game types."""
 import sqlite3
 

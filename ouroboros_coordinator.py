@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Ouroboros Coordinator - Claude Code LLM Coordinator
 Following LLM Operating Rules:

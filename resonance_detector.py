@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Resonance Detector - Cross-Role Pattern Resonance Detection
 

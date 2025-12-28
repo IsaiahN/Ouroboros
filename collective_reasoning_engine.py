@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Collective Reasoning System - Multi-Agent Ensemble Intelligence
 ===============================================================

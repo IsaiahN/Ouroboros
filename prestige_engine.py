@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Prestige Engine - Phase 1 of Roadmap
 =====================================

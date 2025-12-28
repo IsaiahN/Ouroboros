@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Sensation Engine - Phase 4.5 Emotional Intelligence System
 

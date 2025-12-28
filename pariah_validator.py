@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Pariah Validator - Automatic False Pariah Detection and Cleanup
 

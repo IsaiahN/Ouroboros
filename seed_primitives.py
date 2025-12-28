@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+
 """
 Seed Primitives - The ~50 atomic operations given at birth
 ==========================================================
