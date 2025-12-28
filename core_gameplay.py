@@ -5779,46 +5779,6 @@ class GameplayEngine:
             # Ensure session is properly closed
             await self.session_manager.shutdown()
 
-    def get_performance_stats(self, session_id: Optional[str] = None) -> Dict[str, Any]:
-        """Get performance statistics.
-
-        Args:
-            session_id: Optional session ID filter
-
-        Returns:
-            Performance statistics
-        """
-        # Get data from database
-        game_results = self.session_manager.db.get_game_results(session_id=session_id)
-
-        if not game_results:
-            return {"message": "No game results found"}
-
-        total_games = len(game_results)
-        wins = sum(1 for r in game_results if r.get('win_detected', False))
-        total_score = sum(r.get('final_score', 0) for r in game_results)
-        total_actions = sum(r.get('total_actions', 0) for r in game_results)
-
-        stats = {
-            'total_games': total_games,
-            'wins': wins,
-            'losses': total_games - wins,
-            'win_rate': wins / total_games if total_games > 0 else 0.0,
-            'total_score': total_score,
-            'avg_score': total_score / total_games if total_games > 0 else 0.0,
-            'total_actions': total_actions,
-            'avg_actions_per_game': total_actions / total_games if total_games > 0 else 0.0
-        }
-
-        # Add recent performance
-        recent_games = game_results[:10]  # Last 10 games
-        if recent_games:
-            recent_wins = sum(1 for r in recent_games if r.get('win_detected', False))
-            stats['recent_win_rate'] = recent_wins / len(recent_games)
-            stats['recent_avg_score'] = sum(r.get('final_score', 0) for r in recent_games) / len(recent_games)
-
-        return stats
-
     async def __aenter__(self):
         """Async context manager entry."""
         return self
@@ -6342,43 +6302,6 @@ class GameplayEngine:
             
         except Exception as e:
             logger.debug(f"Failed to record stuck point: {e}")
-    
-    def _apply_self_awareness_to_strategy(self, agent_id: str, base_config: Dict) -> Dict:
-        """
-        Apply self-awareness insights to adjust agent strategy.
-        
-        Args:
-            agent_id: Agent ID
-            base_config: Base game configuration
-            
-        Returns:
-            Modified configuration based on self-awareness
-        """
-        awareness = self._get_agent_self_awareness(agent_id)
-        
-        if not awareness['has_history']:
-            return base_config  # No history, use base config
-        
-        # Adjust exploration rate based on performance
-        if awareness['strategy_adjustment'] == 'explore':
-            base_config['exploration_rate'] = min(1.0, base_config.get('exploration_rate', 0.3) * 1.5)
-            logger.debug(f"Agent {agent_id}: Increasing exploration (low win rate)")
-        elif awareness['strategy_adjustment'] == 'exploit':
-            base_config['exploration_rate'] = max(0.1, base_config.get('exploration_rate', 0.3) * 0.5)
-            logger.debug(f"Agent {agent_id}: Decreasing exploration (high win rate)")
-        
-        # Adjust confidence-based parameters
-        base_config['confidence_level'] = awareness['confidence']
-        
-        # Log self-awareness
-        if awareness['games_played'] > 0:
-            logger.info(f"[AWARE] Agent {agent_id} self-awareness: "
-                       f"Win rate {awareness['win_rate']:.1%}, "
-                       f"Avg score {awareness['avg_score']:.2f}, "
-                       f"Strategy: {awareness['strategy_adjustment']}, "
-                       f"Trend: {awareness['performance_trend']}")
-        
-        return base_config
 
     # ========================================================================
     # SELF-MODEL & WORLD-MODEL CONTEXT HELPERS
@@ -10458,74 +10381,6 @@ class GameplayEngine:
             
         return None
 
-    def _get_best_cumulative_sequence(self, game_id: str) -> Optional[Dict]:
-        """
-        Get the SINGLE BEST cumulative sequence for a game (highest score = most levels).
-        This is what Generalists and Pioneers should replay to efficiently reach the frontier.
-        
-        Unlike _get_best_sequence_for_game() which gets a sequence for a SPECIFIC level,
-        this returns the sequence that completes the MOST levels in total.
-        
-        Args:
-            game_id: Game to check
-            
-        Returns:
-            Best cumulative sequence (highest total_score) or None
-        """
-        if not self.game_config.get('enable_pattern_learning', True):
-            return None
-            
-        try:
-            # Extract game type prefix
-            game_type = game_id.split('-')[0] if '-' in game_id else game_id
-            logger.info(f"[SEQUENCE REPLAY DEBUG] _get_best_cumulative_sequence: game_id={game_id}, game_type={game_type}")
-            
-            # Get sequence with HIGHEST score (completes most levels)
-            # Priority:
-            # 1. PROVEN sequences (successful_validations > 0) with highest score
-            # 2. UNTESTED sequences with highest score
-            # 3. Among ties, prefer fewer actions (more efficient)
-            sequences = self.db.execute_query("""
-                SELECT ws.*, 
-                       COALESCE(sr.reliability_score, 0.5) as reliability,
-                       COALESCE(sr.success_rate, 0.5) as community_success_rate,
-                       COALESCE(sr.agent_diversity, 0) as validators,
-                       COALESCE(sr.successful_validations, 0) as validation_count,
-                       COALESCE(sr.total_validation_attempts, 0) as total_attempts,
-                       COALESCE(sr.trending, 'stable') as trend
-                FROM winning_sequences ws
-                LEFT JOIN sequence_reputation sr ON ws.sequence_id = sr.sequence_id
-                WHERE ws.game_id LIKE ? 
-                  AND ws.is_active = 1
-                ORDER BY 
-                    ws.total_score DESC,  -- Highest score first (most levels)
-                    CASE 
-                        WHEN COALESCE(sr.successful_validations, 0) > 0 THEN 0  -- Proven
-                        WHEN COALESCE(sr.total_validation_attempts, 0) = 0 THEN 1  -- Untested
-                        ELSE 2  -- Failed validations
-                    END,
-                    ws.total_actions ASC  -- Fewer actions = more efficient
-                LIMIT 1
-            """, (f"{game_type}-%",))
-            
-            logger.info(f"[SEQUENCE REPLAY DEBUG] Query returned {len(sequences) if sequences else 0} sequences")
-            
-            if sequences:
-                seq = sequences[0]
-                reliability_indicator = "" if seq['reliability'] >= 0.5 else "?"
-                logger.info(f" {reliability_indicator} Best cumulative sequence for {game_type}: "
-                           f"Score {seq['total_score']:.1f} (Level {int(seq['total_score'])}), "
-                           f"{seq['total_actions']} actions, reliability {seq['reliability']:.2f}")
-                logger.info(f"[SEQUENCE REPLAY DEBUG] Returning sequence {seq.get('sequence_id', 'UNKNOWN')}")
-                return seq
-            
-            logger.warning(f"[SEQUENCE REPLAY DEBUG] No cumulative sequence found for game type {game_type}")
-                
-        except Exception as e:
-            logger.debug(f"Error retrieving cumulative sequence for {game_type}: {e}")
-            
-        return None
-
     def _get_ranked_cumulative_sequences(self, game_id: str, limit: int = 3) -> List[Dict]:
         """
         Get TOP N cumulative sequences for a game, ranked by priority.
@@ -10683,7 +10538,7 @@ class GameplayEngine:
         Prioritizes sequences with high reliability scores (community validation).
         Uses reputation system to filter out sequences that fail often (Task 4).
         
-        NOTE: For Generalists/Pioneers replaying to frontier, use _get_best_cumulative_sequence() instead.
+        NOTE: For Generalists/Pioneers replaying to frontier, use _get_ranked_cumulative_sequences() instead.
         This method is for level-specific lookups (e.g., when at a specific level and need targeted sequence).
         
         Args:
@@ -12961,77 +12816,10 @@ class GameplayEngine:
                     datetime.now().isoformat()
                 ))
                 
-                logger.info(f"🆕 Discovered new pattern {pattern_id}: {pattern_name}")
+                logger.info(f"[NEW] Discovered new pattern {pattern_id}: {pattern_name}")
         
         except Exception as e:
             logger.debug(f"Abstract pattern detection error: {e}")
-    
-    def _find_similar_patterns(self, current_frame) -> Optional[Dict]:
-        """
-        Find patterns that might apply to the current game state.
-        Uses abstract pattern matching rather than exact frame matching.
-        """
-        try:
-            # Get current frame characteristics
-            dummy_final = current_frame  # We don't know final yet
-            current_sig = self._detect_frame_pattern(current_frame, dummy_final)
-            
-            # Query patterns with similar characteristics
-            all_patterns = self.db.execute_query("""
-                SELECT pattern_id, pattern_name, pattern_signature, 
-                       concrete_examples, success_rate, avg_efficiency,
-                       confidence_score
-                FROM discovered_patterns
-                WHERE success_rate >= 0.5
-                ORDER BY confidence_score DESC, success_rate DESC
-                LIMIT 10
-            """)
-            
-            best_match = None
-            best_score = 0.0
-            
-            for pat in all_patterns:
-                try:
-                    sig = json.loads(pat['pattern_signature'])
-                    
-                    # Calculate similarity score
-                    similarity = 0.0
-                    
-                    # Grid size match
-                    if sig.get('grid_size') == current_sig.get('grid_size'):
-                        similarity += 0.3
-                    
-                    # Transformation type match
-                    if sig.get('transformation_type') == current_sig.get('transformation_type'):
-                        similarity += 0.3
-                    
-                    # Pattern features
-                    if sig.get('symmetry_detected') == current_sig.get('symmetry_detected'):
-                        similarity += 0.2
-                    
-                    if sig.get('repetition_detected') == current_sig.get('repetition_detected'):
-                        similarity += 0.2
-                    
-                    # Weight by pattern success rate and confidence
-                    weighted_score = similarity * pat['success_rate'] * pat['confidence_score']
-                    
-                    if weighted_score > best_score:
-                        best_score = weighted_score
-                        best_match = pat
-                
-                except Exception as e:
-                    logger.debug(f"Pattern matching error: {e}")
-                    continue
-            
-            if best_match and best_score >= 0.3:
-                logger.info(f" Found similar pattern {best_match['pattern_id']} "
-                           f"(similarity: {best_score:.2f})")
-                return best_match
-            
-        except Exception as e:
-            logger.debug(f"Pattern search error: {e}")
-        
-        return None
     
     # ========== META-LEARNING METHODS (Rule 10: Integrated into core_gameplay.py) ==========
     

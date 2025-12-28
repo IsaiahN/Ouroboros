@@ -424,72 +424,6 @@ class ViralPackageEngine:
         
         return True
     
-    def update_package_success(self,
-                              package_id: str,
-                              agent_id: str,
-                              score_contribution: float,
-                              success: bool,
-                              generation: int):
-        """
-        Update package fitness based on usage outcome.
-        
-        Args:
-            package_id: Package used
-            agent_id: Agent who used it
-            score_contribution: Score gained/lost
-            success: Whether this helped or hurt
-            generation: Current generation
-        """
-        try:
-            # Update agent infection stats
-            self.db.execute_query("""
-                UPDATE agent_viral_infections
-                SET success_count = success_count + ?,
-                    failure_count = failure_count + ?,
-                    total_uses = total_uses + 1,
-                    avg_score_boost = (avg_score_boost * total_uses + ?) / (total_uses + 1),
-                    last_used_generation = ?
-                WHERE agent_id = ? AND package_id = ?
-            """, (
-                1 if success else 0,
-                0 if success else 1,
-                score_contribution,
-                generation,
-                agent_id,
-                package_id
-            ))
-            
-            # Update package global stats
-            self.db.execute_query("""
-                UPDATE viral_information_packages
-                SET last_successful_use_generation = ?
-                WHERE package_id = ?
-            """, (generation, package_id))
-            
-            # Recalculate package success rate
-            infections = self.db.execute_query("""
-                SELECT 
-                    AVG(CAST(success_count AS FLOAT) / NULLIF(total_uses, 0)) as success_rate,
-                    AVG(avg_score_boost) as avg_score
-                FROM agent_viral_infections
-                WHERE package_id = ? AND total_uses > 0
-            """, (package_id,))
-            
-            if infections:
-                self.db.execute_query("""
-                    UPDATE viral_information_packages
-                    SET success_rate = ?,
-                        avg_score_contribution = ?
-                    WHERE package_id = ?
-                """, (
-                    infections[0]['success_rate'] or 0.0,
-                    infections[0]['avg_score'] or 0.0,
-                    package_id
-                ))
-                
-        except Exception as e:
-            print(f"[VIRAL] Error updating package success: {e}")
-    
     # ========================================================================
     # PARIAH CREATION (Negative Selection)
     # ========================================================================
@@ -678,66 +612,6 @@ class ViralPackageEngine:
         self._make_agent_aware_of_pariah(to_agent_id, pariah_id, generation, 'horizontal_transfer', from_agent_id)
         
         return True
-    
-    def update_pariah_avoidance(self,
-                               pariah_id: str,
-                               agent_id: str,
-                               avoided_successfully: bool,
-                               score_saved: float,
-                               generation: int):
-        """
-        Update pariah avoidance stats.
-        
-        Args:
-            pariah_id: Pariah encountered
-            agent_id: Agent who encountered it
-            avoided_successfully: Whether agent avoided the trap
-            score_saved: Score saved by avoiding (or lost by triggering)
-            generation: Current generation
-        """
-        try:
-            self.db.execute_query("""
-                UPDATE agent_pariah_awareness
-                SET avoidance_success_count = avoidance_success_count + ?,
-                    trigger_count = trigger_count + ?,
-                    total_encounters = total_encounters + 1,
-                    avg_score_saved = (avg_score_saved * total_encounters + ?) / (total_encounters + 1),
-                    last_encountered_generation = ?
-                WHERE agent_id = ? AND pariah_id = ?
-            """, (
-                1 if avoided_successfully else 0,
-                0 if avoided_successfully else 1,
-                score_saved if avoided_successfully else -score_saved,
-                generation,
-                agent_id,
-                pariah_id
-            ))
-            
-            # Update pariah global stats
-            if not avoided_successfully:
-                self.db.execute_query("""
-                    UPDATE pariahs
-                    SET trigger_count = trigger_count + 1,
-                        last_triggered_generation = ?
-                    WHERE pariah_id = ?
-                """, (generation, pariah_id))
-            
-            # Recalculate avoidance success rate
-            awareness = self.db.execute_query("""
-                SELECT AVG(CAST(avoidance_success_count AS FLOAT) / NULLIF(total_encounters, 0)) as avoidance_rate
-                FROM agent_pariah_awareness
-                WHERE pariah_id = ? AND total_encounters > 0
-            """, (pariah_id,))
-            
-            if awareness:
-                self.db.execute_query("""
-                    UPDATE pariahs
-                    SET avoidance_success_rate = ?
-                    WHERE pariah_id = ?
-                """, (awareness[0]['avoidance_rate'] or 0.0, pariah_id))
-                
-        except Exception as e:
-            print(f"[PARIAH] Error updating avoidance: {e}")
     
     # ========================================================================
     # FRONTIER EXPLORATION PACKAGES (Temporary - auto-cleaned when sequences exist)
@@ -1352,57 +1226,6 @@ class ViralPackageEngine:
             generation,
             package_id
         ))
-    
-    def record_pariah_encounter(self, agent_id: str, pariah_id: str,
-                               triggered: bool, score_impact: float, generation: int):
-        """
-        Record that an agent encountered a pariah (either avoided it or triggered it).
-        
-        Args:
-            agent_id: Agent that encountered the pariah
-            pariah_id: Pariah that was encountered
-            triggered: Whether agent fell into the trap (True) or avoided it (False)
-            score_impact: Score change from this encounter
-            generation: Current generation
-        """
-        # Update awareness stats
-        self.db.execute_query("""
-            UPDATE agent_pariah_awareness
-            SET total_encounters = total_encounters + 1,
-                avoidance_success_count = avoidance_success_count + ?,
-                trigger_count = trigger_count + ?,
-                avg_score_saved = ((avg_score_saved * total_encounters) + ?) / (total_encounters + 1),
-                last_encountered_generation = ?
-            WHERE agent_id = ? AND pariah_id = ?
-        """, (
-            0 if triggered else 1,
-            1 if triggered else 0,
-            score_impact,
-            generation,
-            agent_id,
-            pariah_id
-        ))
-        
-        # Update pariah-level stats
-        if triggered:
-            self.db.execute_query("""
-                UPDATE pariahs
-                SET trigger_count = trigger_count + 1,
-                    avg_score_loss = ((avg_score_loss * trigger_count) + ?) / (trigger_count + 1),
-                    last_triggered_generation = ?,
-                    avoidance_success_rate = (
-                        SELECT CAST(SUM(avoidance_success_count) AS REAL) /
-                               NULLIF(SUM(total_encounters), 0)
-                        FROM agent_pariah_awareness
-                        WHERE pariah_id = ?
-                    )
-                WHERE pariah_id = ?
-            """, (
-                abs(score_impact),
-                generation,
-                pariah_id,
-                pariah_id
-            ))
     
     # ========================================================================
     # PACKAGE/PARIAH MANAGEMENT

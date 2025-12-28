@@ -5407,3 +5407,116 @@ Oracle now automatically:
 3. **Verify** Q1 now reports actual frame changes (not "no actions")
 4. **Monitor** for any new bug types that emerge
 5. **Fix** any CRITICAL bugs before continuing
+
+---
+
+## Session: December 28, 2025 (Afternoon) - Dead Code Cleanup
+
+---
+
+### Approach: Identify and Remove Unused Functions to Reduce Code Drift
+
+**Timestamp**: 1:19:59 PM  
+**Status**: COMPLETED - 516 lines of dead code removed
+
+---
+
+### Problem Statement
+
+User requested a comprehensive dead code audit to ensure no orphaned/unused functions exist in core modules. Per Rule 3 (No Orphaned Code) and Rule 10 (Prevent Code Drift), all unused code should be identified and removed.
+
+---
+
+### Approach
+
+**Strategy**: Use static analysis via grep_search to find functions that are:
+1. Defined but never called anywhere in the codebase
+2. Only referenced in their own definition (no external calls)
+3. Superseded by newer implementations
+
+**Analysis Scope**:
+- `core_gameplay.py` (main file, ~14,500 lines)
+- `viral_package_engine.py` (~2,100 lines)
+- `evolutionary_engine.py` (~1,400 lines)
+- `autonomous_evolution_runner.py` (~2,500 lines)
+
+---
+
+### Dead Code Identified and Removed
+
+#### core_gameplay.py (4 functions removed)
+
+| Function | Lines Removed | Reason |
+|----------|---------------|--------|
+| `get_performance_stats()` | ~42 lines | Never called - performance tracking done elsewhere via database queries |
+| `_apply_self_awareness_to_strategy()` | ~37 lines | Never called - self-awareness applied through different mechanisms |
+| `_get_best_cumulative_sequence()` | ~68 lines | Superseded by `_get_ranked_cumulative_sequences()` which returns multiple sequences for 3-try fallback system |
+| `_find_similar_patterns()` | ~65 lines | Never called - pattern matching integrated into other methods |
+
+#### viral_package_engine.py (3 functions removed)
+
+| Function | Lines Removed | Reason |
+|----------|---------------|--------|
+| `update_package_success()` | ~56 lines | Never called - package tracking done through `_update_package_usage()` instead |
+| `update_pariah_avoidance()` | ~55 lines | Never called - pariah awareness tracked through `_make_agent_aware_of_pariah()` |
+| `record_pariah_encounter()` | ~48 lines | Never called - duplicates functionality handled elsewhere |
+
+#### evolutionary_engine.py (2 functions removed)
+
+| Function | Lines Removed | Reason |
+|----------|---------------|--------|
+| `_calculate_learning_speed_fitness()` | ~131 lines | Never called - only referenced in documentation (DOCS/Ouroboros_Three_Layer_Quick_Reference.md) |
+| `_get_agent_games_played()` | ~14 lines | Never called - games_played queried directly from agents table in other methods |
+
+---
+
+### Verification Steps
+
+1. **Grep search for each function** - Confirmed only definition exists (no call sites)
+2. **Read function context** - Understood purpose and confirmed superseded by other implementations
+3. **Removed dead code** - Used replace_string_in_file to cleanly remove each function
+4. **Fixed stale comment** - Updated docstring in `_get_best_sequence_for_game()` that referenced deleted `_get_best_cumulative_sequence()` to point to `_get_ranked_cumulative_sequences()` instead
+5. **Fixed Unicode emoji** - Changed `🆕` to `[NEW]` in log message (Rule 11 compliance)
+6. **Verified imports** - Ran `python -c "from autonomous_evolution_runner import AutonomousEvolutionRunner; print('[OK]')"` - all imports valid
+
+---
+
+### Summary
+
+| Metric | Value |
+|--------|-------|
+| **Total lines removed** | ~516 lines |
+| **Files modified** | 3 (core_gameplay.py, viral_package_engine.py, evolutionary_engine.py) |
+| **Functions removed** | 9 |
+| **Import verification** | PASSED |
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `core_gameplay.py` | Removed 4 dead functions (~212 lines), fixed stale comment, fixed emoji |
+| `viral_package_engine.py` | Removed 3 dead functions (~159 lines) |
+| `evolutionary_engine.py` | Removed 2 dead functions (~145 lines) |
+
+---
+
+### Current Status
+
+**Timestamp**: 1:19:59 PM
+
+Dead code cleanup completed:
+- ✅ Identified 9 dead functions across 3 core files
+- ✅ Verified each function was truly never called
+- ✅ Removed all dead code cleanly
+- ✅ Fixed stale documentation references
+- ✅ Fixed Rule 11 (Unicode emoji) violation
+- ✅ Verified all imports still work
+
+**Current Failure Being Worked On**: None - cleanup complete.
+
+**NEXT STEP**: Run evolution to verify system operates normally after dead code removal:
+```bash
+python run_evolution.py --max-generations 3
+```
