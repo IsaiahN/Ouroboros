@@ -1,5 +1,80 @@
 # Ouroboros Progress Log
 
+## Session: December 29, 2025 - Scientific Method Engine
+
+---
+
+### Approach: Autonomous Theory Formation, Testing, and Generalization
+
+**Timestamp**: 7:23 AM  
+**Status**: COMPLETE - Engine created and integrated
+
+---
+
+### The Meta-Question
+
+User asked the fundamental architecture question: "How do I get agents to think like this, but about EVERYTHING and then formulate and test these theories until they have a good approximation of their world model, self model and cause and effect?"
+
+The user had manually demonstrated the scientific method while building the danger detection system:
+1. Observed: "My agent died"
+2. Hypothesized: "Maybe red objects kill me"
+3. Predicted: "If I touch red again, I should die"
+4. Designed test: "Let me track deaths near red"
+5. Generalized: "ALL red objects are dangerous"
+
+**Goal**: Agents must do this AUTONOMOUSLY about everything - not just death, but goals, actions, objects, and patterns.
+
+---
+
+### Solution: Scientific Method Engine
+
+Created [scientific_method_engine.py](scientific_method_engine.py) - a 7-phase autonomous reasoning system:
+
+| Phase | Purpose | What Happens |
+|-------|---------|--------------|
+| 1. OBSERVE | Notice patterns | Record every action's effect into observation buffer |
+| 2. HYPOTHESIZE | Form theories | Automatically form Theory objects on death/progress/level change |
+| 3. PREDICT | Define expectations | "If theory is true, X should happen" |
+| 4. EXPERIMENT | Design tests | Create Experiment objects with preconditions and expected results |
+| 5. ANALYZE | Compare results | Did prediction match reality? |
+| 6. UPDATE | Adjust confidence | Strengthen (+0.1) or weaken (-0.15) theory |
+| 7. GENERALIZE | Abstract rules | If same theory on 3+ levels, create generalized version |
+
+### Key Design Decisions
+
+1. **20% Experimentation Budget**: Agents allocate ~20% of actions to DELIBERATE tests, not just goal-seeking
+2. **8 Theory Types**: OBJECT_IDENTITY, OBJECT_DANGER, ACTION_EFFECT, SPATIAL_RULE, GOAL_HYPOTHESIS, SEQUENCE_PATTERN, COUNTER_BEHAVIOR, TRIGGER_MECHANISM
+3. **Automatic Triggers**: Death → death theory, Score increase → progress theory, Level complete → goal theory
+4. **Network Sharing**: Theories with confidence >= 0.7 and 3+ tests are shared to network
+5. **Generalization Detection**: Same theory on 3+ levels → generalized version (applies to ALL levels)
+
+### Integration Points in core_gameplay.py
+
+1. **Import + Init**: Added import and initialization in `__init__`
+2. **Experiment Hook**: In `_select_action()` - checks if experiment should run (~20% of actions)
+3. **Observation Recording**: After every action via `_record_science_observation()`
+4. **Level Completion**: Updates beliefs and attempts generalization
+
+### New Tables
+
+| Table | Purpose |
+|-------|---------|
+| `agent_theories` | Stores all theories with confidence, status, evidence |
+| `theory_experiments` | Tracks designed experiments and their results |
+
+### Files Created/Modified
+
+- **NEW**: [scientific_method_engine.py](scientific_method_engine.py) - The core engine
+- **NEW**: [migrations/add_scientific_method_tables.py](migrations/add_scientific_method_tables.py) - Migration
+- **MODIFIED**: [core_gameplay.py](core_gameplay.py):
+  - Added `ScientificMethodEngine` import and initialization
+  - Added experiment hook in `_select_action()`
+  - Added `_record_science_observation()` method
+  - Added observation recording after every action
+  - Added belief update and generalization at level completion
+
+---
+
 ## Session: December 28, 2025 - Theory Validation & Observation-Based Learning
 
 ---

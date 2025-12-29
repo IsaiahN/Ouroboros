@@ -48,6 +48,14 @@ from agent_self_model import (
 )
 from object_detector import ObjectDetector
 
+# SCIENTIFIC METHOD ENGINE: Autonomous theory formation, testing, and generalization
+try:
+    from scientific_method_engine import ScientificMethodEngine
+    SCIENTIFIC_METHOD_AVAILABLE = True
+except ImportError:
+    SCIENTIFIC_METHOD_AVAILABLE = False
+    ScientificMethodEngine = None
+
 # Two-Streams: Import cohort wisdom for role-based sequence selection
 try:
     from viral_package_engine import get_cohort_wisdom, update_sequence_role_reputation
@@ -464,6 +472,19 @@ class GameplayEngine:
                 logger.debug(f"Terminal detector init failed: {e}")
         else:
             self.terminal_detector = None
+        
+        # SCIENTIFIC METHOD ENGINE - Autonomous theory formation and testing
+        # Agents observe, hypothesize, test predictions, and generalize.
+        # 20% of actions are deliberate experiments to test theories.
+        if SCIENTIFIC_METHOD_AVAILABLE:
+            try:
+                self.science_engine = ScientificMethodEngine(self.db)
+                logger.info("Scientific method engine initialized (autonomous theory formation)")
+            except Exception as e:
+                self.science_engine = None
+                logger.debug(f"Science engine init failed: {e}")
+        else:
+            self.science_engine = None
         
         # NEW: Breakthrough systems initialization
         try:
@@ -1032,6 +1053,30 @@ class GameplayEngine:
                     )
             except Exception as e:
                 logger.debug(f"Goal inference failed (non-critical): {e}")
+        
+        # ================================================================
+        # SCIENTIFIC METHOD: Update beliefs and attempt generalization
+        # ================================================================
+        # On level completion:
+        # 1. Update confidence in all theories for this level
+        # 2. Attempt to generalize supported theories across levels
+        # ================================================================
+        if hasattr(self, 'science_engine') and self.science_engine:
+            try:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                
+                # Update beliefs based on level completion
+                self.science_engine.update_beliefs(game_type, loop_state.current_level)
+                
+                # Attempt generalization if we've completed multiple levels
+                if loop_state.level_completions >= 2:
+                    generalized = self.science_engine.attempt_generalization(
+                        game_type, agent_id or 'unknown'
+                    )
+                    if generalized:
+                        logger.info(f"[SCIENCE] Generalized theory: {generalized.description[:60]}...")
+            except Exception as e:
+                logger.debug(f"Science belief update failed (non-critical): {e}")
         
         # CODS - Update context for new level
         # Advance CODS to track operator usage per level
@@ -2384,6 +2429,43 @@ class GameplayEngine:
                                         )
                                         if zone_id:
                                             logger.info(f"[FORESIGHT] Recorded death zone: {zone_id[:20]}")
+                                        
+                                        # ================================================================
+                                        # DANGEROUS OBJECT DETECTION - Color/pattern-based danger
+                                        # ================================================================
+                                        # Identify WHAT killed the agent (by color) and mark all
+                                        # similar objects as suspected dangers across the grid.
+                                        # ================================================================
+                                        if controlled_objects:
+                                            obj_id = self.terminal_detector.record_dangerous_object(
+                                                game_type=game_type,
+                                                level_number=current_level,
+                                                frame_before_death=frame_before,
+                                                controlled_objects=controlled_objects,
+                                                fatal_action=fatal_action_num
+                                            )
+                                            if obj_id:
+                                                logger.info(f"[DANGER-OBJ] Marked dangerous object pattern: {obj_id[:20] if isinstance(obj_id, str) else obj_id}")
+                                        
+                                        # ================================================================
+                                        # GAME-OVER THEORY: WHY did the game end?
+                                        # ================================================================
+                                        # Generate a theory about the cause of death for future agents
+                                        # to learn from and actively test/avoid.
+                                        # ================================================================
+                                        theory = self.terminal_detector.generate_game_over_theory(
+                                            game_id=game_id,
+                                            level_number=current_level,
+                                            frame_before_death=frame_before,
+                                            fatal_action=fatal_action_num,
+                                            pre_death_actions=pre_death_actions,
+                                            controlled_objects=controlled_objects
+                                        )
+                                        if theory:
+                                            logger.info(f"[THEORY] Game-over cause: {theory.get('theory', 'Unknown')[:80]}")
+                                            logger.info(f"[THEORY] Avoidance: {theory.get('avoidance_strategy', 'Unknown')[:60]}")
+                                            # Store theory for reasoning log
+                                            self._last_game_over_theory = theory
                                 except Exception as e:
                                     logger.debug(f"Terminal pattern recording failed: {e}")
                         break
@@ -3648,6 +3730,41 @@ class GameplayEngine:
             reasoning = f"ESCAPE MODE: Trying ACTION{escape_action} to break out of frozen state"
             logger.info(f"[ESCAPE] {reasoning}")
             return f"ACTION{escape_action}", reasoning
+        
+        # ===================================================================
+        # SCIENTIFIC METHOD: CHECK FOR EXPERIMENT OPPORTUNITY
+        # ===================================================================
+        # Agents allocate ~20% of actions to deliberate theory testing.
+        # This is how they autonomously learn cause-and-effect relationships.
+        # When experiment is ready: take the experimental action and track result.
+        # ===================================================================
+        if hasattr(self, 'science_engine') and self.science_engine:
+            try:
+                action_count = getattr(self, '_action_counter', 0)
+                
+                # Check if we should run an experiment on this action
+                if self.science_engine.should_experiment_now(action_count):
+                    # Get the experimental action
+                    current_state = {
+                        'frame': game_state.frame,
+                        'score': game_state.score,
+                        'game_type': self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown',
+                        'level': game_state.score + 1
+                    }
+                    
+                    experiment_result = self.science_engine.get_experiment_action(current_state)
+                    
+                    if experiment_result:
+                        action, reasoning = experiment_result
+                        # Mark that we're in an experiment so _execute_action records result
+                        self._running_experiment = True
+                        self._experiment_score_before = game_state.score
+                        self._experiment_frame_before = game_state.frame
+                        
+                        logger.info(f"[SCIENCE] {reasoning}")
+                        return action, reasoning
+            except Exception as e:
+                logger.debug(f"Science experiment check failed: {e}")
         
         # === SELF-DIRECTED MODE: Agent broke out of stuck state, now exploring on its own ===
         # Skip network-guided early returns (rules, subgoal plans) and rely on own judgment
@@ -5278,6 +5395,85 @@ class GameplayEngine:
                                        f"ACTION{alt_action}")
                             base_action = f"ACTION{alt_action}"
                             final_reasoning = f"FORESIGHT: {danger.get('reason', 'Avoided fatal action')} | {final_reasoning}"
+                    
+                    # =====================================================================
+                    # DEATH ZONE CHECK - Spatial danger awareness
+                    # Check if planned movement would take controlled objects into danger
+                    # This is more robust than frame-hash matching for dynamic games
+                    # =====================================================================
+                    if action_to_check and action_to_check <= 4:  # Movement actions (UP/DOWN/RIGHT/LEFT)
+                        # Get controlled object positions from agent self-model
+                        object_positions = []
+                        if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                            controlled = self.agent_self_model.get_controlled_objects()
+                            if controlled:
+                                for obj in controlled:
+                                    if 'x' in obj and 'y' in obj:
+                                        object_positions.append((obj['x'], obj['y']))
+                        
+                        if object_positions:
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            zone_danger = self.terminal_detector.check_death_zones(
+                                game_type=game_type,
+                                level_number=current_level_check,
+                                object_positions=object_positions,
+                                planned_direction=action_to_check,
+                                min_danger=0.6
+                            )
+                            
+                            if zone_danger and zone_danger.get('warning'):
+                                zone_id = zone_danger.get('zone_id')
+                                
+                                # =========================================================
+                                # CHALLENGE MECHANISM: Occasionally test old death zones
+                                # Zones might be temporary (enemy moved) or stale beliefs
+                                # =========================================================
+                                should_challenge = self.terminal_detector.should_challenge_zone(
+                                    zone_danger, 
+                                    self.game_config.get('generation', 0)
+                                )
+                                
+                                if should_challenge:
+                                    # Deliberately enter the zone to test if it's still dangerous
+                                    logger.info(f"[CHALLENGE] Testing death zone {zone_id[:12] if zone_id else 'unknown'} "
+                                               f"(danger_score={zone_danger.get('danger_score', 0):.2f}) - zone might be stale")
+                                    # Store zone_id for post-action tracking
+                                    self._challenging_zone = zone_id
+                                    final_reasoning = f"CHALLENGE: Testing if death zone is still dangerous | {final_reasoning}"
+                                    # Don't change action - let the agent enter the zone
+                                else:
+                                    # Avoid the zone - it's confirmed dangerous
+                                    safe_direction = zone_danger.get('safe_direction')
+                                    if safe_direction and safe_direction != action_to_check:
+                                        logger.info(f"[DEATH-ZONE] Avoiding ACTION{action_to_check} "
+                                                   f"(would enter death zone at {zone_danger.get('zone_coords', 'unknown')}) -> "
+                                                   f"ACTION{safe_direction}")
+                                        base_action = f"ACTION{safe_direction}"
+                                        final_reasoning = f"DEATH-ZONE: Avoided entering danger area | {final_reasoning}"
+                            
+                            # =====================================================================
+                            # DANGEROUS OBJECT CHECK - Color-based danger awareness
+                            # If red enemies have killed before, avoid ALL red objects
+                            # More general than position-based zones
+                            # =====================================================================
+                            if game_state.frame:
+                                obj_danger = self.terminal_detector.check_dangerous_objects(
+                                    game_type=game_type,
+                                    level_number=current_level_check,
+                                    current_frame=game_state.frame,
+                                    object_positions=object_positions,
+                                    planned_action=action_to_check
+                                )
+                                
+                                if obj_danger and obj_danger.get('warning'):
+                                    safe_dir = obj_danger.get('safe_direction')
+                                    if safe_dir and safe_dir != action_to_check:
+                                        logger.info(f"[DANGER-OBJ] Avoiding ACTION{action_to_check} "
+                                                   f"(would contact color {obj_danger.get('object_color')} "
+                                                   f"which killed {obj_danger.get('kill_count', 0)} times) -> "
+                                                   f"ACTION{safe_dir}")
+                                        base_action = f"ACTION{safe_dir}"
+                                        final_reasoning = f"DANGER-OBJ: {obj_danger.get('reason', 'Avoided lethal object')} | {final_reasoning}"
             except Exception as e:
                 logger.debug(f"Terminal foresight check failed: {e}")
         
@@ -5562,6 +5758,19 @@ class GameplayEngine:
                     )
                 except Exception as e:
                     logger.debug(f"ACTION6 availability tracking failed (non-critical): {e}")
+            
+            # ================================================================
+            # SCIENTIFIC METHOD: Record observation and experiment results
+            # ================================================================
+            self._record_science_observation(
+                action='ACTION6',
+                frame_before=game_state.frame,
+                frame_after=new_state.frame if new_state else None,
+                score_before=game_state.score,
+                score_after=new_state.score if new_state else game_state.score,
+                game_state_str=new_state.state if new_state else 'UNKNOWN',
+                current_level=current_level
+            )
                     
             return new_state
         else:
@@ -5941,6 +6150,19 @@ class GameplayEngine:
                             
                     except Exception as e:
                         logger.debug(f"Primitive post-action analysis failed (non-critical): {e}")
+                
+                # ================================================================
+                # SCIENTIFIC METHOD: Record observation and experiment results
+                # ================================================================
+                self._record_science_observation(
+                    action=action,
+                    frame_before=frame_before,
+                    frame_after=new_state.frame if new_state else None,
+                    score_before=game_state.score,
+                    score_after=new_state.score if new_state else game_state.score,
+                    game_state_str=new_state.state if new_state else 'UNKNOWN',
+                    current_level=current_level
+                )
                 
                 return new_state
             else:
@@ -7133,9 +7355,9 @@ class GameplayEngine:
                 ]
             
             # McGuffin Grammar: Integrate tetrahedral perception from sensation context
+            tetra = context['tetrahedral_perception']
+            
             if sensation_context:
-                tetra = context['tetrahedral_perception']
-                
                 # Self objects (Method axis - what we control)
                 tetra['self_objects'] = [
                     self._summarize_object(obj) 
@@ -7156,6 +7378,10 @@ class GameplayEngine:
                 
                 # Mood vector (emergent from perception balance)
                 tetra['mood'] = sensation_context.get('mood_vector', tetra['mood'])
+            
+            # FIX: If self_objects is empty but we have controlled objects, populate it
+            if not tetra['self_objects'] and context['objects_agent_controls']:
+                tetra['self_objects'] = [f"controlled_obj_{i}" for i, _ in enumerate(context['objects_agent_controls'][:5])]
                 
         except Exception as e:
             logger.debug(f"Self-model context build failed: {e}")
@@ -8465,9 +8691,13 @@ class GameplayEngine:
             color_movements = {}  # old_color -> list of movements
             
             for coord in diff_coords[:20]:  # Limit to 20 changes
-                y, x = coord
-                old_color = int(previous_arr[y, x])
-                new_color = int(current_arr[y, x])
+                # Handle both 2D and 3D+ arrays (RGB, etc.)
+                if len(coord) >= 2:
+                    y, x = coord[0], coord[1]
+                else:
+                    continue  # Skip malformed coordinates
+                old_color = int(previous_arr[y, x] if previous_arr.ndim == 2 else previous_arr[y, x, 0])
+                new_color = int(current_arr[y, x] if current_arr.ndim == 2 else current_arr[y, x, 0])
                 
                 if old_color != 0 and new_color == 0:
                     # Object disappeared
@@ -9703,6 +9933,39 @@ class GameplayEngine:
                 SET last_referenced = CURRENT_TIMESTAMP
                 WHERE game_type = ? AND level_number <= ?
             """, (game_type, level_number))
+            
+            # ================================================================
+            # GAME-OVER THEORIES: Add terminal pattern theories to insights
+            # ================================================================
+            # These are more specific than failure hypotheses - they explain
+            # exactly WHY previous agents died at this level.
+            # ================================================================
+            if hasattr(self, 'terminal_detector') and self.terminal_detector:
+                try:
+                    game_over_theories = self.terminal_detector.get_game_over_theories(
+                        game_id, level_number, limit=2
+                    )
+                    for theory in game_over_theories:
+                        result.append({
+                            'hypothesis_id': theory.get('pattern_id', 'terminal_unknown'),
+                            'level': level_number,
+                            'failure': theory.get('theory', 'Unknown game-over cause'),
+                            'strategy': theory.get('avoidance_strategy', 'Avoid fatal action'),
+                            'confidence': theory.get('confidence', 0.5),
+                            'validated': theory.get('confirmed_deaths', 0) >= 2,
+                            'type': 'game_over_theory',
+                            'actionable': {
+                                'avoid_actions': [theory.get('fatal_action')] if theory.get('fatal_action') else [],
+                                'prefer_actions': [],
+                                'avoid_directions': [],
+                                'prefer_directions': [],
+                                'avoid_colors': [],
+                                'target_colors': [],
+                                'patterns_detected': ['terminal_pattern']
+                            }
+                        })
+                except Exception as e:
+                    logger.debug(f"Game-over theory query failed: {e}")
             
             return result
             
@@ -11489,6 +11752,29 @@ class GameplayEngine:
                     # Add foresight indicator to reasoning if action was changed
                     foresight_indicator = "" if action_to_execute == action_num else f" (foresight: avoided ACTION{action_num})"
                     game_state = await self._execute_action(action, game_state, foresight_indicator, actual_level)
+                
+                # ================================================================
+                # FIX: REFRESH EMERGENT REASONING DURING SEQUENCE REPLAY
+                # ================================================================
+                # During replay, _select_action() isn't called, so Q1-Q5 stay stale.
+                # Update emergent reasoning periodically during replay to keep
+                # reasoning logs accurate and enable learning from replay.
+                # ================================================================
+                if action_count % 5 == 0 or game_state.score > last_score:  # Every 5 actions or on progress
+                    try:
+                        agent_id = self.game_config.get('agent_id')
+                        navigation_state = getattr(self, '_navigation_state', 0.0)
+                        emergent_reasoning = self._build_emergent_reasoning_context(
+                            agent_id=agent_id,
+                            game_state=game_state,
+                            hypothesis_biases={},
+                            sensation_biases={},
+                            navigation_state=navigation_state
+                        )
+                        if emergent_reasoning:
+                            self._last_emergent_reasoning = emergent_reasoning
+                    except Exception as e:
+                        logger.debug(f"Emergent reasoning refresh during replay failed: {e}")
                 
                 # ================================================================
                 # ADAPTIVE REPLAY: Track progress and adapt if stuck
@@ -14252,6 +14538,102 @@ class GameplayEngine:
             return 'cautious'
         else:
             return 'frustrated'
+
+    def _record_science_observation(self, action: str, frame_before, frame_after,
+                                    score_before: float, score_after: float,
+                                    game_state_str: str, current_level: int) -> None:
+        """
+        Record an observation for the Scientific Method Engine.
+        
+        This is called after every action to:
+        1. Feed the observation buffer (pattern detection)
+        2. Check for automatic theory triggers (death, progress, level completion)
+        3. Record experiment results if we were running an experiment
+        
+        Args:
+            action: The action that was taken
+            frame_before: Frame state before action
+            frame_after: Frame state after action
+            score_before: Score before action
+            score_after: Score after action
+            game_state_str: Current game state (WIN, GAME_OVER, NOT_FINISHED)
+            current_level: Current level number
+        """
+        if not hasattr(self, 'science_engine') or not self.science_engine:
+            return
+        
+        try:
+            agent_id = self.game_config.get('agent_id', 'unknown')
+            game_id = self.session_manager.current_game_id or 'unknown'
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+            
+            # Get controlled objects if available
+            controlled_objects = []
+            if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                try:
+                    controlled = self.agent_self_model.get_controlled_objects()
+                    if controlled:
+                        controlled_objects = controlled
+                except:
+                    pass
+            
+            # Check if frame changed
+            frame_changed = False
+            if frame_before and frame_after:
+                frame_changed = frame_before != frame_after
+            
+            # Build observation
+            observation = {
+                'action': action,
+                'frame_before': frame_before,
+                'frame_after': frame_after,
+                'score_before': score_before,
+                'score_after': score_after,
+                'game_state': game_state_str,
+                'controlled_objects': controlled_objects,
+                'frame_changed': frame_changed,
+                'level_changed': score_after > score_before,
+                'game_type': game_type,
+                'level_number': current_level,
+                'agent_id': agent_id,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Record the observation (triggers automatic theory formation)
+            self.science_engine.record_observation(observation)
+            
+            # If we were running an experiment, record the result
+            if hasattr(self, '_running_experiment') and self._running_experiment:
+                # Classify the effect
+                if game_state_str == 'GAME_OVER':
+                    effect = 'death'
+                elif game_state_str == 'WIN':
+                    effect = 'win'
+                elif score_after > score_before:
+                    effect = 'progress'
+                elif frame_changed:
+                    effect = 'state_change'
+                else:
+                    effect = 'no_effect'
+                
+                actual_outcome = {
+                    'game_state': game_state_str,
+                    'effect': effect,
+                    'score_increased': score_after > score_before,
+                    'frame_changed': frame_changed
+                }
+                
+                self.science_engine.record_experiment_result(actual_outcome, agent_id)
+                
+                # Clear experiment flags
+                self._running_experiment = False
+                if hasattr(self, '_experiment_score_before'):
+                    del self._experiment_score_before
+                if hasattr(self, '_experiment_frame_before'):
+                    del self._experiment_frame_before
+                    
+        except Exception as e:
+            logger.debug(f"Science observation recording failed (non-critical): {e}")
 
     def _learn_from_action_outcome(self, action: str, previous_score: float, 
                                  current_game_state: GameState, agent_id: str) -> None:
