@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """Migration: Add best_score_achieved column to network_object_control_hypotheses.
 
 TIER 5 - SELECTION: Hypotheses compete by outcome, not just validation count.

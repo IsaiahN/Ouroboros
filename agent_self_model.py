@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: MUST be before other imports
+
 """
 Agent Self-Model System
 =======================
@@ -8,9 +11,6 @@ Identifies which objects/pixels agents control in each game/level.
 
 This addresses the agent self-model requirement from operational philosophy.
 """
-
-import os
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import json
 import uuid
