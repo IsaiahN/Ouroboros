@@ -34,6 +34,15 @@ from datetime import datetime
 
 from database_interface import DatabaseInterface
 
+# Primitive unlock pressure - concepts drive primitive unlocking
+try:
+    from primitive_unlock_manager import PrimitiveUnlockManager, PrimitiveStatus
+    UNLOCK_MANAGER_AVAILABLE = True
+except ImportError:
+    UNLOCK_MANAGER_AVAILABLE = False
+    PrimitiveUnlockManager = None
+    PrimitiveStatus = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -143,6 +152,14 @@ class ConceptDiscoveryEngine:
         self.db = db or DatabaseInterface(db_path)
         self.concept_candidates: Dict[str, ConceptCandidate] = {}
         self.confirmed_concepts: Dict[str, Concept] = {}
+        
+        # Primitive unlock manager - concepts drive primitive unlocking
+        if UNLOCK_MANAGER_AVAILABLE:
+            self.unlock_manager = PrimitiveUnlockManager(db=self.db, db_path=db_path)
+            logger.info("[CONCEPT] PrimitiveUnlockManager integrated for unlock pressure")
+        else:
+            self.unlock_manager = None
+            logger.warning("[CONCEPT] PrimitiveUnlockManager not available - no unlock pressure")
         
         # Ensure database tables exist
         self._ensure_schema()
@@ -425,9 +442,86 @@ class ConceptDiscoveryEngine:
         
         self.confirmed_concepts[concept_id] = concept
         
+        # NEW: Apply unlock pressure for primitives required by this concept
+        self._apply_unlock_pressure_for_concept(concept)
+        
         logger.info(f"[CONCEPT CONFIRMED] '{concept.name}' (ID: {concept_id[:8]})")
         
         return concept
+    
+    def _apply_unlock_pressure_for_concept(self, concept: Concept) -> int:
+        """
+        Apply unlock pressure for primitives required by a confirmed concept.
+        
+        When a concept is confirmed, we know the system needs certain primitives
+        to fully implement it. This creates pressure to unlock those primitives.
+        
+        Args:
+            concept: The confirmed concept
+            
+        Returns:
+            Number of unlock attempts created
+        """
+        if not self.unlock_manager:
+            return 0
+        
+        # Find required primitives from CONCEPTUAL_PRIMITIVES
+        matched_name = self._match_to_known_concept(concept.pattern)
+        if not matched_name:
+            return 0
+        
+        known_data = CONCEPTUAL_PRIMITIVES.get(matched_name, {})
+        required_components = known_data.get('components', [])
+        
+        unlock_attempts = 0
+        for primitive_name in required_components:
+            try:
+                # Check if primitive is locked
+                status = self.unlock_manager.db.execute_query("""
+                    SELECT status FROM primitive_status WHERE primitive_name = ?
+                """, (primitive_name,))
+                
+                if not status:
+                    # Primitive not in system - skip
+                    continue
+                
+                if status[0]['status'] in ('unlocked', 'seed', 'grandfathered'):
+                    # Already available - skip
+                    continue
+                
+                # Record unlock attempt driven by concept discovery
+                attempt_id = self.unlock_manager.record_unlock_attempt(
+                    primitive_name=primitive_name,
+                    discovered_pattern={
+                        'source': 'concept_discovery',
+                        'concept_id': concept.concept_id,
+                        'concept_name': concept.name,
+                        'games_proven': concept.games_proven[:5],  # Limit for storage
+                        'operators_using': concept.operators_using[:5]
+                    },
+                    game_ids_tested=concept.games_proven[:10],
+                    success_rate=concept.confidence,
+                    cross_game_success_rate=min(1.0, len(concept.games_proven) / 5.0),  # Scale by game count
+                    agent_id=None,  # System-driven
+                    generation=0  # No generation context here
+                )
+                
+                unlock_attempts += 1
+                logger.info(
+                    f"[CONCEPT->UNLOCK] Concept '{concept.name}' drives pressure for "
+                    f"primitive '{primitive_name}' (attempt: {attempt_id[:8]})"
+                )
+                
+            except Exception as e:
+                logger.debug(f"[CONCEPT] Failed to apply unlock pressure for {primitive_name}: {e}")
+        
+        if unlock_attempts > 0:
+            logger.info(
+                f"[CONCEPT] Concept '{concept.name}' created {unlock_attempts} "
+                f"primitive unlock attempts for components: {required_components}"
+            )
+        
+        return unlock_attempts
     
     def extract_concept_from_counterfactuals(
         self,

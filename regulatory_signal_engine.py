@@ -25,6 +25,15 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 from database_interface import DatabaseInterface
 
+# Anti-resonance protection for regulatory adjustments
+try:
+    from trigger_controller import TriggerController
+    TRIGGER_CONTROLLER_AVAILABLE = True
+except ImportError:
+    TRIGGER_CONTROLLER_AVAILABLE = False
+    TriggerController = None
+
+
 class RegulatorySignalEngine:
     """
     Manages distributed network regulation through signal-based homeostasis.
@@ -35,6 +44,14 @@ class RegulatorySignalEngine:
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self.logger = logging.getLogger(__name__)
+        
+        # Anti-resonance protection via TriggerController
+        if TRIGGER_CONTROLLER_AVAILABLE:
+            self.trigger_controller = TriggerController(db)
+            self.logger.info("[REGULATION] TriggerController integrated for anti-resonance protection")
+        else:
+            self.trigger_controller = None
+            self.logger.warning("[REGULATION] TriggerController not available - resonance protection disabled")
         
         # Signal types and their target parameters
         self.signal_types = {
@@ -447,6 +464,11 @@ class RegulatorySignalEngine:
         """
         Apply parameter adjustments based on distributed signal consensus.
         
+        Uses TriggerController for anti-resonance protection:
+        - Cooldowns between same parameter adjustments
+        - Damping for consecutive fires
+        - Maximum adjustment caps
+        
         Returns dict of parameter_name: (old_value, new_value)
         """
         applied_changes = {}
@@ -454,6 +476,21 @@ class RegulatorySignalEngine:
         for parameter, adjustment in net_adjustments.items():
             if abs(adjustment) < 0.01:  # Skip tiny adjustments
                 continue
+            
+            # Anti-resonance check via TriggerController
+            trigger_name = f"regulate_{parameter}"
+            if self.trigger_controller:
+                # Check cooldown - prevent rapid-fire adjustments
+                if not self.trigger_controller.can_fire(trigger_name, generation):
+                    self.logger.debug(f"[REGULATION] {parameter} blocked by cooldown")
+                    continue
+                
+                # Apply damping for consecutive fires
+                damped_adjustment = self.trigger_controller.calculate_damped_magnitude(
+                    trigger_name, abs(adjustment), generation
+                )
+                # Preserve direction
+                adjustment = damped_adjustment if adjustment > 0 else -damped_adjustment
             
             old_value = self._get_current_parameter_value(parameter)
             new_value = self._calculate_new_parameter_value(parameter, old_value, adjustment)
@@ -463,6 +500,17 @@ class RegulatorySignalEngine:
             
             if success:
                 applied_changes[parameter] = (old_value, new_value)
+                
+                # Record trigger fire for anti-resonance tracking
+                if self.trigger_controller:
+                    self.trigger_controller.fire_with_safeguards(
+                        trigger_name=trigger_name,
+                        generation=generation,
+                        primary_metric_value=abs(adjustment),
+                        secondary_metric_values=[],  # No corroboration needed for signal-driven
+                        base_adjustment=abs(adjustment),
+                        apply_func=lambda _: True  # Already applied above
+                    )
                 
                 # Record in regulation history
                 self._record_regulation_event(
