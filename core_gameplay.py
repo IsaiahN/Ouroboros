@@ -486,6 +486,17 @@ class GameplayEngine:
         else:
             self.science_engine = None
         
+        # AGENT NETWORK CONTRIBUTOR - Decentralized knowledge sharing
+        # Agents share successes/failures and query peer insights WITHOUT central coordinator
+        # Philosophy: "The infection mechanism IS the coordination mechanism"
+        try:
+            from agent_self_model import AgentNetworkContributor
+            self.network_contributor = AgentNetworkContributor(self.db)
+            logger.info("Agent network contributor initialized (decentralized viral exchange)")
+        except Exception as e:
+            self.network_contributor = None
+            logger.debug(f"Network contributor init failed: {e}")
+        
         # NEW: Breakthrough systems initialization
         try:
             from subgoal_planner import SubgoalPlanner
@@ -807,8 +818,8 @@ class GameplayEngine:
                 actions_taken = len(json.loads(known_sequence['action_sequence']))
                 await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
                 
-                if agent_id:
-                    self.session_manager.deduct_actions_used(agent_id, game_id)
+                # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
+                # to avoid race condition (must be called AFTER store_arc_reward_data)
                 
                 # DISABLED 2025-12-28: Recombination system was 100% broken (INSERT silently failed)
                 # and redundant - organic cumulative sequences already capture L1->LN with level_breakpoints
@@ -1149,6 +1160,45 @@ class GameplayEngine:
                                 logger.info(f"[VIRAL] Level win package spread to {spread_count} agents")
                     except Exception as e:
                         logger.debug(f"Level viral package creation failed (non-critical): {e}")
+                
+                # ================================================================
+                # AGENT NETWORK SHARE SUCCESS INSIGHT
+                # ================================================================
+                # Agent shares abstract insight about what worked (not just sequence)
+                # Philosophy: "Intelligence spreads through viral information transfer"
+                # ================================================================
+                if hasattr(self, 'network_contributor') and self.network_contributor:
+                    try:
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                        
+                        # Generate insight from action history
+                        action_count = loop_state.level_action_count
+                        if action_count < 30:
+                            insight_text = f"Solved in {action_count} actions - efficient approach"
+                            insight_type = 'timing'
+                        elif action_count < 100:
+                            insight_text = f"Moderate approach ({action_count} actions) works"
+                            insight_type = 'approach_pattern'
+                        else:
+                            insight_text = f"Careful exploration ({action_count} actions) eventually succeeds"
+                            insight_type = 'approach_pattern'
+                        
+                        # Add goal info if available
+                        if hasattr(self, '_last_goal_info') and self._last_goal_info:
+                            goal_type = self._last_goal_info.get('goal_type', '')
+                            if goal_type:
+                                insight_text = f"{goal_type}: {insight_text}"
+                        
+                        self.network_contributor.share_success_insight(
+                            agent_id=agent_id,
+                            game_type=game_type,
+                            insight_text=insight_text,
+                            insight_type=insight_type,
+                            level_number=level_for_storage,
+                            confidence=0.6
+                        )
+                    except Exception as e:
+                        logger.debug(f"Success insight sharing failed: {e}")
         
         # Rule Induction: Extract rules from LEVEL completions (not just game wins)
         # This enables cumulative rule learning as each level provides cause-effect data
@@ -1350,9 +1400,8 @@ class GameplayEngine:
         # Finish game in session manager
         await self.session_manager.finish_game(game_state.state, game_state.score, loop_state.level_completions, loop_state.action_count)
         
-        # Deduct actions from budget
-        if agent_id:
-            self.session_manager.deduct_actions_used(agent_id, game_id)
+        # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
+        # to avoid race condition (must be called AFTER store_arc_reward_data)
 
         # Pattern Learning: Capture final sequence
         if self.game_config.get('enable_pattern_learning', True):
@@ -1675,14 +1724,6 @@ class GameplayEngine:
             Game results dictionary
         """
         logger.info(f"Starting game: {game_id}" + (f" (agent: {agent_id})" if agent_id else ""))
-        
-        # Set game context for Scientific Method Engine (load queued experiments)
-        game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
-        if hasattr(self, 'science_engine') and self.science_engine:
-            try:
-                self.science_engine.set_game_context(game_type)
-            except Exception as e:
-                logger.debug(f"Science engine context setup failed: {e}")
         
         # PHASE 2: Check if agent can afford to play this game
         if agent_id:
@@ -2226,9 +2267,8 @@ class GameplayEngine:
                     actions_taken = len(json.loads(known_sequence['action_sequence']))
                     await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
                     
-                    # PHASE 2: Deduct actions from agent's budget
-                    if agent_id:
-                        self.session_manager.deduct_actions_used(agent_id, game_id)
+                    # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
+                    # to avoid race condition (must be called AFTER store_arc_reward_data)
                     
                     # PHASE 2.5: Knowledge Recombination - DISABLED 2025-12-28
                     # Was 100% broken and redundant with organic cumulative sequences
@@ -2474,6 +2514,27 @@ class GameplayEngine:
                                             logger.info(f"[THEORY] Avoidance: {theory.get('avoidance_strategy', 'Unknown')[:60]}")
                                             # Store theory for reasoning log
                                             self._last_game_over_theory = theory
+                                        
+                                        # ================================================================
+                                        # AGENT NETWORK BROADCAST - Share failure with network
+                                        # ================================================================
+                                        # Broadcast what we tried that didn't work (viral exchange)
+                                        # Philosophy: "The infection mechanism IS the coordination mechanism"
+                                        if hasattr(self, 'network_contributor') and self.network_contributor:
+                                            try:
+                                                attempt_desc = theory.get('theory', 'Unknown cause') if theory else f"Died after action {fatal_action_num}"
+                                                self.network_contributor.broadcast_failed_attempt(
+                                                    agent_id=game_id.split('-')[0] if game_id else 'unknown',
+                                                    game_type=game_type,
+                                                    level_number=current_level,
+                                                    action_sequence=pre_death_actions[-5:] if pre_death_actions else None,
+                                                    attempt_description=attempt_desc[:200],
+                                                    frames_survived=action_count,
+                                                    death_cause=theory.get('cause', 'unknown') if theory else 'unknown'
+                                                )
+                                            except Exception as e:
+                                                logger.debug(f"Network failure broadcast failed: {e}")
+                                        
                                 except Exception as e:
                                     logger.debug(f"Terminal pattern recording failed: {e}")
                         break
@@ -2717,6 +2778,39 @@ class GameplayEngine:
                     
                     # Check for significant score increase (level completion)
                     score_increase = game_state.score - previous_score
+                    
+                    # ================================================================
+                    # AGENT SELF-PROGRESS CHECK (Decentralized Self-Assessment)
+                    # ================================================================
+                    # Agent periodically asks: "Am I making progress compared to peers?"
+                    # This replaces external coordinator detection with agent self-awareness.
+                    # Philosophy: Agent decides own strategy based on network comparison.
+                    # ================================================================
+                    if action_count % 50 == 0 and hasattr(self, 'network_contributor') and self.network_contributor:
+                        try:
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            progress = self.network_contributor.check_my_progress(
+                                agent_id=agent_id or 'unknown',
+                                game_type=game_type,
+                                level_number=current_level,
+                                my_best_score=game_state.score,
+                                my_attempts=action_count
+                            )
+                            
+                            recommendation = progress.get('recommendation', 'continue')
+                            if recommendation == 'query_peers':
+                                # Agent decides to check what others found
+                                logger.info(f"[SELF-ASSESS] Below network baseline - will query peer insights")
+                                self._should_query_peers = True
+                            elif recommendation == 'share_insight':
+                                # Agent doing well - will share what works on next success
+                                logger.debug(f"[SELF-ASSESS] Above network - ready to share insights")
+                                self._should_share_on_success = True
+                            elif recommendation == 'try_novel':
+                                # Frontier problem - everyone struggles
+                                logger.debug(f"[SELF-ASSESS] Frontier problem - trying novel approaches")
+                        except Exception as e:
+                            logger.debug(f"Self-progress check failed: {e}")
                     
                     # STUCK STATE DETECTION: Apply to ALL agents (not just pioneers at frontier)
                     # BUG FIX (2025-12-04): Previously only pioneers on frontier levels got stuck detection.
@@ -3408,9 +3502,8 @@ class GameplayEngine:
             # Finish game in session manager (CRITICAL FIX: Pass level_completions AND actions_taken!)
             await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, action_count)
             
-            # PHASE 2: Deduct actions from agent's budget
-            if agent_id:
-                self.session_manager.deduct_actions_used(agent_id, game_id)
+            # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
+            # to avoid race condition (must be called AFTER store_arc_reward_data)
 
             # Pattern Learning: Capture final sequence (Rule 2: Database-only)
             if self.game_config.get('enable_pattern_learning', True):
@@ -3784,6 +3877,45 @@ class GameplayEngine:
             # (We don't have action_count here, but we can estimate from game_state or just stay in mode)
             # For now, just log and skip the deterministic early-returns
             logger.debug(f"[SELF-DIRECTED] Agent exploring on its own (off-script)")
+        
+        # ===================================================================
+        # QUERY PEER INSIGHTS (Decentralized Knowledge Sharing)
+        # ===================================================================
+        # Agent asks network: "What have others discovered on this level?"
+        # This is SOFT GUIDANCE, not command - agent can ignore if their
+        # private experience (Stream A) outweighs network wisdom (Stream B).
+        # Philosophy: "The infection mechanism IS the coordination mechanism"
+        # ===================================================================
+        peer_insights = None
+        peer_failures = None
+        if hasattr(self, 'network_contributor') and self.network_contributor:
+            try:
+                current_game_id = self.session_manager.current_game_id
+                current_level = int(game_state.score) + 1
+                if current_game_id:
+                    game_type = current_game_id.split('-')[0] if '-' in current_game_id else current_game_id
+                    
+                    # Query what worked (success insights)
+                    peer_insights = self.network_contributor.query_peer_insights(
+                        game_type=game_type,
+                        level_number=current_level,
+                        limit=3,
+                        min_confidence=0.5
+                    )
+                    
+                    # Query what failed (avoid repeating mistakes)
+                    peer_failures = self.network_contributor.query_peer_failures(
+                        game_type=game_type,
+                        level_number=current_level,
+                        limit=3
+                    )
+                    
+                    if peer_insights:
+                        logger.debug(f"[PEER] {len(peer_insights)} insights available: {peer_insights[0].get('insight_text', '')[:40]}...")
+                    if peer_failures:
+                        logger.debug(f"[PEER] {len(peer_failures)} failures to avoid")
+            except Exception as e:
+                logger.debug(f"Peer insight query failed: {e}")
         
         # ===================================================================
         # OBJECT DISCOVERY PHASE (Seed Capability)

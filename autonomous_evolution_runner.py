@@ -194,16 +194,16 @@ class AutonomousEvolutionRunner:
         from near_miss_analyzer import NearMissAnalyzer
         from collective_reasoning_engine import CollectiveReasoningEngine
         from counterfactual_analyzer import CounterfactualAnalyzer
-        from stuck_game_coordinator import StuckGameCoordinator
+        from oracle_stuck_game_diagnostics import OracleStuckGameDiagnostics
         
         self.subgoal_planner = SubgoalPlanner(self.db)  # Hierarchical planning
-        self.frustration_detector = FrustrationDetector(self.db)  # Frustration tracking (quorum disabled)
-        self.stuck_game_coordinator = StuckGameCoordinator(self.db)  # NEW: Intelligent stuck game intervention
+        self.frustration_detector = FrustrationDetector(self.db)  # Frustration tracking
+        self.stuck_game_diagnostics = OracleStuckGameDiagnostics(self.db)  # DIAGNOSTIC ONLY - no interventions
         self.near_miss_analyzer = NearMissAnalyzer(self.db)  # Learn from 15-18/20 scores
         self.collective_reasoner = CollectiveReasoningEngine(self.db)  # Multi-agent collaboration
         self.counterfactual_analyzer = CounterfactualAnalyzer(self.db)  # "What if?" analysis
         
-        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Coordinator, Near-Miss Analysis, Collective Reasoning, Counterfactual Analysis)")
+        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Diagnostics, Near-Miss Analysis, Collective Reasoning, Counterfactual Analysis)")
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -1412,6 +1412,13 @@ class AutonomousEvolutionRunner:
                         # CRITICAL FIX: Store reward data so agents get credited for their games!
                         self.db.store_arc_reward_data(agent_id, reward_data)
                         
+                        # RACE CONDITION FIX: Deduct actions AFTER storing performance record
+                        # Previously was in core_gameplay.py before record existed
+                        try:
+                            engine.session_manager.deduct_actions_used(agent_id, game_id)
+                        except Exception as deduct_e:
+                            logger.debug(f"Action deduction failed (non-critical): {deduct_e}")
+                        
                         # === NEW BREAKTHROUGH SYSTEMS: Post-game analysis ===
                         
                         # 1. Update frustration state (detect stuck agents)
@@ -1947,46 +1954,30 @@ class AutonomousEvolutionRunner:
                 import traceback
                 traceback.print_exc()
             
-            # PHASE 4.5: STUCK GAME COORDINATION (Intelligent Intervention)
-            # Replaces old broken frustration quorum with knowledge synthesis
-            print(f"\n[COORDINATOR] Checking for stuck games needing intervention...")
+            # PHASE 4.5: ORACLE STUCK GAME DIAGNOSTICS (Health Monitoring)
+            # Diagnostic only - identifies WHICH TIER is broken, does NOT intervene
+            # Philosophy: If games stuck, fix the SYSTEM. Let network intelligence emerge.
+            print(f"\n[ORACLE] Running stuck game diagnostics...")
             try:
-                stuck_games = self.stuck_game_coordinator.check_for_stuck_games(self.current_generation)
+                stuck_games = self.stuck_game_diagnostics.check_stuck_games(self.current_generation)
                 
                 if stuck_games:
-                    print(f"[!] Found {len(stuck_games)} games with stuck agent quorum:")
-                    for analysis in stuck_games:
-                        stuck_pct = (analysis.agents_stuck / analysis.total_agents_on_game * 100) if analysis.total_agents_on_game > 0 else 0
-                        print(f"    {analysis.game_type}: {stuck_pct:.0f}% stuck at L{analysis.bottleneck_level}")
-                        print(f"        Knowledge: {len(analysis.death_zones)} death zones, {len(analysis.dangerous_objects)} dangerous objects")
-                        print(f"        Theories: {len(analysis.scientific_theories)} scientific, {len(analysis.network_hypotheses)} network hypotheses")
-                        print(f"        Gaps: {len(analysis.knowledge_gaps)} identified")
+                    print(f"[!] {len(stuck_games)} games with high failure rates detected")
+                    for game_type in stuck_games:
+                        diagnosis = self.stuck_game_diagnostics.diagnose_stuck_game(
+                            game_type, self.current_generation
+                        )
                         
-                        # Apply interventions
-                        int_id = self.stuck_game_coordinator.apply_interventions(analysis, self.current_generation)
-                        print(f"        Applied {len(analysis.recommended_actions)} interventions (ID: {int_id[:12]})")
-                        for intervention in analysis.recommended_actions[:3]:
-                            print(f"          -> {intervention['type']}: {intervention.get('description', '')[:60]}")
+                        if diagnosis.broken_tier:
+                            print(f"    {game_type}: {diagnosis.broken_tier} - {diagnosis.diagnosis}")
+                            print(f"        FIX: {diagnosis.suggested_fix[:80]}...")
+                        else:
+                            print(f"    {game_type}: All tiers healthy (game may be difficult)")
                 else:
-                    print("[OK] No stuck game quorum detected - agents making progress")
-                
-                # Check if any previously stuck games got resolved
-                resolved_count = 0
-                interventions = self.db.execute_query("""
-                    SELECT DISTINCT game_type FROM stuck_game_interventions
-                    WHERE resolved = 0 AND generation < ?
-                """, (self.current_generation,))
-                
-                if interventions:
-                    for row in interventions:
-                        if self.stuck_game_coordinator.check_resolution(row['game_type'], self.current_generation):
-                            resolved_count += 1
-                
-                if resolved_count > 0:
-                    print(f"[OK] {resolved_count} previously stuck games now resolved!")
+                    print("[OK] No stuck games detected - network is learning")
                     
             except Exception as e:
-                print(f"[WARN] Stuck game coordination failed: {e}")
+                print(f"[WARN] Stuck game diagnostics failed: {e}")
             
             # ISSUE 3 FIX: Aggressive pruning to maintain target population
             # ADAPTIVE: Scale target with available game count (game_types * 10)

@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """
 Scientific Method Engine - Autonomous Theory Formation & Testing
 ================================================================
@@ -162,15 +165,6 @@ class ScientificMethodEngine:
         # Experimentation budget (fraction of actions for deliberate tests)
         self._experiment_budget_ratio = 0.20  # 20% of actions for experiments
         self._actions_since_experiment = 0
-        
-        # Game type for checking coordinator-queued experiments
-        self._current_game_type: Optional[str] = None
-    
-    def set_game_context(self, game_type: str):
-        """Set the current game context for queued experiment lookup."""
-        self._current_game_type = game_type
-        # Load any queued experiments from stuck_game_coordinator
-        self._load_queued_experiments(game_type)
     
     def _ensure_tables(self):
         """Create tables for theory storage."""
@@ -241,66 +235,6 @@ class ScientificMethodEngine:
             
         except Exception as e:
             logger.debug(f"Theory tables setup: {e}")
-    
-    def _load_queued_experiments(self, game_type: str):
-        """
-        Load experiments queued by the stuck_game_coordinator.
-        
-        These are high-priority experiments identified during intervention
-        for games where agents are collectively stuck.
-        """
-        try:
-            queued = self.db.execute_query("""
-                SELECT experiment_id, description FROM queued_experiments
-                WHERE game_type = ? AND executed = 0 AND priority = 'HIGH'
-                ORDER BY created_at ASC
-                LIMIT 5
-            """, (game_type,))
-            
-            if queued:
-                logger.info(f"[SCIENCE] Found {len(queued)} queued experiments for stuck game {game_type}")
-                
-                for exp in queued:
-                    # Convert coordinator's experiment description to experiment object
-                    exp_desc = exp['description']
-                    
-                    # Parse experiment description
-                    if exp_desc.startswith('TRY_ACTION:'):
-                        # Experiment to try an untested action
-                        action = exp_desc.split(':')[1].strip().split()[0]
-                        experiment = Experiment(
-                            experiment_id=exp['experiment_id'],
-                            theory_id='coordinator_queued',
-                            hypothesis=f"Action {action} may reveal new game dynamics",
-                            prediction={'action': action, 'expected_outcome': 'any'},
-                            preconditions={},
-                            test_action=action,
-                            expected_result={'outcome': 'any_new_knowledge'}
-                        )
-                        self._experiment_queue.append(experiment)
-                    
-                    elif 'EXPLORE_CLICKS' in exp_desc:
-                        # Experiment to systematically click objects
-                        experiment = Experiment(
-                            experiment_id=exp['experiment_id'],
-                            theory_id='coordinator_queued',
-                            hypothesis="Clicking objects may reveal control mechanisms",
-                            prediction={'action': 'ACTION6', 'expected_outcome': 'any'},
-                            preconditions={},
-                            test_action='ACTION6',
-                            expected_result={'outcome': 'discover_clickable_objects'}
-                        )
-                        self._experiment_queue.append(experiment)
-                    
-                    # Mark as executed (we've queued it)
-                    self.db.execute_query("""
-                        UPDATE queued_experiments SET executed = 1
-                        WHERE experiment_id = ?
-                    """, (exp['experiment_id'],))
-                    
-        except Exception as e:
-            # Table may not exist if coordinator hasn't run
-            logger.debug(f"Queued experiments lookup: {e}")
     
     # =========================================================================
     # PHASE 1: OBSERVATION - Notice patterns and anomalies
