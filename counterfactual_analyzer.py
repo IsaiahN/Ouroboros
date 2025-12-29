@@ -193,20 +193,33 @@ class CounterfactualAnalyzer:
         try:
             # Get actual action sequence from database
             # NOTE: Use action_traces table (has data) not arc_action_tracking (empty)
+            # action_traces has: coordinates (JSON [x,y]), score_before, score_after, game_id, session_id
             actual_actions = self.db.execute_query("""
-                SELECT action_type, 
-                       COALESCE(coordinate_x, 0) as coordinate_x, 
-                       COALESCE(coordinate_y, 0) as coordinate_y, 
+                SELECT coordinates as action_coords,
                        COALESCE(score_before, 0) as score_before_action, 
-                       COALESCE(score_after, 0) as score_after_action
+                       COALESCE(score_after, 0) as score_after_action,
+                       action_number
                 FROM action_traces
-                WHERE agent_id = ? AND game_id = ?
+                WHERE game_id = ?
                 ORDER BY action_number
-            """, (agent_id, game_id))
+            """, (game_id,))
             
             if not actual_actions or len(actual_actions) < self.min_actions_for_analysis:
                 self.logger.info(f"Not enough actions for counterfactual analysis: {len(actual_actions) if actual_actions else 0}")
                 return []
+            
+            # Convert coordinates to action_type for compatibility with rest of code
+            # Coordinates are stored as JSON string like "[3, 60]"
+            import json as json_mod
+            for action in actual_actions:
+                coords = action.get('action_coords', '[]')
+                if isinstance(coords, str):
+                    try:
+                        coords = json_mod.loads(coords)
+                    except:
+                        coords = [0, 0]
+                # Use first coordinate as action type (simplified)
+                action['action_type'] = coords[0] if coords else 0
             
             # Identify critical decision points
             decision_points = self._identify_decision_points(

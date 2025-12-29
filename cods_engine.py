@@ -3377,16 +3377,18 @@ class CODSEngine:
         """
         try:
             # Check for existing similar hypothesis
-            existing = self.db.fetch_one("""
+            existing_rows = self.db.execute_query("""
                 SELECT hypothesis_id, evidence_for, evidence_against, posterior_probability
                 FROM cods_bayesian_hypotheses
                 WHERE game_type = ? AND description = ? AND status = 'active'
             """, (game_type, description))
+            existing = existing_rows[0] if existing_rows else None
             
             if existing:
                 # Hypothesis already exists - just return its ID
-                logger.debug(f"[BAYES] Hypothesis already exists: {existing[0][:12]}")
-                return existing[0]
+                h_id = existing['hypothesis_id']
+                logger.debug(f"[BAYES] Hypothesis already exists: {h_id[:12]}")
+                return h_id
             
             hypothesis_id = str(uuid.uuid4())
             
@@ -3437,17 +3439,21 @@ class CODSEngine:
         """
         try:
             # Fetch current state
-            current = self.db.fetch_one("""
+            current_rows = self.db.execute_query("""
                 SELECT prior_probability, evidence_for, evidence_against, source_games
                 FROM cods_bayesian_hypotheses
                 WHERE hypothesis_id = ? AND status = 'active'
             """, (hypothesis_id,))
+            current = current_rows[0] if current_rows else None
             
             if not current:
                 logger.warning(f"[BAYES] Hypothesis not found or inactive: {hypothesis_id[:12]}")
                 return None
             
-            prior, evidence_for, evidence_against, source_games_json = current
+            prior = current['prior_probability']
+            evidence_for = current['evidence_for']
+            evidence_against = current['evidence_against']
+            source_games_json = current['source_games']
             
             # Update evidence counts
             evidence_weight = int(weight)  # Round to integer for counts
@@ -3579,7 +3585,7 @@ class CODSEngine:
                 )
             else:
                 # Update all active hypotheses for this game/level
-                hypotheses = self.db.fetch_all("""
+                hypotheses = self.db.execute_query("""
                     SELECT hypothesis_id
                     FROM cods_bayesian_hypotheses
                     WHERE game_type = ? 
@@ -3587,7 +3593,8 @@ class CODSEngine:
                     AND status = 'active'
                 """, (game_type, level_number))
                 
-                for (h_id,) in hypotheses:
+                for h in (hypotheses or []):
+                    h_id = h['hypothesis_id'] if isinstance(h, dict) else h[0]
                     self.record_evidence(
                         hypothesis_id=h_id,
                         supports=False,
@@ -3609,7 +3616,7 @@ class CODSEngine:
             List of BayesianHypothesis objects ready for synthesis
         """
         try:
-            rows = self.db.fetch_all("""
+            rows = self.db.execute_query("""
                 SELECT hypothesis_id, hypothesis_type, game_type, level_number,
                        description, target_primitive, suggested_composition,
                        prior_probability, evidence_for, evidence_against,
@@ -3623,25 +3630,25 @@ class CODSEngine:
             """, (min_posterior,))
             
             hypotheses = []
-            for row in rows:
+            for row in (rows or []):
                 h = BayesianHypothesis(
-                    hypothesis_id=row[0],
-                    hypothesis_type=row[1],
-                    game_type=row[2],
-                    level_number=row[3],
-                    description=row[4],
-                    target_primitive=row[5],
-                    suggested_composition=json.loads(row[6]) if row[6] else None,
-                    prior=row[7],
-                    evidence_for=row[8],
-                    evidence_against=row[9],
-                    posterior=row[10],
-                    confidence_low=row[11],
-                    confidence_high=row[12],
-                    confirmation_threshold=row[13],
-                    refutation_threshold=row[14],
-                    status=row[15],
-                    source_type=row[16]
+                    hypothesis_id=row['hypothesis_id'],
+                    hypothesis_type=row['hypothesis_type'],
+                    game_type=row['game_type'],
+                    level_number=row['level_number'],
+                    description=row['description'],
+                    target_primitive=row['target_primitive'],
+                    suggested_composition=json.loads(row['suggested_composition']) if row['suggested_composition'] else None,
+                    prior=row['prior_probability'],
+                    evidence_for=row['evidence_for'],
+                    evidence_against=row['evidence_against'],
+                    posterior=row['posterior_probability'],
+                    confidence_low=row['confidence_low'],
+                    confidence_high=row['confidence_high'],
+                    confirmation_threshold=row['confirmation_threshold'],
+                    refutation_threshold=row['refutation_threshold'],
+                    status=row['status'],
+                    source_type=row['source_type']
                 )
                 hypotheses.append(h)
             
@@ -3821,7 +3828,7 @@ class CODSEngine:
     def get_hypothesis_summary(self) -> Dict[str, Any]:
         """Get summary of current hypothesis state for logging."""
         try:
-            stats = self.db.fetch_one("""
+            stats_rows = self.db.execute_query("""
                 SELECT 
                     COUNT(*) as total,
                     SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
@@ -3833,17 +3840,19 @@ class CODSEngine:
                     SUM(evidence_for + evidence_against) as total_evidence
                 FROM cods_bayesian_hypotheses
             """)
+            stats = stats_rows[0] if stats_rows else None
             
             if stats:
+                # stats is a dict-like Row object, use column names
                 return {
-                    'total': stats[0] or 0,
-                    'active': stats[1] or 0,
-                    'confirmed': stats[2] or 0,
-                    'synthesized': stats[3] or 0,
-                    'refuted': stats[4] or 0,
-                    'avg_posterior': round(stats[5] or 0, 3),
-                    'max_posterior': round(stats[6] or 0, 3),
-                    'total_evidence': stats[7] or 0
+                    'total': stats['total'] or 0,
+                    'active': stats['active'] or 0,
+                    'confirmed': stats['confirmed'] or 0,
+                    'synthesized': stats['synthesized'] or 0,
+                    'refuted': stats['refuted'] or 0,
+                    'avg_posterior': round(stats['avg_posterior'] or 0, 3),
+                    'max_posterior': round(stats['max_posterior'] or 0, 3),
+                    'total_evidence': stats['total_evidence'] or 0
                 }
             return {}
             
@@ -4030,7 +4039,7 @@ class CODSEngine:
     ) -> List[Dict[str, Any]]:
         """Get win strategies from games that succeeded (level 2+)."""
         try:
-            strategies = self.db.fetch_all("""
+            strategies = self.db.execute_query("""
                 SELECT 
                     nfh.win_strategy,
                     nfh.game_type,
@@ -4046,7 +4055,7 @@ class CODSEngine:
                 LIMIT 500
             """, (generation - lookback, generation))
             
-            return strategies if strategies else []
+            return list(strategies) if strategies else []
             
         except Exception as e:
             logger.debug(f"[AGENT-PATTERNS] Error fetching success strategies: {e}")
@@ -4059,7 +4068,7 @@ class CODSEngine:
     ) -> List[Dict[str, Any]]:
         """Get strategies from games that failed (level 1 only)."""
         try:
-            strategies = self.db.fetch_all("""
+            strategies = self.db.execute_query("""
                 SELECT 
                     nfh.failure_reason,
                     nfh.game_type,
@@ -4072,7 +4081,7 @@ class CODSEngine:
                 LIMIT 500
             """, (generation - lookback, generation))
             
-            return strategies if strategies else []
+            return list(strategies) if strategies else []
             
         except Exception as e:
             logger.debug(f"[AGENT-PATTERNS] Error fetching failure strategies: {e}")
