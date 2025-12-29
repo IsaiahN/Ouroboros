@@ -1755,6 +1755,9 @@ class AgentSelfModel:
         # Map action to expected direction
         action_num = int(action_taken.replace('ACTION', '')) if action_taken.startswith('ACTION') else 0
         
+        # Track spurious/environmental movement (objects that move but not matching our action)
+        spurious_movers = []
+        
         # For movement actions (1-4), check if any object moved in the expected direction
         if action_num in [1, 2, 3, 4]:
             for obj in objects_before:
@@ -1764,6 +1767,25 @@ class AgentSelfModel:
                 movement = primitives.call('get_object_movement', obj_id, frame_before, frame_after)
                 matches = primitives.call('action_matches_movement', action_num, movement)
                 
+                # SPURIOUS MOVEMENT DETECTION
+                # Object moved but in WRONG direction = environmental/NPC, not controlled
+                if movement and movement != 'none' and not matches:
+                    spurious_movers.append({
+                        'object_id': obj_id,
+                        'movement': movement,
+                        'expected': {1: 'up', 2: 'down', 3: 'left', 4: 'right'}.get(action_num)
+                    })
+                    # Record as likely environmental object
+                    if game_type and level:
+                        try:
+                            controlled_color = int(obj_id.replace('obj_', ''))
+                            self._record_spurious_movement(
+                                game_type, level, controlled_color, 
+                                action_taken, movement, agent_id
+                            )
+                        except Exception as e:
+                            logger.debug(f"Spurious movement recording failed: {e}")
+                
                 if matches:
                     result['discovered_control'] = True
                     result['object_id'] = obj_id
@@ -1771,7 +1793,7 @@ class AgentSelfModel:
                     result['movement_matches_action'] = True
                     result['confidence'] = 0.7
                     
-                    # Store discovery
+                    # Store discovery locally
                     if game_type and level:
                         self._record_control_discovery(
                             game_type, level, obj_id,
@@ -1779,6 +1801,29 @@ class AgentSelfModel:
                             confidence=0.7,
                             agent_id=agent_id
                         )
+                        
+                        # SHARE TO NETWORK: Observation-based validation (not waiting for win!)
+                        # learn_from_movement_correlation tracks observation count
+                        # and only validates after 3+ consistent observations
+                        try:
+                            # Extract color from obj_id (e.g., "obj_10" -> 10)
+                            controlled_color = int(obj_id.replace('obj_', ''))
+                            # Map action to direction for network hypothesis
+                            action_to_direction = {1: 'up', 2: 'down', 3: 'left', 4: 'right'}
+                            direction = action_to_direction.get(action_num, movement)
+                            
+                            self.learn_from_movement_correlation(
+                                agent_id=agent_id or 'discovery',
+                                game_id=f"{game_type}-discovery",
+                                level=level,
+                                action=action_taken,
+                                direction=direction,
+                                controlled_color=controlled_color,
+                                generation=0
+                            )
+                            # Log message now in learn_from_movement_correlation based on observation count
+                        except Exception as e:
+                            logger.debug(f"Network sharing failed (non-critical): {e}")
                     
                     logger.info(f"[DISCOVERY] Found control: {obj_id} responds to {action_taken}")
                     break
@@ -1807,10 +1852,32 @@ class AgentSelfModel:
                                     game_type, level, click_coords[0], click_coords[1],
                                     movement, clicked_obj, agent_id
                                 )
+                                
+                                # SHARE TO NETWORK: Button discovery based on observation
+                                # Uses same repeated testing logic as movement
+                                try:
+                                    controlled_color = int(clicked_obj.replace('obj_', ''))
+                                    self.learn_from_movement_correlation(
+                                        agent_id=agent_id or 'discovery',
+                                        game_id=f"{game_type}-discovery",
+                                        level=level,
+                                        action='ACTION6',
+                                        direction=movement,
+                                        controlled_color=controlled_color,
+                                        generation=0
+                                    )
+                                    # Log message handled by learn_from_movement_correlation
+                                except Exception as e:
+                                    logger.debug(f"Network button sharing failed: {e}")
                         else:
                             # Object didn't move - might be a selection (test with next movement)
                             result['control_type'] = 'maybe_selectable'
                             result['confidence'] = 0.3
+        
+        # Add spurious movers info to result (for debugging/analysis)
+        if spurious_movers:
+            result['spurious_movers'] = spurious_movers
+            result['spurious_count'] = len(spurious_movers)
         
         return result
     
@@ -1928,6 +1995,43 @@ class AgentSelfModel:
         """, (game_type, level, color, 
               json.dumps(['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']),
               confidence, agent_id))
+    
+    def _record_spurious_movement(
+        self,
+        game_type: str,
+        level: int,
+        object_color: int,
+        action_taken: str,
+        actual_movement: str,
+        agent_id: str = None
+    ):
+        """
+        Record when an object moves in a direction that doesn't match our action.
+        
+        This indicates the object is likely environmental/NPC movement, not player-controlled.
+        Used to filter out false positives in control detection.
+        
+        Example: We pressed ACTION1 (up) but obj_5 moved left = obj_5 is environmental
+        """
+        # Use object_selection_state to mark as environmental (lower confidence)
+        self.db.execute_query("""
+            INSERT INTO object_selection_state 
+            (game_type, level_number, object_color, is_selectable, is_moveable, 
+             control_actions, confidence, discovered_by_agent)
+            VALUES (?, ?, ?, 0, 0, ?, ?, ?)
+            ON CONFLICT(game_type, level_number, object_color) DO UPDATE SET
+                confidence = MAX(0.1, confidence - 0.1),
+                movement_test_count = COALESCE(movement_test_count, 0) + 1,
+                last_observed = CURRENT_TIMESTAMP
+        """, (game_type, level, object_color, 
+              json.dumps([]),  # No control actions
+              0.1,  # Low confidence = likely environmental
+              agent_id))
+        
+        logger.debug(
+            f"[SPURIOUS] color_{object_color} moved {actual_movement} on {action_taken} "
+            f"(expected opposite) - likely environmental"
+        )
     
     def _record_button_discovery(
         self,
@@ -2463,8 +2567,40 @@ class AgentSelfModel:
         """, (game_type, level, f'%"controlled_color": {controlled_color}%'))
         
         if existing:
-            # Update existing - increase reliability
+            # Update existing - increase reliability only if direction matches
             row = existing[0]
+            current_attempts = row['validation_attempts'] or 0
+            
+            # Check if this observation matches existing pattern
+            # (same action should produce same direction)
+            try:
+                existing_pattern = self.db.execute_query("""
+                    SELECT action_response_map FROM network_object_control_hypotheses
+                    WHERE hypothesis_id = ?
+                """, (row['hypothesis_id'],))
+                if existing_pattern:
+                    existing_responses = json.loads(existing_pattern[0]['action_response_map'])
+                    expected_direction = existing_responses.get(action)
+                    
+                    if expected_direction and expected_direction != direction:
+                        # CONTRADICTION: Same action, different direction = spurious correlation
+                        # This might be an NPC or environmental animation
+                        self.db.execute_query("""
+                            UPDATE network_object_control_hypotheses
+                            SET validation_attempts = validation_attempts + 1,
+                                reliability_score = MAX(0.1, reliability_score - 0.15),
+                                last_validated = CURRENT_TIMESTAMP
+                            WHERE hypothesis_id = ?
+                        """, (row['hypothesis_id'],))
+                        logger.warning(
+                            f"[MOVEMENT] CONTRADICTION: {action} moved color_{controlled_color} {direction} "
+                            f"but expected {expected_direction} - lowering reliability"
+                        )
+                        return  # Don't update with contradictory data
+            except Exception as e:
+                logger.debug(f"Pattern comparison failed: {e}")
+            
+            # Consistent observation - increase reliability
             new_reliability = min(0.95, row['reliability_score'] + 0.1)
             self.db.execute_query("""
                 UPDATE network_object_control_hypotheses
@@ -2474,22 +2610,32 @@ class AgentSelfModel:
                     last_validated = CURRENT_TIMESTAMP
                 WHERE hypothesis_id = ?
             """, (new_reliability, row['hypothesis_id']))
-            logger.debug(f"[MOVEMENT] Updated hypothesis for color_{controlled_color}: reliability {new_reliability:.2f}")
+            
+            # Only log as validated after 3+ consistent observations
+            if current_attempts + 1 >= 3:
+                logger.info(
+                    f"[MOVEMENT] VALIDATED (x{current_attempts + 1}): color_{controlled_color} "
+                    f"responds to {action} with {direction} (reliability {new_reliability:.2f})"
+                )
+            else:
+                logger.debug(f"[MOVEMENT] Observation {current_attempts + 1}/3 for color_{controlled_color}")
         else:
-            # Create new hypothesis
+            # Create new hypothesis with LOW initial confidence
+            # Correlation != Causation - need multiple observations to validate
             hypothesis_id = self._generate_hypothesis_id()
             self.db.execute_query("""
                 INSERT INTO network_object_control_hypotheses
                 (hypothesis_id, game_type, level_number, control_pattern, action_response_map,
                  discovered_by_agent, discovery_generation, reliability_score, discovery_method,
                  validation_attempts, validation_successes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0.75, 'movement_correlation', 1, 1)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0.3, 'movement_correlation', 1, 1)
             """, (
                 hypothesis_id, game_type, level, json.dumps(control_pattern),
                 json.dumps(action_response), agent_id, generation
             ))
-            logger.info(
-                f"[MOVEMENT] Agent {agent_id[:8]} learned: {action} moves color_{controlled_color} {direction}"
+            logger.debug(
+                f"[MOVEMENT] Observation 1/3: {action} may control color_{controlled_color} "
+                f"(needs {2} more consistent observations)"
             )
         
         # Also store in agent's personal control map
@@ -2525,6 +2671,9 @@ class AgentSelfModel:
         """
         game_type = game_id.split('-')[0] if '-' in game_id else game_id
         
+        # CORRELATION != CAUSATION FILTER
+        # Only return hypotheses that have been validated at least 3 times
+        # with consistent results. Single observations could be spurious.
         results = self.db.execute_query("""
             SELECT 
                 hypothesis_id,
@@ -2536,8 +2685,10 @@ class AgentSelfModel:
                 validated_by_win
             FROM network_object_control_hypotheses
             WHERE game_type = ? AND level_number = ? 
-                  AND is_active = TRUE AND reliability_score >= ?
-            ORDER BY reliability_score DESC, validated_by_win DESC
+                  AND is_active = TRUE 
+                  AND reliability_score >= ?
+                  AND (validation_attempts >= 3 OR validated_by_win = TRUE)
+            ORDER BY validated_by_win DESC, reliability_score DESC
             LIMIT 5
         """, (game_type, level, min_reliability))
         

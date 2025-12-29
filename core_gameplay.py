@@ -3743,6 +3743,159 @@ class GameplayEngine:
                 logger.debug(f"Win-validated hypothesis check failed: {e}")
         
         # ===================================================================
+        # SELF-MODEL DRIVEN ACTION (Added 2025-12-28)
+        # ===================================================================
+        # When agent has identified objects it controls (working_theory populated),
+        # USE that knowledge to guide action selection:
+        # 1. If we control objects, move them toward rare colors/goals
+        # 2. If no goal visible, explore systematically with controlled objects
+        # 3. Track which directions we've tried to avoid oscillation
+        # 
+        # This fixes the gap where working_theory says "I control 10 objects"
+        # but the agent never actually uses that to make decisions.
+        # ===================================================================
+        if hasattr(self, 'agent_self_model') and game_state.frame:
+            try:
+                current_game_id = self.session_manager.current_game_id
+                current_level = int(game_state.score) + 1
+                
+                # Get self_model context to check if we have controlled objects
+                self_model = self._build_self_model_context(agent_id, game_state)
+                controlled = self_model.get('objects_agent_controls', [])
+                
+                # Only apply self-model driven behavior if we have high confidence control
+                control_confidence = self_model.get('control_confidence', 0)
+                
+                if controlled and control_confidence >= 0.5:
+                    # Parse controlled object positions to find centroid
+                    controlled_positions = []
+                    for coord in controlled[:10]:
+                        if isinstance(coord, str) and ',' in coord:
+                            parts = coord.replace('x:', '').replace('y:', '').split(',')
+                            if len(parts) == 2:
+                                try:
+                                    controlled_positions.append((int(parts[0]), int(parts[1])))
+                                except ValueError:
+                                    pass
+                    
+                    if controlled_positions:
+                        # Calculate centroid of controlled objects
+                        avg_x = sum(c[0] for c in controlled_positions) // len(controlled_positions)
+                        avg_y = sum(c[1] for c in controlled_positions) // len(controlled_positions)
+                        self._current_agent_position = (avg_x, avg_y)
+                        
+                        # Store controlled objects for other systems
+                        self._last_controlled_objects = controlled
+                        
+                        # Get frame dimensions
+                        frame_height = len(game_state.frame)
+                        frame_width = len(game_state.frame[0]) if game_state.frame else 0
+                        
+                        # Look for goals/rare colors in frame
+                        goals = self._infer_goals_from_frame(game_state.frame)
+                        
+                        # Initialize direction tracking if needed
+                        track_key = f"{current_game_id}_{current_level}"
+                        if not hasattr(self, '_self_model_direction_history'):
+                            self._self_model_direction_history = {}
+                        if track_key not in self._self_model_direction_history:
+                            self._self_model_direction_history[track_key] = []
+                        
+                        direction_history = self._self_model_direction_history[track_key]
+                        
+                        # Strategy 1: Move toward nearest goal if visible
+                        if goals:
+                            closest_goal = min(
+                                goals,
+                                key=lambda g: abs(g.get('position', [0,0])[0] - avg_x) + 
+                                              abs(g.get('position', [0,0])[1] - avg_y)
+                            )
+                            gx, gy = closest_goal.get('position', [avg_x, avg_y])[:2]
+                            dist = abs(gx - avg_x) + abs(gy - avg_y)
+                            
+                            if dist > 2:  # Goal is not at our position
+                                # Determine direction
+                                if abs(gx - avg_x) >= abs(gy - avg_y):
+                                    if gx > avg_x:
+                                        action, direction = "ACTION4", "right"
+                                    else:
+                                        action, direction = "ACTION3", "left"
+                                else:
+                                    if gy > avg_y:
+                                        action, direction = "ACTION2", "down"
+                                    else:
+                                        action, direction = "ACTION1", "up"
+                                
+                                # Track direction to detect oscillation
+                                direction_history.append(direction)
+                                if len(direction_history) > 10:
+                                    direction_history.pop(0)
+                                
+                                # Check for oscillation (same 2 directions alternating)
+                                if len(direction_history) >= 6:
+                                    last_6 = direction_history[-6:]
+                                    if len(set(last_6)) <= 2:
+                                        # Oscillating - try a perpendicular action
+                                        logger.info(f"[SELF-MODEL] Oscillation detected, trying perpendicular")
+                                        if direction in ["up", "down"]:
+                                            action = "ACTION3" if random.random() < 0.5 else "ACTION4"
+                                        else:
+                                            action = "ACTION1" if random.random() < 0.5 else "ACTION2"
+                                
+                                goal_reason = closest_goal.get('reason', 'goal')
+                                reasoning = f"[SELF-MODEL] Moving controlled objects {direction} toward {goal_reason} at ({gx},{gy})"
+                                logger.info(reasoning)
+                                # Track for decision_contributors
+                                self._self_model_drove_action = len(controlled)
+                                return action, reasoning
+                        
+                        # Strategy 2: No goals visible - explore systematically
+                        # Prefer directions away from edges, toward center
+                        else:
+                            # Calculate distance to each edge
+                            dist_top = avg_y
+                            dist_bottom = frame_height - avg_y - 1
+                            dist_left = avg_x
+                            dist_right = frame_width - avg_x - 1
+                            
+                            # Build action preferences based on room to move
+                            preferences = []
+                            if dist_top > 3:
+                                preferences.append(("ACTION1", "up", dist_top))
+                            if dist_bottom > 3:
+                                preferences.append(("ACTION2", "down", dist_bottom))
+                            if dist_left > 3:
+                                preferences.append(("ACTION3", "left", dist_left))
+                            if dist_right > 3:
+                                preferences.append(("ACTION4", "right", dist_right))
+                            
+                            if preferences:
+                                # Pick direction with most room, avoiding recent directions
+                                recent_dirs = direction_history[-4:] if direction_history else []
+                                
+                                # Prefer unexplored directions
+                                unexplored = [p for p in preferences if p[1] not in recent_dirs]
+                                if unexplored:
+                                    preferences = unexplored
+                                
+                                # Sort by available space (most room first)
+                                preferences.sort(key=lambda x: x[2], reverse=True)
+                                
+                                action, direction, _ = preferences[0]
+                                direction_history.append(direction)
+                                if len(direction_history) > 10:
+                                    direction_history.pop(0)
+                                
+                                reasoning = f"[SELF-MODEL] Exploring {direction} with {len(controlled)} controlled objects (pos: {avg_x},{avg_y})"
+                                logger.info(reasoning)
+                                # Track for decision_contributors
+                                self._self_model_drove_action = len(controlled)
+                                return action, reasoning
+                        
+            except Exception as e:
+                logger.debug(f"Self-model driven action failed: {e}")
+        
+        # ===================================================================
         # GAP FIX 5: USE INFERRED_GOALS FOR ACTION SELECTION (Added 2025-12-28)
         # ===================================================================
         # If world_model identified rare colors/objects as inferred goals,
@@ -5225,6 +5378,32 @@ class GameplayEngine:
                                 f"[SELECTION] ACTION6 clicked on object color "
                                 f"{selection_result['selected_object_color']} at ({x},{y})"
                             )
+                        
+                        # ================================================================
+                        # DISCOVERY PHASE: ACTION6 OBSERVATION-BASED VALIDATION
+                        # ================================================================
+                        # During discovery phase, observe if clicking caused movement
+                        # and share to network immediately (not waiting for win).
+                        # ================================================================
+                        actions_this_level = getattr(self, '_level_action_count', 0)
+                        if actions_this_level <= 20:
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                            
+                            discovery_result = self.agent_self_model.execute_object_discovery(
+                                frame_before=game_state.frame,
+                                frame_after=new_state.frame,
+                                action_taken='ACTION6',
+                                click_coords=(x, y),
+                                game_type=game_type,
+                                level=current_level,
+                                agent_id=agent_id
+                            )
+                            
+                            if discovery_result and discovery_result.get('discovered_control'):
+                                logger.info(
+                                    f"[DISCOVERY] ACTION6 at ({x},{y}) triggers {discovery_result['object_id']} "
+                                    f"(shared to network for {game_type} L{current_level})"
+                                )
                 except Exception as e:
                     logger.debug(f"Selection tracking failed (non-critical): {e}")
             
@@ -5343,6 +5522,41 @@ class GameplayEngine:
                 
                 # Pass reasoning JSON and level_number to action handler
                 new_state = await method(reasoning=reasoning_json, level_number=current_level)
+                
+                # ================================================================
+                # DISCOVERY PHASE OBSERVATION-BASED VALIDATION (Added 2025-12-28)
+                # ================================================================
+                # During first N actions, systematically test objects and IMMEDIATELY
+                # validate control hypotheses based on observed movement - not waiting
+                # for win. This is per game_type + level validation.
+                # ================================================================
+                if action_num in ['1', '2', '3', '4'] and hasattr(self, 'agent_self_model'):
+                    try:
+                        actions_this_level = getattr(self, '_level_action_count', 0)
+                        # Only run during discovery phase (first 20 actions)
+                        if actions_this_level <= 20 and new_state and new_state.frame:
+                            game_id = self.session_manager.current_game_id
+                            game_type = game_id.split('-')[0] if game_id and '-' in game_id else (game_id or 'unknown')[:4]
+                            agent_id = self.game_config.get('agent_id')
+                            
+                            # Execute discovery - observes movement and shares to network
+                            discovery_result = self.agent_self_model.execute_object_discovery(
+                                frame_before=frame_before,
+                                frame_after=new_state.frame,
+                                action_taken=action,
+                                click_coords=None,  # Not a click action
+                                game_type=game_type,
+                                level=current_level,
+                                agent_id=agent_id
+                            )
+                            
+                            if discovery_result and discovery_result.get('discovered_control'):
+                                logger.info(
+                                    f"[DISCOVERY] {action} controls {discovery_result['object_id']} "
+                                    f"(shared to network for {game_type} L{current_level})"
+                                )
+                    except Exception as e:
+                        logger.debug(f"Discovery phase observation failed (non-critical): {e}")
                 
                 # ================================================================
                 # SELECTION VERIFICATION (Added 2025-12-08)
@@ -7284,6 +7498,12 @@ class GameplayEngine:
             # Track availability change detection
             if hasattr(self, '_action_availability_changes') and self._action_availability_changes:
                 context['decision_contributors']['availability_tracking'] = len(self._action_availability_changes)
+            
+            # Track self-model DRIVEN action (not just knowledge, but actually used it)
+            if hasattr(self, '_self_model_drove_action') and self._self_model_drove_action:
+                context['decision_contributors']['self_model_action'] = self._self_model_drove_action
+                # Reset for next action
+                self._self_model_drove_action = 0
             
             # Track self-model contribution (controlled objects knowledge)
             if hasattr(self, 'agent_self_model') and self.agent_self_model:
