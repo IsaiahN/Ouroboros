@@ -194,14 +194,16 @@ class AutonomousEvolutionRunner:
         from near_miss_analyzer import NearMissAnalyzer
         from collective_reasoning_engine import CollectiveReasoningEngine
         from counterfactual_analyzer import CounterfactualAnalyzer
+        from stuck_game_coordinator import StuckGameCoordinator
         
         self.subgoal_planner = SubgoalPlanner(self.db)  # Hierarchical planning
-        self.frustration_detector = FrustrationDetector(self.db)  # Frustration quorum sensing
+        self.frustration_detector = FrustrationDetector(self.db)  # Frustration tracking (quorum disabled)
+        self.stuck_game_coordinator = StuckGameCoordinator(self.db)  # NEW: Intelligent stuck game intervention
         self.near_miss_analyzer = NearMissAnalyzer(self.db)  # Learn from 15-18/20 scores
         self.collective_reasoner = CollectiveReasoningEngine(self.db)  # Multi-agent collaboration
         self.counterfactual_analyzer = CounterfactualAnalyzer(self.db)  # "What if?" analysis
         
-        print("[OK] Breakthrough systems initialized (Subgoal Planning, Frustration Detection, Near-Miss Analysis, Collective Reasoning, Counterfactual Analysis)")
+        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Coordinator, Near-Miss Analysis, Collective Reasoning, Counterfactual Analysis)")
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -1432,12 +1434,9 @@ class AutonomousEvolutionRunner:
                                     generation=self.current_generation
                                 )
                                 
-                                # Check if network-wide frustration threshold reached
-                                quorum_reached = self.frustration_detector.check_frustration_quorum(
-                                    generation=self.current_generation
-                                )
-                                if quorum_reached:
-                                    print(f"  [!] Frustration quorum reached - desperation signals emitted")
+                                # NOTE: Old frustration quorum disabled - used to emit useless mutation signals
+                                # The stuck_game_coordinator now handles this at generation end
+                                # with intelligent knowledge synthesis and targeted interventions
                             except Exception as e:
                                 print(f"  [WARN] Frustration detection failed: {e}")
                         
@@ -1947,6 +1946,47 @@ class AutonomousEvolutionRunner:
                 print(f"[WARN]  Distributed regulation failed: {e}")
                 import traceback
                 traceback.print_exc()
+            
+            # PHASE 4.5: STUCK GAME COORDINATION (Intelligent Intervention)
+            # Replaces old broken frustration quorum with knowledge synthesis
+            print(f"\n[COORDINATOR] Checking for stuck games needing intervention...")
+            try:
+                stuck_games = self.stuck_game_coordinator.check_for_stuck_games(self.current_generation)
+                
+                if stuck_games:
+                    print(f"[!] Found {len(stuck_games)} games with stuck agent quorum:")
+                    for analysis in stuck_games:
+                        stuck_pct = (analysis.agents_stuck / analysis.total_agents_on_game * 100) if analysis.total_agents_on_game > 0 else 0
+                        print(f"    {analysis.game_type}: {stuck_pct:.0f}% stuck at L{analysis.bottleneck_level}")
+                        print(f"        Knowledge: {len(analysis.death_zones)} death zones, {len(analysis.dangerous_objects)} dangerous objects")
+                        print(f"        Theories: {len(analysis.scientific_theories)} scientific, {len(analysis.network_hypotheses)} network hypotheses")
+                        print(f"        Gaps: {len(analysis.knowledge_gaps)} identified")
+                        
+                        # Apply interventions
+                        int_id = self.stuck_game_coordinator.apply_interventions(analysis, self.current_generation)
+                        print(f"        Applied {len(analysis.recommended_actions)} interventions (ID: {int_id[:12]})")
+                        for intervention in analysis.recommended_actions[:3]:
+                            print(f"          -> {intervention['type']}: {intervention.get('description', '')[:60]}")
+                else:
+                    print("[OK] No stuck game quorum detected - agents making progress")
+                
+                # Check if any previously stuck games got resolved
+                resolved_count = 0
+                interventions = self.db.execute_query("""
+                    SELECT DISTINCT game_type FROM stuck_game_interventions
+                    WHERE resolved = 0 AND generation < ?
+                """, (self.current_generation,))
+                
+                if interventions:
+                    for row in interventions:
+                        if self.stuck_game_coordinator.check_resolution(row['game_type'], self.current_generation):
+                            resolved_count += 1
+                
+                if resolved_count > 0:
+                    print(f"[OK] {resolved_count} previously stuck games now resolved!")
+                    
+            except Exception as e:
+                print(f"[WARN] Stuck game coordination failed: {e}")
             
             # ISSUE 3 FIX: Aggressive pruning to maintain target population
             # ADAPTIVE: Scale target with available game count (game_types * 10)

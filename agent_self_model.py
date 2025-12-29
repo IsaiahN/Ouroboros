@@ -1892,6 +1892,7 @@ class AgentSelfModel:
         Get the next action for the discovery phase.
         
         First N actions should systematically test objects.
+        Discovery phase can be extended by stuck_game_coordinator interventions.
         
         Args:
             frame: Current frame
@@ -1903,8 +1904,23 @@ class AgentSelfModel:
             Action recommendation or None if discovery complete:
             {'action': 'ACTION6', 'x': 10, 'y': 15, 'reason': 'Testing object obj_3'}
         """
-        # Only do discovery phase in first 20 actions
-        if actions_taken > 20:
+        # Check for game-specific discovery phase extension from stuck_game_coordinator
+        discovery_limit = 20  # Default
+        try:
+            config = self.db.execute_query("""
+                SELECT config_value FROM game_specific_config
+                WHERE game_type = ? AND config_key = 'discovery_phase_actions'
+            """, (game_type,))
+            if config and config[0].get('config_value'):
+                import json
+                extended_limit = json.loads(config[0]['config_value'])
+                if isinstance(extended_limit, int) and extended_limit > discovery_limit:
+                    discovery_limit = extended_limit
+        except:
+            pass  # Use default if table doesn't exist or query fails
+        
+        # Only do discovery phase in first N actions
+        if actions_taken > discovery_limit:
             return None
         
         # Generate plan if we don't have one

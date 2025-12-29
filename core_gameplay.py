@@ -1676,6 +1676,14 @@ class GameplayEngine:
         """
         logger.info(f"Starting game: {game_id}" + (f" (agent: {agent_id})" if agent_id else ""))
         
+        # Set game context for Scientific Method Engine (load queued experiments)
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+        if hasattr(self, 'science_engine') and self.science_engine:
+            try:
+                self.science_engine.set_game_context(game_type)
+            except Exception as e:
+                logger.debug(f"Science engine context setup failed: {e}")
+        
         # PHASE 2: Check if agent can afford to play this game
         if agent_id:
             can_afford, reason = self.session_manager.can_agent_afford_game(agent_id, game_id)

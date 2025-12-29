@@ -5,6 +5,22 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before othe
 Frustration Detection & Quorum Sensing System
 ==============================================
 
+NOTE: The QUORUM SIGNAL EMISSION portion of this system has been DEPRECATED.
+The old approach was to emit "mutation_rate" signals which:
+1. Were never properly consumed
+2. Targeted the wrong response (mutation doesn't help stuck gameplay)
+3. Created duplicate spam in the database
+
+This is now SUPERSEDED by stuck_game_coordinator.py which provides:
+- Intelligent knowledge synthesis from stuck agents
+- Targeted interventions (extend discovery phase, queue experiments, etc.)
+- Integration with Scientific Method Engine, CODS, Q1-Q5
+
+The frustration TRACKING (update_agent_frustration) is still used by
+stuck_game_coordinator to detect quorum conditions.
+
+===== LEGACY DOCSTRING =====
+
 Detects when agents are stuck and triggers network-wide "desperation mode"
 through the existing regulatory signal system. Extends regulatory_signal_engine.py.
 
