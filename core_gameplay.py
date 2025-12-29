@@ -118,6 +118,14 @@ except ImportError:
     record_reasoning = None
     get_reasoning_capture = None
 
+# Sequence Miner - Retroactive learning from winning sequences
+try:
+    from sequence_miner import SequenceMiner
+    SEQUENCE_MINER_AVAILABLE = True
+except ImportError:
+    SEQUENCE_MINER_AVAILABLE = False
+    SequenceMiner = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -10742,8 +10750,54 @@ class GameplayEngine:
                             # No breakpoint for this level - agent might be ahead of sequence
                             logger.warning(f"[PARTIAL REPLAY] No breakpoint for L{current_agent_level} in sequence, "
                                           f"replaying from start")
-                else:
-                    logger.debug(f"[PARTIAL REPLAY] No level_breakpoints in sequence, replaying from start")
+                
+                # ================================================================
+                # DYNAMIC FRAME MATCHING: If no breakpoints, find start via frame comparison
+                # ================================================================
+                # Compare agent's current frame to sequence's frame_transitions to find
+                # the closest matching point - no stored breakpoints needed!
+                # ================================================================
+                if start_index == 0 and sequence.get('frame_transitions'):
+                    try:
+                        frame_transitions = sequence['frame_transitions']
+                        if isinstance(frame_transitions, str):
+                            frame_transitions = json.loads(frame_transitions)
+                        
+                        if frame_transitions and len(frame_transitions) > 0:
+                            current_frame = game_state.frame
+                            best_match_idx = 0
+                            best_match_score = float('inf')
+                            
+                            # Sample every 3rd frame for efficiency (level transitions are big changes)
+                            for i in range(0, len(frame_transitions), 3):
+                                seq_frame = frame_transitions[i]
+                                # Count pixel differences
+                                diff_count = 0
+                                if isinstance(current_frame, list) and isinstance(seq_frame, list):
+                                    for r1, r2 in zip(current_frame, seq_frame):
+                                        if isinstance(r1, list) and isinstance(r2, list):
+                                            for c1, c2 in zip(r1, r2):
+                                                if c1 != c2:
+                                                    diff_count += 1
+                                
+                                if diff_count < best_match_score:
+                                    best_match_score = diff_count
+                                    best_match_idx = i
+                            
+                            # Only skip ahead if we found a good match (< 50 pixel differences)
+                            # and it's past the first few actions
+                            if best_match_score < 50 and best_match_idx > 5:
+                                start_index = best_match_idx
+                                logger.info(f"[DYNAMIC MATCH] Agent at L{current_agent_level}, frame matched at action {start_index} "
+                                           f"(diff={best_match_score} pixels) - skipping ahead!")
+                            elif best_match_idx > 0:
+                                logger.debug(f"[DYNAMIC MATCH] Best match at action {best_match_idx} but diff={best_match_score} "
+                                           f"(too high or too early), replaying from start")
+                    except Exception as e:
+                        logger.debug(f"[DYNAMIC MATCH] Frame matching failed: {e}, replaying from start")
+                
+                if start_index == 0:
+                    logger.debug(f"[PARTIAL REPLAY] No breakpoints or frame match found, replaying from start")
             
             # Track that this agent is using a sequence for this level
             agent_id = self.game_config.get('agent_id', 'unknown')
@@ -11586,6 +11640,27 @@ class GameplayEngine:
                         
                 except Exception as e:
                     logger.debug(f"Inferred beliefs extraction during replay failed (non-critical): {e}")
+                
+                # ================================================================
+                # SEQUENCE MINING: Retroactive learning from replayed sequence
+                # ================================================================
+                # Mine the sequence for learning data that may be missing:
+                # 1. Level breakpoints (for future partial replays)
+                # 2. Interaction triggers (action->effect correlations)
+                # This runs ONCE per sequence (checks if already mined)
+                # ================================================================
+                if SEQUENCE_MINER_AVAILABLE and SequenceMiner:
+                    try:
+                        miner = SequenceMiner()
+                        mining_result = miner.mine_single_sequence(sequence_id)
+                        miner.close()
+                        
+                        if mining_result.level_breakpoints_computed:
+                            logger.debug(f"[MINER] Computed level_breakpoints for {sequence_id[:12]}")
+                        if mining_result.interaction_triggers_extracted > 0:
+                            logger.debug(f"[MINER] Extracted {mining_result.interaction_triggers_extracted} triggers from {sequence_id[:12]}")
+                    except Exception as e:
+                        logger.debug(f"Sequence mining during replay failed (non-critical): {e}")
                 
             else:
                 # ================================================================

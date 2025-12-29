@@ -71,6 +71,14 @@ from automated_assessment_runner import AutomatedAssessmentRunner  # Other AI #3
 from pariah_validator import PariahValidator, run_pariah_validation  # False pariah detection/cleanup
 # GameDiversityPreserver import removed - prestige-only protection now
 
+# Sequence Miner - retroactive learning from winning sequences
+try:
+    from sequence_miner import SequenceMiner
+    SEQUENCE_MINER_AVAILABLE = True
+except ImportError:
+    SEQUENCE_MINER_AVAILABLE = False
+    SequenceMiner = None
+
 # Autopoiesis Monitor - system health and emergence tracking
 try:
     from autopoiesis_monitor import AutopoiesisMonitor
@@ -2239,6 +2247,20 @@ class AutonomousEvolutionRunner:
                 print("  Attempting to reinitialize population...")
                 if not await self.initialize_population():
                     return False
+        
+        # SEQUENCE MINING: Backfill learning data from winning sequences
+        # Runs once per cycle to extract any missing knowledge from existing sequences
+        if SEQUENCE_MINER_AVAILABLE:
+            try:
+                miner = SequenceMiner(self.db.db_path)
+                mining_result = miner.mine_all_sequences()
+                if mining_result.get('total_changes', 0) > 0:
+                    print(f"[MINER] Backfilled: {mining_result.get('breakpoints_updated', 0)} breakpoints, "
+                          f"{mining_result.get('triggers_inserted', 0)} triggers, "
+                          f"{mining_result.get('outcomes_inserted', 0)} outcomes")
+                miner.close()
+            except Exception as e:
+                print(f"[WARN] Sequence mining failed: {e}")
         
         # Run evaluation games
         # ADAPTIVE: Use target population if available, otherwise use configured value

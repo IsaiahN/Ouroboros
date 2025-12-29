@@ -5851,3 +5851,214 @@ Recombination system removed:
 **Current Failure Being Worked On**: None - cleanup complete.
 
 **NEXT STEP**: Run evolution to verify system operates normally without recombination overhead.
+
+---
+
+## Session: December 28, 2025 (Evening) - Retroactive Sequence Mining System
+
+---
+
+### Approach: Extract Learning Data from Existing Winning Sequences
+
+**Timestamp**: 6:42:15 PM  
+**Status**: COMPLETED - Sequence mining system implemented and integrated
+
+---
+
+### Problem Statement
+
+User asked: *"Read through progress.md to see if there's anything that can be retroactively learned and filled in DB from winning sequences while agents are replaying them."*
+
+**Investigation revealed significant data gaps** in learning tables despite 33 active winning sequences existing:
+
+| Table | Expected | Actual | Gap |
+|-------|----------|--------|-----|
+| `level_breakpoints` (column in winning_sequences) | 33 | 0 | 100% empty |
+| `interaction_triggers` | Many | 0 | Completely empty |
+| `cods_level_outcomes` | 65+ levels | 1 | 98% missing |
+| `action_effectiveness` | High counts | 42 | Low coverage |
+
+**Root Cause**: When `action_traces` were purged (17GB → 2.4GB cleanup), the system lost the ability to compute breakpoints from traces. However, winning sequences contain `frame_transitions` which can be mined instead.
+
+---
+
+### Approach
+
+**Strategy**: Build a sequence mining system that:
+1. Extracts knowledge from `frame_transitions` (one frame per action in sequence)
+2. Infers level breakpoints from `total_score` / action count
+3. Detects interaction triggers (action → frame changes)
+4. Backfills CODS level outcomes (all levels in winning sequences = passed)
+5. Boosts action effectiveness for actions that appear in wins
+
+**Integration Points**:
+1. **Batch mining** at generation start (backfill all unmined sequences)
+2. **Per-sequence mining** during replay success (learn while replaying)
+
+---
+
+### Implementation
+
+#### Step 1: Created sequence_miner.py (~600 lines)
+
+**New File**: `sequence_miner.py`
+
+| Class/Method | Purpose |
+|--------------|---------|
+| `SequenceMiner` | Main mining class with database connection |
+| `MiningResult` | Dataclass for tracking what was mined |
+| `compute_level_breakpoints()` | Infer level boundaries from total_score / actions |
+| `extract_interaction_triggers()` | Detect action → frame change correlations |
+| `backfill_cods_level_outcomes()` | Record all levels in winning sequences as passed |
+| `backfill_action_effectiveness()` | Boost effectiveness for winning actions |
+| `mine_single_sequence()` | Mine one sequence (for per-replay use) |
+| `mine_all_sequences()` | Batch mine all unmined sequences |
+
+**Key Logic for Level Breakpoints**:
+```python
+# If total_score = 4 and action_count = 80, each level ~20 actions
+actions_per_level = action_count / total_score
+breakpoints = {str(i): int((i-1) * actions_per_level) for i in range(1, total_score + 1)}
+```
+
+**Key Logic for Interaction Triggers**:
+```python
+# Compare consecutive frames in frame_transitions
+for i, (action, frame) in enumerate(zip(action_sequence, frame_transitions[1:])):
+    if frame != prev_frame:
+        # This action caused a change - record as interaction trigger
+        record_trigger(game_type, level, action, effect_type='frame_change')
+```
+
+#### Step 2: Initial Backfill Run
+
+```bash
+python sequence_miner.py
+```
+
+**Results**:
+| Category | Count |
+|----------|-------|
+| Level breakpoints updated | 17 |
+| Interaction triggers inserted | 39 |
+| CODS level outcomes recorded | 65 |
+| Action effectiveness updated | 34 |
+
+#### Step 3: Integrated into core_gameplay.py
+
+**Import Added** (line ~120):
+```python
+from sequence_miner import SequenceMiner
+```
+
+**Mining Hook in `_replay_sequence_inline()` Success Section** (after line ~11635):
+```python
+# Mine knowledge from successful replay
+try:
+    miner = SequenceMiner(self.db.db_path)
+    miner.mine_single_sequence(sequence_id)
+    miner.close()
+except Exception as e:
+    logger.debug(f"Sequence mining during replay failed: {e}")
+```
+
+#### Step 4: Integrated into autonomous_evolution_runner.py
+
+**Import with Availability Flag** (lines ~72-79):
+```python
+# Sequence Miner - retroactive learning from winning sequences
+try:
+    from sequence_miner import SequenceMiner
+    SEQUENCE_MINER_AVAILABLE = True
+except ImportError:
+    SEQUENCE_MINER_AVAILABLE = False
+    SequenceMiner = None
+```
+
+**Mining Call at Generation Start** (lines ~2244-2258):
+```python
+# SEQUENCE MINING: Backfill learning data from winning sequences
+# Runs once per cycle to extract any missing knowledge from existing sequences
+if SEQUENCE_MINER_AVAILABLE:
+    try:
+        miner = SequenceMiner(self.db.db_path)
+        mining_result = miner.mine_all_sequences()
+        if mining_result.get('total_changes', 0) > 0:
+            print(f"[MINER] Backfilled: {mining_result.get('breakpoints_updated', 0)} breakpoints, "
+                  f"{mining_result.get('triggers_inserted', 0)} triggers, "
+                  f"{mining_result.get('outcomes_inserted', 0)} outcomes")
+        miner.close()
+    except Exception as e:
+        print(f"[WARN] Sequence mining failed: {e}")
+```
+
+---
+
+### Verification
+
+```bash
+# Test miner directly
+python -c "from sequence_miner import SequenceMiner; m = SequenceMiner(); r = m.mine_all_sequences(); print(f'Mining complete: {r}'); m.close()"
+# Result: Mining complete: {...breakpoints_updated: 0, triggers_updated: 67, outcomes_inserted: 0, effectiveness_updated: 34...}
+
+# Verify import in autonomous_evolution_runner
+python -c "from autonomous_evolution_runner import SEQUENCE_MINER_AVAILABLE, SequenceMiner; print(f'SEQUENCE_MINER_AVAILABLE: {SEQUENCE_MINER_AVAILABLE}')"
+# Result: SEQUENCE_MINER_AVAILABLE: True
+
+# Verify import in core_gameplay
+python -c "from core_gameplay import SequenceMiner; print(f'SequenceMiner imported: {SequenceMiner is not None}')"
+# Result: SequenceMiner imported: True
+```
+
+All imports successful, no errors.
+
+---
+
+### Data Flow
+
+```
+Winning Sequence Stored
+    ↓
+mine_all_sequences() at generation start OR mine_single_sequence() after replay
+    ↓
+├── compute_level_breakpoints() → winning_sequences.level_breakpoints column
+├── extract_interaction_triggers() → interaction_triggers table
+├── backfill_cods_level_outcomes() → cods_level_outcomes table
+└── backfill_action_effectiveness() → action_effectiveness table
+    ↓
+Future agents use this knowledge for:
+- Partial replay (start from any level using breakpoints)
+- Action selection (which actions cause changes)
+- CODS learning (which levels pass/fail)
+- Strategy optimization (which actions work)
+```
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `sequence_miner.py` | **NEW FILE** - ~600 lines, complete mining system |
+| `core_gameplay.py` | Added import (~line 120), added mining hook in replay success (~line 11635) |
+| `autonomous_evolution_runner.py` | Added import with availability flag (~lines 72-79), added generation-start mining (~lines 2244-2258) |
+
+---
+
+### Current Status
+
+**Timestamp**: 6:42:15 PM
+
+Sequence mining system complete:
+- ✅ Created sequence_miner.py with all mining methods
+- ✅ Ran initial backfill (17 breakpoints, 39 triggers, 65 outcomes, 34 effectiveness)
+- ✅ Integrated into core_gameplay.py for per-replay mining
+- ✅ Integrated into autonomous_evolution_runner.py for batch mining at generation start
+- ✅ All imports verified working
+
+**Current Failure Being Worked On**: None - implementation complete.
+
+**NEXT STEP**: Run evolution to verify mining runs at generation start and during sequence replays:
+```bash
+python run_evolution.py --max-generations 3
+```
