@@ -6,8 +6,16 @@
 
 ### Approach: Close the Learning Loop - Observation-Based Validation (Not Win-Based)
 
-**Timestamp**: 7:40:32 PM  
-**Status**: COMPLETE - All 6 tiers implemented
+**Timestamp**: 8:44:54 PM (Updated)  
+**Status**: COMPLETE - All 6 tiers implemented + Agent Operation Guide created
+
+---
+
+### Session Summary
+
+This session addressed a critical gap in how the Ouroboros system learns and validates theories. The core insight was that theories were only validated on WIN, meaning every game restarts "dumb" with agents having to re-discover everything each time.
+
+**Philosophy**: "Working theories need to constantly be tested and validated. If this is true, what does that mean for this level? What operators should I apply to test this assumption?"
 
 ---
 
@@ -238,6 +246,9 @@ If win achieved:
 - Contradiction detection lowers reliability
 - Spurious movement tracked separately
 - Network queries filter unvalidated hypotheses
+- Hypothesis usage tracking with feedback loop
+- Hypothesis competition by outcome (best_score_achieved)
+- Composite hypothesis synthesis (Tier 6)
 
 **What's Missing (Future Work)**:
 - Theory chaining to recipes (validated control + action sequence → abstract recipe)
@@ -250,8 +261,31 @@ If win achieved:
 
 | File | Changes |
 |------|---------|
-| `agent_self_model.py` | Added network sharing, repeated testing, contradiction detection, spurious movement tracking |
-| `core_gameplay.py` | Added discovery execution after ACTION1-4 and ACTION6 during discovery phase |
+| `agent_self_model.py` | Added network sharing, repeated testing, contradiction detection, spurious movement tracking, `synthesize_composite_hypothesis()`, updated ORDER BY for best_score_achieved |
+| `core_gameplay.py` | Added discovery execution after ACTION1-4 and ACTION6, `_current_hypothesis_used` tracking, `_update_hypothesis_best_score()`, feedback loop in `_run_single_action()` |
+| `complete_database_schema.sql` | Added `best_score_achieved` column to `network_object_control_hypotheses` |
+| `migrations/add_hypothesis_best_score.py` | NEW: Migration script for best_score_achieved column |
+| `DOCS/agent-operation.md` | NEW: Comprehensive agent operation guide for autonomous oracle oversight |
+
+---
+
+### Verification: System Running With New Features
+
+**Timestamp**: 8:44:54 PM
+
+Observed in terminal during evolution run:
+```
+[DISCOVERY] Found control: obj_9 responds to ACTION4
+[DISCOVERY] ACTION4 controls obj_9 (shared to network for ls20 L2)
+[HYPOTHESIS] Level 2: 1 hypotheses (0 validated)
+[DM-3] Boosting ACTION4 based on hypothesis: Changes color_3 to color_12
+```
+
+This confirms:
+- Discovery phase is executing and finding controls
+- Controls are being shared to network (not just local)
+- Hypotheses are being queried and used for action boosting
+- The feedback loop is operational
 
 ---
 
