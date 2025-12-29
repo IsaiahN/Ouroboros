@@ -581,7 +581,13 @@ class ScientificMethodEngine:
     def _design_effect_test(self, theory: Theory) -> Experiment:
         """Design a test for an action-effect theory."""
         action = theory.formal_statement.get('action') or 'ACTION1'
-        expected_effect = theory.formal_statement.get('effect')
+        # Try 'effect' first, then 'result', then 'consequence' for backwards compatibility
+        expected_effect = (
+            theory.formal_statement.get('effect') or 
+            theory.formal_statement.get('result') or 
+            theory.formal_statement.get('consequence') or
+            'unknown_effect'
+        )
         
         return Experiment(
             experiment_id=f"exp_{uuid.uuid4().hex[:12]}",

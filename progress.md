@@ -1,5 +1,143 @@
 # Ouroboros Progress Log
 
+## Session: December 29, 2025 - Log Analysis & Bug Fixes
+
+---
+
+### Approach: Trace Runtime Issues from Evolution Logs Back to Root Causes
+
+**Timestamp**: 3:36:53 PM  
+**Status**: IN PROGRESS - Multiple bugs fixed, testing pending
+
+---
+
+### Problem Statement
+
+Analyzed [as66 reasoning log-sample.md](DOCS/[LOG]%20as66%20reasoning%20log-sample.md) from a live evolution run. Found multiple issues where systems were logging errors or producing null/empty results despite having data in the database.
+
+---
+
+### Bugs Found and Fixed
+
+| Bug | Log Message | Root Cause | Fix |
+|-----|-------------|------------|-----|
+| 1 | "Testing theory - Executing ACTION1 will cause None" | `_design_effect_test()` only checked 'effect' key, but theories use 'result' | Check 'effect' OR 'result' OR 'consequence' with fallback |
+| 2 | "Not enough actions for counterfactual analysis: 0" at level 4-5 | Querying `arc_action_tracking` (0 rows) instead of `action_traces` (53,951 rows) | Changed to `action_traces` with proper column mapping |
+| 3 | "FAIL L1 - 0 primitive gaps detected" when on level 5 | Key mismatch: `levels_completed` vs `level_completions` in result dict | Fixed key in `autonomous_evolution_runner.py` |
+| 4 | "0 primitive gaps detected" always | First failure ignored because query runs BEFORE insert | Added `+1` to include current failure in count |
+
+---
+
+### Detailed Investigation Steps
+
+#### Bug 1: Scientific Method Engine - "will cause None"
+
+**Location**: [scientific_method_engine.py](scientific_method_engine.py) line ~590
+
+**Investigation**:
+1. Searched for log message "will cause" 
+2. Found in `_design_effect_test()` method
+3. Discovered it only looked for `observation.get('effect')` 
+4. But theories store predictions as 'result' not 'effect'
+
+**Fix Applied**:
+```python
+# BEFORE:
+effect = observation.get('effect', 'unknown_effect')
+
+# AFTER:
+effect = observation.get('effect') or observation.get('result') or observation.get('consequence') or 'unknown_effect'
+```
+
+#### Bug 2: Counterfactual Analyzer - "Not enough actions"
+
+**Location**: [counterfactual_analyzer.py](counterfactual_analyzer.py) line ~330
+
+**Investigation**:
+1. Log showed "0 actions" at level 4-5 (should have thousands)
+2. Queried database: `arc_action_tracking` = 0 rows, `action_traces` = 53,951 rows
+3. Wrong table being queried!
+
+**Fix Applied**:
+- Changed from `arc_action_tracking` to `action_traces`
+- Updated column mappings:
+  - `action_type` → `action_name`
+  - `score_delta` → calculated from `outcome_score - previous`
+  - `timestamp` → `recorded_at`
+
+#### Bug 3: CODS Wrong Level Reported - "FAIL L1" on Level 5
+
+**Location**: [autonomous_evolution_runner.py](autonomous_evolution_runner.py) line 1504
+
+**Investigation**:
+1. Log header said "Level: 1" but context showed `"level": 5`
+2. Traced `max_level_reached` parameter back to caller
+3. Found: `result.get('levels_completed', 0)` but key is actually `level_completions`
+
+**Fix Applied**:
+```python
+# BEFORE:
+max_level_reached=result.get('levels_completed', 0) + 1,
+
+# AFTER:
+max_level_reached=result.get('level_completions', 0) + 1,  # Fixed: was 'levels_completed'
+```
+
+#### Bug 4: Primitive Gaps Always Zero
+
+**Location**: [cods_engine.py](cods_engine.py) line 1517
+
+**Investigation**:
+1. Even with 34 locked primitives, all outcomes showed `gaps=[]`
+2. Found timing issue: `_analyze_game_failure()` queries history BEFORE current failure is inserted
+3. So on first failure for a game type, `fail_count = 0` and threshold fails
+
+**Fix Applied**:
+```python
+# BEFORE:
+fail_count = failure_history[0]['fail_count'] if failure_history else 0
+
+# AFTER (include THIS failure):
+fail_count = (failure_history[0]['fail_count'] if failure_history else 0) + 1
+```
+
+---
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| [scientific_method_engine.py](scientific_method_engine.py) | Fixed effect lookup with fallback chain |
+| [counterfactual_analyzer.py](counterfactual_analyzer.py) | Changed table from `arc_action_tracking` to `action_traces` |
+| [autonomous_evolution_runner.py](autonomous_evolution_runner.py) | Fixed key `levels_completed` → `level_completions` |
+| [cods_engine.py](cods_engine.py) | Added `+1` to include current failure in count |
+| [sequence_miner.py](sequence_miner.py) | Added pycache disable (Rule 1) |
+| [stuck_game_coordinator.py](stuck_game_coordinator.py) | Added pycache disable (Rule 1) |
+
+---
+
+### Verification
+
+All syntax verified with `python -m py_compile`:
+- [x] scientific_method_engine.py
+- [x] counterfactual_analyzer.py  
+- [x] autonomous_evolution_runner.py
+- [x] cods_engine.py
+- [x] sequence_miner.py
+- [x] stuck_game_coordinator.py
+
+---
+
+### Next Steps
+
+1. Run evolution to verify fixes appear correctly in logs
+2. Confirm CODS now reports primitive gaps on failures
+3. Confirm counterfactual analyzer finds actions
+4. Confirm theories show predicted effects (not "None")
+5. Monitor for new issues in reasoning logs
+
+---
+
 ## Session: December 29, 2025 - Scientific Method Engine
 
 ---

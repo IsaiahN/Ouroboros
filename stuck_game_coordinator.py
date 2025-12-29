@@ -32,6 +32,8 @@ When multiple agents are stuck on the same game, this coordinator:
 
 Philosophy: The network should get SMARTER when stuck, not more random.
 """
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 import json
 import uuid

@@ -192,12 +192,16 @@ class CounterfactualAnalyzer:
         """
         try:
             # Get actual action sequence from database
+            # NOTE: Use action_traces table (has data) not arc_action_tracking (empty)
             actual_actions = self.db.execute_query("""
-                SELECT action_type, coordinate_x, coordinate_y, 
-                       score_before_action, score_after_action
-                FROM arc_action_tracking
+                SELECT action_type, 
+                       COALESCE(coordinate_x, 0) as coordinate_x, 
+                       COALESCE(coordinate_y, 0) as coordinate_y, 
+                       COALESCE(score_before, 0) as score_before_action, 
+                       COALESCE(score_after, 0) as score_after_action
+                FROM action_traces
                 WHERE agent_id = ? AND game_id = ?
-                ORDER BY action_timestamp
+                ORDER BY action_number
             """, (agent_id, game_id))
             
             if not actual_actions or len(actual_actions) < self.min_actions_for_analysis:

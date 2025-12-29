@@ -1512,38 +1512,41 @@ class CODSEngine:
             WHERE game_id LIKE ? AND won = FALSE
         """, (f"{game_type}%",))
         
-        if failure_history and failure_history[0]['fail_count'] >= 3:
+        # FIXED: Lower threshold from 3 to 1 for earlier detection
+        # Even a single failure can suggest primitive gaps based on frame analysis
+        # NOTE: Add 1 to include THIS current failure (not yet inserted into DB)
+        fail_count = (failure_history[0]['fail_count'] if failure_history else 0) + 1
+        
+        if fail_count >= 1:
             avg_level = failure_history[0]['avg_level'] or 1
             
-            # If agents consistently fail at same level, there's likely a primitive gap
-            if max_level <= avg_level + 0.5:
-                # Check which locked primitives might help
-                locked = self.unlock_manager.list_locked()
+            # Check which locked primitives might help
+            locked = self.unlock_manager.list_locked()
+            
+            for prim in locked:
+                # Score each primitive by relevance to this failure pattern
+                relevance = self._score_primitive_relevance(
+                    prim['primitive_name'], game_type, max_level
+                )
                 
-                for prim in locked:
-                    # Score each primitive by relevance to this failure pattern
-                    relevance = self._score_primitive_relevance(
-                        prim['primitive_name'], game_type, max_level
-                    )
-                    
-                    if relevance >= 0.3:
-                        gaps.append({
-                            'primitive_name': prim['primitive_name'],
-                            'category': prim.get('category', 'unknown'),
-                            'relevance_score': relevance,
-                            'failure_pattern': f"{game_type}_level{max_level}",
-                            'suggested_reason': self._get_unlock_reason(
-                                prim['primitive_name'], game_type
-                            )
-                        })
-                        
-                        # ==> BAYESIAN: Create hypothesis for each gap
-                        self.observe_failure_pattern(
-                            game_type=game_type,
-                            level_number=max_level,
-                            failure_pattern=f"gap_{prim['primitive_name']}",
-                            suggested_primitive=prim['primitive_name']
+                if relevance >= 0.3:
+                    gaps.append({
+                        'primitive_name': prim['primitive_name'],
+                        'category': prim.get('category', 'unknown'),
+                        'relevance_score': relevance,
+                        'failure_pattern': f"{game_type}_level{max_level}",
+                        'suggested_reason': self._get_unlock_reason(
+                            prim['primitive_name'], game_type
                         )
+                    })
+                    
+                    # ==> BAYESIAN: Create hypothesis for each gap
+                    self.observe_failure_pattern(
+                        game_type=game_type,
+                        level_number=max_level,
+                        failure_pattern=f"gap_{prim['primitive_name']}",
+                        suggested_primitive=prim['primitive_name']
+                    )
         
         # Sort by relevance
         gaps.sort(key=lambda x: x['relevance_score'], reverse=True)

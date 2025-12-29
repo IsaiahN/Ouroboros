@@ -1501,7 +1501,7 @@ class AutonomousEvolutionRunner:
                                 cods_result = engine.cods_engine.record_game_outcome(
                                     game_id=game_id,
                                     final_score=final_score,
-                                    max_level_reached=result.get('levels_completed', 0) + 1,
+                                    max_level_reached=result.get('level_completions', 0) + 1,  # Fixed: was 'levels_completed'
                                     total_actions=result.get('actions_taken', 0),
                                     won=result.get('win', False)
                                 )

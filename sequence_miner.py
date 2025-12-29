@@ -15,6 +15,8 @@ What can be mined from sequences:
 Author: Ouroboros System
 Created: 2025-12-28
 """
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 import json
 import logging
