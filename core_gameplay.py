@@ -879,6 +879,51 @@ class GameplayEngine:
             loop_state.consecutive_api_errors = 0
             action_succeeded = True
             
+            # ================================================================
+            # PRIORITY 1 FIX: HYPOTHESIS USAGE FEEDBACK LOOP
+            # ================================================================
+            # If we used a hypothesis to select this action, track the outcome.
+            # Score improvement = validate hypothesis (it helped!)
+            # No improvement after N actions = contradict hypothesis (not helpful)
+            # This closes the feedback loop so network learns which hypotheses work.
+            # ================================================================
+            if hasattr(self, '_current_hypothesis_used') and self._current_hypothesis_used:
+                try:
+                    hyp_info = self._current_hypothesis_used
+                    score_before = hyp_info.get('score_before', 0)
+                    score_after = game_state.score
+                    hypothesis_id = hyp_info.get('hypothesis_id')
+                    
+                    if score_after > score_before:
+                        # SCORE IMPROVED! Hypothesis helped - validate it
+                        if hasattr(self, 'agent_self_model') and self.agent_self_model and hypothesis_id:
+                            self.agent_self_model.validate_control_hypothesis(
+                                hypothesis_id, success=True, validated_by_win=True
+                            )
+                            logger.info(f"[HYPOTHESIS FEEDBACK] {hypothesis_id[:12]} HELPED: score {score_before} -> {score_after}")
+                            
+                            # Also update best_score_achieved for Priority 2
+                            self._update_hypothesis_best_score(hypothesis_id, int(score_after))
+                        
+                        # Clear after success
+                        self._current_hypothesis_used = None
+                    else:
+                        # No improvement yet - track actions since hypothesis used
+                        actions_since = hyp_info.get('actions_since', 0) + 1
+                        hyp_info['actions_since'] = actions_since
+                        
+                        # After 20 actions with no improvement, contradict
+                        if actions_since >= 20:
+                            if hasattr(self, 'agent_self_model') and self.agent_self_model and hypothesis_id:
+                                self.agent_self_model.validate_control_hypothesis(
+                                    hypothesis_id, success=False
+                                )
+                                logger.info(f"[HYPOTHESIS FEEDBACK] {hypothesis_id[:12]} NOT HELPING after {actions_since} actions")
+                            self._current_hypothesis_used = None
+                            
+                except Exception as e:
+                    logger.debug(f"Hypothesis feedback tracking failed: {e}")
+            
         except Exception as action_error:
             error_msg = str(action_error).lower()
             is_api_error = any(indicator in error_msg for indicator in [
@@ -3708,8 +3753,17 @@ class GameplayEngine:
                     
                     if validated_hypotheses:
                         best_hypothesis = validated_hypotheses[0]
+                        hypothesis_id = best_hypothesis.get('hypothesis_id')
                         controlled_objects = best_hypothesis.get('controlled_objects', [])
                         action_response = best_hypothesis.get('action_response_map', {})
+                        
+                        # PRIORITY 1 FIX: Track which hypothesis is being used for outcome feedback
+                        # Store hypothesis ID so we can validate/contradict after action execution
+                        self._current_hypothesis_used = {
+                            'hypothesis_id': hypothesis_id,
+                            'score_before': game_state.score,
+                            'level_before': current_level
+                        }
                         
                         # Check if hypothesis suggests ACTION6 to select something
                         control_pattern = controlled_objects[0] if controlled_objects else None
@@ -9717,6 +9771,36 @@ class GameplayEngine:
             logger.debug(f"Contradicted hypothesis {hypothesis_id[:12]}: {reason}")
         except Exception as e:
             logger.debug(f"Failed to contradict hypothesis: {e}")
+    
+    def _update_hypothesis_best_score(self, hypothesis_id: str, score: int) -> None:
+        """
+        Track best score achieved when using this hypothesis.
+        
+        TIER 5 - SELECTION: Hypotheses compete by outcome, not just validation count.
+        When multiple hypotheses exist for the same game/level, we rank them by
+        the best score any agent achieved while using that hypothesis.
+        
+        This enables:
+        - High-performing hypotheses rise to the top of query results
+        - Agents naturally gravitate toward hypotheses that produce wins
+        - Poor hypotheses sink even if technically "validated"
+        
+        Args:
+            hypothesis_id: The hypothesis that was used
+            score: The score achieved while using this hypothesis
+        """
+        try:
+            # Update only if this score is better than previous best
+            # Uses COALESCE for graceful handling if column doesn't exist yet
+            self.db.execute_query("""
+                UPDATE network_object_control_hypotheses
+                SET best_score_achieved = MAX(COALESCE(best_score_achieved, 0), ?)
+                WHERE hypothesis_id = ?
+            """, (score, hypothesis_id))
+            logger.debug(f"Updated hypothesis {hypothesis_id[:12]} best score to {score}")
+        except Exception as e:
+            # Column may not exist yet - log but don't crash
+            logger.debug(f"Failed to update hypothesis best score: {e}")
     
     def _parse_actionable_from_hypothesis(
         self,

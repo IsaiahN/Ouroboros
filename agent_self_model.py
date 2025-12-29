@@ -2674,6 +2674,7 @@ class AgentSelfModel:
         # CORRELATION != CAUSATION FILTER
         # Only return hypotheses that have been validated at least 3 times
         # with consistent results. Single observations could be spurious.
+        # TIER 5 - SELECTION: Order by outcome (best_score_achieved) not just validation
         results = self.db.execute_query("""
             SELECT 
                 hypothesis_id,
@@ -2682,13 +2683,16 @@ class AgentSelfModel:
                 reliability_score,
                 validation_attempts,
                 validation_successes,
-                validated_by_win
+                validated_by_win,
+                COALESCE(best_score_achieved, 0) as best_score_achieved
             FROM network_object_control_hypotheses
             WHERE game_type = ? AND level_number = ? 
                   AND is_active = TRUE 
                   AND reliability_score >= ?
                   AND (validation_attempts >= 3 OR validated_by_win = TRUE)
-            ORDER BY validated_by_win DESC, reliability_score DESC
+            ORDER BY validated_by_win DESC, 
+                     best_score_achieved DESC, 
+                     reliability_score DESC
             LIMIT 5
         """, (game_type, level, min_reliability))
         
@@ -2701,8 +2705,27 @@ class AgentSelfModel:
                 'reliability': row['reliability_score'],
                 'validation_count': row['validation_attempts'],
                 'success_rate': row['validation_successes'] / max(1, row['validation_attempts']),
-                'validated_by_win': row['validated_by_win']
+                'validated_by_win': row['validated_by_win'],
+                'best_score_achieved': row['best_score_achieved']  # TIER 5 - competition by outcome
             })
+        
+        # TIER 6 - SYNTHESIS: If we have multiple moderate-reliability hypotheses
+        # but none with high confidence, try to synthesize a composite
+        if len(hypotheses) >= 2 and all(h['reliability'] < 0.8 for h in hypotheses):
+            composite = self.synthesize_composite_hypothesis(game_id, level)
+            if composite and composite.get('hypothesis_id') not in [h['hypothesis_id'] for h in hypotheses]:
+                # Insert composite at the front (highest priority)
+                hypotheses.insert(0, {
+                    'hypothesis_id': composite['hypothesis_id'],
+                    'controlled_objects': composite.get('control_pattern', '').split(',') if isinstance(composite.get('control_pattern'), str) else [],
+                    'action_response_map': composite.get('action_map', {}),
+                    'reliability': composite.get('reliability', 0.5),
+                    'validation_count': 0,
+                    'success_rate': 0.0,
+                    'validated_by_win': False,
+                    'best_score_achieved': 0,
+                    'is_composite': True
+                })
         
         return hypotheses
     
@@ -2763,6 +2786,148 @@ class AgentSelfModel:
         
         if not is_active:
             logger.info(f"[NETWORK] Control hypothesis {hypothesis_id} deactivated (reliability: {reliability:.2f})")
+    
+    def synthesize_composite_hypothesis(
+        self,
+        game_id: str,
+        level: int
+    ) -> Optional[Dict]:
+        """
+        TIER 6 - SYNTHESIS: Combine validated hypotheses into composite strategies.
+        
+        This is the highest tier of the thought process colony. When multiple
+        validated hypotheses exist for a game/level, this method:
+        1. Queries all validated hypotheses
+        2. Identifies complementary patterns (e.g., control + goal)
+        3. Creates a composite hypothesis combining them
+        4. Stores composite with references to source hypotheses
+        
+        A composite hypothesis answers: "I control X, and my goal is Y"
+        rather than just "I control X" or "Y is the goal".
+        
+        Args:
+            game_id: Game identifier
+            level: Level number
+            
+        Returns:
+            Composite hypothesis dict if synthesis successful, None otherwise
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Get all validated hypotheses for this game/level
+        validated = self.db.execute_query("""
+            SELECT 
+                hypothesis_id,
+                control_pattern,
+                action_response_map,
+                reliability_score,
+                validation_attempts,
+                best_score_achieved
+            FROM network_object_control_hypotheses
+            WHERE game_type = ? AND level_number = ?
+                  AND is_active = TRUE
+                  AND reliability_score >= 0.5
+                  AND (validation_attempts >= 3 OR validated_by_win = TRUE)
+            ORDER BY best_score_achieved DESC, reliability_score DESC
+            LIMIT 10
+        """, (game_type, level))
+        
+        if not validated or len(validated) < 2:
+            # Need at least 2 hypotheses to synthesize
+            return None
+        
+        # Group hypotheses by pattern type
+        control_hypotheses = []
+        goal_hypotheses = []
+        
+        for row in validated:
+            try:
+                action_map = json.loads(row['action_response_map']) if row['action_response_map'] else {}
+                hypothesis = {
+                    'id': row['hypothesis_id'],
+                    'control_pattern': row['control_pattern'],
+                    'action_map': action_map,
+                    'reliability': row['reliability_score'],
+                    'best_score': row.get('best_score_achieved', 0)
+                }
+                
+                # Classify: control hypotheses have directional mappings
+                if any(k in str(action_map) for k in ['up', 'down', 'left', 'right', 'ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']):
+                    control_hypotheses.append(hypothesis)
+                else:
+                    goal_hypotheses.append(hypothesis)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        
+        if not control_hypotheses:
+            return None
+        
+        # Create composite: best control + any complementary patterns
+        best_control = control_hypotheses[0]
+        
+        # Check if composite already exists
+        composite_id = f"composite_{game_type}_{level}_{best_control['id'][:8]}"
+        existing = self.db.execute_query("""
+            SELECT hypothesis_id FROM network_object_control_hypotheses
+            WHERE hypothesis_id = ?
+        """, (composite_id,))
+        
+        if existing:
+            # Composite already exists, return it
+            return {
+                'hypothesis_id': composite_id,
+                'is_composite': True,
+                'source_hypotheses': [best_control['id']],
+                'reliability': best_control['reliability']
+            }
+        
+        # Build composite action map
+        composite_action_map = dict(best_control['action_map'])
+        source_ids = [best_control['id']]
+        
+        # Add complementary patterns from other hypotheses
+        for h in control_hypotheses[1:3]:  # Limit to top 3
+            for key, value in h['action_map'].items():
+                if key not in composite_action_map:
+                    composite_action_map[key] = value
+                    source_ids.append(h['id'])
+        
+        # Calculate composite reliability (weighted average)
+        total_weight = sum(h['reliability'] for h in control_hypotheses[:3])
+        composite_reliability = total_weight / min(3, len(control_hypotheses))
+        
+        # Store composite hypothesis
+        try:
+            self.db.execute_query("""
+                INSERT INTO network_object_control_hypotheses
+                (hypothesis_id, game_type, level_number, control_pattern, action_response_map,
+                 discovered_by_agent, discovery_generation, validation_attempts, 
+                 validation_successes, reliability_score, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, TRUE)
+            """, (
+                composite_id,
+                game_type,
+                level,
+                best_control['control_pattern'],
+                json.dumps(composite_action_map),
+                f"synthesis_from_{len(source_ids)}_sources",
+                self.db.get_generation() if hasattr(self.db, 'get_generation') else 0,
+                composite_reliability
+            ))
+            
+            logger.info(f"[TIER-6] Synthesized composite hypothesis {composite_id} from {len(source_ids)} sources")
+            
+            return {
+                'hypothesis_id': composite_id,
+                'is_composite': True,
+                'source_hypotheses': source_ids,
+                'control_pattern': best_control['control_pattern'],
+                'action_map': composite_action_map,
+                'reliability': composite_reliability
+            }
+        except Exception as e:
+            logger.debug(f"Failed to store composite hypothesis: {e}")
+            return None
     
     def _create_pattern_signature(self, controlled_objects: List[str], action_map: Dict) -> str:
         """
