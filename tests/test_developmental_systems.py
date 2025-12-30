@@ -385,6 +385,492 @@ class TestEpisodicMemorySystem(unittest.TestCase):
 
 
 # =============================================================================
+# PRE-GAME AUTOBIOGRAPHICAL SYNTHESIS TESTS
+# =============================================================================
+
+class TestPreGameAutobiography(unittest.TestCase):
+    """Tests for pre-game autobiographical synthesis.
+    
+    These test the agent's ability to synthesize their complete understanding
+    of a game from all their past experiences before taking their first action.
+    This is the TRUE wA (private stream) that gives agents real memory.
+    """
+    
+    def setUp(self):
+        """Set up test fixtures with extended mock database."""
+        self.db = MockDatabaseInterface()
+        self._add_autobiography_tables()
+        
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from agent_self_model import EpisodicMemorySystem
+        
+        self.episodic = EpisodicMemorySystem(self.db)  # type: ignore[arg-type]
+    
+    def _add_autobiography_tables(self):
+        """Add tables needed for autobiography synthesis."""
+        c = self.db.conn.cursor()
+        
+        # Agent theories table
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS agent_theories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                theory_type TEXT,
+                description TEXT,
+                confidence REAL DEFAULT 0.5,
+                tests_conducted INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'testing'
+            )
+        """)
+        
+        # Network object control hypotheses
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS network_object_control_hypotheses (
+                hypothesis_id TEXT PRIMARY KEY,
+                game_type TEXT NOT NULL,
+                level_number INTEGER,
+                controlled_pattern TEXT,
+                action_response TEXT,
+                reliability_score REAL DEFAULT 0.5,
+                validation_attempts INTEGER DEFAULT 0,
+                discovered_by TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+        
+        # Inferred goal states
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS inferred_goal_states (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_type TEXT NOT NULL,
+                level_number INTEGER,
+                goal_type TEXT,
+                goal_params TEXT,
+                confidence REAL DEFAULT 0.5
+            )
+        """)
+        
+        # Pariahs (failure patterns)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS pariahs (
+                pariah_id TEXT PRIMARY KEY,
+                game_id TEXT,
+                level_number INTEGER,
+                failure_pattern TEXT,
+                death_count INTEGER DEFAULT 1,
+                created_at TEXT
+            )
+        """)
+        
+        # Agent pariah awareness
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS agent_pariah_awareness (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                pariah_id TEXT NOT NULL
+            )
+        """)
+        
+        # Object sensation mappings
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS object_sensation_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                object_type TEXT,
+                sensation_score REAL DEFAULT 0.0,
+                success_count INTEGER DEFAULT 0,
+                failure_count INTEGER DEFAULT 0,
+                personal_meaning TEXT
+            )
+        """)
+        
+        # Action traces
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS action_traces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                game_id TEXT NOT NULL,
+                action_name TEXT,
+                score_before REAL DEFAULT 0.0,
+                score_after REAL DEFAULT 0.0
+            )
+        """)
+        
+        # Add generation column to game_results
+        c.execute("""
+            ALTER TABLE game_results ADD COLUMN generation INTEGER DEFAULT 0
+        """)
+        
+        self.db.conn.commit()
+    
+    def _seed_agent_history(self, agent_id: str, game_type: str, 
+                            wins: int, losses: int, generation: int = 10):
+        """Seed an agent's game history."""
+        # Add agent
+        self.db.execute_query(
+            "INSERT OR IGNORE INTO agents (agent_id, agent_type) VALUES (?, ?)",
+            (agent_id, "explorer")
+        )
+        
+        # Add wins
+        for i in range(wins):
+            self.db.execute_query("""
+                INSERT INTO game_results 
+                (agent_id, game_id, final_score, levels_completed, actions_used, generation)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (agent_id, f"{game_type}-win{i}", 3.0, 3, 50 + i, generation))
+        
+        # Add losses
+        for i in range(losses):
+            self.db.execute_query("""
+                INSERT INTO game_results 
+                (agent_id, game_id, final_score, levels_completed, actions_used, generation)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (agent_id, f"{game_type}-loss{i}", 0.0, 0, 100 + i, generation))
+    
+    def _seed_network_knowledge(self, game_type: str, sequences: int, efficiency: float):
+        """Seed network sequences for a game type."""
+        for i in range(sequences):
+            self.db.execute_query("""
+                INSERT INTO winning_sequences 
+                (sequence_id, game_id, level_number, is_active, efficiency_score, times_referenced)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (f"seq_{i}", f"{game_type}-net{i}", 1, 1, efficiency, 5))
+    
+    # =========================================================================
+    # CORE SYNTHESIS TESTS
+    # =========================================================================
+    
+    def test_empty_history_returns_explore_strategy(self):
+        """New agent with no history should recommend exploration."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "new_agent", "SP80", 1, is_frontier=True
+        )
+        
+        self.assertEqual(result['total_games_played'], 0)
+        self.assertEqual(result['recommended_strategy']['strategy'], 'explore')
+        self.assertIn("first time", result['autobiography_narrative'].lower())
+    
+    def test_experienced_agent_trusts_self(self):
+        """Experienced successful agent should trust self."""
+        self._seed_agent_history("exp_agent", "SP80", wins=25, losses=5)
+        
+        result = self.episodic.synthesize_pregame_autobiography(
+            "exp_agent", "SP80", 1, current_generation=10
+        )
+        
+        self.assertEqual(result['total_games_played'], 30)
+        self.assertGreater(result['win_rate'], 0.7)
+        self.assertEqual(result['recommended_strategy']['strategy'], 'trust_self')
+    
+    def test_novice_with_network_trusts_network(self):
+        """Novice agent with strong network should trust network."""
+        self._seed_agent_history("novice", "SP80", wins=1, losses=2)
+        self._seed_network_knowledge("SP80", sequences=10, efficiency=0.8)
+        
+        result = self.episodic.synthesize_pregame_autobiography(
+            "novice", "SP80", 1, current_generation=10
+        )
+        
+        self.assertEqual(result['total_games_played'], 3)
+        self.assertGreater(result['network_sequences_available'], 5)
+        self.assertEqual(result['recommended_strategy']['strategy'], 'trust_network')
+    
+    def test_moderate_experience_blends(self):
+        """Agent with moderate experience should blend sources."""
+        self._seed_agent_history("blend_agent", "SP80", wins=5, losses=5)
+        self._seed_network_knowledge("SP80", sequences=5, efficiency=0.6)
+        
+        result = self.episodic.synthesize_pregame_autobiography(
+            "blend_agent", "SP80", 1, current_generation=10
+        )
+        
+        self.assertEqual(result['total_games_played'], 10)
+        self.assertEqual(result['recommended_strategy']['strategy'], 'blend')
+    
+    def test_frontier_game_always_explores(self):
+        """Frontier game should always recommend exploration."""
+        # Even with history on other games, frontier = explore
+        self._seed_agent_history("frontier_agent", "SP80", wins=20, losses=5)
+        
+        result = self.episodic.synthesize_pregame_autobiography(
+            "frontier_agent", "NEW_GAME", 1, is_frontier=True
+        )
+        
+        self.assertEqual(result['recommended_strategy']['strategy'], 'explore')
+    
+    # =========================================================================
+    # UNCERTAINTY DETECTION TESTS
+    # =========================================================================
+    
+    def test_uncertainty_no_controls(self):
+        """Agent with no control knowledge should report control uncertainty."""
+        self._seed_agent_history("no_control_agent", "SP80", wins=5, losses=5)
+        
+        result = self.episodic.synthesize_pregame_autobiography(
+            "no_control_agent", "SP80", 1
+        )
+        
+        self.assertIsNotNone(result['key_uncertainty'])
+        self.assertEqual(result['key_uncertainty']['type'], 'control')
+    
+    def test_uncertainty_low_win_rate(self):
+        """Agent with high games but low win rate should report strategy uncertainty."""
+        self._seed_agent_history("struggling_agent", "SP80", wins=3, losses=22)
+        
+        result = self.episodic.synthesize_pregame_autobiography(
+            "struggling_agent", "SP80", 1
+        )
+        
+        self.assertIsNotNone(result['key_uncertainty'])
+        # Either control or strategy uncertainty is valid
+        self.assertIn(result['key_uncertainty']['type'], ['control', 'strategy', 'goal'])
+    
+    # =========================================================================
+    # TEMPORAL WEIGHTING TESTS
+    # =========================================================================
+    
+    def test_temporal_weight_recent_full_weight(self):
+        """Recent experiences should have full weight."""
+        weight = self.episodic._temporal_weight(10, 10, half_life=20)
+        self.assertEqual(weight, 1.0)
+    
+    def test_temporal_weight_old_decays(self):
+        """Old experiences should have reduced weight."""
+        # 20 generations old = half_life = 50% weight
+        weight = self.episodic._temporal_weight(0, 20, half_life=20)
+        self.assertAlmostEqual(weight, 0.5, places=2)
+        
+        # 40 generations old = 25% weight
+        weight = self.episodic._temporal_weight(0, 40, half_life=20)
+        self.assertAlmostEqual(weight, 0.25, places=2)
+    
+    # =========================================================================
+    # NARRATIVE GENERATION TESTS
+    # =========================================================================
+    
+    def test_narrative_includes_experience(self):
+        """Narrative should mention game count and win rate."""
+        self._seed_agent_history("narr_agent", "SP80", wins=15, losses=5)
+        
+        result = self.episodic.synthesize_pregame_autobiography(
+            "narr_agent", "SP80", 1
+        )
+        
+        narrative = result['autobiography_narrative'].lower()
+        self.assertIn("played", narrative)
+        self.assertIn("20", narrative)  # 15 + 5 = 20 games
+    
+    def test_narrative_includes_strategy(self):
+        """Narrative should mention recommended strategy."""
+        self._seed_agent_history("strat_agent", "SP80", wins=20, losses=2)
+        
+        result = self.episodic.synthesize_pregame_autobiography(
+            "strat_agent", "SP80", 1
+        )
+        
+        narrative = result['autobiography_narrative'].lower()
+        # Should mention confidence in own approach
+        self.assertIn("confident", narrative)
+    
+    def test_narrative_first_time(self):
+        """Narrative for new agent should say first time."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "brand_new", "SP80", 1
+        )
+        
+        self.assertIn("first time", result['autobiography_narrative'].lower())
+
+    # =========================================================================
+    # RUNTIME AUTOBIOGRAPHY UPDATE TESTS
+    # =========================================================================
+    
+    def test_initialize_session_state(self):
+        """Session state should be initialized with wA/wB from strategy."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "session_agent", "SP80", 1
+        )
+        
+        # Initialize session state
+        updated = self.episodic.initialize_session_state(result)
+        
+        self.assertIn('session_state', updated)
+        session = updated['session_state']
+        self.assertEqual(session['actions_taken_this_game'], 0)
+        self.assertEqual(session['current_level'], 1)
+        self.assertIn('wA', session)
+        self.assertIn('wB', session)
+        # wA + wB should approximately equal 1
+        self.assertAlmostEqual(session['wA'] + session['wB'], 1.0, places=2)
+    
+    def test_wA_wB_shift_on_positive_personal(self):
+        """wA should increase when personal action succeeds."""
+        # Setup experienced agent (trust_self strategy)
+        self._seed_agent_history("wab_agent", "SP80", wins=15, losses=5)
+        result = self.episodic.synthesize_pregame_autobiography(
+            "wab_agent", "SP80", 1
+        )
+        result = self.episodic.initialize_session_state(result)
+        
+        initial_wA = result['session_state']['wA']
+        
+        # Personal action succeeds
+        result = self.episodic.update_autobiography_after_action(
+            autobiography=result,
+            action='ACTION1',
+            action_source='wA',
+            outcome='positive'
+        )
+        
+        new_wA = result['session_state']['wA']
+        # wA should have increased
+        self.assertGreater(new_wA, initial_wA)
+    
+    def test_wB_shift_on_positive_network(self):
+        """wB should increase when network action succeeds."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "wb_agent", "SP80", 1
+        )
+        result = self.episodic.initialize_session_state(result)
+        
+        initial_wB = result['session_state']['wB']
+        
+        # Network action succeeds
+        result = self.episodic.update_autobiography_after_action(
+            autobiography=result,
+            action='ACTION2',
+            action_source='wB',
+            outcome='positive'
+        )
+        
+        new_wB = result['session_state']['wB']
+        # wB should have increased
+        self.assertGreater(new_wB, initial_wB)
+    
+    def test_wA_wB_bounded(self):
+        """wA and wB should stay between 0.1 and 0.9."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "bound_agent", "SP80", 1
+        )
+        result = self.episodic.initialize_session_state(result)
+        
+        # Many positive personal outcomes
+        for _ in range(50):
+            result = self.episodic.update_autobiography_after_action(
+                autobiography=result,
+                action='ACTION1',
+                action_source='wA',
+                outcome='positive'
+            )
+        
+        session = result['session_state']
+        self.assertLessEqual(session['wA'], 0.9)
+        self.assertGreaterEqual(session['wB'], 0.1)
+    
+    def test_level_change_updates_narrative(self):
+        """Level change should update narrative and reset level counter."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "level_agent", "SP80", 1
+        )
+        result = self.episodic.initialize_session_state(result)
+        
+        # Simulate some actions
+        for _ in range(10):
+            result = self.episodic.update_autobiography_after_action(
+                autobiography=result,
+                action='ACTION1',
+                action_source='explore',
+                outcome='neutral'
+            )
+        
+        # Complete level
+        result = self.episodic.update_autobiography_on_level_change(
+            autobiography=result,
+            old_level=1,
+            new_level=2,
+            actions_to_complete=10
+        )
+        
+        session = result['session_state']
+        self.assertEqual(session['current_level'], 2)
+        self.assertEqual(session['actions_taken_this_level'], 0)
+        self.assertEqual(len(session['level_transitions']), 1)
+        self.assertIn("level 1", result['session_narrative'].lower())
+    
+    def test_get_action_source_recommendation_personal_only(self):
+        """When only personal action available, use it."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "rec_agent", "SP80", 1
+        )
+        result = self.episodic.initialize_session_state(result)
+        
+        action, source, reasoning = self.episodic.get_action_source_recommendation(
+            autobiography=result,
+            personal_action='ACTION1',
+            network_action=None
+        )
+        
+        self.assertEqual(action, 'ACTION1')
+        self.assertEqual(source, 'wA')
+    
+    def test_get_action_source_recommendation_network_only(self):
+        """When only network action available, use it."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "rec_agent2", "SP80", 1
+        )
+        result = self.episodic.initialize_session_state(result)
+        
+        action, source, reasoning = self.episodic.get_action_source_recommendation(
+            autobiography=result,
+            personal_action=None,
+            network_action='ACTION2'
+        )
+        
+        self.assertEqual(action, 'ACTION2')
+        self.assertEqual(source, 'wB')
+    
+    def test_get_action_source_recommendation_both_agree(self):
+        """When both streams suggest same action, use blend."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "blend_agent", "SP80", 1
+        )
+        result = self.episodic.initialize_session_state(result)
+        
+        action, source, reasoning = self.episodic.get_action_source_recommendation(
+            autobiography=result,
+            personal_action='ACTION3',
+            network_action='ACTION3'
+        )
+        
+        self.assertEqual(action, 'ACTION3')
+        self.assertEqual(source, 'blend')
+    
+    def test_runtime_narrative_includes_session_info(self):
+        """Runtime narrative should include current session state."""
+        result = self.episodic.synthesize_pregame_autobiography(
+            "narr2_agent", "SP80", 1
+        )
+        result = self.episodic.initialize_session_state(result)
+        
+        # Take some actions
+        for i in range(15):
+            result = self.episodic.update_autobiography_after_action(
+                autobiography=result,
+                action=f'ACTION{(i % 4) + 1}',
+                action_source='explore',
+                outcome='neutral'
+            )
+        
+        narrative = self.episodic.generate_runtime_narrative(result)
+        
+        self.assertIn("15 actions", narrative.lower())
+        self.assertIn("level 1", narrative.lower())
+
+
+# =============================================================================
 # AGENT HYPOTHESIS SYSTEM TESTS
 # =============================================================================
 

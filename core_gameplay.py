@@ -44,7 +44,8 @@ from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
 from agent_self_model import (
     AgentSelfModel, WeavingReporter, 
-    CognitiveStageSystem, EpisodicMemorySystem, AgentHypothesisSystem
+    CognitiveStageSystem, EpisodicMemorySystem, AgentHypothesisSystem,
+    MetacognitiveReasoningEngine
 )
 from object_detector import ObjectDetector
 
@@ -413,6 +414,10 @@ class GameplayEngine:
         self.cognitive_stage_system = CognitiveStageSystem(self.db)
         self.episodic_memory = EpisodicMemorySystem(self.db)
         self.agent_hypothesis_system = AgentHypothesisSystem(self.db, self.cognitive_stage_system)
+        
+        # Metacognitive Reasoning: Scientific hypothesis testing and theory revision
+        # Implements: assumptions, predictions, theory revision, failure analysis, elimination
+        self.metacognitive_engine = MetacognitiveReasoningEngine(self.db)
         
         # Inject subgoal activator into action handler for real-time guidance
         self.action_handler.subgoal_activator = self.subgoal_activator  # type: ignore[attr-defined]
@@ -906,10 +911,87 @@ class GameplayEngine:
                     raise ValueError(f"Invalid action callback result: {action_result}")
             else:
                 action, reasoning = await self._select_action(game_state)
+                
+                # ================================================================
+                # METACOGNITIVE: PREDICTION BEFORE ACTION
+                # ================================================================
+                # Make a falsifiable prediction before executing the action.
+                # This is the scientific method: "If my theory is right, X should happen."
+                # Predictions are evaluated post-action in the metacognitive evaluation block.
+                # ================================================================
+                if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                    try:
+                        game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
+                        
+                        # Infer expected outcome from reasoning
+                        expected_outcome = 'score_increase'  # Default: expect progress
+                        if 'explore' in reasoning.lower() or 'test' in reasoning.lower():
+                            expected_outcome = 'discover_pattern'
+                        elif 'avoid' in reasoning.lower() or 'escape' in reasoning.lower():
+                            expected_outcome = 'avoid_failure'
+                        elif 'optimal' in reasoning.lower() or 'sequence' in reasoning.lower():
+                            expected_outcome = 'score_increase'
+                        
+                        # Current theory from autobiography
+                        theory_source = getattr(self, '_last_action_source', 'intuition')
+                        
+                        # Make the prediction
+                        self.metacognitive_engine.make_prediction(
+                            game_type=game_type,
+                            level=loop_state.current_level,
+                            action=action,
+                            expected_outcome=expected_outcome,
+                            theory_behind_it=f"Action from {theory_source}: {reasoning[:100]}",
+                            current_score=game_state.score
+                        )
+                    except Exception as e:
+                        logger.debug(f"Metacognitive prediction failed (non-critical): {e}")
+                
                 game_state = await self._execute_action(action, game_state, reasoning, loop_state.current_level)
             
             loop_state.consecutive_api_errors = 0
             action_succeeded = True
+            
+            # ================================================================
+            # AUTOBIOGRAPHY RUNTIME UPDATE
+            # ================================================================
+            # Update the agent's autobiography with action outcome.
+            # This adjusts wA/wB weights based on which stream was reliable.
+            # ================================================================
+            if hasattr(self, 'episodic_memory') and self.episodic_memory:
+                try:
+                    autobiography = self.game_config.get('agent_autobiography')
+                    if autobiography:
+                        # Determine action outcome
+                        score_before = getattr(loop_state, 'previous_score', 0)
+                        score_after = game_state.score
+                        if score_after > score_before:
+                            outcome = 'positive'
+                        elif game_state.state == 'GAME_OVER':
+                            outcome = 'negative'
+                        else:
+                            outcome = 'neutral'
+                        
+                        # Get action source from _select_action tracking
+                        action_source = getattr(self, '_last_action_source', 'explore')
+                        
+                        # Update autobiography
+                        self.episodic_memory.update_autobiography_after_action(
+                            autobiography=autobiography,
+                            action=action,
+                            action_source=action_source,
+                            outcome=outcome
+                        )
+                        
+                        # Log significant wA/wB shifts
+                        session = autobiography.get('session_state', {})
+                        if session.get('actions_taken_this_game', 0) % 50 == 0 and session.get('actions_taken_this_game', 0) > 0:
+                            logger.info(
+                                f"[AUTOBIOGRAPHY] Action {session['actions_taken_this_game']}: "
+                                f"wA={session.get('wA', 0.5):.2f}, wB={session.get('wB', 0.5):.2f}"
+                            )
+                except Exception as e:
+                    logger.debug(f"Autobiography update failed (non-critical): {e}")
             
             # ================================================================
             # PRIORITY 1 FIX: HYPOTHESIS USAGE FEEDBACK LOOP
@@ -955,6 +1037,89 @@ class GameplayEngine:
                             
                 except Exception as e:
                     logger.debug(f"Hypothesis feedback tracking failed: {e}")
+            
+            # ================================================================
+            # METACOGNITIVE: EVALUATE PREDICTION & RECORD FAILURES
+            # ================================================================
+            # Scientific reasoning: Did our prediction come true?
+            # If wrong, trigger theory revision. Track failures for pattern analysis.
+            # ================================================================
+            if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine and agent_id:
+                try:
+                    score_before = getattr(loop_state, 'previous_score', 0)
+                    score_after = game_state.score
+                    
+                    # Check if frame changed
+                    frame_changed = False
+                    if hasattr(self, '_previous_frame') and self._previous_frame and game_state.frame:
+                        import numpy as np
+                        prev_arr = np.array(self._previous_frame)
+                        curr_arr = np.array(game_state.frame)
+                        if prev_arr.shape == curr_arr.shape:
+                            frame_changed = not np.array_equal(prev_arr, curr_arr)
+                    
+                    # Evaluate pending prediction
+                    if score_after > score_before:
+                        actual_outcome = f"Score increased {score_before} -> {score_after}"
+                    elif game_state.state == 'GAME_OVER':
+                        actual_outcome = "Game over - died"
+                    elif frame_changed:
+                        actual_outcome = "Frame changed (movement/interaction)"
+                    else:
+                        actual_outcome = "No visible change"
+                    
+                    eval_result = self.metacognitive_engine.evaluate_prediction(
+                        actual_outcome=actual_outcome,
+                        score_before=score_before,
+                        score_after=score_after,
+                        frame_changed=frame_changed
+                    )
+                    
+                    # If prediction was wrong, revise theory
+                    if eval_result.get('recommendation') == 'revise_theory':
+                        self.metacognitive_engine.revise_theory(
+                            old_theory=eval_result.get('theory', ''),
+                            failed_prediction=eval_result.get('predicted', ''),
+                            actual_outcome=actual_outcome
+                        )
+                    
+                    # Record failure for pattern analysis if outcome was negative
+                    if score_after <= score_before and game_state.state != 'WIN':
+                        game_type = game_id[:4] if game_id else ''
+                        current_level = int(game_state.score) + 1
+                        
+                        # Build context for failure
+                        context = {
+                            'action': action,
+                            'frame_changed': frame_changed,
+                            'score_before': score_before,
+                            'score_after': score_after
+                        }
+                        
+                        self.metacognitive_engine.record_failure(action, context)
+                        
+                        # Analyze failure patterns periodically
+                        if loop_state.action_count % 10 == 0:
+                            pattern = self.metacognitive_engine.analyze_failure_commonality(
+                                agent_id=agent_id,
+                                game_type=game_type,
+                                level_number=current_level
+                            )
+                            if pattern:
+                                # Eliminate action if pattern is clear
+                                common = pattern.get('common_factor', '')
+                                if 'ACTION:' in common:
+                                    failed_action = common.replace('ACTION: ', '')
+                                    self.metacognitive_engine.eliminate_action(
+                                        agent_id=agent_id,
+                                        game_type=game_type,
+                                        level_number=current_level,
+                                        action=failed_action,
+                                        reason=pattern.get('insight', 'Consistent failure')
+                                    )
+                                    
+                except Exception as e:
+                    logger.debug(f"Metacognitive evaluation failed: {e}")
             
         except Exception as action_error:
             error_msg = str(action_error).lower()
@@ -1473,6 +1638,52 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Cognitive competency update failed (non-critical): {e}")
 
+        # ===================================================================
+        # METACOGNITIVE: POST-WIN REFLECTION
+        # ===================================================================
+        # On game win, reflect on what caused the success.
+        # This extracts the key insight that can be shared with the network.
+        # ===================================================================
+        if game_state.state == "WIN" and hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+            try:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                
+                # Gather context for reflection
+                session_id = self.session_manager.current_session_id
+                action_traces = self.db.execute_query("""
+                    SELECT action_number, frame_changed
+                    FROM action_traces
+                    WHERE session_id = ? AND game_id = ?
+                    ORDER BY action_number DESC
+                    LIMIT 20
+                """, (session_id, game_id)) if session_id else []
+                
+                # Calculate what changed in the last few actions
+                effective_actions = sum(1 for t in action_traces if t.get('frame_changed')) if action_traces else 0
+                
+                # Get any validated hypotheses that contributed
+                validated_hypotheses = self.metacognitive_engine.get_current_theory()
+                
+                # Generate the reflection
+                insight = self.metacognitive_engine.generate_win_reflection(
+                    game_type=game_type,
+                    level=loop_state.current_level,
+                    actions_taken=loop_state.action_count,
+                    key_context={
+                        'effective_final_actions': effective_actions,
+                        'theory_used': validated_hypotheses,
+                        'levels_completed': loop_state.level_completions,
+                        'score': game_state.score
+                    }
+                )
+                
+                if insight:
+                    results['win_insight'] = insight
+                    logger.info(f"[METACOGNITIVE] Win reflection: {insight[:100]}...")
+                    
+            except Exception as e:
+                logger.debug(f"Post-win reflection failed (non-critical): {e}")
+
         # Knowledge Recombination - DISABLED 2025-12-28
         # Was 100% broken (INSERT failed silently) and redundant with organic cumulative sequences
         # See progress.md "Recombination System Removal" section for details
@@ -1564,33 +1775,43 @@ class GameplayEngine:
         if agent_id:
             await self._handle_viral_evolution(results, game_state, game_id, agent_id)
         
-        # TWO-STREAMS: Update meta-bias after game completion
-        # Adjusts agent's self_network_bias based on whether trusting self or network led to success
-        if agent_id:
+        # ===================================================================
+        # TWO-STREAMS: Persist learned wA/wB bias from this game session
+        # ===================================================================
+        # The autobiography's session_state tracks how wA/wB shifted during
+        # gameplay based on actual outcomes. Persist this learning so the
+        # agent starts next game with their updated bias.
+        #
+        # This replaces the old heuristic-based meta-bias update with actual
+        # tracked wA/wB from the autobiography system.
+        # ===================================================================
+        if agent_id and hasattr(self, 'episodic_memory') and self.episodic_memory:
             try:
-                from agent_operating_mode_system import AgentOperatingModeSystem
-                mode_system = AgentOperatingModeSystem(self.db)
-                
-                # Determine outcome
-                outcome_success = results['win'] or game_state.score > 0
-                
-                # Determine which stream was followed (heuristic based on agent mode)
-                # Pioneers tend to trust self, Optimizers trust network
-                agent_mode = self._get_agent_operating_mode(agent_id)
-                if agent_mode == 'pioneer':
-                    decision_aligned_with = 'private'
-                elif agent_mode in ['optimizer', 'exploiter']:
-                    decision_aligned_with = 'network'
-                else:
-                    decision_aligned_with = 'balanced'
-                
-                # Update meta-bias based on outcome
-                mode_system.update_meta_bias(
-                    agent_id=agent_id,
-                    decision_aligned_with=decision_aligned_with,
-                    outcome_success=outcome_success
-                )
-                logger.debug(f"[META-BIAS] Updated bias for {agent_id[:8]} after {'success' if outcome_success else 'failure'}")
+                autobiography = self.game_config.get('agent_autobiography')
+                if autobiography and 'session_state' in autobiography:
+                    # Determine game outcome for learning rate
+                    if results['win']:
+                        game_outcome = 'win'
+                    elif game_state.score > 0:
+                        game_outcome = 'timeout'  # Made progress but didn't win
+                    else:
+                        game_outcome = 'loss'
+                    
+                    # Persist the learned wA/wB to database
+                    persisted = self.episodic_memory.persist_wA_wB_at_game_end(
+                        agent_id=agent_id,
+                        autobiography=autobiography,
+                        game_outcome=game_outcome
+                    )
+                    
+                    if persisted:
+                        session = autobiography['session_state']
+                        logger.debug(
+                            f"[wA/wB] Persisted learned bias for {agent_id[:8]}: "
+                            f"wA={session['wA']:.2f}, wB={session['wB']:.2f}"
+                        )
+            except Exception as e:
+                logger.debug(f"wA/wB persistence failed (non-critical): {e}")
             except Exception as e:
                 logger.debug(f"Meta-bias update failed (non-critical): {e}")
         
@@ -1891,6 +2112,98 @@ class GameplayEngine:
         self._action_availability_changes = []  # Track changes for reasoning
         
         logger.debug(f"[EMERGENT] Bootstrapped reasoning context for {game_id}")
+        
+        # ================================================================
+        # PRE-GAME AUTOBIOGRAPHICAL SYNTHESIS
+        # ================================================================
+        # Before taking first action, synthesize agent's complete understanding
+        # of this game from all their past experiences. This gives agents true
+        # wA (private stream) that accumulates meaning across sessions.
+        #
+        # Philosophy: Agents start INFORMED by their history, not "dumb".
+        # ================================================================
+        if agent_id and hasattr(self, 'episodic_memory') and self.episodic_memory:
+            try:
+                game_type = game_id[:4] if game_id else ''
+                current_gen = self.game_config.get('generation', 0)
+                is_frontier = (network_max_level == 0)
+                
+                autobiography = self.episodic_memory.synthesize_pregame_autobiography(
+                    agent_id=agent_id,
+                    game_type=game_type,
+                    target_level=1,
+                    current_generation=current_gen,
+                    is_frontier=is_frontier
+                )
+                
+                # Initialize session state for runtime updates
+                # Pass agent_id and role so wA/wB honors:
+                # 1. Persisted self_network_bias from DB
+                # 2. Role-based defaults (Pioneer vs Optimizer vs Generalist)
+                autobiography = self.episodic_memory.initialize_session_state(
+                    autobiography,
+                    agent_id=agent_id,
+                    agent_role=agent_mode
+                )
+                
+                # Store for use throughout the game
+                self.game_config['agent_autobiography'] = autobiography
+                
+                # Initialize action source tracking
+                self._last_action_source = 'explore'
+                
+                # ================================================================
+                # METACOGNITIVE: SESSION RESET AT GAME START
+                # ================================================================
+                # Clear any stale predictions/theories from previous games.
+                # Each game starts with a fresh slate for hypothesis testing.
+                # ================================================================
+                if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                    try:
+                        self.metacognitive_engine.reset_session()
+                        
+                        # Register opening assumptions based on autobiography
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                        win_rate = autobiography.get('win_rate', 0)
+                        
+                        if win_rate > 0.5:
+                            self.metacognitive_engine.register_assumption(
+                                game_type=game_type,
+                                level=1,
+                                assumption_text=f"Familiar game type - prior approach should work (win rate {win_rate:.0%})",
+                                confidence=0.7
+                            )
+                        elif autobiography.get('total_games_played', 0) == 0:
+                            self.metacognitive_engine.register_assumption(
+                                game_type=game_type,
+                                level=1,
+                                assumption_text="New game type - need to discover mechanics",
+                                confidence=0.3
+                            )
+                            
+                        logger.debug(f"[METACOGNITIVE] Session reset for new game {game_id}")
+                    except Exception as e:
+                        logger.debug(f"Metacognitive reset failed (non-critical): {e}")
+                
+                # Update emergent reasoning with real autobiography (not placeholders!)
+                self._last_emergent_reasoning['Q3'] = autobiography['autobiography_narrative']
+                self._last_emergent_reasoning['autobiography'] = autobiography
+                self._last_emergent_reasoning['recommended_strategy'] = autobiography['recommended_strategy']
+                
+                # Log key autobiography insights
+                if autobiography['total_games_played'] > 0:
+                    logger.info(
+                        f"[AUTOBIOGRAPHY] {agent_id[:8]}: "
+                        f"Played {autobiography['total_games_played']}x, "
+                        f"win rate {autobiography['win_rate']:.0%}, "
+                        f"strategy: {autobiography['recommended_strategy']['strategy']}"
+                    )
+                else:
+                    logger.info(f"[AUTOBIOGRAPHY] {agent_id[:8]}: First time on {game_type}")
+                    
+            except Exception as e:
+                logger.debug(f"Autobiography synthesis failed (using defaults): {e}")
+                self.game_config['agent_autobiography'] = None
         
         # ================================================================
         # SESSION 25: INITIAL REGION CLASSIFICATION
@@ -2588,6 +2901,28 @@ class GameplayEngine:
                         else:
                             # Use default action selection
                             action, reasoning = await self._select_action(game_state)
+                            
+                            # ================================================================
+                            # METACOGNITIVE: PREDICTION BEFORE ACTION
+                            # ================================================================
+                            if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                                try:
+                                    game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
+                                    expected_outcome = 'score_increase'
+                                    if 'explore' in reasoning.lower() or 'test' in reasoning.lower():
+                                        expected_outcome = 'discover_pattern'
+                                    theory_source = getattr(self, '_last_action_source', 'intuition')
+                                    self.metacognitive_engine.make_prediction(
+                                        game_type=game_type,
+                                        level=current_level,
+                                        action=action,
+                                        expected_outcome=expected_outcome,
+                                        theory_behind_it=f"Action from {theory_source}: {reasoning[:100]}",
+                                        current_score=game_state.score
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Metacognitive prediction failed: {e}")
+                            
                             game_state = await self._execute_action(action, game_state, reasoning, current_level)
                         
                         # Action succeeded - reset error counter
@@ -3785,6 +4120,26 @@ class GameplayEngine:
                 pass
             raise
 
+    def _return_action_with_source(
+        self,
+        action: str,
+        reasoning: str,
+        source: str = 'explore'
+    ) -> tuple[str, str]:
+        """
+        Helper to return action and track its source for wA/wB feedback.
+        
+        Args:
+            action: Action to return (e.g., 'ACTION1')
+            reasoning: Human-readable reasoning
+            source: 'wA' (personal), 'wB' (network), or 'explore'
+            
+        Returns:
+            Tuple of (action, reasoning)
+        """
+        self._last_action_source = source
+        return action, reasoning
+
     async def _select_action(self, game_state: GameState) -> tuple[str, str]:
         """Select the next action to take with reasoning.
         
@@ -3918,6 +4273,53 @@ class GameplayEngine:
                 logger.debug(f"Peer insight query failed: {e}")
         
         # ===================================================================
+        # AUTOBIOGRAPHY-BASED STRATEGY SELECTION
+        # ===================================================================
+        # Use the pre-game synthesized autobiography to guide action selection.
+        # Agent knows their recommended strategy from their full experience.
+        #
+        # Strategies:
+        #   - trust_self: Prioritize personal successful strategies
+        #   - trust_network: Prioritize network sequences and peer wisdom
+        #   - blend: Mix personal and network approaches
+        #   - explore: Focus on discovery and experimentation
+        # ===================================================================
+        autobiography_strategy = None
+        wA, wB = 0.5, 0.5  # Default equal weights
+        
+        if hasattr(self, 'game_config') and self.game_config.get('agent_autobiography'):
+            autobiography = self.game_config['agent_autobiography']
+            autobiography_strategy = autobiography.get('recommended_strategy', {})
+            
+            # Get current wA/wB from session state (dynamically updated)
+            session = autobiography.get('session_state', {})
+            wA = session.get('wA', 0.5)
+            wB = session.get('wB', 0.5)
+            
+            # If strategy is 'explore', boost discovery phase importance
+            if autobiography_strategy.get('strategy') == 'explore':
+                # Don't skip discovery, let it run naturally
+                pass
+            
+            # If strategy is 'trust_self' and we have successful strategies
+            elif autobiography_strategy.get('strategy') == 'trust_self':
+                successful_strategies = autobiography.get('successful_strategies', [])
+                if successful_strategies:
+                    top_strategy = successful_strategies[0]
+                    action = top_strategy.get('action')
+                    if action and top_strategy.get('success_rate', 0) >= 0.6:
+                        # Use wA probability to decide whether to use personal strategy
+                        import random
+                        if random.random() < wA:
+                            reasoning = (
+                                f"[wA={wA:.2f}] Using personal strategy: {top_strategy['description']} "
+                                f"({top_strategy['success_rate']:.0%} success)"
+                            )
+                            logger.info(reasoning)
+                            self._last_action_source = 'wA'
+                            return f"ACTION{action}", reasoning
+        
+        # ===================================================================
         # OBJECT DISCOVERY PHASE (Seed Capability)
         # ===================================================================
         # Even babies systematically test what they can control.
@@ -3965,25 +4367,30 @@ class GameplayEngine:
         # This allows agents to use network-learned knowledge from previous wins
         # Database read is cheap - runs on every action selection
         # SELF-DIRECTED: Skip deterministic rule following - use rules as soft guidance only
+        # wB GATING: Only follow network rules if wB probability check passes
         if self.rule_engine and game_state.frame and not is_self_directed:
             try:
-                applicable_rules = self.rule_engine.get_applicable_rules(
-                    current_frame=game_state.frame,
-                    agent_id=agent_id,
-                    min_confidence=0.7
-                )
-                if applicable_rules:
-                    best_rule, confidence = applicable_rules[0]
-                    action_template = best_rule.get('action_template', {})
-                    if isinstance(action_template, str):
-                        action_template = json.loads(action_template)
-                    suggested_action = action_template.get('action') or action_template.get('suggested_action')
-                    
-                    if suggested_action:
-                        rule_id = best_rule.get('rule_id', 'unknown')[:8]
-                        reasoning = f"Following learned rule '{rule_id}' (confidence: {confidence:.2f})"
-                        logger.info(f"[RULE] {reasoning}: ACTION{suggested_action}")
-                        return f"ACTION{suggested_action}", reasoning
+                import random
+                # Probabilistic gating based on wB (network trust)
+                if random.random() < wB:
+                    applicable_rules = self.rule_engine.get_applicable_rules(
+                        current_frame=game_state.frame,
+                        agent_id=agent_id,
+                        min_confidence=0.7
+                    )
+                    if applicable_rules:
+                        best_rule, confidence = applicable_rules[0]
+                        action_template = best_rule.get('action_template', {})
+                        if isinstance(action_template, str):
+                            action_template = json.loads(action_template)
+                        suggested_action = action_template.get('action') or action_template.get('suggested_action')
+                        
+                        if suggested_action:
+                            rule_id = best_rule.get('rule_id', 'unknown')[:8]
+                            reasoning = f"[wB={wB:.2f}] Following learned rule '{rule_id}' (confidence: {confidence:.2f})"
+                            logger.info(f"[RULE] {reasoning}: ACTION{suggested_action}")
+                            self._last_action_source = 'wB'
+                            return f"ACTION{suggested_action}", reasoning
             except Exception as e:
                 logger.debug(f"Rule query failed (falling back to other strategies): {e}")
         
@@ -4000,55 +4407,60 @@ class GameplayEngine:
                 current_level = game_state.score + 1
                 
                 if current_game_id:
-                    # Query network hypotheses specifically for validated_by_win ones
-                    hypotheses = self.agent_self_model.get_network_control_hypotheses(
-                        current_game_id, current_level, min_reliability=0.5
-                    )
-                    
-                    # Filter for win-validated hypotheses
-                    validated_hypotheses = [h for h in hypotheses if h.get('validated_by_win')]
-                    
-                    if validated_hypotheses:
-                        best_hypothesis = validated_hypotheses[0]
-                        hypothesis_id = best_hypothesis.get('hypothesis_id')
-                        controlled_objects = best_hypothesis.get('controlled_objects', [])
-                        action_response = best_hypothesis.get('action_response_map', {})
+                    # wB GATING: Win-validated hypotheses are network knowledge
+                    import random
+                    if random.random() < wB:
+                        # Query network hypotheses specifically for validated_by_win ones
+                        hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                            current_game_id, current_level, min_reliability=0.5
+                        )
                         
-                        # PRIORITY 1 FIX: Track which hypothesis is being used for outcome feedback
-                        # Store hypothesis ID so we can validate/contradict after action execution
-                        self._current_hypothesis_used = {
-                            'hypothesis_id': hypothesis_id,
-                            'score_before': game_state.score,
-                            'level_before': current_level
-                        }
+                        # Filter for win-validated hypotheses
+                        validated_hypotheses = [h for h in hypotheses if h.get('validated_by_win')]
                         
-                        # Check if hypothesis suggests ACTION6 to select something
-                        control_pattern = controlled_objects[0] if controlled_objects else None
-                        
-                        if control_pattern and isinstance(control_pattern, dict):
-                            # Hypothesis has selection info - use it
-                            if control_pattern.get('discovery_type') == 'availability_change':
-                                # This was discovered via available_actions change
-                                trigger_action = control_pattern.get('trigger_action', 'ACTION6')
-                                logger.info(
-                                    f"[WIN-VALIDATED] Using proven control pattern from hypothesis "
-                                    f"{best_hypothesis['hypothesis_id']} (reliability: {best_hypothesis['reliability']:.2f})"
-                                )
-                                reasoning = f"Win-validated control: {trigger_action} proven to unlock movement"
-                                return trigger_action, reasoning
-                        
-                        # If we have action_response mapping, suggest a direction
-                        if action_response:
-                            # Pick the first mapped action
-                            for action_name, response in action_response.items():
-                                if 'ACTION' in action_name:
-                                    action_num = action_name.replace('ACTION', '')
+                        if validated_hypotheses:
+                            best_hypothesis = validated_hypotheses[0]
+                            hypothesis_id = best_hypothesis.get('hypothesis_id')
+                            controlled_objects = best_hypothesis.get('controlled_objects', [])
+                            action_response = best_hypothesis.get('action_response_map', {})
+                            
+                            # PRIORITY 1 FIX: Track which hypothesis is being used for outcome feedback
+                            # Store hypothesis ID so we can validate/contradict after action execution
+                            self._current_hypothesis_used = {
+                                'hypothesis_id': hypothesis_id,
+                                'score_before': game_state.score,
+                                'level_before': current_level
+                            }
+                            
+                            # Check if hypothesis suggests ACTION6 to select something
+                            control_pattern = controlled_objects[0] if controlled_objects else None
+                            
+                            if control_pattern and isinstance(control_pattern, dict):
+                                # Hypothesis has selection info - use it
+                                if control_pattern.get('discovery_type') == 'availability_change':
+                                    # This was discovered via available_actions change
+                                    trigger_action = control_pattern.get('trigger_action', 'ACTION6')
                                     logger.info(
-                                        f"[WIN-VALIDATED] Using action {action_name} from validated hypothesis "
-                                        f"(response: {response})"
+                                        f"[wB={wB:.2f}] [WIN-VALIDATED] Using proven control pattern from hypothesis "
+                                        f"{best_hypothesis['hypothesis_id']} (reliability: {best_hypothesis['reliability']:.2f})"
                                     )
-                                    reasoning = f"Win-validated: ACTION{action_num} causes {response}"
-                                    return f"ACTION{action_num}", reasoning
+                                    reasoning = f"[wB] Win-validated control: {trigger_action} proven to unlock movement"
+                                    self._last_action_source = 'wB'
+                                    return trigger_action, reasoning
+                            
+                            # If we have action_response mapping, suggest a direction
+                            if action_response:
+                                # Pick the first mapped action
+                                for action_name, response in action_response.items():
+                                    if 'ACTION' in action_name:
+                                        action_num = action_name.replace('ACTION', '')
+                                        logger.info(
+                                            f"[wB={wB:.2f}] [WIN-VALIDATED] Using action {action_name} from validated hypothesis "
+                                            f"(response: {response})"
+                                        )
+                                        reasoning = f"[wB] Win-validated: ACTION{action_num} causes {response}"
+                                        self._last_action_source = 'wB'
+                                        return f"ACTION{action_num}", reasoning
                         
             except Exception as e:
                 logger.debug(f"Win-validated hypothesis check failed: {e}")
@@ -8154,6 +8566,76 @@ class GameplayEngine:
         context['Q2'] = q2_data.get('insight', f"Found {len(q2_data.get('rewarding_objects', []))} rewarding, {len(q2_data.get('dangerous_objects', []))} dangerous objects")
         context['Q3'] = q3_data.get('insight', f"Top salient: {q3_data.get('top_salient', ['none'])[:2]}")
         context['Q4'] = context.get('q4_working_theory', {}).get('theory', 'Exploring to discover rules')
+        
+        # ===================================================================
+        # Q6: AUTOBIOGRAPHICAL CONTEXT (wA/wB Stream Integration)
+        # ===================================================================
+        # Include the agent's runtime autobiography state - how they're weighting
+        # personal experience (wA) vs network wisdom (wB) and what they've
+        # discovered/confirmed/contradicted this session.
+        # ===================================================================
+        try:
+            autobiography = self.game_config.get('agent_autobiography', {})
+            if autobiography:
+                session = autobiography.get('session_state', {})
+                
+                # Generate runtime narrative if episodic memory available
+                if hasattr(self, 'episodic_memory') and self.episodic_memory:
+                    runtime_narrative = self.episodic_memory.generate_runtime_narrative(autobiography)
+                else:
+                    runtime_narrative = autobiography.get('autobiography_narrative', '')
+                
+                context['q6_autobiography'] = {
+                    'wA': session.get('wA', 0.5),
+                    'wB': session.get('wB', 0.5),
+                    'actions_this_game': session.get('actions_taken_this_game', 0),
+                    'current_level': session.get('current_level', 1),
+                    'discoveries_count': len(session.get('discoveries_this_game', [])),
+                    'confirmations_count': len(session.get('confirmations_this_game', [])),
+                    'contradictions_count': len(session.get('contradictions_this_game', [])),
+                    'recommended_strategy': autobiography.get('recommended_strategy', {}).get('strategy', 'explore'),
+                    'narrative': runtime_narrative[:200]  # Truncate for log
+                }
+                
+                # Shorthand for reasoning logs
+                wA = session.get('wA', 0.5)
+                wB = session.get('wB', 0.5)
+                strategy = autobiography.get('recommended_strategy', {}).get('strategy', 'explore')
+                context['Q6'] = f"[wA={wA:.2f}/wB={wB:.2f}] Strategy: {strategy}"
+            else:
+                context['q6_autobiography'] = {'status': 'no_autobiography'}
+                context['Q6'] = "No autobiography available"
+        except Exception as e:
+            logger.debug(f"Q6 autobiography context failed: {e}")
+            context['q6_autobiography'] = {'status': 'error', 'error': str(e)[:50]}
+            context['Q6'] = "Autobiography unavailable"
+        
+        # ===================================================================
+        # Q8: METACOGNITIVE CONTEXT
+        # ===================================================================
+        # What am I assuming? What have I proven/disproven? What's eliminated?
+        # This is the scientific reasoning layer - hypothesis testing, not just
+        # random exploration.
+        # ===================================================================
+        try:
+            if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine and agent_id:
+                game_type = game_id[:4] if game_id else ''
+                
+                q8_context = self.metacognitive_engine.get_q8_metacognitive_context(
+                    agent_id=agent_id,
+                    game_type=game_type,
+                    level_number=current_level
+                )
+                
+                context['q8_metacognitive'] = q8_context
+                context['Q8'] = q8_context.get('Q8', 'No metacognitive data')
+            else:
+                context['q8_metacognitive'] = {'status': 'no_engine'}
+                context['Q8'] = "Metacognitive engine not available"
+        except Exception as e:
+            logger.debug(f"Q8 metacognitive context failed: {e}")
+            context['q8_metacognitive'] = {'status': 'error', 'error': str(e)[:50]}
+            context['Q8'] = "Metacognitive unavailable"
         
         return context
     

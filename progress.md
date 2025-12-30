@@ -1,5 +1,391 @@
 # Ouroboros Progress Log
 
+## Session: December 29, 2025 - Metacognitive Reasoning Engine + Role-Based wA/wB
+
+---
+
+### Approach: Implement scientific hypothesis testing framework from "how to reason.md"
+
+**Timestamp**: 6:57:27 PM  
+**Status**: COMPLETE - Syntax verified, awaiting live testing
+
+---
+
+### Problem Statement
+
+Agents were exploring randomly without scientific method. The "how to reason.md" document outlined a metacognitive framework where agents should:
+1. Track assumptions ("What am I assuming?")
+2. Make falsifiable predictions ("If my theory is right, X should happen")
+3. Revise theories when predictions fail
+4. Analyze failure commonalities ("Last 5 failures all had X in common")
+5. Eliminate proven-useless actions
+6. Reflect on wins to extract transferable insights
+
+Additionally, agent role (Pioneer/Optimizer/Generalist/Exploiter) wasn't being honored for initial wA/wB weighting.
+
+---
+
+### Implementation Summary
+
+#### Part 1: Role-Based wA/wB Initialization
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| `initialize_session_state()` update | agent_self_model.py | Priority chain: persisted DB bias -> role defaults -> strategy defaults |
+| Role defaults | agent_self_model.py | Pioneer (wA=0.7), Optimizer (wA=0.3), Generalist (0.5), Exploiter (wA=0.4) |
+| Role change reset | agent_operating_mode_system.py | Reset `self_network_bias` to new role's default on role change |
+| Game-end persistence | agent_self_model.py | `persist_wA_wB_at_game_end()` - 40% weight on win, 20% on loss |
+
+#### Part 2: Metacognitive Reasoning Engine (~700 lines)
+
+| Component | Method | Purpose |
+|-----------|--------|---------|
+| Assumption Tracker | `register_assumption()` | Track what agent assumes about game mechanics |
+| Prediction Before Action | `make_prediction()` | "If I take ACTION3, score should increase" |
+| Prediction Evaluation | `evaluate_prediction()` | Check if prediction was correct |
+| Theory Revision | `revise_theory()` | Update working theory when prediction fails |
+| Failure Recording | `record_failure()` | Log failures for pattern analysis |
+| Failure Commonality | `analyze_failure_commonality()` | Find common factors in recent failures |
+| Action Elimination | `eliminate_action()` | Mark action as proven useless for level |
+| Post-Win Reflection | `generate_win_reflection()` | Extract key insight from successful game |
+| Session Reset | `reset_session()` | Clear stale data at game start |
+| Q8 Context | `get_q8_metacognitive_context()` | Provide metacognitive state to emergent reasoning |
+
+---
+
+### Database Tables Created
+
+```sql
+-- Tracked assumptions per game/level
+CREATE TABLE IF NOT EXISTS metacognitive_assumptions (...)
+
+-- Predictions awaiting verification  
+CREATE TABLE IF NOT EXISTS metacognitive_predictions (...)
+
+-- Common failure analysis
+CREATE TABLE IF NOT EXISTS metacognitive_failure_patterns (...)
+
+-- Proven-useless actions
+CREATE TABLE IF NOT EXISTS metacognitive_eliminations (...)
+
+-- Win reflections and learnings
+CREATE TABLE IF NOT EXISTS metacognitive_insights (...)
+```
+
+---
+
+### Integration Points in core_gameplay.py
+
+| Location | What it does |
+|----------|-------------|
+| Line ~913 | **Prediction Before Action**: Makes falsifiable prediction before executing |
+| Line ~2830 | **Prediction Before Action** (optimizer path): Same for `_play_game_session_with_optimizer_support` |
+| Line ~1042 | **Post-Action Evaluation**: Evaluates predictions, records failures, triggers theory revision |
+| Line ~2165 | **Session Reset**: Clears stale data at game start, registers opening assumptions |
+| Line ~1640 | **Post-Win Reflection**: Generates insight about what caused the win |
+| Line ~8614 | **Q8 Context**: Provides metacognitive state to emergent reasoning |
+
+---
+
+### The Scientific Reasoning Loop
+
+```
+1. GAME START
+   - reset_session() clears previous game's state
+   - register_assumption() based on autobiography
+
+2. BEFORE EACH ACTION
+   - make_prediction() based on current theory
+   - "If I take ACTION3, expect score_increase"
+
+3. AFTER EACH ACTION
+   - evaluate_prediction() checks outcome
+   - If wrong: revise_theory()
+   - If failure: record_failure()
+   - Every 10 actions: analyze_failure_commonality()
+   - If pattern found: eliminate_action()
+
+4. ON WIN
+   - generate_win_reflection() extracts key insight
+   - Store for network learning
+```
+
+---
+
+### Role-Based wA/wB Defaults
+
+| Role | wA (self) | wB (network) | Rationale |
+|------|-----------|--------------|-----------|
+| Pioneer | 0.70 | 0.30 | Frontier exploration, trust own discovery |
+| Optimizer | 0.30 | 0.70 | Follow proven sequences, trust network |
+| Generalist | 0.50 | 0.50 | Balanced approach |
+| Exploiter | 0.40 | 0.60 | Slight network preference, micro-optimize |
+
+---
+
+### Persistence at Game End
+
+```python
+# On game end, blend session wB with persisted wB
+if win:
+    # 40% weight to session learning on win
+    new_wB = persisted_wB * 0.6 + session_wB * 0.4
+else:
+    # 20% weight on loss (less confident)
+    new_wB = persisted_wB * 0.8 + session_wB * 0.2
+# UPDATE agents SET self_network_bias = new_wB
+```
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `agent_self_model.py` | Added `MetacognitiveReasoningEngine` class (~700 lines at line 8040) |
+| `agent_self_model.py` | Updated `initialize_session_state()` with agent_id/role priority chain |
+| `agent_self_model.py` | Added `persist_wA_wB_at_game_end()` method |
+| `agent_operating_mode_system.py` | Updated `request_role_change()` to reset wB to role default |
+| `core_gameplay.py` | Added import of `MetacognitiveReasoningEngine` |
+| `core_gameplay.py` | Added `self.metacognitive_engine` initialization |
+| `core_gameplay.py` | Added prediction-making before action (2 locations) |
+| `core_gameplay.py` | Added post-action metacognitive evaluation block |
+| `core_gameplay.py` | Added session reset at game start |
+| `core_gameplay.py` | Added post-win reflection |
+| `core_gameplay.py` | Added Q8 metacognitive context in emergent reasoning |
+
+---
+
+### Verification
+
+```bash
+python -m py_compile core_gameplay.py agent_self_model.py
+# Exit code: 0 (no syntax errors)
+```
+
+---
+
+### Next Steps
+
+1. Run live evolution test (2-5 generations) to verify integration
+2. Check `investigate_bugs.py` for any reasoning bugs
+3. Monitor Q8 context appearing in reasoning logs
+4. Verify predictions are being made/evaluated (check logs for "[METACOGNITIVE]")
+
+---
+
+## Session: January 9, 2025 - Runtime Autobiography & wA/wB Integration
+
+---
+
+### Approach: Enable autobiography to update during gameplay with dynamic wA/wB weighting
+
+**Timestamp**: Session complete  
+**Status**: COMPLETE - 21/21 tests passing
+
+---
+
+### Problem Statement
+
+The pre-game autobiography was static - synthesized once at game start but never updated during play. Agents needed:
+1. Runtime updates as they discover, confirm, or contradict knowledge
+2. Dynamic wA/wB weighting that shifts based on which stream proves reliable
+3. Integration into action selection using probabilistic source choice
+4. Inclusion in reasoning logs (Q6)
+
+---
+
+### Implementation Summary
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| `initialize_session_state()` | agent_self_model.py | Initialize runtime tracking at game start |
+| `update_autobiography_after_action()` | agent_self_model.py | Update wA/wB based on action outcomes |
+| `update_autobiography_on_level_change()` | agent_self_model.py | Track level completions |
+| `get_current_wA_wB()` | agent_self_model.py | Get current weighting |
+| `get_action_source_recommendation()` | agent_self_model.py | Probabilistic source selection |
+| `generate_runtime_narrative()` | agent_self_model.py | Live narrative with session state |
+| wA/wB gating in `_select_action()` | core_gameplay.py | Rules and hypotheses gated by wB |
+| Autobiography updates in `_run_single_action()` | core_gameplay.py | Track outcomes and shift weights |
+| Q6 in `_build_emergent_reasoning_context()` | core_gameplay.py | Autobiography state in reasoning logs |
+
+---
+
+### wA/wB Dynamic Weighting Logic
+
+```python
+# After each action:
+if action_source == 'wA' and outcome == 'positive':
+    wA += 0.03  # Reinforce personal trust
+    wB -= 0.02
+elif action_source == 'wB' and outcome == 'positive':
+    wB += 0.03  # Reinforce network trust
+    wA -= 0.02
+# Normalize to sum = 1.0
+# Bounds: 0.1 <= wA, wB <= 0.9
+```
+
+---
+
+### Action Source Gating
+
+Network-based action sources are now probabilistically gated by wB:
+
+```python
+# In _select_action():
+if random.random() < wB:
+    # Query network rules/hypotheses
+    # If found, return with source='wB'
+```
+
+Personal strategies are gated by wA:
+
+```python
+if random.random() < wA:
+    # Use personal successful strategy
+    # Return with source='wA'
+```
+
+---
+
+### Reasoning Log Integration (Q6)
+
+```python
+context['Q6'] = f"[wA={wA:.2f}/wB={wB:.2f}] Strategy: {strategy}"
+context['q6_autobiography'] = {
+    'wA': 0.65,
+    'wB': 0.35,
+    'actions_this_game': 47,
+    'current_level': 2,
+    'discoveries_count': 3,
+    'confirmations_count': 1,
+    'contradictions_count': 0,
+    'recommended_strategy': 'trust_self',
+    'narrative': "I've played this game 20 times..."
+}
+```
+
+---
+
+### New Tests Added
+
+| Test | Description |
+|------|-------------|
+| `test_initialize_session_state` | Session state initialized with wA/wB |
+| `test_wA_wB_shift_on_positive_personal` | wA increases on personal success |
+| `test_wB_shift_on_positive_network` | wB increases on network success |
+| `test_wA_wB_bounded` | Weights stay in [0.1, 0.9] range |
+| `test_level_change_updates_narrative` | Level transitions update state |
+| `test_get_action_source_recommendation_*` | Source selection logic |
+| `test_runtime_narrative_includes_session_info` | Live narrative generation |
+
+---
+
+### Files Modified
+
+- `agent_self_model.py`: Added 7 runtime update methods (~300 lines)
+- `core_gameplay.py`: Added session init, action updates, wA/wB gating, Q6 (~100 lines)
+- `tests/test_developmental_systems.py`: Added 9 new tests (~150 lines)
+
+---
+
+## Session: January 9, 2025 - Pre-Game Autobiographical Synthesis Implementation
+
+---
+
+### Approach: Give agents unified autobiographical memory before each game
+
+**Timestamp**: Session complete  
+**Status**: COMPLETE - 12/12 tests passing
+
+---
+
+### Problem Statement
+
+Agents lacked true autobiographical memory. Each game they started "dumb" - querying fragmented data without a unified self-narrative. The wA/wB dual-stream consciousness model required agents to synthesize their personal history (wA) alongside network knowledge (wB) and compute which to trust.
+
+---
+
+### Implementation Summary
+
+| Component | Location | Lines Added | Description |
+|-----------|----------|-------------|-------------|
+| `synthesize_pregame_autobiography()` | agent_self_model.py | ~400 | Main synthesis returning comprehensive Dict |
+| `_temporal_weight()` | agent_self_model.py | - | Exponential decay for experience recency (20-gen half-life) |
+| `_populate_game_history()` | agent_self_model.py | - | Query game_results |
+| `_populate_action_patterns()` | agent_self_model.py | - | Query action_traces |
+| `_populate_knowledge_base()` | agent_self_model.py | - | Query theories, controls, pariahs |
+| `_populate_network_context()` | agent_self_model.py | - | Query network sequences |
+| `_compute_recommended_strategy()` | agent_self_model.py | - | Returns 'trust_self', 'trust_network', 'blend', 'explore' |
+| `_identify_key_uncertainties()` | agent_self_model.py | - | Detects knowledge gaps |
+| `_generate_autobiography_narrative()` | agent_self_model.py | - | Human-readable summary |
+| Integration in `play_single_game()` | core_gameplay.py | ~45 | Synthesis call + Q3 reasoning update |
+| Strategy-based action selection | core_gameplay.py | ~40 | `_select_action()` uses recommended_strategy |
+| TestPreGameAutobiography | tests/test_developmental_systems.py | ~250 | 12 comprehensive tests |
+
+---
+
+### Strategy Selection Logic
+
+```
+if agent_win_rate > network_win_rate * 1.2:
+    recommended_strategy = 'trust_self'
+elif network_sequences > 0 AND agent_win_rate < 0.3:
+    recommended_strategy = 'trust_network'
+elif agent has experience AND network has sequences:
+    recommended_strategy = 'blend'
+else:
+    recommended_strategy = 'explore'
+```
+
+---
+
+### Uncertainty Types Detected
+
+| Uncertainty | Trigger Condition |
+|-------------|-------------------|
+| 'control' | No verified object controls |
+| 'goal' | No inferred goals |
+| 'strategy' | < 5 games played |
+| 'theory_instability' | Working theory still "425 Too Early" after 5+ games |
+| 'danger_avoidance' | Pariahs exist for this game |
+
+---
+
+### Bug Fixed During Implementation
+
+**Issue**: `test_temporal_weight_old_decays` failed - returned 1.0 instead of 0.5  
+**Root Cause**: Early return condition `if generation_created <= 0` treated generation 0 as invalid  
+**Fix**: Changed to `if current_generation < 0` - allows generation_created=0 (experience from generation 0)
+
+---
+
+### Files Modified
+
+- `agent_self_model.py`: Added 8 methods to EpisodicMemorySystem (lines ~8177-8610)
+- `core_gameplay.py`: Added synthesis call (~1895-1943) + strategy guidance (~3968-4010)
+- `tests/test_developmental_systems.py`: Added TestPreGameAutobiography class (12 tests)
+
+---
+
+### Test Results
+
+All 12 tests passing:
+- `test_empty_history_returns_explore_strategy`
+- `test_experienced_agent_trusts_self`
+- `test_novice_with_network_trusts_network`
+- `test_moderate_experience_blends`
+- `test_frontier_game_always_explores`
+- `test_uncertainty_no_controls`
+- `test_uncertainty_low_win_rate`
+- `test_temporal_weight_recent_full_weight`
+- `test_temporal_weight_old_decays`
+- `test_narrative_first_time`
+- `test_narrative_includes_experience`
+- `test_narrative_includes_strategy`
+
+---
+
 ## Session: December 29, 2025 - Log Analysis & Bug Fixes
 
 ---

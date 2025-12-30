@@ -1307,8 +1307,32 @@ class AgentOperatingModeSystem:
                 WHERE agent_id = ?
             """, (desired_role, generation, agent_id))
             
-            logger.info(f"[ROLE CHANGE] Agent {agent_id[:8]} -> {desired_role} (fit={fit_score:.2f})")
-            return True, f"Role change approved (fit={fit_score:.2f})"
+            # ================================================================
+            # RESET wA/wB FOR NEW ROLE
+            # ================================================================
+            # Per AGI theory: Role changes reset stream weighting to role defaults.
+            # Pioneer: wA=0.7, wB=0.3 (self-reliant)
+            # Optimizer: wA=0.3, wB=0.7 (network-reliant)
+            # Generalist: wA=0.5, wB=0.5 (balanced)
+            # Exploiter: wA=0.4, wB=0.6 (network-leaning)
+            role_wB_defaults = {
+                'pioneer': 0.3,
+                'optimizer': 0.7,
+                'generalist': 0.5,
+                'exploiter': 0.6,
+            }
+            new_wB = role_wB_defaults.get(desired_role.lower(), 0.5)
+            
+            self.db.execute_query("""
+                UPDATE agents SET self_network_bias = ?
+                WHERE agent_id = ?
+            """, (new_wB, agent_id))
+            
+            logger.info(
+                f"[ROLE CHANGE] Agent {agent_id[:8]} -> {desired_role} "
+                f"(fit={fit_score:.2f}, reset wB={new_wB:.2f})"
+            )
+            return True, f"Role change approved (fit={fit_score:.2f}, wB reset to {new_wB:.2f})"
         
         return False, f"No capacity and fit too low ({fit_score:.2f})"
 

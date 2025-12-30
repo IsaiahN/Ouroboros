@@ -7943,6 +7943,901 @@ class CognitiveStageSystem:
 
 
 # ============================================================================
+# METACOGNITIVE REASONING ENGINE
+# ============================================================================
+# Implements the missing metacognitive capabilities from "how to reason.md":
+# - Assumption Tracker: "What am I assuming that might not be true?"
+# - Prediction Before Action: "If my theory is right, this should cause X"
+# - Theory Revision: "My theory was wrong because..."
+# - Failure Commonality: "These N attempts all failed the same way"
+# - Elimination Tracker: "I've proven these approaches won't work"
+# - Post-Win Reflection: "The key insight that unlocked this was..."
+# ============================================================================
+
+class MetacognitiveReasoningEngine:
+    """
+    Provides metacognitive reasoning capabilities for agents.
+    
+    Philosophy: Strong problem-solvers don't just try things - they:
+    1. Make PREDICTIONS before acting ("if theory is right, X should happen")
+    2. Track ASSUMPTIONS that might be wrong
+    3. Analyze FAILURE PATTERNS (what do failed attempts have in common?)
+    4. ELIMINATE possibilities systematically
+    5. REFLECT after success to extract transferable insights
+    
+    This shifts agents from "random exploration" to "scientific hypothesis testing".
+    """
+    
+    def __init__(self, db: DatabaseInterface):
+        """Initialize metacognitive engine."""
+        self.db = db
+        self._ensure_tables()
+        
+        # Session state (cleared per game)
+        self._current_assumptions = []
+        self._pending_prediction = None
+        self._failed_attempts = []
+        self._eliminated_actions = set()
+        self._theory_revisions = []
+        self._current_theory = None
+    
+    def _ensure_tables(self):
+        """Create metacognitive tracking tables."""
+        # Track assumptions and their validity
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS metacognitive_assumptions (
+                assumption_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- The assumption
+                assumption_text TEXT NOT NULL,
+                assumption_type TEXT NOT NULL,  -- 'control', 'goal', 'obstacle', 'rule'
+                
+                -- Status
+                is_valid BOOLEAN DEFAULT NULL,  -- NULL = untested, TRUE/FALSE = tested
+                tested_at DATETIME,
+                test_result TEXT,
+                
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Track predictions and outcomes
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS metacognitive_predictions (
+                prediction_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- The prediction
+                theory_text TEXT NOT NULL,
+                predicted_outcome TEXT NOT NULL,  -- "score will increase", "object will move right"
+                action_taken TEXT NOT NULL,
+                
+                -- Outcome
+                actual_outcome TEXT,
+                prediction_correct BOOLEAN,
+                theory_revised BOOLEAN DEFAULT FALSE,
+                
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Track failure commonalities
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS metacognitive_failure_patterns (
+                pattern_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- The pattern
+                common_factor TEXT NOT NULL,  -- "all failures involved color_3"
+                failure_count INTEGER NOT NULL,
+                example_actions TEXT,  -- JSON list of actions that failed
+                
+                -- Insight derived
+                insight TEXT,
+                insight_applied BOOLEAN DEFAULT FALSE,
+                
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Track eliminated possibilities
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS metacognitive_eliminations (
+                elimination_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- What was eliminated
+                eliminated_action TEXT NOT NULL,  -- "ACTION1", "ACTION2", etc.
+                reason TEXT NOT NULL,
+                confidence REAL DEFAULT 0.8,
+                
+                -- Evidence
+                test_count INTEGER DEFAULT 1,
+                consistent_failure BOOLEAN DEFAULT TRUE,
+                
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Track post-win reflections (the key insight)
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS metacognitive_insights (
+                insight_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- The insight
+                key_insight TEXT NOT NULL,
+                winning_strategy TEXT NOT NULL,
+                
+                -- What led to the breakthrough
+                breakthrough_action TEXT,
+                theory_at_breakthrough TEXT,
+                actions_before_breakthrough INTEGER,
+                
+                -- Transferability
+                is_transferable BOOLEAN DEFAULT FALSE,
+                applicable_to TEXT,  -- JSON list of similar game types
+                
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Index for fast lookup
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_metacog_assumptions_game 
+            ON metacognitive_assumptions(game_type, level_number, is_valid)
+        """)
+    
+    # ========================================================================
+    # 1. ASSUMPTION TRACKER
+    # ========================================================================
+    # "What am I assuming that might not be true?"
+    # ========================================================================
+    
+    def register_assumption(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int,
+        assumption: str,
+        assumption_type: str = 'rule'
+    ) -> str:
+        """
+        Register an assumption the agent is making.
+        
+        Examples:
+        - "I control the blue object"
+        - "Rare colors are goals"
+        - "ACTION1 moves me up"
+        - "Walls cannot be passed"
+        
+        Args:
+            agent_id: Agent making assumption
+            game_type: Current game type
+            level_number: Current level
+            assumption: The assumption text
+            assumption_type: 'control', 'goal', 'obstacle', 'rule'
+            
+        Returns:
+            assumption_id
+        """
+        assumption_id = f"assume_{uuid.uuid4().hex[:12]}"
+        
+        self.db.execute_query("""
+            INSERT INTO metacognitive_assumptions 
+            (assumption_id, agent_id, game_type, level_number, assumption_text, assumption_type)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (assumption_id, agent_id, game_type, level_number, assumption, assumption_type))
+        
+        # Track in session
+        self._current_assumptions.append({
+            'id': assumption_id,
+            'text': assumption,
+            'type': assumption_type,
+            'tested': False
+        })
+        
+        logger.debug(f"[METACOG] Registered assumption: {assumption}")
+        return assumption_id
+    
+    def challenge_assumption(
+        self,
+        assumption_id: str,
+        is_valid: bool,
+        test_result: str
+    ) -> None:
+        """
+        Record the result of testing an assumption.
+        
+        Args:
+            assumption_id: ID of assumption being tested
+            is_valid: Whether assumption proved true
+            test_result: Description of what happened
+        """
+        self.db.execute_query("""
+            UPDATE metacognitive_assumptions 
+            SET is_valid = ?, tested_at = datetime('now'), test_result = ?
+            WHERE assumption_id = ?
+        """, (is_valid, test_result, assumption_id))
+        
+        # Update session state
+        for a in self._current_assumptions:
+            if a['id'] == assumption_id:
+                a['tested'] = True
+                a['valid'] = is_valid
+        
+        status = "CONFIRMED" if is_valid else "DISPROVEN"
+        logger.info(f"[METACOG] Assumption {status}: {test_result}")
+    
+    def get_untested_assumptions(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> List[Dict[str, Any]]:
+        """Get assumptions that haven't been tested yet."""
+        result = self.db.execute_query("""
+            SELECT assumption_id, assumption_text, assumption_type
+            FROM metacognitive_assumptions
+            WHERE game_type = ? AND level_number = ? AND is_valid IS NULL
+            ORDER BY created_at DESC
+            LIMIT 5
+        """, (game_type, level_number))
+        
+        return result or []
+    
+    def get_disproven_assumptions(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> List[Dict[str, Any]]:
+        """Get assumptions that were proven false - avoid repeating these errors."""
+        result = self.db.execute_query("""
+            SELECT assumption_text, test_result
+            FROM metacognitive_assumptions
+            WHERE game_type = ? AND level_number = ? AND is_valid = FALSE
+            ORDER BY created_at DESC
+            LIMIT 5
+        """, (game_type, level_number))
+        
+        return result or []
+    
+    # ========================================================================
+    # 2. PREDICTION BEFORE ACTION
+    # ========================================================================
+    # "If my theory is right, then THIS should happen"
+    # ========================================================================
+    
+    def make_prediction(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int,
+        theory: str,
+        predicted_outcome: str,
+        action: str
+    ) -> str:
+        """
+        Make a prediction before taking an action.
+        
+        This is the key shift from random exploration to hypothesis testing.
+        
+        Examples:
+        - Theory: "I control the blue object"
+          Prediction: "ACTION1 will move it up"
+          Action: "ACTION1"
+          
+        - Theory: "Rare colors are goals"
+          Prediction: "Touching color_7 will increase score"
+          Action: "ACTION4" (move toward color_7)
+        
+        Args:
+            agent_id: Agent making prediction
+            game_type: Current game type
+            level_number: Current level
+            theory: The underlying theory being tested
+            predicted_outcome: What should happen if theory is correct
+            action: The action being taken to test
+            
+        Returns:
+            prediction_id
+        """
+        prediction_id = f"pred_{uuid.uuid4().hex[:12]}"
+        
+        self.db.execute_query("""
+            INSERT INTO metacognitive_predictions 
+            (prediction_id, agent_id, game_type, level_number, theory_text, predicted_outcome, action_taken)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (prediction_id, agent_id, game_type, level_number, theory, predicted_outcome, action))
+        
+        # Store pending prediction for outcome evaluation
+        self._pending_prediction = {
+            'id': prediction_id,
+            'theory': theory,
+            'predicted': predicted_outcome,
+            'action': action
+        }
+        
+        self._current_theory = theory
+        
+        logger.info(f"[METACOG] PREDICTION: If '{theory}' then {action} should cause '{predicted_outcome}'")
+        return prediction_id
+    
+    def evaluate_prediction(
+        self,
+        actual_outcome: str,
+        score_before: float,
+        score_after: float,
+        frame_changed: bool
+    ) -> Dict[str, Any]:
+        """
+        Evaluate the pending prediction against actual outcome.
+        
+        Returns evaluation with recommendation for theory revision.
+        """
+        if not self._pending_prediction:
+            return {'status': 'no_pending_prediction'}
+        
+        pred = self._pending_prediction
+        prediction_id = pred['id']
+        
+        # Determine if prediction was correct
+        predicted = pred['predicted'].lower()
+        prediction_correct = False
+        
+        if 'score' in predicted and 'increase' in predicted:
+            prediction_correct = score_after > score_before
+        elif 'move' in predicted:
+            prediction_correct = frame_changed
+        elif 'no change' in predicted:
+            prediction_correct = not frame_changed
+        else:
+            # Generic check - frame change or score change counts as something happened
+            prediction_correct = frame_changed or score_after > score_before
+        
+        # Record outcome
+        self.db.execute_query("""
+            UPDATE metacognitive_predictions 
+            SET actual_outcome = ?, prediction_correct = ?
+            WHERE prediction_id = ?
+        """, (actual_outcome, prediction_correct, prediction_id))
+        
+        result = {
+            'prediction_id': prediction_id,
+            'theory': pred['theory'],
+            'predicted': pred['predicted'],
+            'actual': actual_outcome,
+            'correct': prediction_correct
+        }
+        
+        if prediction_correct:
+            logger.info(f"[METACOG] PREDICTION CORRECT: Theory '{pred['theory']}' confirmed!")
+            result['recommendation'] = 'strengthen_theory'
+        else:
+            logger.info(f"[METACOG] PREDICTION WRONG: Expected '{pred['predicted']}', got '{actual_outcome}'")
+            result['recommendation'] = 'revise_theory'
+            
+            # Queue theory revision
+            self._theory_revisions.append({
+                'old_theory': pred['theory'],
+                'failed_prediction': pred['predicted'],
+                'actual': actual_outcome
+            })
+        
+        # Clear pending prediction
+        self._pending_prediction = None
+        
+        return result
+    
+    # ========================================================================
+    # 3. THEORY REVISION
+    # ========================================================================
+    # "My theory was wrong because..."
+    # ========================================================================
+    
+    def revise_theory(
+        self,
+        old_theory: str,
+        failed_prediction: str,
+        actual_outcome: str
+    ) -> str:
+        """
+        Generate a revised theory based on failed prediction.
+        
+        Returns:
+            New theory text
+        """
+        # Simple heuristic revision rules
+        new_theory = old_theory
+        
+        if 'control' in old_theory.lower() and 'no change' in actual_outcome.lower():
+            # "I control X" but nothing moved -> probably don't control X
+            new_theory = old_theory.replace('I control', 'I might NOT control')
+            
+        elif 'goal' in old_theory.lower() and 'no score' in actual_outcome.lower():
+            # "X is goal" but score didn't increase -> probably not the goal
+            new_theory = old_theory.replace('is a goal', 'is NOT a goal')
+            
+        elif 'move' in failed_prediction.lower() and 'blocked' in actual_outcome.lower():
+            # Predicted movement but was blocked -> add obstacle awareness
+            new_theory = f"{old_theory} (but obstacles block movement)"
+        
+        else:
+            # Generic revision
+            new_theory = f"REVISED: {old_theory} [failed: {failed_prediction}]"
+        
+        logger.info(f"[METACOG] THEORY REVISED: '{old_theory}' -> '{new_theory}'")
+        
+        self._current_theory = new_theory
+        return new_theory
+    
+    def get_current_theory(self) -> Optional[str]:
+        """Get the current working theory."""
+        return self._current_theory
+    
+    def get_theory_revision_history(self) -> List[Dict[str, Any]]:
+        """Get history of theory revisions this session."""
+        return self._theory_revisions.copy()
+    
+    # ========================================================================
+    # 4. FAILURE COMMONALITY ANALYSIS
+    # ========================================================================
+    # "These N attempts all failed the same way - what do they have in common?"
+    # ========================================================================
+    
+    def record_failure(
+        self,
+        action: str,
+        context: Dict[str, Any]
+    ) -> None:
+        """
+        Record a failed attempt for commonality analysis.
+        
+        Args:
+            action: The action that failed
+            context: Context of failure (colors nearby, position, etc.)
+        """
+        self._failed_attempts.append({
+            'action': action,
+            'context': context,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Keep last 20 failures
+        if len(self._failed_attempts) > 20:
+            self._failed_attempts = self._failed_attempts[-20:]
+    
+    def analyze_failure_commonality(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int,
+        min_failures: int = 3
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Analyze recent failures to find common factors.
+        
+        Returns:
+            Common factor analysis if pattern found, None otherwise
+        """
+        if len(self._failed_attempts) < min_failures:
+            return None
+        
+        # Analyze last N failures
+        recent_failures = self._failed_attempts[-min_failures:]
+        
+        # Check for common actions
+        action_counts = {}
+        for f in recent_failures:
+            action = f.get('action', '')
+            action_counts[action] = action_counts.get(action, 0) + 1
+        
+        # Check for common context elements
+        context_elements = {}
+        for f in recent_failures:
+            context = f.get('context', {})
+            for key, value in context.items():
+                element = f"{key}:{value}"
+                context_elements[element] = context_elements.get(element, 0) + 1
+        
+        # Find most common factor
+        common_factor = None
+        max_count = 0
+        
+        for action, count in action_counts.items():
+            if count >= min_failures * 0.8 and count > max_count:
+                common_factor = f"ACTION: {action}"
+                max_count = count
+        
+        for element, count in context_elements.items():
+            if count >= min_failures * 0.8 and count > max_count:
+                common_factor = f"CONTEXT: {element}"
+                max_count = count
+        
+        if not common_factor:
+            return None
+        
+        # Generate insight
+        insight = self._generate_failure_insight(common_factor, recent_failures)
+        
+        # Store pattern
+        pattern_id = f"fail_{uuid.uuid4().hex[:12]}"
+        self.db.execute_query("""
+            INSERT INTO metacognitive_failure_patterns
+            (pattern_id, agent_id, game_type, level_number, common_factor, failure_count, example_actions, insight)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            pattern_id, agent_id, game_type, level_number,
+            common_factor, len(recent_failures),
+            json.dumps([f['action'] for f in recent_failures]),
+            insight
+        ))
+        
+        logger.info(f"[METACOG] FAILURE PATTERN: {common_factor} - {insight}")
+        
+        return {
+            'pattern_id': pattern_id,
+            'common_factor': common_factor,
+            'failure_count': len(recent_failures),
+            'insight': insight
+        }
+    
+    def _generate_failure_insight(
+        self,
+        common_factor: str,
+        failures: List[Dict[str, Any]]
+    ) -> str:
+        """Generate an insight from failure pattern."""
+        if 'ACTION:' in common_factor:
+            action = common_factor.replace('ACTION: ', '')
+            return f"Stop using {action} - it consistently fails in this context"
+        elif 'color' in common_factor.lower():
+            return f"Avoid interaction with {common_factor.split(':')[1]} - it leads to failure"
+        elif 'position' in common_factor.lower():
+            return f"This position/area seems dangerous - avoid or find another route"
+        else:
+            return f"Pattern detected: {common_factor} correlates with failure"
+    
+    # ========================================================================
+    # 5. ELIMINATION TRACKER
+    # ========================================================================
+    # "I've proven these 8 approaches won't work, so it must be one of these 3"
+    # ========================================================================
+    
+    def eliminate_action(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int,
+        action: str,
+        reason: str
+    ) -> None:
+        """
+        Mark an action as eliminated (proven not to work).
+        
+        Args:
+            agent_id: Agent eliminating action
+            game_type: Current game type
+            level_number: Current level
+            action: The action to eliminate (e.g., "ACTION1")
+            reason: Why it's being eliminated
+        """
+        # Add to session set
+        self._eliminated_actions.add(action)
+        
+        # Check if already eliminated in DB
+        existing = self.db.execute_query("""
+            SELECT elimination_id, test_count FROM metacognitive_eliminations
+            WHERE agent_id = ? AND game_type = ? AND level_number = ? AND eliminated_action = ?
+        """, (agent_id, game_type, level_number, action))
+        
+        if existing:
+            # Increment test count
+            self.db.execute_query("""
+                UPDATE metacognitive_eliminations 
+                SET test_count = test_count + 1
+                WHERE elimination_id = ?
+            """, (existing[0]['elimination_id'],))
+        else:
+            # Insert new elimination
+            elimination_id = f"elim_{uuid.uuid4().hex[:12]}"
+            self.db.execute_query("""
+                INSERT INTO metacognitive_eliminations
+                (elimination_id, agent_id, game_type, level_number, eliminated_action, reason)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (elimination_id, agent_id, game_type, level_number, action, reason))
+        
+        logger.debug(f"[METACOG] ELIMINATED: {action} - {reason}")
+    
+    def get_eliminated_actions(
+        self,
+        game_type: str,
+        level_number: int,
+        min_confidence: float = 0.6
+    ) -> List[str]:
+        """Get list of actions that have been eliminated for this level."""
+        result = self.db.execute_query("""
+            SELECT eliminated_action FROM metacognitive_eliminations
+            WHERE game_type = ? AND level_number = ? 
+              AND confidence >= ? AND consistent_failure = TRUE
+            ORDER BY test_count DESC
+        """, (game_type, level_number, min_confidence))
+        
+        db_eliminated = [r['eliminated_action'] for r in (result or [])]
+        
+        # Combine with session eliminations
+        all_eliminated = set(db_eliminated) | self._eliminated_actions
+        return list(all_eliminated)
+    
+    def get_remaining_actions(
+        self,
+        game_type: str,
+        level_number: int,
+        all_actions: List[str] = None
+    ) -> List[str]:
+        """Get actions that haven't been eliminated yet."""
+        if all_actions is None:
+            all_actions = [f"ACTION{i}" for i in range(1, 8)]
+        
+        eliminated = set(self.get_eliminated_actions(game_type, level_number))
+        return [a for a in all_actions if a not in eliminated]
+    
+    def get_elimination_summary(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> str:
+        """Get human-readable elimination summary."""
+        eliminated = self.get_eliminated_actions(game_type, level_number)
+        remaining = self.get_remaining_actions(game_type, level_number)
+        
+        if not eliminated:
+            return "No actions eliminated yet - all options open"
+        
+        return (
+            f"Eliminated {len(eliminated)} actions ({', '.join(eliminated)}). "
+            f"Remaining options: {', '.join(remaining)}"
+        )
+    
+    # ========================================================================
+    # 6. POST-WIN REFLECTION
+    # ========================================================================
+    # "What was the key insight that unlocked this?"
+    # ========================================================================
+    
+    def record_win_reflection(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int,
+        key_insight: str,
+        winning_strategy: str,
+        breakthrough_action: Optional[str] = None,
+        theory_at_breakthrough: Optional[str] = None,
+        actions_before_breakthrough: int = 0
+    ) -> str:
+        """
+        Record reflection after winning - what was the key insight?
+        
+        This is critical for extracting transferable knowledge.
+        
+        Examples:
+        - "The key insight was that color_3 objects can be pushed"
+        - "The winning strategy was to clear obstacles before moving to goal"
+        - "The breakthrough was realizing ACTION5 toggles switches"
+        
+        Returns:
+            insight_id
+        """
+        insight_id = f"insight_{uuid.uuid4().hex[:12]}"
+        
+        # Determine if insight is transferable
+        is_transferable = any([
+            'all games' in key_insight.lower(),
+            'always' in key_insight.lower(),
+            'general rule' in key_insight.lower(),
+            'pattern' in key_insight.lower()
+        ])
+        
+        self.db.execute_query("""
+            INSERT INTO metacognitive_insights
+            (insight_id, agent_id, game_type, level_number, key_insight, winning_strategy,
+             breakthrough_action, theory_at_breakthrough, actions_before_breakthrough, is_transferable)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            insight_id, agent_id, game_type, level_number,
+            key_insight, winning_strategy, breakthrough_action,
+            theory_at_breakthrough, actions_before_breakthrough, is_transferable
+        ))
+        
+        logger.info(f"[METACOG] WIN REFLECTION: '{key_insight}' (strategy: {winning_strategy})")
+        
+        return insight_id
+    
+    def generate_win_reflection(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int,
+        action_history: List[str],
+        score_history: List[float]
+    ) -> Dict[str, Any]:
+        """
+        Automatically generate win reflection from action history.
+        
+        Analyzes the sequence of actions to identify:
+        - When the breakthrough happened (first score increase)
+        - What theory was active at that point
+        - What strategy worked
+        
+        Returns:
+            Generated reflection
+        """
+        if not action_history or not score_history:
+            return {'status': 'no_history'}
+        
+        # Find breakthrough moment (first significant score increase)
+        breakthrough_idx = None
+        for i in range(1, len(score_history)):
+            if score_history[i] > score_history[i-1]:
+                breakthrough_idx = i
+                break
+        
+        if breakthrough_idx is None:
+            # No clear breakthrough - use last action before win
+            breakthrough_idx = len(action_history) - 1
+        
+        breakthrough_action = action_history[breakthrough_idx] if breakthrough_idx < len(action_history) else None
+        
+        # Analyze winning pattern
+        action_counts = {}
+        for a in action_history:
+            action_counts[a] = action_counts.get(a, 0) + 1
+        
+        most_used = max(action_counts.items(), key=lambda x: x[1])[0] if action_counts else None
+        
+        # Generate key insight
+        if breakthrough_action:
+            key_insight = f"Breakthrough came from {breakthrough_action} at action {breakthrough_idx}"
+        else:
+            key_insight = f"Gradual progress using primarily {most_used}"
+        
+        # Generate winning strategy
+        unique_actions = len(set(action_history))
+        if unique_actions <= 2:
+            winning_strategy = f"Focused approach using {unique_actions} action types"
+        else:
+            winning_strategy = f"Mixed approach with {unique_actions} different actions"
+        
+        # Record reflection
+        insight_id = self.record_win_reflection(
+            agent_id=agent_id,
+            game_type=game_type,
+            level_number=level_number,
+            key_insight=key_insight,
+            winning_strategy=winning_strategy,
+            breakthrough_action=breakthrough_action,
+            theory_at_breakthrough=self._current_theory,
+            actions_before_breakthrough=breakthrough_idx or 0
+        )
+        
+        return {
+            'insight_id': insight_id,
+            'key_insight': key_insight,
+            'winning_strategy': winning_strategy,
+            'breakthrough_action': breakthrough_action,
+            'actions_before_breakthrough': breakthrough_idx
+        }
+    
+    def get_relevant_insights(
+        self,
+        game_type: str,
+        level_number: int,
+        include_transferable: bool = True
+    ) -> List[Dict[str, Any]]:
+        """Get insights relevant to current game/level."""
+        result = self.db.execute_query("""
+            SELECT key_insight, winning_strategy, breakthrough_action, is_transferable
+            FROM metacognitive_insights
+            WHERE (game_type = ? AND level_number = ?)
+               OR (is_transferable = TRUE AND ? = TRUE)
+            ORDER BY created_at DESC
+            LIMIT 5
+        """, (game_type, level_number, include_transferable))
+        
+        return result or []
+    
+    # ========================================================================
+    # SESSION MANAGEMENT
+    # ========================================================================
+    
+    def reset_session(self) -> None:
+        """Reset session state for new game."""
+        self._current_assumptions = []
+        self._pending_prediction = None
+        self._failed_attempts = []
+        self._eliminated_actions = set()
+        self._theory_revisions = []
+        self._current_theory = None
+        
+        logger.debug("[METACOG] Session reset for new game")
+    
+    def get_metacognitive_summary(self) -> Dict[str, Any]:
+        """Get summary of current metacognitive state."""
+        untested = [a for a in self._current_assumptions if not a.get('tested')]
+        disproven = [a for a in self._current_assumptions if a.get('tested') and not a.get('valid')]
+        
+        return {
+            'current_theory': self._current_theory,
+            'assumptions_count': len(self._current_assumptions),
+            'untested_assumptions': len(untested),
+            'disproven_assumptions': len(disproven),
+            'pending_prediction': self._pending_prediction is not None,
+            'failures_recorded': len(self._failed_attempts),
+            'actions_eliminated': len(self._eliminated_actions),
+            'theory_revisions': len(self._theory_revisions)
+        }
+    
+    def get_q8_metacognitive_context(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int
+    ) -> Dict[str, Any]:
+        """
+        Build Q8 context for reasoning logs.
+        
+        Q8: What am I assuming? What have I proven/disproven? What's eliminated?
+        
+        Returns:
+            Q8 context dictionary
+        """
+        summary = self.get_metacognitive_summary()
+        eliminated = self.get_eliminated_actions(game_type, level_number)
+        remaining = self.get_remaining_actions(game_type, level_number)
+        disproven = self.get_disproven_assumptions(game_type, level_number)
+        insights = self.get_relevant_insights(game_type, level_number)
+        
+        # Build insight text
+        if self._current_theory:
+            theory_insight = f"Working theory: {self._current_theory}"
+        else:
+            theory_insight = "No working theory yet - exploring"
+        
+        if eliminated:
+            elimination_insight = f"Eliminated {len(eliminated)} actions, {len(remaining)} remain"
+        else:
+            elimination_insight = "All actions still viable"
+        
+        if disproven:
+            assumption_insight = f"Disproven {len(disproven)} assumptions"
+        else:
+            assumption_insight = "No assumptions disproven yet"
+        
+        return {
+            'Q8': f"{theory_insight}. {elimination_insight}. {assumption_insight}.",
+            'current_theory': self._current_theory,
+            'theory_revisions': len(self._theory_revisions),
+            'eliminated_actions': eliminated,
+            'remaining_actions': remaining,
+            'disproven_assumptions': [d['assumption_text'] for d in disproven],
+            'relevant_insights': [i['key_insight'] for i in insights[:3]],
+            'pending_prediction': self._pending_prediction is not None,
+            'confidence': min(0.9, 0.3 + len(self._theory_revisions) * 0.1 + len(eliminated) * 0.05)
+        }
+
+
+# ============================================================================
 # EPISODIC MEMORY SYSTEM (Agent History Query + Intuition)
 # ============================================================================
 
@@ -8172,6 +9067,1155 @@ class EpisodicMemorySystem:
             parts.append("Balancing personal intuition with network guidance.")
         
         return " ".join(parts)
+
+    # ========================================================================
+    # PRE-GAME AUTOBIOGRAPHICAL SYNTHESIS
+    # ========================================================================
+    # 
+    # Philosophy: Before taking their first action, agents synthesize their
+    # complete understanding of a game from all available data sources.
+    # This gives agents true Stream A (private memory) that accumulates
+    # meaning across sessions - not just aggregate statistics.
+    #
+    # Key insight: Agents should start each game INFORMED by their history,
+    # not "dumb" with NULL values everywhere.
+    # ========================================================================
+
+    def synthesize_pregame_autobiography(
+        self,
+        agent_id: str,
+        game_type: str,
+        target_level: int,
+        current_generation: int = 0,
+        is_frontier: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Synthesize agent's complete autobiographical understanding before gameplay.
+        
+        This is the "What do I know about this game?" query that gives agents
+        true private memory (wA) informed by all their past experiences.
+        
+        Args:
+            agent_id: Agent synthesizing their autobiography
+            game_type: Game type prefix (e.g., "SP80")
+            target_level: Target level to play
+            current_generation: Current generation for temporal weighting
+            is_frontier: Whether this is an unbeaten game/level
+            
+        Returns:
+            Comprehensive autobiography with strategies, pariahs, theories,
+            uncertainties, and metacognitive recommendations
+        """
+        autobiography = {
+            # Identity
+            'agent_id': agent_id,
+            'game_type': game_type,
+            'target_level': target_level,
+            'is_frontier': is_frontier,
+            'synthesis_timestamp': datetime.now().isoformat(),
+            
+            # Experience Summary (populated below)
+            'total_games_played': 0,
+            'total_wins': 0,
+            'win_rate': 0.0,
+            'weighted_win_rate': 0.0,  # Temporal-weighted
+            'max_level_reached': 0,
+            'avg_actions_per_game': 0.0,
+            
+            # What Worked (wA positive)
+            'successful_strategies': [],
+            'personal_winning_sequences': [],
+            'effective_actions': {},
+            
+            # What To Avoid (wA negative)
+            'personal_pariahs': [],
+            'dangerous_objects': [],
+            'failed_theories': [],
+            
+            # My Theories (wA hypothetical)
+            'active_theories': [],
+            'control_hypotheses': [],
+            'goal_hypothesis': None,
+            
+            # Network Influence (wB summary)
+            'network_sequences_available': 0,
+            'network_best_efficiency': 0.0,
+            'viral_packages_received': 0,
+            'network_pariahs_for_level': 0,
+            
+            # Metacognitive Assessment
+            'recommended_strategy': None,
+            'confidence_level': 0.0,
+            'key_uncertainty': None,
+            
+            # Narrative Summary
+            'autobiography_narrative': ''
+        }
+        
+        try:
+            # Query 1: Personal game history (aggregated)
+            self._populate_game_history(autobiography, agent_id, game_type, current_generation)
+            
+            # Query 2: Personal action patterns
+            self._populate_action_patterns(autobiography, agent_id, game_type)
+            
+            # Query 3: Personal theories, controls, and pariahs
+            self._populate_knowledge_base(autobiography, agent_id, game_type, target_level)
+            
+            # Query 4: Network influence
+            self._populate_network_context(autobiography, game_type, target_level)
+            
+            # Metacognitive synthesis
+            autobiography['recommended_strategy'] = self._compute_recommended_strategy(autobiography)
+            autobiography['key_uncertainty'] = self._identify_key_uncertainties(autobiography)
+            autobiography['confidence_level'] = autobiography['recommended_strategy'].get('confidence', 0.3)
+            
+            # Generate human-readable narrative
+            autobiography['autobiography_narrative'] = self._generate_autobiography_narrative(autobiography)
+            
+        except Exception as e:
+            logger.error(f"Autobiography synthesis error for {agent_id}: {e}")
+            autobiography['autobiography_narrative'] = f"Synthesis failed: {e}. Defaulting to exploration."
+            autobiography['recommended_strategy'] = {
+                'strategy': 'explore',
+                'rationale': 'Synthesis failed',
+                'confidence': 0.2
+            }
+        
+        return autobiography
+
+    def _temporal_weight(
+        self,
+        generation_created: int,
+        current_generation: int,
+        half_life: int = 20
+    ) -> float:
+        """
+        Weight experiences by recency using exponential decay.
+        
+        Experience from `half_life` generations ago has 50% weight.
+        
+        Args:
+            generation_created: When the experience occurred
+            current_generation: Current generation
+            half_life: Generations until 50% decay (default 20)
+            
+        Returns:
+            Weight between 0.0 and 1.0
+        """
+        # Only skip if current_generation is unknown/invalid
+        if current_generation < 0:
+            return 1.0  # No temporal data, full weight
+        
+        # generation_created = 0 is valid (experience from generation 0)
+        age = max(0, current_generation - generation_created)
+        weight = 0.5 ** (age / half_life) if half_life > 0 else 1.0
+        return max(0.01, weight)  # Minimum 1% weight
+
+    def _populate_game_history(
+        self,
+        autobiography: Dict[str, Any],
+        agent_id: str,
+        game_type: str,
+        current_generation: int
+    ) -> None:
+        """Populate experience summary from game_results."""
+        try:
+            # Get aggregate stats
+            history = self.db.execute_query("""
+                SELECT 
+                    COUNT(*) as total_games,
+                    SUM(CASE WHEN final_score > 0 THEN 1 ELSE 0 END) as wins,
+                    MAX(levels_completed) as max_level,
+                    AVG(actions_used) as avg_actions,
+                    AVG(final_score) as avg_score
+                FROM game_results
+                WHERE agent_id = ? AND game_id LIKE ?
+            """, (agent_id, f"{game_type}%"))
+            
+            if history and history[0]['total_games']:
+                h = history[0]
+                autobiography['total_games_played'] = h['total_games'] or 0
+                autobiography['total_wins'] = h['wins'] or 0
+                autobiography['max_level_reached'] = h['max_level'] or 0
+                autobiography['avg_actions_per_game'] = h['avg_actions'] or 0.0
+                
+                if autobiography['total_games_played'] > 0:
+                    autobiography['win_rate'] = autobiography['total_wins'] / autobiography['total_games_played']
+            
+            # Calculate temporal-weighted win rate (recent games matter more)
+            if current_generation > 0:
+                recent_games = self.db.execute_query("""
+                    SELECT final_score, generation
+                    FROM game_results
+                    WHERE agent_id = ? AND game_id LIKE ?
+                    ORDER BY timestamp DESC
+                    LIMIT 50
+                """, (agent_id, f"{game_type}%"))
+                
+                if recent_games:
+                    weighted_wins = 0.0
+                    total_weight = 0.0
+                    
+                    for game in recent_games:
+                        gen = game.get('generation', current_generation)
+                        weight = self._temporal_weight(gen, current_generation)
+                        total_weight += weight
+                        if game['final_score'] and game['final_score'] > 0:
+                            weighted_wins += weight
+                    
+                    if total_weight > 0:
+                        autobiography['weighted_win_rate'] = weighted_wins / total_weight
+                    else:
+                        autobiography['weighted_win_rate'] = autobiography['win_rate']
+                else:
+                    autobiography['weighted_win_rate'] = autobiography['win_rate']
+            else:
+                autobiography['weighted_win_rate'] = autobiography['win_rate']
+                
+        except Exception as e:
+            logger.debug(f"Game history population failed: {e}")
+
+    def _populate_action_patterns(
+        self,
+        autobiography: Dict[str, Any],
+        agent_id: str,
+        game_type: str
+    ) -> None:
+        """Populate what actions worked/failed from action_traces."""
+        try:
+            # Get action effectiveness patterns
+            actions = self.db.execute_query("""
+                SELECT 
+                    action_name,
+                    COUNT(*) as uses,
+                    AVG(score_after - score_before) as avg_delta,
+                    SUM(CASE WHEN score_after > score_before THEN 1 ELSE 0 END) as positive_outcomes
+                FROM action_traces
+                WHERE agent_id = ? AND game_id LIKE ?
+                GROUP BY action_name
+                ORDER BY avg_delta DESC
+            """, (agent_id, f"{game_type}%"))
+            
+            if actions:
+                effective_actions = {}
+                for action in actions:
+                    action_name = action['action_name']
+                    uses = action['uses'] or 0
+                    avg_delta = action['avg_delta'] or 0.0
+                    positive = action['positive_outcomes'] or 0
+                    
+                    if uses > 0:
+                        effective_actions[action_name] = {
+                            'uses': uses,
+                            'avg_score_delta': round(avg_delta, 3),
+                            'positive_rate': round(positive / uses, 2) if uses > 0 else 0.0
+                        }
+                
+                autobiography['effective_actions'] = effective_actions
+                
+                # Identify successful strategies (actions with positive avg delta)
+                for action_name, data in effective_actions.items():
+                    if data['avg_score_delta'] > 0 and data['uses'] >= 5:
+                        autobiography['successful_strategies'].append({
+                            'description': f"Using {action_name} tends to improve score",
+                            'action': action_name,
+                            'times_used': data['uses'],
+                            'success_rate': data['positive_rate']
+                        })
+                
+        except Exception as e:
+            logger.debug(f"Action pattern population failed: {e}")
+
+    def _populate_knowledge_base(
+        self,
+        autobiography: Dict[str, Any],
+        agent_id: str,
+        game_type: str,
+        target_level: int
+    ) -> None:
+        """Populate theories, controls, pariahs from knowledge tables."""
+        try:
+            # Get active theories
+            theories = self.db.execute_query("""
+                SELECT theory_type, description, confidence, tests_conducted, status
+                FROM agent_theories 
+                WHERE agent_id = ? AND game_type = ? AND status IN ('testing', 'validated')
+                ORDER BY confidence DESC
+                LIMIT 10
+            """, (agent_id, game_type))
+            
+            if theories:
+                for t in theories:
+                    autobiography['active_theories'].append({
+                        'type': t['theory_type'],
+                        'description': t['description'],
+                        'confidence': t['confidence'] or 0.5,
+                        'tests': t['tests_conducted'] or 0,
+                        'status': t['status']
+                    })
+            
+            # Get control hypotheses (agent discovered)
+            controls = self.db.execute_query("""
+                SELECT controlled_pattern, action_response, reliability_score, validation_attempts
+                FROM network_object_control_hypotheses 
+                WHERE discovered_by = ? AND game_type = ? AND is_active = 1
+                ORDER BY reliability_score DESC
+                LIMIT 10
+            """, (agent_id, game_type))
+            
+            if controls:
+                for c in controls:
+                    try:
+                        pattern = json.loads(c['controlled_pattern']) if c['controlled_pattern'] else {}
+                        response = json.loads(c['action_response']) if c['action_response'] else {}
+                        autobiography['control_hypotheses'].append({
+                            'controlled_color': pattern.get('color', 'unknown'),
+                            'action': response.get('action', 'unknown'),
+                            'direction': response.get('direction', 'unknown'),
+                            'reliability': c['reliability_score'] or 0.5
+                        })
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            
+            # Get goal hypothesis
+            goals = self.db.execute_query("""
+                SELECT goal_type, goal_params, confidence
+                FROM inferred_goal_states
+                WHERE game_type = ? AND level_number = ?
+                ORDER BY confidence DESC
+                LIMIT 1
+            """, (game_type, target_level))
+            
+            if goals and goals[0]:
+                autobiography['goal_hypothesis'] = {
+                    'goal_type': goals[0]['goal_type'],
+                    'confidence': goals[0]['confidence'] or 0.5
+                }
+            
+            # Get pariahs agent has encountered
+            pariahs = self.db.execute_query("""
+                SELECT p.failure_pattern, p.death_count, p.created_at
+                FROM pariahs p
+                JOIN agent_pariah_awareness apa ON p.pariah_id = apa.pariah_id
+                WHERE apa.agent_id = ? AND p.game_id LIKE ?
+                ORDER BY p.death_count DESC
+                LIMIT 5
+            """, (agent_id, f"{game_type}%"))
+            
+            if pariahs:
+                for p in pariahs:
+                    autobiography['personal_pariahs'].append({
+                        'pattern': p['failure_pattern'] or 'unknown pattern',
+                        'times_died': p['death_count'] or 1,
+                        'last_death': p['created_at'] or 'unknown'
+                    })
+            
+            # Get dangerous objects from sensation mappings
+            dangers = self.db.execute_query("""
+                SELECT object_type, failure_count, sensation_score
+                FROM object_sensation_mappings
+                WHERE agent_id = ? AND game_type = ? AND failure_count > success_count
+                ORDER BY failure_count DESC
+                LIMIT 5
+            """, (agent_id, game_type))
+            
+            if dangers:
+                for d in dangers:
+                    try:
+                        # Extract color from object_type like "color_5"
+                        color = int(d['object_type'].replace('color_', '')) if d['object_type'] else -1
+                        autobiography['dangerous_objects'].append({
+                            'color': color,
+                            'death_count': d['failure_count'] or 0,
+                            'sensation_score': d['sensation_score'] or 0.0
+                        })
+                    except (ValueError, AttributeError):
+                        pass
+                        
+        except Exception as e:
+            logger.debug(f"Knowledge base population failed: {e}")
+
+    def _populate_network_context(
+        self,
+        autobiography: Dict[str, Any],
+        game_type: str,
+        target_level: int
+    ) -> None:
+        """Populate network influence (wB) context."""
+        try:
+            # Get network sequences available
+            sequences = self.db.execute_query("""
+                SELECT COUNT(*) as seq_count, MAX(efficiency_score) as best_efficiency
+                FROM winning_sequences
+                WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
+            """, (f"{game_type}%", target_level))
+            
+            if sequences and sequences[0]:
+                autobiography['network_sequences_available'] = sequences[0]['seq_count'] or 0
+                autobiography['network_best_efficiency'] = sequences[0]['best_efficiency'] or 0.0
+            
+            # Get network pariahs for this level
+            pariah_count = self.db.execute_query("""
+                SELECT COUNT(*) as pariah_count
+                FROM pariahs
+                WHERE game_id LIKE ? AND level_number = ?
+            """, (f"{game_type}%", target_level))
+            
+            if pariah_count and pariah_count[0]:
+                autobiography['network_pariahs_for_level'] = pariah_count[0]['pariah_count'] or 0
+                
+        except Exception as e:
+            logger.debug(f"Network context population failed: {e}")
+
+    def _compute_recommended_strategy(
+        self,
+        autobiography: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Agent metacognition: "What strategy should I use on this game?"
+        
+        This is the agent's self-awareness - deciding when to trust
+        themselves vs trust the network vs explore.
+        """
+        games_played = autobiography['total_games_played']
+        win_rate = autobiography['weighted_win_rate']  # Use temporal-weighted
+        network_available = autobiography['network_sequences_available']
+        network_efficiency = autobiography['network_best_efficiency']
+        is_frontier = autobiography['is_frontier']
+        
+        # Strategy 1: Explore (frontier games or no data)
+        if is_frontier:
+            return {
+                'strategy': 'explore',
+                'rationale': 'Frontier game - no network knowledge exists, must explore',
+                'confidence': 0.3
+            }
+        
+        # Strategy 2: Trust Self (experienced + successful)
+        if games_played >= 20 and win_rate >= 0.6:
+            return {
+                'strategy': 'trust_self',
+                'rationale': f"Strong personal track record ({win_rate:.0%} win rate from {games_played} games)",
+                'confidence': min(0.9, win_rate)
+            }
+        
+        # Strategy 3: Trust Network (novice but network has good solutions)
+        if games_played < 5 and network_available >= 5 and network_efficiency > 0.6:
+            return {
+                'strategy': 'trust_network',
+                'rationale': f"Limited personal experience ({games_played} games) but strong network knowledge available ({network_available} sequences)",
+                'confidence': network_efficiency
+            }
+        
+        # Strategy 4: Blend (moderate experience, mixed results)
+        if games_played >= 5 and network_available > 0:
+            # Calculate blend confidence
+            personal_factor = min(1.0, win_rate)
+            network_factor = min(1.0, network_efficiency)
+            blend_confidence = (personal_factor + network_factor) / 2
+            
+            if win_rate > 0.3:
+                return {
+                    'strategy': 'blend',
+                    'rationale': f"Moderate experience ({win_rate:.0%} win rate) + network knowledge ({network_available} sequences)",
+                    'confidence': blend_confidence
+                }
+        
+        # Strategy 5: Explore (insufficient data for other strategies)
+        return {
+            'strategy': 'explore',
+            'rationale': f"Insufficient data (played {games_played} games, {win_rate:.0%} win rate)",
+            'confidence': max(0.2, win_rate * 0.5)
+        }
+
+    def _identify_key_uncertainties(
+        self,
+        autobiography: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Agent identifies: "What am I still confused about?"
+        
+        This is metacognitive awareness of knowledge gaps - agents
+        know what they don't know.
+        """
+        uncertainties = []
+        
+        # Uncertainty 1: No control hypotheses
+        if len(autobiography['control_hypotheses']) == 0:
+            uncertainties.append({
+                'type': 'control',
+                'description': "I don't know how to control any objects",
+                'priority': 'high',
+                'recommended_action': 'systematic_discovery'
+            })
+        
+        # Uncertainty 2: No goal hypothesis
+        if not autobiography['goal_hypothesis'] or autobiography['goal_hypothesis'].get('confidence', 0) < 0.5:
+            uncertainties.append({
+                'type': 'goal',
+                'description': "I'm unclear about the goal of this game",
+                'priority': 'high',
+                'recommended_action': 'observe_winning_patterns'
+            })
+        
+        # Uncertainty 3: Low win rate despite experience
+        if autobiography['total_games_played'] >= 20 and autobiography['win_rate'] < 0.3:
+            uncertainties.append({
+                'type': 'strategy',
+                'description': "My strategies aren't working despite practice",
+                'priority': 'medium',
+                'recommended_action': 'query_network_for_better_strategies'
+            })
+        
+        # Uncertainty 4: Unstable theories (tested but inconclusive)
+        unstable_theories = [
+            t for t in autobiography['active_theories']
+            if t['tests'] >= 5 and 0.3 < t['confidence'] < 0.7
+        ]
+        
+        if unstable_theories:
+            uncertainties.append({
+                'type': 'theory_instability',
+                'description': f"I have {len(unstable_theories)} theories with unclear validity",
+                'priority': 'low',
+                'recommended_action': 'focused_testing'
+            })
+        
+        # Uncertainty 5: Many pariahs (danger-prone)
+        if len(autobiography['personal_pariahs']) >= 3:
+            uncertainties.append({
+                'type': 'danger_avoidance',
+                'description': f"I've died to {len(autobiography['personal_pariahs'])} different patterns",
+                'priority': 'medium',
+                'recommended_action': 'cautious_exploration'
+            })
+        
+        # Return highest priority uncertainty (or None)
+        if uncertainties:
+            priority_order = {'high': 3, 'medium': 2, 'low': 1}
+            return max(uncertainties, key=lambda u: priority_order.get(u['priority'], 0))
+        
+        return None
+
+    def _generate_autobiography_narrative(
+        self,
+        autobiography: Dict[str, Any]
+    ) -> str:
+        """
+        Generate human-readable autobiography summary.
+        
+        This is for Oracle/human observation and for populating
+        the agent's Q3 ("what worked before") reasoning field.
+        """
+        parts = []
+        
+        # Opening: Experience summary
+        games = autobiography['total_games_played']
+        if games == 0:
+            parts.append("This is my first time playing this game.")
+        elif games < 5:
+            parts.append(f"I've only played this game {games} time{'s' if games != 1 else ''}.")
+        else:
+            parts.append(
+                f"I've played this game {games} times, "
+                f"winning {autobiography['win_rate']:.0%} of the time."
+            )
+        
+        # What I know works
+        if autobiography['successful_strategies']:
+            top = autobiography['successful_strategies'][0]
+            parts.append(
+                f"I've found that {top['description'].lower()} "
+                f"(used {top['times_used']} times, {top['success_rate']:.0%} success)."
+            )
+        
+        # What I know to avoid
+        if autobiography['personal_pariahs']:
+            top_danger = autobiography['personal_pariahs'][0]
+            parts.append(
+                f"I've learned to avoid {top_danger['pattern']} "
+                f"(killed me {top_danger['times_died']} time{'s' if top_danger['times_died'] != 1 else ''})."
+            )
+        
+        # My control knowledge
+        controls = autobiography['control_hypotheses']
+        if controls:
+            parts.append(f"I know how to control {len(controls)} object{'s' if len(controls) != 1 else ''}.")
+        else:
+            parts.append("I haven't discovered any object controls yet.")
+        
+        # Active theories
+        theories = autobiography['active_theories']
+        if theories:
+            validated = [t for t in theories if t['status'] == 'validated']
+            testing = [t for t in theories if t['status'] == 'testing']
+            if validated:
+                parts.append(f"I have {len(validated)} validated theor{'ies' if len(validated) != 1 else 'y'}.")
+            if testing:
+                parts.append(f"I'm testing {len(testing)} theor{'ies' if len(testing) != 1 else 'y'}.")
+        
+        # Network influence
+        network = autobiography['network_sequences_available']
+        if network > 0:
+            parts.append(f"The network has {network} sequence{'s' if network != 1 else ''} for this level.")
+        
+        # Current uncertainty
+        uncertainty = autobiography['key_uncertainty']
+        if uncertainty:
+            parts.append(f"My main uncertainty: {uncertainty['description']}")
+        
+        # Strategy decision
+        strategy = autobiography['recommended_strategy']
+        if strategy:
+            strat = strategy['strategy']
+            if strat == 'trust_self':
+                parts.append("I'm confident in my own approach.")
+            elif strat == 'trust_network':
+                parts.append("I'll rely on what others have learned.")
+            elif strat == 'blend':
+                parts.append("I'll blend my experience with network knowledge.")
+            elif strat == 'explore':
+                parts.append("I need to explore and experiment.")
+        
+        return " ".join(parts)
+
+    # ========================================================================
+    # RUNTIME AUTOBIOGRAPHY UPDATES (wA/wB Dynamic Weighting)
+    # ========================================================================
+    # These methods update the autobiography DURING gameplay, allowing
+    # the agent's self-model to evolve as they play. The wA/wB weighting
+    # adapts based on which stream (personal vs network) is proving reliable.
+    # ========================================================================
+
+    def initialize_session_state(
+        self,
+        autobiography: Dict[str, Any],
+        agent_id: Optional[str] = None,
+        agent_role: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Initialize runtime session state within autobiography.
+        
+        Called at game start to set up tracking for this session.
+        This creates the dynamic portion of the autobiography that
+        updates as the agent plays.
+        
+        wA/wB Initialization Priority:
+        1. Persisted self_network_bias from DB (if agent has learned bias)
+        2. Role-based defaults (if agent has assigned role)
+        3. Strategy-based defaults (from autobiography synthesis)
+        4. Fallback: 0.5/0.5 balanced
+        
+        Role-based wA/wB defaults (from AGI theory):
+        - PIONEER: wA=0.7, wB=0.3 (favor personal exploration, cautious of network)
+        - OPTIMIZER: wA=0.3, wB=0.7 (rely on network sequences, refine)
+        - GENERALIST: wA=0.5, wB=0.5 (balanced - sensation-enabled)
+        - EXPLOITER: wA=0.4, wB=0.6 (follow network but can break rules)
+        
+        Args:
+            autobiography: Pre-game synthesized autobiography
+            agent_id: Agent ID (for DB lookup of persisted bias)
+            agent_role: Agent's current role (pioneer/optimizer/generalist/exploiter)
+            
+        Returns:
+            Updated autobiography with session_state initialized
+        """
+        strategy = autobiography.get('recommended_strategy', {}).get('strategy', 'explore')
+        
+        # ================================================================
+        # PRIORITY 1: Persisted self_network_bias from database
+        # ================================================================
+        # Agent's learned wA/wB across games - this persists and evolves
+        persisted_bias = None
+        if agent_id and self.db:
+            try:
+                result = self.db.execute_query(
+                    "SELECT self_network_bias FROM agents WHERE agent_id = ?",
+                    (agent_id,)
+                )
+                if result and result[0].get('self_network_bias') is not None:
+                    persisted_bias = result[0]['self_network_bias']
+            except Exception as e:
+                logger.debug(f"Could not retrieve persisted bias: {e}")
+        
+        # ================================================================
+        # PRIORITY 2: Role-based defaults
+        # ================================================================
+        # Agent roles have inherent wA/wB tendencies from AGI theory
+        role_defaults = {
+            'pioneer': (0.7, 0.3),     # Self-reliant explorers
+            'optimizer': (0.3, 0.7),    # Network-dependent refiners
+            'generalist': (0.5, 0.5),   # Balanced
+            'exploiter': (0.4, 0.6),    # Slightly network-favoring
+        }
+        
+        # ================================================================
+        # PRIORITY 3: Strategy-based defaults (from autobiography)
+        # ================================================================
+        strategy_defaults = {
+            'trust_self': (0.7, 0.3),
+            'trust_network': (0.3, 0.7),
+            'blend': (0.5, 0.5),
+            'explore': (0.5, 0.5),
+        }
+        
+        # ================================================================
+        # RESOLVE INITIAL wA/wB
+        # ================================================================
+        if persisted_bias is not None:
+            # Priority 1: Use persisted bias (self_network_bias is wB)
+            initial_wB = persisted_bias
+            initial_wA = 1.0 - initial_wB
+            bias_source = 'persisted'
+        elif agent_role and agent_role.lower() in role_defaults:
+            # Priority 2: Use role-based default
+            initial_wA, initial_wB = role_defaults[agent_role.lower()]
+            bias_source = f'role:{agent_role}'
+        else:
+            # Priority 3: Use strategy-based default
+            initial_wA, initial_wB = strategy_defaults.get(strategy, (0.5, 0.5))
+            bias_source = f'strategy:{strategy}'
+        
+        autobiography['session_state'] = {
+            'actions_taken_this_game': 0,
+            'actions_taken_this_level': 0,
+            'current_level': 1,
+            'discoveries_this_game': [],
+            'confirmations_this_game': [],
+            'contradictions_this_game': [],
+            'wA': initial_wA,
+            'wB': initial_wB,
+            'initial_wA': initial_wA,  # Track starting point for role evaluation
+            'initial_wB': initial_wB,
+            'bias_source': bias_source,
+            'agent_role': agent_role,
+            'stream_trust_history': [],
+            'level_transitions': [],
+            'last_action_source': None,  # 'wA', 'wB', or 'explore'
+            'last_action_outcome': None,  # 'positive', 'negative', 'neutral'
+        }
+        
+        autobiography['session_narrative'] = (
+            f"Starting game as {agent_role or 'unknown'} with strategy '{strategy}' "
+            f"(wA={initial_wA:.2f}, wB={initial_wB:.2f}, source={bias_source})."
+        )
+        
+        return autobiography
+
+    def reset_wA_wB_for_role_change(
+        self,
+        agent_id: str,
+        new_role: str
+    ) -> Tuple[float, float]:
+        """
+        Reset agent's wA/wB bias when they change roles.
+        
+        Per AGI theory: When agents switch roles, their stream weighting
+        should reset to the new role's default, not carry over old habits.
+        
+        This updates BOTH the database (self_network_bias) and returns
+        the new values for session initialization.
+        
+        Args:
+            agent_id: Agent ID
+            new_role: New role being assigned
+            
+        Returns:
+            Tuple of (new_wA, new_wB)
+        """
+        role_defaults = {
+            'pioneer': (0.7, 0.3),
+            'optimizer': (0.3, 0.7),
+            'generalist': (0.5, 0.5),
+            'exploiter': (0.4, 0.6),
+        }
+        
+        new_wA, new_wB = role_defaults.get(new_role.lower(), (0.5, 0.5))
+        
+        # Update database with new bias
+        try:
+            self.db.execute_query(
+                "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
+                (new_wB, agent_id)  # self_network_bias is wB
+            )
+            logger.info(
+                f"[ROLE CHANGE] Reset wA/wB for {agent_id[:8]} -> {new_role}: "
+                f"wA={new_wA:.2f}, wB={new_wB:.2f}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to reset wA/wB in DB: {e}")
+        
+        return new_wA, new_wB
+
+    def update_autobiography_after_action(
+        self,
+        autobiography: Dict[str, Any],
+        action: str,
+        action_source: str,  # 'wA' (personal), 'wB' (network), 'explore'
+        outcome: str,  # 'positive' (score up), 'negative' (stuck/died), 'neutral'
+        discovery: Optional[Dict[str, Any]] = None,
+        confirmation: Optional[Dict[str, Any]] = None,
+        contradiction: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Update autobiography based on action outcome.
+        
+        This is the core runtime learning - adjusting wA/wB weights
+        based on which stream is providing better guidance.
+        
+        Args:
+            autobiography: Current autobiography with session_state
+            action: Action taken (e.g., 'ACTION1')
+            action_source: Which stream influenced this action
+            outcome: Result of the action
+            discovery: New control/pattern discovered (optional)
+            confirmation: Network hypothesis confirmed (optional)
+            contradiction: Personal vs network disagreement (optional)
+            
+        Returns:
+            Updated autobiography
+        """
+        if 'session_state' not in autobiography:
+            autobiography = self.initialize_session_state(autobiography)
+        
+        session = autobiography['session_state']
+        session['actions_taken_this_game'] += 1
+        session['actions_taken_this_level'] += 1
+        
+        # Record what happened
+        session['last_action_source'] = action_source
+        session['last_action_outcome'] = outcome
+        
+        # Track stream trust history
+        session['stream_trust_history'].append({
+            'action_num': session['actions_taken_this_game'],
+            'source': action_source,
+            'outcome': outcome,
+            'action': action
+        })
+        # Keep last 50 entries
+        if len(session['stream_trust_history']) > 50:
+            session['stream_trust_history'] = session['stream_trust_history'][-50:]
+        
+        # ================================================================
+        # DYNAMIC wA/wB ADJUSTMENT
+        # ================================================================
+        # Shift trust toward whichever stream is providing better outcomes.
+        # Small increments to avoid oscillation.
+        # ================================================================
+        wA, wB = session['wA'], session['wB']
+        
+        if action_source == 'wA':  # Personal strategy
+            if outcome == 'positive':
+                wA = min(0.9, wA + 0.03)  # Reinforce personal trust
+                wB = max(0.1, wB - 0.02)
+            elif outcome == 'negative':
+                wA = max(0.1, wA - 0.02)  # Reduce personal trust
+                wB = min(0.9, wB + 0.02)
+        elif action_source == 'wB':  # Network strategy
+            if outcome == 'positive':
+                wB = min(0.9, wB + 0.03)  # Reinforce network trust
+                wA = max(0.1, wA - 0.02)
+            elif outcome == 'negative':
+                wB = max(0.1, wB - 0.02)  # Reduce network trust
+                wA = min(0.9, wA + 0.02)
+        # Exploration doesn't shift weights
+        
+        # Normalize to sum = 1.0
+        total = wA + wB
+        session['wA'] = wA / total
+        session['wB'] = wB / total
+        
+        # ================================================================
+        # TRACK DISCOVERIES
+        # ================================================================
+        if discovery:
+            discovery['when'] = f"action {session['actions_taken_this_game']}"
+            discovery['level'] = session['current_level']
+            session['discoveries_this_game'].append(discovery)
+        
+        if confirmation:
+            confirmation['when'] = f"action {session['actions_taken_this_game']}"
+            session['confirmations_this_game'].append(confirmation)
+        
+        if contradiction:
+            contradiction['when'] = f"action {session['actions_taken_this_game']}"
+            session['contradictions_this_game'].append(contradiction)
+        
+        return autobiography
+
+    def update_autobiography_on_level_change(
+        self,
+        autobiography: Dict[str, Any],
+        old_level: int,
+        new_level: int,
+        actions_to_complete: int
+    ) -> Dict[str, Any]:
+        """
+        Update autobiography when level changes.
+        
+        This records level completion and resets per-level counters.
+        Also updates the narrative with level transition.
+        """
+        if 'session_state' not in autobiography:
+            autobiography = self.initialize_session_state(autobiography)
+        
+        session = autobiography['session_state']
+        
+        # Record transition
+        session['level_transitions'].append({
+            'from_level': old_level,
+            'to_level': new_level,
+            'actions_taken': actions_to_complete,
+            'wA_at_transition': session['wA'],
+            'wB_at_transition': session['wB']
+        })
+        
+        session['current_level'] = new_level
+        session['actions_taken_this_level'] = 0
+        
+        # Update narrative
+        autobiography['session_narrative'] += (
+            f" Completed level {old_level} in {actions_to_complete} actions."
+            f" Now on level {new_level} (wA={session['wA']:.2f}, wB={session['wB']:.2f})."
+        )
+        
+        return autobiography
+
+    def get_current_wA_wB(
+        self,
+        autobiography: Dict[str, Any]
+    ) -> Tuple[float, float]:
+        """
+        Get current wA/wB weighting for action selection.
+        
+        Returns:
+            Tuple of (wA, wB) where wA + wB = 1.0
+        """
+        if 'session_state' not in autobiography:
+            return (0.5, 0.5)
+        return (
+            autobiography['session_state']['wA'],
+            autobiography['session_state']['wB']
+        )
+
+    def get_action_source_recommendation(
+        self,
+        autobiography: Dict[str, Any],
+        personal_action: Optional[str] = None,
+        network_action: Optional[str] = None
+    ) -> Tuple[str, str, str]:
+        """
+        Decide which action source to use based on current wA/wB.
+        
+        This is the core decision function - should the agent follow
+        their personal experience (wA) or network wisdom (wB)?
+        
+        Args:
+            autobiography: Current autobiography with session_state
+            personal_action: Action suggested by personal experience
+            network_action: Action suggested by network knowledge
+            
+        Returns:
+            Tuple of (action, source, reasoning) where:
+            - action: The recommended action string
+            - source: 'wA', 'wB', or 'explore'
+            - reasoning: Human-readable explanation
+        """
+        if 'session_state' not in autobiography:
+            return ('explore', 'explore', 'No session state - exploring')
+        
+        session = autobiography['session_state']
+        wA, wB = session['wA'], session['wB']
+        
+        # If only one option available
+        if personal_action and not network_action:
+            return (personal_action, 'wA', f"Using personal strategy (wA={wA:.2f}, no network option)")
+        if network_action and not personal_action:
+            return (network_action, 'wB', f"Following network (wB={wB:.2f}, no personal option)")
+        if not personal_action and not network_action:
+            return ('explore', 'explore', "No suggestions from either stream - exploring")
+        
+        # Both options available - use weighted probabilistic selection
+        import random
+        
+        if personal_action == network_action:
+            # Both agree - use either
+            return (personal_action, 'blend', f"Both streams agree (wA={wA:.2f}, wB={wB:.2f})")
+        
+        # Probabilistic selection based on weights
+        if random.random() < wA:
+            reasoning = (
+                f"Choosing personal strategy (wA={wA:.2f} > random). "
+                f"Recent outcomes: {self._summarize_recent_outcomes(session, 'wA')}"
+            )
+            return (personal_action, 'wA', reasoning)
+        else:
+            reasoning = (
+                f"Following network (wB={wB:.2f} > random). "
+                f"Recent outcomes: {self._summarize_recent_outcomes(session, 'wB')}"
+            )
+            return (network_action, 'wB', reasoning)
+
+    def _summarize_recent_outcomes(
+        self,
+        session: Dict[str, Any],
+        source: str
+    ) -> str:
+        """Summarize recent outcomes for a given source."""
+        history = session.get('stream_trust_history', [])
+        recent = [h for h in history[-20:] if h['source'] == source]
+        if not recent:
+            return "no recent data"
+        
+        positive = sum(1 for h in recent if h['outcome'] == 'positive')
+        negative = sum(1 for h in recent if h['outcome'] == 'negative')
+        total = len(recent)
+        
+        return f"{positive}/{total} positive, {negative}/{total} negative"
+
+    def generate_runtime_narrative(
+        self,
+        autobiography: Dict[str, Any]
+    ) -> str:
+        """
+        Generate current narrative reflecting runtime state.
+        
+        This combines the static autobiography with dynamic session state
+        to create a live self-description.
+        """
+        base = autobiography.get('autobiography_narrative', '')
+        session = autobiography.get('session_state', {})
+        
+        if not session:
+            return base
+        
+        parts = [base]
+        
+        # Current session status
+        actions = session.get('actions_taken_this_game', 0)
+        level = session.get('current_level', 1)
+        wA, wB = session.get('wA', 0.5), session.get('wB', 0.5)
+        
+        parts.append(
+            f"Currently on level {level} after {actions} actions "
+            f"(wA={wA:.2f}, wB={wB:.2f})."
+        )
+        
+        # Discoveries this session
+        discoveries = session.get('discoveries_this_game', [])
+        if discoveries:
+            parts.append(f"This session I discovered: {len(discoveries)} new control(s).")
+        
+        # Confirmations/contradictions
+        confirmations = session.get('confirmations_this_game', [])
+        contradictions = session.get('contradictions_this_game', [])
+        
+        if confirmations:
+            parts.append(f"Network wisdom confirmed {len(confirmations)} time(s).")
+        if contradictions:
+            parts.append(f"My experience contradicted network {len(contradictions)} time(s).")
+        
+        # Trust trend
+        history = session.get('stream_trust_history', [])
+        if len(history) >= 10:
+            recent_wA = sum(1 for h in history[-10:] if h['source'] == 'wA' and h['outcome'] == 'positive')
+            recent_wB = sum(1 for h in history[-10:] if h['source'] == 'wB' and h['outcome'] == 'positive')
+            if recent_wA > recent_wB:
+                parts.append("Personal strategies are working better recently.")
+            elif recent_wB > recent_wA:
+                parts.append("Network wisdom is proving more reliable recently.")
+        
+        return " ".join(parts)
+
+    def persist_wA_wB_at_game_end(
+        self,
+        agent_id: str,
+        autobiography: Dict[str, Any],
+        game_outcome: str  # 'win', 'loss', 'timeout'
+    ) -> bool:
+        """
+        Persist learned wA/wB bias to database at game end.
+        
+        The agent's wA/wB shifts during gameplay based on outcomes.
+        At game end, we blend this session's learned bias with their
+        historical bias, weighted by outcome quality.
+        
+        Philosophy: Wins teach more than losses. Agents that win
+        should have their learned biases weighted more heavily.
+        
+        Args:
+            agent_id: Agent ID
+            autobiography: Current autobiography with session_state
+            game_outcome: 'win', 'loss', or 'timeout'
+            
+        Returns:
+            True if persisted successfully
+        """
+        if not agent_id or 'session_state' not in autobiography:
+            return False
+        
+        session = autobiography['session_state']
+        session_wB = session.get('wB', 0.5)
+        initial_wB = session.get('initial_wB', 0.5)
+        
+        # How much did wB shift this game?
+        shift = session_wB - initial_wB
+        
+        # Only persist if there was meaningful shift (> 0.05)
+        if abs(shift) < 0.05:
+            logger.debug(
+                f"[wA/wB] Agent {agent_id[:8]} wB shift too small ({shift:.3f}), not persisting"
+            )
+            return False
+        
+        # Outcome-weighted learning rate
+        # Wins: Learn more from this session (blend 40% session, 60% historical)
+        # Losses: Learn less (blend 20% session, 80% historical)
+        # Timeout: Learn moderately (blend 30% session, 70% historical)
+        if game_outcome == 'win':
+            session_weight = 0.4
+        elif game_outcome == 'timeout':
+            session_weight = 0.3
+        else:  # loss
+            session_weight = 0.2
+        
+        try:
+            # Get current persisted bias
+            result = self.db.execute_query(
+                "SELECT self_network_bias FROM agents WHERE agent_id = ?",
+                (agent_id,)
+            )
+            
+            if result and result[0].get('self_network_bias') is not None:
+                historical_wB = result[0]['self_network_bias']
+            else:
+                # No historical - use role default (session has it from initialization)
+                historical_wB = initial_wB
+            
+            # Blend session learning with historical
+            new_wB = (session_weight * session_wB) + ((1 - session_weight) * historical_wB)
+            
+            # Clamp to valid range
+            new_wB = max(0.1, min(0.9, new_wB))
+            
+            # Update database
+            self.db.execute_query(
+                "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
+                (new_wB, agent_id)
+            )
+            
+            logger.info(
+                f"[wA/wB] Agent {agent_id[:8]} persisted bias: "
+                f"{historical_wB:.2f} -> {new_wB:.2f} "
+                f"(session learned {session_wB:.2f}, outcome={game_outcome})"
+            )
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Failed to persist wA/wB for {agent_id[:8]}: {e}")
+            return False
 
 
 # ============================================================================
