@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 #!/usr/bin/env python3
 """
 Database Schema Auto-Maintenance System

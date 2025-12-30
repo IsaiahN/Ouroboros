@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """
 Agent Factory - Creates specialized agents that integrate with existing GameplayEngine
 Following Rule 3: Clean integration with existing codebase

@@ -1,3 +1,6 @@
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+
 """
 Network Intelligence Engine
 Treats the DATABASE as the primary organism, with agents as temporary cellular components.

@@ -1,40 +1,25 @@
-"""
-Stuck Game Coordinator - Intelligent Response to Collective Failure
-====================================================================
-
-REPLACES the old frustration quorum system which just emitted useless
-"increase mutation rate" signals.
-
-When multiple agents are stuck on the same game, this coordinator:
-
-1. SYNTHESIZES all knowledge gathered by stuck agents:
-   - Death zones (WHERE did they die?)
-   - Dangerous objects (WHAT killed them?)
-   - Game-over theories (WHY did they die?)
-   - Scientific theories (what patterns were observed?)
-   - Q1-Q5 reasoning (what changed, what rewarded/punished?)
-
-2. IDENTIFIES knowledge gaps:
-   - Which level is the bottleneck?
-   - What do we know vs. not know about that level?
-   - What experiments haven't been tried?
-
-3. COORDINATES intelligent responses:
-   - Request targeted experiments from Scientific Method Engine
-   - Boost action budget for that specific game
-   - Assign "investigator" agents to explore novel approaches
-   - Share synthesized theories to all agents on the game
-
-4. TRACKS resolution:
-   - Did the intervention work?
-   - What knowledge led to breakthrough?
-   - Store successful strategies for similar future situations
-
-Philosophy: The network should get SMARTER when stuck, not more random.
-"""
 import os
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: MUST be before all other imports
 
+"""Network Knowledge Synthesis - Agent-Accessible Collective Intelligence
+=========================================================================
+
+Knowledge synthesis service that agents PULL from when they need help.
+NOT a coordinator - agents decide when to query, not the other way around.
+
+Design Philosophy:
+- Agents are autonomous - they decide when they're stuck
+- This service synthesizes collective network knowledge on demand
+- No central control - just a knowledge aggregation tool
+
+What agents can query:
+1. DEATH ZONES - Where did other agents die?
+2. DANGEROUS OBJECTS - What killed other agents?
+3. THEORIES - Why did agents fail?
+4. KNOWLEDGE GAPS - What hasn't been tried?
+
+Philosophy: The network gets SMARTER collectively, agents stay autonomous.
+"""
 import json
 import uuid
 import logging
