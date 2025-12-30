@@ -14,12 +14,11 @@ Phased execution to reach the event-first, guard-heavy runtime with provenance. 
 - Swarm orchestration: default runner becomes swarm-style (one agent per game concurrently, auto scorecard/replay links, tag propagation). Allow game filters and tags passthrough. Frontier/optimizer/exploiter assignments map to swarm slots instead of bespoke loops.
 - Recordings/replays: rely on ARC-provided replays; store pointers (scorecard_id, replay_id, local recording filename if staged) instead of frames. In LIVE, optionally stage JSONL to temp, ingest summaries (actions/deltas/contradictions), then delete file. In REPLAY_VALIDATION, pull from replay_index instead of regenerating actions.
 
-## Swarm orchestration and replay usage (space-saving and parity)
-- Replace per-game serial execution with swarm-style orchestration: one agent instance per game, concurrent threads, automatic scorecard open/close, and tag capture (from ARC swarms.md). Integrate into evolution scheduler so frontier/optimizer/exploiter assignments map to swarm slots instead of bespoke loops.
-- Stop persisting raw frame blobs in DB when ARC already records runs: store replay/recording pointers (scorecard_id, replay_id, local recording filename if enabled) in a new replay_index table; persist step-level telemetry only when needed for learning (actions, deltas, contradictions), not full frames.
-- In LIVE mode, optionally mirror ARC JSONL recordings to a staging directory, then ingest summaries (actions, deltas, contradictions) into DB and delete raw file to honor “no log files” rule; keep replay links for audit instead of heavy blobs.
-- When running in REPLAY_VALIDATION, prefer pulling frames from replay_index (ARC replay link) instead of regenerating actions; compare predicted vs recorded outcomes to detect drift.
-- Scheduler change: allow `--game` filters and tag propagation so ARC scorecards/tags mirror our attempt_id/mode/role; store tags in attempts for cross-system traceability.
+## Acceptance checks for ARC alignment and guards
+- Action6 guard: reject missing coords; Action6Reasoner must derive coords from attention_windows salience; validate in REPLAY_VALIDATION using recorded traces.
+- Swarm runner: verify scorecards auto open/close, tags propagate, and concurrent per-game agents replace serial loop; honor `--game` filters.
+- Replay_index flow: attempts.scorecard_id + replay_index populated; DB stores thin summaries only (no frame blobs); staged recordings deleted after ingestion.
+- Gap/Struggle guards: NO_DELTA and OSCILLATION_NO_CLOSURE emit COMPREHENSION_GAP_DETECTED and enqueue closure_probe intervention; closure_probe logged via CODS_OPERATOR_USED with validation_state from experiments.
 
 ## Phase 0: Migrations & Plumbing
 - Apply additive migrations for attempts, hook_failures, action_proposals_log, lesson_interpretations, source_attempt_id/source_mode tags.
