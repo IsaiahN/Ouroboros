@@ -26,6 +26,8 @@ This plan synthesizes all DOCS materials (master rulesets, AGI Unified Theory, C
 - Lesson-first telemetry: reasoning logs framed as student questions; lesson interpretations recorded with coverage/contradictions.
 - Data-first governance: attempts table is the authoritative fitness record; hook_failures table for self-diagnosis; all artifacts reference attempt_id and mode.
 - Preserve working pieces: ARC API, frame recovery, sequence retrieval reputation, database schema (extended only), agent roles/themes, network knowledge synthesis.
+- Thinking-visible scaffolds: explicit hypothesis/experiment structures (prediction, outcome, interpretation, contradiction), assumption tracker, theory revision triggers, elimination tracker, and circular-reasoning detectors so metacognition is first-class data.
+- Observer-first visibility: every agent has a biography (learning history, active hypotheses, revisions, struggles, WA/WB adoption/rejection), with dashboards for competence (prediction accuracy, coherence, transfer, explanation quality, metacog calibration, recovery rate) and struggle diagnosis (stuck patterns, blind spots, assumption traps, concept gaps, working-memory overload signals).
 
 ## Reliability Goals (airline-grade)
 - Deterministic traces: every action and decision has attempt_id, step, mode, role, w_A, w_B, proposal sources, and ARC request/response recorded. No silent paths.
@@ -79,22 +81,56 @@ This plan synthesizes all DOCS materials (master rulesets, AGI Unified Theory, C
 - CODS operators become the vocabulary to express lessons; proposals include operator_id and are validated against lesson coverage. Unlocking an operator requires evidence that it explains observed examples (Games-as-Teachers) plus RLVR validation.
 - Add a Lesson-Operator Fusion plugin: subscribes to ACTION_PROPOSALS/ACTION_EXECUTED/FRAME_CHANGED, updates lesson_interpretations, and feeds operator eligibility into the combiner (operators preferred when they improve lesson coverage).
 - Transfer test: replay validation must confirm that a fused lesson+operator explanation works across variations; failures decrement operator reliability and flag contradictions in lesson_interpretations.
+- Network textbook: lessons/concepts are versioned and peer-reviewed; prestige signals teaching quality (adoption/transfer), not just discovery. Concept library merges equivalent explanations across agents with provenance and contradiction audits.
+- Observer surfacing: concept library exposes consensus vs dissent and accuracy flags so reviewers can see where peer explanations help or mislead; WA/WB adoption/rejection per agent is logged for peer-teaching graphs.
+
+## Games-as-Teachers Runtime Commitments
+- Reframe reasoning prompts: every N steps enforce “what is the teacher showing?”, “what changed between examples?”, “what am I supposed to manipulate?”, “does my interpretation explain all examples?”, and log contradictions in reasoning_tags.
+- Sequence = evidence: winning_sequences stay, but lessons/interpretations are the primary artifacts; sequences support/contradict interpretations and are tagged with source_attempt_id/source_mode.
+- Success metric shift: prioritize lesson coverage, transfer to variants, and peer adoption; prestige rewards teachable understanding while action budgets remain metabolic.
+- Proposal ladder changes: require causal probes (contingency tests) after attention cues before more sweeps; guard against fixation/oscillation without hypothesis updates; mid-run lesson extraction when patterns repeat.
+- Roles: explorer/validator/tutor/synthesizer mapping—explorers form first interpretations; validators stress-test; tutors share; synthesizers unify cross-game lessons using resonance (w_R).
+- Win/fail handling: on WIN, extract lesson + evidence; on stuck/fail, record misunderstanding and contradictions to steer next probes; replay validation checks that hangup tags drop on similar games.
+- Teacher interface: extract lesson setup (initial frames), learning objective (win condition), attended vs ignored aspects, and curriculum placement; ambiguous or multi-interpretation lessons stay multi-variant until resolved by evidence.
+- Reviewer affordances: expose “what is active now?”, “what gaps are being addressed?”, “recent interventions tried”, and “learning velocity” in dashboards; deep-dive triggers for anomalies/stagnation/runaway changes.
 
 ## Two-Streams + Resonance Core (from two-streams.md, harmonies)
 - Every proposal and decision logs w_A (private memory), w_B (collective wisdom), and w_R (resonance across domains/scales). Combiner uses these weights; telemetry stored in attempts and action_proposals_log.
 - Resonance detection: detect cross-game/operator/lesson convergence; surface resonance_tags in proposals/lessons; elevate high-resonance packages per harmonic principle while retaining dual economies.
 - Agents stay stateless between runs beyond DB queries; w_A/w_B/w_R are runtime weights, not stateful parameters.
 - Dynamic ATP reweighting (preserve existing logic from adaptive_action_limits/agent_operating_mode_system): role multipliers + w_B growth bonuses/low-start boosts/stagnation penalties adjust action budgets per generation and per agent; this is metabolic-only and remains separate from prestige.
+- Metacog alignment: prediction-before-action prompts, theory revision triggers when outcomes diverge, assumption drift tracking, and elimination memory prevent circular reasoning and premature convergence.
+- WA/WB streams for observers: WA (autobiographical) retains “I tried X, saw Y, concluded Z”; WB (collective) records peer theories adopted/rejected with reasons, enabling reviewer pull-aside views.
 
 ## Innate + Meta Primitives (advanced primitives, meta primitive generation)
 - Seed weak priors/attention primitives: detect_change, detect_motion, novelty/surprise, contingency/action_causation, face/social salience equivalents (mapped to ARC cues), plus weak physics priors (solidity_bias, continuity_bias) as soft constraints that can be overturned by evidence.
 - Social learning priors: credibility_weighting, joint_attention/teaching_detection, imitation_bias to better use viral packages and Oracle guidance.
 - Meta-representation loop: treat rules/operators as data; enable operator factories and discovery strategies as first-class objects; log meta_operators in CODS and provenance them via source_attempt_id/source_mode.
 - Temporal/causal prompts: recency_weighting, gap detection, and hypothesis design prompts (see how_to_reason.md) applied in metacognitive/hypothesis plugins.
+- Memory architecture: episodic (attempt traces), semantic (concept/rule/lesson library), working (bounded active cues) with selective forgetting/retention knobs so noise is pruned but evidence and wins persist.
 
 ## Reasoning Prompts & Hangup Remediation
 - Standard metacognitive prompts (assumptions, unused info, simpler subproblem, reverse engineering, certainty vs guess, prediction before action) are enforced in the hypothesis/lesson plugin and reflected into reasoning_tags on events.
 - Hangup patterns from legacy logs (rare-color fixation, oscillation sweeps, pseudo-button dead-ends) are auto-tagged and drive guard triggers and replay checks until cleared.
+- Theory-action gap detector: compare stated interpretation vs chosen actions; flag circular probes and assumption drift; feed HOOK_FAILURE_DETECTED/GUARD_TRIGGERED when hypotheses are not updated after contradictions.
+- Struggle surfaces: stuck-pattern detector, blind-spot tracker (ignored lesson aspects), assumption-trap flags, working-memory overload hints; all emitted as tags for dashboards and remediation planners.
+
+## Gap Analysis & Self-Repair
+- Gap detection: performance gaps (fail rates), comprehension gaps (wins without explanations), metacog gaps (confident-but-wrong), architectural gaps (capacity limits), pedagogical gaps (lesson misread).
+- Gap diagnosis: root cause classifier (missing prerequisite, wrong assumptions spreading, architectural limit, ambiguity, insufficient exploration) with severity and affected-pop counts.
+- Gap remediation planner: selects intervention type (agent-level exploration/tutoring, peer teaching, curriculum reorder, architectural enhancement), estimates resources, defines success criteria, and rollback conditions.
+- Self-repair execution: agent-level (redirect to peer explanations, metacog prompts, prerequisites), network-level (promote good explanations, quarantine misconceptions, study groups), and code-level proposals routed to the autonomous code evolution loop.
+
+## Autonomous Code Evolution Hooks
+- Architectural gap detector flags missing capabilities; system drafts change proposals (what/why/risk/impact) with tests (regression + gap-resolution + competence lift) and canary cohorts.
+- Git automation: use gitpython-style control to open feature branches (leave human/manual branches untouched; production branch is Ouroboros-v2), prepare PRs with gap analysis, tests, success metrics, rollback triggers; auto-merge only if learning metrics improve with no regressions; auto-rollback on degradation.
+- Change safeguards: rate limiting, canaries vs baseline cohorts, comparative analysis, and full change audit trail for reviewer oversight.
+
+## Concepts to Reconsider (from reasoning logs)
+- What worked: pathfinding persistence + pseudo-button exploration occasionally found viable trajectories; rare-color salience surfaced targets; oscillation sweeps covered space methodically; long sequences reached later frames without crashing.
+- What failed: fixation on rare colors without testing causal effect; endless oscillation without hypothesis update; pseudo-button loops lacking closure test; no early contradiction checks; lessons not extracted after long runs.
+- Adjustments: enforce prediction-before-action and contradiction prompts each N steps; require causal tests (contingency) after attention cues fire; add guard to abort or switch strategy when hangup tags persist beyond threshold; auto-generate lesson_interpretations mid-run when repeated patterns seen; ensure proposal ladder falls back to CODS/operator-led causal probes before more sweeps.
+- Transfer: replay validation must confirm that resolved hangups reduce reasoning_tags counts on similar games; prioritize operators/lessons that break fixation (containment, selective physics, directional control) for reuse.
 
 ## Target Runtime Flow (high level)
 - Orchestrator (thin): INIT → STEP → POST_STEP → FINALIZE; emits events only.

@@ -18,13 +18,13 @@ Goal: inventory all side-effects in play_single_game and assign them to plugins/
   - Current side-effects: check win/loss, maybe save sequence fragments, update stats, frustration/loop detectors.
   - Target: emit STEP_COMPLETE (with guard state), optionally LESSON_INTERPRETATION_READY when applicable.
   - Guards: heartbeat tick; frame sanity check (FRAME_SANITY_FAIL if deltas missing while action claimed change).
-  - Plugins: Sequence plugin (partial save in LIVE), Viral plugin (package candidates), Metacog (lesson coverage/contradictions), Health monitors (frustration/loop detection) emitting HOOK_FAILURE_DETECTED on exceptions.
+  - Plugins: Sequence plugin (partial save in LIVE), Viral plugin (package candidates), Metacog (lesson coverage/contradictions), Health monitors (frustration/loop/oscillation/no-delta detection) emitting HOOK_FAILURE_DETECTED on exceptions; StruggleGuard must emit oscillation_no_closure and no_delta tags plus COMPREHENSION_GAP_DETECTED for GapRegistry.
 
 - FINALIZE
   - Current side-effects: save sequences, prestige updates, budget accounting, logging summaries.
   - Target: emit RUN_FINALIZED; finalize attempts row; flush action_proposals_log; commit lesson_interpretations in LIVE; close out sequence/viral/hypothesis writes in LIVE only.
   - Guards: mode guard on all writes; role guard not needed if game concluded; heartbeat not required after finalize.
-  - Plugins: Sequence plugin (save/reputation), Viral plugin (package persistence), CODS plugin (operator validation results), Prestige/Budget plugin (final accounting), HookFailureMonitor (final errors), Reliability hooks (mark auto-disabled if threshold exceeded).
+  - Plugins: Sequence plugin (save/reputation), Viral plugin (package persistence), CODS plugin (operator validation results), Prestige/Budget plugin (final accounting), HookFailureMonitor (final errors), Reliability hooks (mark auto-disabled if threshold exceeded), GapRegistry (mark interventions completed/failed).
 
 ## Cross-Cutting Side-Effects to Extract
 - Learning writes (sequences, viral packages, hypotheses, lessons): move to plugins; gated by mode == LIVE; attach source_attempt_id/source_mode.

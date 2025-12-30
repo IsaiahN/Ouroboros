@@ -33,6 +33,13 @@ Designing for airline-grade robustness: predictable failure modes, explicit attr
 - Health dashboard queries (to be scripted): count of hook_failures by stack_hash (top offenders), attempts success rate by mode, action_proposals_log completeness (steps without proposals).
 - Missing data detection: absence of proposals or heartbeats is itself an anomaly; recorded as hook_failures.
 
+## Observer Dashboards & Flows
+- Agent deep-dive views pull from agent_biographies, hypotheses/experiments, lesson_interpretations, and action_proposals_log to show timeline, theory evolution, WA/WB adoption/rejection, struggles (struggle_guard tags), blind spots, and competence metrics (prediction accuracy, coherence, transfer, explanation quality, metacog calibration, recovery rate).
+- Network views use concept_library, peer_teaching_graph, competence_metrics, resonance_tags, and gap_registry to show consensus vs accuracy, teaching effectiveness, diversity/stagnation, and knowledge gaps by concept/role/generation.
+- Gap system: gap_registry + interventions track detection → diagnosis (type/severity/root cause) → plan (agent/network/curriculum/code) → execution with success/rollback criteria; hook_failures and guard events supply evidence.
+- Code evolution oversight: code_proposals record what/why/risk/tests/canary metrics and branch/PR metadata; automated branches are system-managed, human/manual branches are left untouched; production branch is Ouroboros-v2; auto-merge only when learning metrics improve without regressions.
+- Reviewer real-time tiles: current learning activity, active gaps, recent interventions, learning velocity, and stability sourced from attempts, gap_registry, interventions, and hook_failures; deep-dive triggers include anomalies, stagnation, runaway changes, critical gaps, and breakthroughs.
+
 ## Recovery Playbooks
 - Plugin crash: identify stack_hash, auto-disabled; run REPLAY_VALIDATION on same input after fix; re-enable flag.
 - Guard trips: inspect guard type, adjust budgets/roles only after root cause found; never bypass guard without reason.

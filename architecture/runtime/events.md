@@ -31,6 +31,8 @@ Authoritative event contracts for the event-first runtime. All payloads must car
 - HEARTBEAT_LOST: heartbeat gap exceeded threshold.
 - ACTION_SOURCE_EMPTY: no safe action available; ladder exhausted.
 - FRAME_SANITY_FAIL: frame delta missing when action claimed change (possible API mismatch).
+- NO_DELTA: frames_unchanged exceeded threshold (default 5); emitted with struggle_guard tag and forwarded to GapRegistry.
+- OSCILLATION_NO_CLOSURE: repeated offset sweeps without closure probe success (default 4 sweeps); emitted with struggle_guard tag and forwarded to GapRegistry.
 
 ## Expectations
 - All events are immutable, append-only; ordered by emit time within a step.
