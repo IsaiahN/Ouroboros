@@ -57,6 +57,15 @@ except ImportError:
     SCIENTIFIC_METHOD_AVAILABLE = False
     ScientificMethodEngine = None
 
+# NETWORK KNOWLEDGE SYNTHESIS: Agent-accessible collective intelligence
+# Agents query this when stuck to get synthesized death zones, theories, etc.
+try:
+    from network_knowledge_synthesis import NetworkKnowledgeSynthesis
+    KNOWLEDGE_SYNTHESIS_AVAILABLE = True
+except ImportError:
+    KNOWLEDGE_SYNTHESIS_AVAILABLE = False
+    NetworkKnowledgeSynthesis = None
+
 # Two-Streams: Import cohort wisdom for role-based sequence selection
 try:
     from viral_package_engine import get_cohort_wisdom, update_sequence_role_reputation
@@ -490,6 +499,19 @@ class GameplayEngine:
                 logger.debug(f"Science engine init failed: {e}")
         else:
             self.science_engine = None
+        
+        # NETWORK KNOWLEDGE SYNTHESIS - Agent-accessible collective intelligence
+        # NOT a central controller - agents query this when THEY decide they're stuck
+        # Returns synthesized death zones, theories, untested experiments, etc.
+        if KNOWLEDGE_SYNTHESIS_AVAILABLE:
+            try:
+                self.knowledge_synthesis = NetworkKnowledgeSynthesis(self.db)
+                logger.info("Network knowledge synthesis initialized (agent knowledge tool)")
+            except Exception as e:
+                self.knowledge_synthesis = None
+                logger.debug(f"Knowledge synthesis init failed: {e}")
+        else:
+            self.knowledge_synthesis = None
         
         # AGENT NETWORK CONTRIBUTOR - Decentralized knowledge sharing
         # Agents share successes/failures and query peer insights WITHOUT central coordinator
@@ -937,12 +959,12 @@ class GameplayEngine:
                         
                         # Make the prediction
                         self.metacognitive_engine.make_prediction(
+                            agent_id=agent_id,
                             game_type=game_type,
-                            level=loop_state.current_level,
-                            action=action,
-                            expected_outcome=expected_outcome,
-                            theory_behind_it=f"Action from {theory_source}: {reasoning[:100]}",
-                            current_score=game_state.score
+                            level_number=loop_state.current_level,
+                            theory=f"Action from {theory_source}: {reasoning[:100]}",
+                            predicted_outcome=expected_outcome,
+                            action=action
                         )
                     except Exception as e:
                         logger.debug(f"Metacognitive prediction failed (non-critical): {e}")
@@ -1253,6 +1275,22 @@ class GameplayEngine:
                         logger.info(f"[SCIENCE] Generalized theory: {generalized.description[:60]}...")
             except Exception as e:
                 logger.debug(f"Science belief update failed (non-critical): {e}")
+        
+        # KNOWLEDGE SYNTHESIS: Report breakthrough to help other stuck agents
+        # Agent shares what worked so the network can learn
+        if hasattr(self, 'knowledge_synthesis') and self.knowledge_synthesis and agent_id:
+            try:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                what_worked = f"Completed level {loop_state.current_level} with {loop_state.level_action_count} actions"
+                self.knowledge_synthesis.report_breakthrough(
+                    agent_id=agent_id,
+                    game_type=game_type,
+                    level=loop_state.current_level,
+                    what_worked=what_worked
+                )
+                logger.debug(f"[BREAKTHROUGH] Reported level {loop_state.current_level} completion to network")
+            except Exception as e:
+                logger.debug(f"Breakthrough report failed (non-critical): {e}")
         
         # CODS - Update context for new level
         # Advance CODS to track operator usage per level
@@ -1648,33 +1686,27 @@ class GameplayEngine:
             try:
                 game_type = game_id.split('-')[0] if '-' in game_id else game_id
                 
-                # Gather context for reflection
+                # Gather action and score history for reflection
                 session_id = self.session_manager.current_session_id
                 action_traces = self.db.execute_query("""
-                    SELECT action_number, frame_changed
+                    SELECT action_number, score_after
                     FROM action_traces
                     WHERE session_id = ? AND game_id = ?
-                    ORDER BY action_number DESC
-                    LIMIT 20
+                    ORDER BY id ASC
+                    LIMIT 100
                 """, (session_id, game_id)) if session_id else []
                 
-                # Calculate what changed in the last few actions
-                effective_actions = sum(1 for t in action_traces if t.get('frame_changed')) if action_traces else 0
+                # Build action_history as list of action strings and score_history as list of floats
+                action_history = [f"ACTION{t.get('action_number', 0)}" for t in action_traces] if action_traces else []
+                score_history = [float(t.get('score_after', 0.0)) for t in action_traces] if action_traces else []
                 
-                # Get any validated hypotheses that contributed
-                validated_hypotheses = self.metacognitive_engine.get_current_theory()
-                
-                # Generate the reflection
+                # Generate the reflection with correct parameters
                 insight = self.metacognitive_engine.generate_win_reflection(
+                    agent_id=agent_id or "unknown",
                     game_type=game_type,
-                    level=loop_state.current_level,
-                    actions_taken=loop_state.action_count,
-                    key_context={
-                        'effective_final_actions': effective_actions,
-                        'theory_used': validated_hypotheses,
-                        'levels_completed': loop_state.level_completions,
-                        'score': game_state.score
-                    }
+                    level_number=loop_state.current_level,
+                    action_history=action_history,
+                    score_history=score_history
                 )
                 
                 if insight:
@@ -1762,10 +1794,13 @@ class GameplayEngine:
                 }
                 
                 # Store in world_model_states table
+                import uuid
+                state_id = f"wm_{uuid.uuid4().hex[:16]}"
                 self.db.execute_query("""
-                    INSERT INTO world_model_states (game_id, game_type, state_data, created_at)
-                    VALUES (?, ?, ?, datetime('now'))
-                """, (game_id, game_type, json.dumps(world_state)))
+                    INSERT INTO world_model_states (state_id, game_id, session_id, objects_json, score, metadata, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                """, (state_id, game_id, self.session_manager.current_session_id, 
+                      json.dumps(world_state), game_state.score, json.dumps({'game_type': game_type})))
                 
                 logger.debug(f"[WORLD-MODEL] Saved end-of-game state for {game_type}")
             except Exception as e:
@@ -2168,17 +2203,19 @@ class GameplayEngine:
                         
                         if win_rate > 0.5:
                             self.metacognitive_engine.register_assumption(
+                                agent_id=agent_id,
                                 game_type=game_type,
-                                level=1,
-                                assumption_text=f"Familiar game type - prior approach should work (win rate {win_rate:.0%})",
-                                confidence=0.7
+                                level_number=1,
+                                assumption=f"Familiar game type - prior approach should work (win rate {win_rate:.0%})",
+                                assumption_type='rule'
                             )
                         elif autobiography.get('total_games_played', 0) == 0:
                             self.metacognitive_engine.register_assumption(
+                                agent_id=agent_id,
                                 game_type=game_type,
-                                level=1,
-                                assumption_text="New game type - need to discover mechanics",
-                                confidence=0.3
+                                level_number=1,
+                                assumption="New game type - need to discover mechanics",
+                                assumption_type='rule'
                             )
                             
                         logger.debug(f"[METACOGNITIVE] Session reset for new game {game_id}")
@@ -2913,12 +2950,12 @@ class GameplayEngine:
                                         expected_outcome = 'discover_pattern'
                                     theory_source = getattr(self, '_last_action_source', 'intuition')
                                     self.metacognitive_engine.make_prediction(
+                                        agent_id=agent_id,
                                         game_type=game_type,
-                                        level=current_level,
-                                        action=action,
-                                        expected_outcome=expected_outcome,
-                                        theory_behind_it=f"Action from {theory_source}: {reasoning[:100]}",
-                                        current_score=game_state.score
+                                        level_number=current_level,
+                                        theory=f"Action from {theory_source}: {reasoning[:100]}",
+                                        predicted_outcome=expected_outcome,
+                                        action=action
                                     )
                                 except Exception as e:
                                     logger.debug(f"Metacognitive prediction failed: {e}")
@@ -7525,6 +7562,62 @@ class GameplayEngine:
                     reasoning_parts.append(f"Hypotheses: {len(hypotheses)}")
             except Exception:
                 pass
+            
+            # === 2.5. NETWORK KNOWLEDGE SYNTHESIS: Collective Intelligence Query ===
+            # Agent queries for death zones, dangerous objects, theories
+            # This is PULL (agent asks when stuck), not PUSH (assigned tasks)
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+            if hasattr(self, 'knowledge_synthesis') and self.knowledge_synthesis:
+                try:
+                    network_knowledge = self.knowledge_synthesis.query_network_knowledge(game_type, level)
+                    
+                    if network_knowledge.get('has_knowledge'):
+                        # Use death zones to avoid dangerous actions
+                        for zone in network_knowledge.get('death_zones', [])[:3]:
+                            # If death zone is in a direction, penalize that direction
+                            zone_x = zone.get('zone_x')
+                            zone_y = zone.get('zone_y')
+                            death_count = zone.get('death_count', 1)
+                            if zone_x is not None and zone_y is not None and game_state.frame:
+                                # Estimate direction of danger relative to agent
+                                # This is heuristic - assumes agent is roughly centered
+                                frame_h = len(game_state.frame)
+                                frame_w = len(game_state.frame[0]) if game_state.frame else 0
+                                mid_y, mid_x = frame_h // 2, frame_w // 2
+                                
+                                death_confidence = min(1.0, death_count / 3.0)  # Scale by death count
+                                if zone_y < mid_y:  # Death zone above - penalize up
+                                    action_scores[4] -= 0.25 * death_confidence
+                                elif zone_y > mid_y:  # Death zone below - penalize down
+                                    action_scores[2] -= 0.25 * death_confidence
+                                if zone_x < mid_x:  # Death zone left - penalize left
+                                    action_scores[3] -= 0.25 * death_confidence
+                                elif zone_x > mid_x:  # Death zone right - penalize right
+                                    action_scores[1] -= 0.25 * death_confidence
+                        
+                        # Use untested experiments as suggestions
+                        for exp in network_knowledge.get('untested_experiments', [])[:2]:
+                            if 'wait' in exp.lower() or 'timing' in exp.lower():
+                                action_scores[5] += 0.2
+                            if 'click' in exp.lower() or 'interact' in exp.lower():
+                                action_scores[6] += 0.2
+                        
+                        # Log what we learned
+                        dz_count = len(network_knowledge.get('death_zones', []))
+                        th_count = len(network_knowledge.get('scientific_theories', []))
+                        if dz_count or th_count:
+                            reasoning_parts.append(f"NetworkKnowledge: {dz_count}dz,{th_count}th")
+                    
+                    # Report that we're stuck (contributes to network knowledge)
+                    self.knowledge_synthesis.report_stuck(
+                        agent_id=agent_id or 'unknown',
+                        game_type=game_type,
+                        level=level,
+                        actions_taken=escape_attempt,  # Use escape attempt as proxy
+                        best_score=game_state.score if game_state else 0
+                    )
+                except Exception as e:
+                    logger.debug(f"Knowledge synthesis query failed: {e}")
             
             # === 3. SELF-MODEL: "I AM STUCK" DETECTION ===
             # Check which actions actually moved "me" vs which did nothing

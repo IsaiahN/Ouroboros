@@ -74,23 +74,26 @@ class StuckGameAnalysis:
     recommended_actions: List[Dict[str, Any]] = field(default_factory=list)
 
 
-class StuckGameCoordinator:
+class NetworkKnowledgeSynthesis:
     """
-    Coordinates intelligent network response when agents are collectively stuck.
+    Agent-accessible knowledge synthesis service.
     
-    Replaces the old frustration quorum system with knowledge synthesis
-    and targeted interventions.
+    Agents query this when THEY decide they need help - it doesn't push commands.
+    Synthesizes death zones, theories, hypotheses, and knowledge gaps from the
+    collective network experience.
+    
+    This is a PULL interface: agents ask for knowledge, not assigned tasks.
     """
     
     def __init__(self, db):
-        """Initialize the coordinator."""
+        """Initialize the knowledge synthesis service."""
         self.db = db
         self.logger = logging.getLogger(__name__)
         
-        # Thresholds
-        self.stuck_threshold = 0.70  # 70% of agents stuck = trigger coordinator
-        self.min_agents_for_coordination = 3  # Need at least 3 agents
-        self.max_interventions_per_game = 3  # Don't over-intervene
+        # Thresholds (for background analysis, not agent control)
+        self.stuck_threshold = 0.70  # 70% of agents stuck = knowledge gap detected
+        self.min_agents_for_synthesis = 3  # Need at least 3 agents for meaningful synthesis
+        self.max_interventions_per_game = 3  # Track intervention history
         
         self._ensure_tables()
     
@@ -139,6 +142,41 @@ class StuckGameCoordinator:
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_stuck_game_lookup
                 ON stuck_game_interventions (game_type, resolved, generation)
+            """)
+            
+            # Table for agent stuck reports (agents report when they're stuck)
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS agent_stuck_reports (
+                    report_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    game_type TEXT NOT NULL,
+                    level_number INTEGER,
+                    actions_taken INTEGER,
+                    best_score REAL,
+                    reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_stuck_reports_game
+                ON agent_stuck_reports (game_type, level_number)
+            """)
+            
+            # Table for agent breakthrough reports (agents share what worked)
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS agent_breakthrough_reports (
+                    report_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    game_type TEXT NOT NULL,
+                    level_number INTEGER,
+                    what_worked TEXT,
+                    reported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_breakthrough_reports_game
+                ON agent_breakthrough_reports (game_type, level_number)
             """)
             
         except Exception as e:
@@ -851,7 +889,7 @@ class StuckGameCoordinator:
                     """, (
                         f"stuck_{analysis.game_type}_{uuid.uuid4().hex[:6]}",
                         analysis.game_type,
-                        'stuck_game_coordinator',
+                        'network_knowledge_synthesis',
                         'GOAL_DETECTION_NEEDED',
                         0.7,
                         json.dumps({'gap': gap, 'bottleneck_level': analysis.bottleneck_level})
@@ -867,7 +905,7 @@ class StuckGameCoordinator:
                     """, (
                         f"stuck_{analysis.game_type}_{uuid.uuid4().hex[:6]}",
                         analysis.game_type,
-                        'stuck_game_coordinator',
+                        'network_knowledge_synthesis',
                         'CONTROL_PRIMITIVE_NEEDED',
                         0.8,
                         json.dumps({'gap': gap, 'bottleneck_level': analysis.bottleneck_level})
@@ -875,3 +913,192 @@ class StuckGameCoordinator:
                     
         except Exception as e:
             self.logger.debug(f"Failed to notify CODS: {e}")
+    # ========================================================================
+    # AGENT-ACCESSIBLE QUERY INTERFACE
+    # ========================================================================
+    # These methods are for agents to PULL knowledge when they need it.
+    # This service doesn't make decisions - agents use it as a tool.
+    # ========================================================================
+    
+    def query_network_knowledge(self, game_type: str, level: int = None) -> Dict[str, Any]:
+        """
+        Agent-accessible method to query synthesized network knowledge.
+        
+        Called by agents when THEY decide they need help, not pushed by coordinator.
+        Returns everything the network knows about this game/level.
+        
+        Args:
+            game_type: Game type prefix (e.g., 'vc33')
+            level: Specific level to query (None = bottleneck level)
+            
+        Returns:
+            Dict with all synthesized knowledge for agent to use
+        """
+        try:
+            # Find bottleneck if level not specified
+            if level is None:
+                level = self._find_bottleneck_level(game_type)
+            
+            knowledge = {
+                'game_type': game_type,
+                'level': level,
+                'has_knowledge': False,
+                
+                # Where agents died
+                'death_zones': [],
+                'avoid_coordinates': [],
+                
+                # What's dangerous
+                'dangerous_objects': [],
+                'danger_object_ids': [],
+                
+                # Why agents died (theories)
+                'game_over_theories': [],
+                'scientific_theories': [],
+                
+                # Control hypotheses from network
+                'control_hypotheses': [],
+                
+                # What's NOT been tried
+                'untested_experiments': [],
+                'knowledge_gaps': [],
+                
+                # Recommendations (agent can ignore these)
+                'suggestions': []
+            }
+            
+            # Gather death zones
+            death_zones = self._get_death_zones(game_type, level)
+            if death_zones:
+                knowledge['death_zones'] = death_zones
+                knowledge['avoid_coordinates'] = [
+                    {'x': dz.get('zone_x'), 'y': dz.get('zone_y'), 'radius': dz.get('zone_radius', 1)}
+                    for dz in death_zones if dz.get('zone_x') is not None
+                ]
+            
+            # Gather dangerous objects
+            dangerous = self._get_dangerous_objects(game_type, level)
+            if dangerous:
+                knowledge['dangerous_objects'] = dangerous
+                knowledge['danger_object_ids'] = [
+                    d.get('object_id') for d in dangerous if d.get('object_id')
+                ]
+            
+            # Gather theories
+            knowledge['game_over_theories'] = self._get_game_over_theories(game_type, level)
+            knowledge['scientific_theories'] = self._get_scientific_theories(game_type, level)
+            
+            # Gather control hypotheses
+            knowledge['control_hypotheses'] = self._get_network_hypotheses(game_type, level)
+            
+            # Gather untested experiments
+            knowledge['untested_experiments'] = self._find_untested_experiments(game_type, level)
+            
+            # Build simple analysis for gap detection
+            temp_analysis = StuckGameAnalysis(
+                game_id=f"{game_type}-query",
+                game_type=game_type,
+                bottleneck_level=level,
+                death_zones=death_zones or [],
+                dangerous_objects=dangerous or [],
+                game_over_theories=knowledge['game_over_theories'] or [],
+                scientific_theories=knowledge['scientific_theories'] or [],
+                network_hypotheses=knowledge['control_hypotheses'] or []
+            )
+            knowledge['knowledge_gaps'] = self._identify_knowledge_gaps(temp_analysis)
+            
+            # Generate suggestions (agent can ignore)
+            if knowledge['avoid_coordinates']:
+                knowledge['suggestions'].append(
+                    f"Avoid coordinates: {knowledge['avoid_coordinates'][:3]}"
+                )
+            if knowledge['danger_object_ids']:
+                knowledge['suggestions'].append(
+                    f"Beware objects: {knowledge['danger_object_ids'][:3]}"
+                )
+            if knowledge['untested_experiments']:
+                knowledge['suggestions'].append(
+                    f"Try: {knowledge['untested_experiments'][0]}"
+                )
+            if 'NO_CONTROL_HYPOTHESES' in str(knowledge['knowledge_gaps']):
+                knowledge['suggestions'].append(
+                    "Network has no control hypotheses - try discovering what you control"
+                )
+            
+            # Mark if we have useful knowledge
+            knowledge['has_knowledge'] = bool(
+                death_zones or dangerous or 
+                knowledge['game_over_theories'] or 
+                knowledge['scientific_theories'] or
+                knowledge['control_hypotheses']
+            )
+            
+            self.logger.debug(
+                f"[COORDINATOR] Agent query for {game_type}@L{level}: "
+                f"{len(death_zones or [])} death zones, "
+                f"{len(dangerous or [])} dangers, "
+                f"{len(knowledge['control_hypotheses'] or [])} hypotheses"
+            )
+            
+            return knowledge
+            
+        except Exception as e:
+            self.logger.debug(f"Knowledge query failed: {e}")
+            return {
+                'game_type': game_type,
+                'level': level,
+                'has_knowledge': False,
+                'error': str(e)
+            }
+    
+    def report_stuck(self, agent_id: str, game_type: str, level: int, 
+                     actions_taken: int, best_score: float) -> None:
+        """
+        Agent reports that it's stuck. Updates network knowledge.
+        
+        This is the agent telling the network about its struggle,
+        not the coordinator detecting it.
+        """
+        try:
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO agent_stuck_reports (
+                    report_id, agent_id, game_type, level_number,
+                    actions_taken, best_score, reported_at
+                ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (
+                f"stuck_{agent_id}_{game_type}_{level}",
+                agent_id, game_type, level, actions_taken, best_score
+            ))
+        except Exception as e:
+            # Table might not exist, that's okay
+            self.logger.debug(f"Stuck report failed: {e}")
+    
+    def report_breakthrough(self, agent_id: str, game_type: str, level: int,
+                           what_worked: str) -> None:
+        """
+        Agent reports a breakthrough. Updates network knowledge.
+        
+        This is how agents share what worked, so other stuck agents
+        can query and learn.
+        """
+        try:
+            self.db.execute_query("""
+                INSERT INTO agent_breakthrough_reports (
+                    report_id, agent_id, game_type, level_number,
+                    what_worked, reported_at
+                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (
+                f"break_{agent_id}_{game_type}_{level}_{uuid.uuid4().hex[:6]}",
+                agent_id, game_type, level, what_worked
+            ))
+            
+            # Mark any interventions as resolved
+            self.db.execute_query("""
+                UPDATE stuck_game_interventions 
+                SET resolved = 1, resolved_at = CURRENT_TIMESTAMP, 
+                    breakthrough_action = ?
+                WHERE game_type = ? AND resolved = 0
+            """, (what_worked, game_type))
+            
+        except Exception as e:
+            self.logger.debug(f"Breakthrough report failed: {e}")

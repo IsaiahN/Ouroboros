@@ -11,13 +11,13 @@ The old approach was to emit "mutation_rate" signals which:
 2. Targeted the wrong response (mutation doesn't help stuck gameplay)
 3. Created duplicate spam in the database
 
-This is now SUPERSEDED by stuck_game_coordinator.py which provides:
+This is now SUPERSEDED by network_knowledge_synthesis.py which provides:
 - Intelligent knowledge synthesis from stuck agents
 - Targeted interventions (extend discovery phase, queue experiments, etc.)
 - Integration with Scientific Method Engine, CODS, Q1-Q5
 
 The frustration TRACKING (update_agent_frustration) is still used by
-stuck_game_coordinator to detect quorum conditions.
+network_knowledge_synthesis to detect quorum conditions.
 
 ===== LEGACY DOCSTRING =====
 

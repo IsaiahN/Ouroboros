@@ -1442,7 +1442,7 @@ class AutonomousEvolutionRunner:
                                 )
                                 
                                 # NOTE: Old frustration quorum disabled - used to emit useless mutation signals
-                                # The stuck_game_coordinator now handles this at generation end
+                                # The network_knowledge_synthesis now handles this at generation end
                                 # with intelligent knowledge synthesis and targeted interventions
                             except Exception as e:
                                 print(f"  [WARN] Frustration detection failed: {e}")

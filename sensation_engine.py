@@ -480,6 +480,50 @@ class SensationEngine:
         
         return ei_score
     
+    def get_agent_sensation_state(self, agent_id: str) -> Optional[Dict[str, float]]:
+        """
+        Get agent's current sensation/emotional state.
+        
+        Returns frustration and satisfaction levels derived from navigation_state.
+        Navigation state ranges from -1.0 (frustrated) to +1.0 (satisfied).
+        
+        Args:
+            agent_id: Agent to query
+            
+        Returns:
+            Dictionary with 'frustration' and 'satisfaction' (0.0 to 1.0 each),
+            or None if agent not found
+        """
+        try:
+            result = self.db.execute_query(
+                "SELECT navigation_state FROM agents WHERE agent_id = ?",
+                (agent_id,)
+            )
+            
+            if not result:
+                return None
+            
+            nav_state = result[0].get('navigation_state', 0.0) or 0.0
+            
+            # Convert navigation_state (-1 to +1) to frustration/satisfaction (0 to 1)
+            # Negative nav_state = frustration, positive = satisfaction
+            if nav_state < 0:
+                frustration = abs(nav_state)  # -0.5 -> 0.5 frustration
+                satisfaction = 0.0
+            else:
+                frustration = 0.0
+                satisfaction = nav_state  # +0.5 -> 0.5 satisfaction
+            
+            return {
+                'frustration': frustration,
+                'satisfaction': satisfaction,
+                'navigation_state': nav_state
+            }
+            
+        except Exception as e:
+            logger.debug(f"Failed to get agent sensation state: {e}")
+            return None
+    
     def get_network_emotional_intelligence(self, generation: Optional[int] = None) -> Dict[str, float]:
         """
         Calculate network-level emotional intelligence metrics.
