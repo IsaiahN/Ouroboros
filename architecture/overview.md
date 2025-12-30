@@ -60,11 +60,41 @@ This plan synthesizes all DOCS materials (master rulesets, AGI Unified Theory, C
 - architecture/ci-pycache-testing.md — CI/runtime enforcement patterns for python -B, env flags, pycache scanning, and test commands.
 
 ## Core Artifacts to Add (additive migrations only)
-- attempts: attempt_id, game_id, level, agent_id, role, mode, actions_used, levels_completed, score, time_ms, succeeded.
-- hook_failures: hook_name, game_id, agent_id, generation, exception_type, message, stack_hash, timestamp, auto_disabled_flag.
-- action_proposals_log: attempt_id, step, proposals (with w_A, w_B), chosen, available_actions, mode.
-- lesson_interpretations: interpretation, explains_examples, fails_examples, confidence, source_attempt_id, game_id, level.
-- Tag existing artifacts with source_attempt_id and source_mode (sequences, viral packages, hypotheses).
+
+## Reasoning Logs as Learning Signals
+- Ingest legacy and live reasoning logs into structured artifacts: map log frames to attempt_id/mode/role and store distilled deltas (what changed, stated intention, detected obstacle) alongside action_proposals_log and lesson_interpretations.
+- Auto-detect hangups seen in samples (rare-color fixation, oscillation search, pseudo-button pathfinding without closure, repeated offset sweeps) and emit GUARD_TRIGGERED or HOOK_FAILURE_DETECTED with stack_hash bucketing when loops exceed thresholds.
+- Use replay validation to reproduce log-path actions and compare to proposal ladders; mismatches become hook_failures with evidence from reasoning logs to drive fixes.
+- Surface per-game and per-role hangup dashboards backed by attempts + reasoning-derived tags to focus refactors on bottlenecks instead of anecdotal logs.
+
+## Unified Theory Alignment (agi_unified_theory)
+- Database-as-organism: all new telemetry (attempts, proposals, lessons, reasoning-derived tags) lands in SQLite; agents stay stateless between runs beyond DB queries.
+- Viral exchange: lesson_interpretations and operators propagate as viral packages with source_attempt_id/source_mode for lineage and credibility; reputation tables track spread and failure.
+- Dual economies: prestige remains social capital; action budgets remain metabolic; neither can buy the other. Mode/role guards enforce separation at runtime and in writes.
+- Evolutionary forgetting: retention and cleanup policies (safe_cleanup + database_logger coordination) purge low-signal logs and stale lessons while preserving wins and positive evidence.
+- Distributed specialization: roles (pioneer/optimizer/generalist/exploiter) remain gated; w_A/w_B weights are logged per decision to keep Two-Streams explicit.
+
+## Lesson + Operator Fusion (Teachers x CODS)
+- Treat each level as a teacher demonstration: lesson_interpretations capture hypothesis of the taught concept with explains_vs_fails coverage.
+- CODS operators become the vocabulary to express lessons; proposals include operator_id and are validated against lesson coverage. Unlocking an operator requires evidence that it explains observed examples (Games-as-Teachers) plus RLVR validation.
+- Add a Lesson-Operator Fusion plugin: subscribes to ACTION_PROPOSALS/ACTION_EXECUTED/FRAME_CHANGED, updates lesson_interpretations, and feeds operator eligibility into the combiner (operators preferred when they improve lesson coverage).
+- Transfer test: replay validation must confirm that a fused lesson+operator explanation works across variations; failures decrement operator reliability and flag contradictions in lesson_interpretations.
+
+## Two-Streams + Resonance Core (from two-streams.md, harmonies)
+- Every proposal and decision logs w_A (private memory), w_B (collective wisdom), and w_R (resonance across domains/scales). Combiner uses these weights; telemetry stored in attempts and action_proposals_log.
+- Resonance detection: detect cross-game/operator/lesson convergence; surface resonance_tags in proposals/lessons; elevate high-resonance packages per harmonic principle while retaining dual economies.
+- Agents stay stateless between runs beyond DB queries; w_A/w_B/w_R are runtime weights, not stateful parameters.
+- Dynamic ATP reweighting (preserve existing logic from adaptive_action_limits/agent_operating_mode_system): role multipliers + w_B growth bonuses/low-start boosts/stagnation penalties adjust action budgets per generation and per agent; this is metabolic-only and remains separate from prestige.
+
+## Innate + Meta Primitives (advanced primitives, meta primitive generation)
+- Seed weak priors/attention primitives: detect_change, detect_motion, novelty/surprise, contingency/action_causation, face/social salience equivalents (mapped to ARC cues), plus weak physics priors (solidity_bias, continuity_bias) as soft constraints that can be overturned by evidence.
+- Social learning priors: credibility_weighting, joint_attention/teaching_detection, imitation_bias to better use viral packages and Oracle guidance.
+- Meta-representation loop: treat rules/operators as data; enable operator factories and discovery strategies as first-class objects; log meta_operators in CODS and provenance them via source_attempt_id/source_mode.
+- Temporal/causal prompts: recency_weighting, gap detection, and hypothesis design prompts (see how_to_reason.md) applied in metacognitive/hypothesis plugins.
+
+## Reasoning Prompts & Hangup Remediation
+- Standard metacognitive prompts (assumptions, unused info, simpler subproblem, reverse engineering, certainty vs guess, prediction before action) are enforced in the hypothesis/lesson plugin and reflected into reasoning_tags on events.
+- Hangup patterns from legacy logs (rare-color fixation, oscillation sweeps, pseudo-button dead-ends) are auto-tagged and drive guard triggers and replay checks until cleared.
 
 ## Target Runtime Flow (high level)
 - Orchestrator (thin): INIT → STEP → POST_STEP → FINALIZE; emits events only.

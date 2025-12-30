@@ -75,11 +75,21 @@ Execution order and SQL sketches for the additive schema changes. Do not drop ex
   );
   - Indices: lesson_interpretations(attempt_id), lesson_interpretations(game_id, level).
 
+  - Enforce PRAGMA foreign_keys=ON at connection init; add validation query to confirm it stays enabled.
+
 ## Phase 2: Additive Columns (provenance)
 - ALTER TABLE sequences ADD COLUMN source_attempt_id TEXT;
 - ALTER TABLE sequences ADD COLUMN source_mode TEXT;
 - Repeat for viral_packages, hypotheses, prestige logs (table names per schema).
 - Indices: add source_attempt_id/source_mode where write volume is high.
+
+- Add CHECK constraints (where safe): mode in {LIVE, REPLAY_VALIDATION, EVAL}; booleans as {0,1}; status enums constrained to allowed sets.
+
+- Add unique constraint on (game_id, level_number, is_active) for winning_sequences; index winning_sequences_full_game.game_id; index sequence_validation_attempts (sequence_id, agent_id); ensure attempts indices (mode, role, game_id, level) are created.
+
+- Reasoning-log linkage: if volume warrants, add attempts.reasoning_tags JSON (nullable for legacy) to store distilled hangup tags; alternatively extend lesson_interpretations.reasoning_tags. Backfill with NULL; require non-null on new LIVE writes.
+
+- Two-Streams/resonance fields: add w_R to attempts/action_proposals_log (nullable legacy), add resonance_tags to lesson_interpretations; add CHECK on mode enum; keep columns nullable for existing rows.
 
 ## Phase 3: Backfill and Defaults
 - Backfill source_mode for legacy rows with 'UNKNOWN'; leave source_attempt_id NULL for legacy.

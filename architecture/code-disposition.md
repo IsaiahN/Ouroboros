@@ -20,7 +20,12 @@ Legend: Keep (no functional change; wire to events/guards), Refactor (move side-
 - database/schema_inspector.py — Keep; include new tables/columns.
 
 ## Root gameplay/orchestration
-- core_gameplay.py — Refactor: split INIT/STEP/POST_STEP/FINALIZE; emit events; guards; attempts + proposal logging; side-effects to plugins.
+- core_gameplay.py — Refactor: split INIT/STEP/POST_STEP/FINALIZE; emit events; guards; attempts + proposal logging; side-effects to plugins. Preserve intent:
+	- PrimitiveHelper + seed_primitives: attention (detect_change/motion/contingency/novelty), affordance/negative-space (containers/open edges), stuck checks; keep as sensing signals in plugins.
+	- 3-try sequence fallback system and SequenceFallbackResult (frontier/reached_frontier, abstraction_guidance, multi_stage_sequence) for replay triage.
+	- Optional hooks: ScientificMethodEngine, NetworkKnowledgeSynthesis, RuleInductionEngine, SymbolicReasoningEngine, SequenceAbstraction, CODS (CODSEngine/CODSGameContext), TerminalPatternDetector, reasoning capture (console_metrics_capture), SequenceMiner—rehome as plugins with mode guards.
+	- Collaborators: SensationEngine/get_sensation_mode, BreakthroughBudgetAllocator/Detector, MultiStageMatchingPipeline, SubgoalPlanningActivator, AgentSelfModel (WeavingReporter, CognitiveStageSystem, EpisodicMemorySystem, AgentHypothesisSystem, MetacognitiveReasoningEngine), ObjectDetector—preserve behaviors via events/plugins.
+	- GameLoopState safeguards (API reset/backoff, stuck thresholds, no-frame-change counters) to become guard/heartbeat logic.
 - action_handler.py — Refactor: pure execution; emit ACTION_EXECUTED; no learning writes.
 - game_session_manager.py — Refactor: thin orchestrator; emit RUN_INIT/RUN_FINALIZED; owns RunContext.
 - run_evolution.py — Keep orchestration; use modes; create attempts.

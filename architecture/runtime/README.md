@@ -15,7 +15,7 @@ This captures the behavior-parity loop split (init/step/post_step/finalize), eve
 
 ## RunContext (required fields)
 - attempt_id (uuid), game_id, level, generation, agent_id, role, mode, budgets {actions_remaining, game_actions_remaining}.
-- w_A_weight, w_B_weight, available_actions (per step), sequence_source_id (if replay), operator_source_id (if CODS), source_mode.
+- w_A_weight, w_B_weight, w_R_weight (resonance), available_actions (per step), sequence_source_id (if replay), operator_source_id (if CODS), source_mode.
 - heartbeat_counters {step_idx, max_steps}, guard_states {budget_ok, mode_ok, role_ok}.
 - replay_guard: ensures REPLAY_VALIDATION/EVAL prohibit writes.
 
@@ -39,3 +39,6 @@ This captures the behavior-parity loop split (init/step/post_step/finalize), eve
 - Start with existing play_single_game; instrument emissions without changing decisions.
 - Move side-effects into plugins behind the bus.
 - Enforce guards and heartbeats; abort safely with recorded reason rather than silent failure.
+- Reasoning logs: ingest legacy/live logs by attempt_id/mode/role; translate narrative steps into hangup tags and contradictions tied to ACTION_PROPOSALS and LESSON_INTERPRETATION_READY events so plugins can react (e.g., boost CODS operator that resolves a logged contradiction, or trigger GUARD_TRIGGERED on repeated oscillation patterns).
+- Two-Streams + resonance: propagate w_A/w_B/w_R through events and plugins; resonance tags come from cross-game/operator/lesson agreement and only affect weighting, not budgets.
+- Priors plugin: apply weak attention/physics/social priors as soft weights; log when evidence overturns priors to avoid brittleness.
