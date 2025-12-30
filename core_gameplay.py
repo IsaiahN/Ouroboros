@@ -388,6 +388,9 @@ class SequenceFallbackResult:
     all_failed: bool = False
     multi_stage_sequence: Any = None  # Dict or None
     abstraction_guidance: Any = None  # Dict or None
+    # Frontier detection - when sequence brings agent to unexplored territory
+    reached_frontier: bool = False
+    frontier_level: Any = None  # int or 'unknown'
 
 
 class GameplayEngine:
@@ -1131,7 +1134,9 @@ class GameplayEngine:
                                 # Eliminate action if pattern is clear
                                 common = pattern.get('common_factor', '')
                                 if 'ACTION:' in common:
-                                    failed_action = common.replace('ACTION: ', '')
+                                    # Extract action and format as 'ACTION#' for eliminate_action
+                                    action_num = common.replace('ACTION: ', '').replace('ACTION:', '').strip()
+                                    failed_action = f"ACTION{action_num}" if not action_num.startswith('ACTION') else action_num
                                     self.metacognitive_engine.eliminate_action(
                                         agent_id=agent_id,
                                         game_type=game_type,
@@ -2419,7 +2424,8 @@ class GameplayEngine:
                             logger.warning(f"  [WARN] Low success rate: {sr:.1%}")
                     
                     # PARIAH ANALYSIS (for optimizer/exploiter)
-                    agent_mode = self.game_config.get('agent_operating_mode', 'generalist')
+                    # NOTE: agent_mode already defined at top of function (line ~2015-2017)
+                    # Do NOT redefine - use existing value
                     should_try = True
                     
                     if agent_mode in ['optimizer', 'exploiter']:
@@ -5452,13 +5458,15 @@ class GameplayEngine:
                 # Get negative influence from pariahs WITH ROLE-ADJUSTED TOLERANCE
                 # Per agi_unified_theory.md: Exploiters/Optimizers have pariah immunity
                 # to prevent analysis paralysis
-                agent_mode = self.game_config.get('agent_operating_mode', 'generalist')
+                # NOTE: agent_mode already defined at line ~4931 in this function
+                # Do NOT redefine - use existing value (or fallback to 'generalist')
+                current_agent_mode = agent_mode or 'generalist'
                 current_game_id = self.session_manager.current_game_id
                 current_level = int(game_state.score) + 1 if game_state.score else 1
                 
                 action_penalties = viral_engine.get_role_adjusted_pariah_penalties(
                     agent_id=agent_id,
-                    agent_role=agent_mode or 'generalist',
+                    agent_role=current_agent_mode,
                     game_id=current_game_id,
                     level_number=current_level
                 )
@@ -5466,7 +5474,7 @@ class GameplayEngine:
                 if action_weights:
                     logger.debug(f"[VIRAL] Viral packages suggest: {list(action_weights.keys())[:3]}")
                 if action_penalties:
-                    logger.debug(f"[PARIAH] Warnings (role-adjusted for {agent_mode}): {list(action_penalties.keys())[:3]}")
+                    logger.debug(f"[PARIAH] Warnings (role-adjusted for {current_agent_mode}): {list(action_penalties.keys())[:3]}")
                     
             except Exception as e:
                 logger.debug(f"Phase 3 influence error: {e}")

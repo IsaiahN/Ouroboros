@@ -228,3 +228,89 @@ All modified files pass import tests:
 python -c "import core_gameplay; import network_knowledge_synthesis; import frustration_detector; print('All modules import OK')"
 # Output: All modules import OK
 ```
+---
+
+## Session Continued: Code Review Fixes
+
+**Timestamp**: ~8:30 AM
+
+### 6. SequenceFallbackResult Missing Fields (FIXED)
+
+**Problem**: `SequenceFallbackResult` dataclass at line 383 was missing `reached_frontier` and `frontier_level` fields that were being used elsewhere in code, causing potential AttributeError crashes.
+
+**Fix**: Added missing fields to the dataclass:
+```python
+@dataclass
+class SequenceFallbackResult:
+    ...
+    reached_frontier: bool = False
+    frontier_level: Any = None  # int or 'unknown'
+```
+
+**Status**: FIXED
+
+---
+
+### 7. Action Format Mismatch in Failure Commonality (FIXED)
+
+**Problem**: At line ~1137, the code was calling `eliminate_action()` with format like `"2"` instead of `"ACTION2"`. The eliminate_action method expects `ACTION#` format.
+
+**Root Cause**: The pattern extraction used `common.replace('ACTION: ', '')` which produces just the number.
+
+**Fix**: Added proper format conversion:
+```python
+action_num = common.replace('ACTION: ', '').replace('ACTION:', '').strip()
+failed_action = f"ACTION{action_num}" if not action_num.startswith('ACTION') else action_num
+```
+
+**Status**: FIXED
+
+---
+
+### 8. Agent Mode Shadowing (FIXED)
+
+**Problem**: In multiple places, `agent_mode` was being redefined with `self.game_config.get('agent_operating_mode', 'generalist')` which would shadow a properly set value from earlier in the function (via `_get_agent_operating_mode()`).
+
+**Locations Fixed**:
+1. **Line ~2427** (in `play_single_game`): Removed redundant redefinition, added comment noting agent_mode already defined at line ~2015-2017
+2. **Line ~5461** (in `_run_single_action`): Changed to use existing `agent_mode` variable with fallback: `current_agent_mode = agent_mode or 'generalist'`
+
+**Why This Matters**: Pioneer/Optimizer/Exploiter agents were sometimes being treated as 'generalist' due to this shadowing, breaking role-specific behavior.
+
+**Status**: FIXED
+
+---
+
+### 9. `_previous_frame` Lifecycle (VERIFIED OK)
+
+**Problem Reported**: Concern that `_previous_frame` wasn't being set at the right time for frame change detection.
+
+**Investigation**: 
+- `_previous_frame` is read at line ~9529 via `getattr(self, '_previous_frame', None)`
+- `_previous_frame` is updated at line ~9909 AFTER building reasoning object
+
+**Analysis**: This is CORRECT behavior:
+1. Action N-1 completes → `_previous_frame` set to frame after action N-1
+2. Action N executes → New frame from API  
+3. Line 1076-1083 → Compare new frame vs `_previous_frame` ✓
+4. Line 9909 → Update `_previous_frame` for next cycle
+
+**Status**: NO FIX NEEDED
+
+---
+
+## Summary of All Fixes This Session
+
+| # | Issue | Severity | Status |
+|---|-------|----------|--------|
+| 1 | Metacognitive param mismatches (5 locations) | CRITICAL | FIXED |
+| 2 | Missing `get_agent_sensation_state()` | HIGH | FIXED |
+| 3 | World model INSERT wrong columns | HIGH | FIXED |
+| 4 | NetworkKnowledgeSynthesis not integrated | MEDIUM | FIXED |
+| 5 | Pycache disable missing (21 files) | LOW | FIXED |
+| 6 | SequenceFallbackResult missing fields | CRITICAL | FIXED |
+| 7 | Action format mismatch | HIGH | FIXED |
+| 8 | Agent mode shadowing (2 locations) | HIGH | FIXED |
+| 9 | `_previous_frame` lifecycle | LOW | VERIFIED OK |
+
+**All core_gameplay.py syntax verified with `python -m py_compile core_gameplay.py`**
