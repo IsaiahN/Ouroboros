@@ -132,6 +132,7 @@ KEEP_FILES = {
 SKIP_DIRS = {
     ".git",
     ".vscode",
+    ".venv",
     "venv",
     "env",
     "tests",           # Unit test files - never delete
