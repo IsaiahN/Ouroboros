@@ -115,6 +115,14 @@ except ImportError:
     TERMINAL_DETECTOR_AVAILABLE = False
     TerminalPatternDetector = None
 
+# Scientific Method Engine - theory formation/testing
+try:
+    from scientific_method_engine import ScientificMethodEngine
+    SCIENTIFIC_METHOD_AVAILABLE = True
+except ImportError:
+    SCIENTIFIC_METHOD_AVAILABLE = False
+    ScientificMethodEngine = None
+
 # Reasoning Log Capture - For Oracle to detect reasoning bugs
 try:
     from console_metrics_capture import record_reasoning, get_reasoning_capture
@@ -131,6 +139,14 @@ try:
 except ImportError:
     SEQUENCE_MINER_AVAILABLE = False
     SequenceMiner = None
+
+# Network Knowledge Synthesis - network-level insights
+try:
+    from network_knowledge_synthesis import NetworkKnowledgeSynthesis
+    KNOWLEDGE_SYNTHESIS_AVAILABLE = True
+except ImportError:
+    KNOWLEDGE_SYNTHESIS_AVAILABLE = False
+    NetworkKnowledgeSynthesis = None
 
 logger = logging.getLogger(__name__)
 

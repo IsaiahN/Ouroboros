@@ -200,7 +200,7 @@ python manual_tools/schema_inspector.py --counts
 | `schema_inspector.py` | Inspect database tables, columns, row counts, sample data |
 
 ## 🛠️ Configuration
--   **Environment**: Copy `.env.example` to `.env` and set `ARC_API_KEY`.
+-   **Environment**: Copy `.env.example` to `.env`, set `ARC_API_KEY`, then `pip install -r requirements.txt` (includes `python-dotenv` for automatic loading).
 -   **Logs**: All logs are stored in `core_data.db` (No log files!).
 -   **Shutdown**: Press `Ctrl+C` ONCE for graceful shutdown (saves state & closes scorecard(s)).
 

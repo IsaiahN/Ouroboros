@@ -21,6 +21,13 @@ import sys
 import asyncio
 import argparse
 
+# Load environment variables from .env if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 from autonomous_evolution_runner import AutonomousEvolutionRunner

@@ -112,6 +112,7 @@ KEEP_FILES = {
     "disk_space_monitor.py",
     "safe_cleanup.py",
     "cleanup_temp_files.py",
+    "requirements.txt",
     
     # TIER 3: Experimental/Future (kept in root but not integrated)
     "symbolic_reasoning_engine.py",

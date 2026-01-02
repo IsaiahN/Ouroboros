@@ -100,6 +100,55 @@ class PrimitiveUnlockManager:
         self._initialize_schema()
         self._register_locked_primitives()
         self._grandfathered_primitives: Dict[str, str] = {}  # name -> implementation
+
+    def attempt_unlock(self, primitive_name: str, pattern: Optional[Dict[str, Any]] = None,
+                       agent_id: Optional[str] = None, generation: int = 0, success_rate: float = 0.0,
+                       cross_game_success_rate: float = 0.0, rlvr_validation_passed: bool = False,
+                       unlock_reason: Optional[str] = None, **kwargs: Any) -> bool:
+        """Compatibility stub for legacy callers; records attempt and returns False (no-op unlock).
+        Accepts unlock_reason/extra kwargs for forward compatibility with CODS engine calls."""
+        try:
+            attempt = UnlockAttempt(
+                attempt_id=str(uuid.uuid4()),
+                primitive_name=primitive_name,
+                discovered_pattern=json.dumps(pattern or {}),
+                game_ids_tested=[],
+                success_rate=success_rate,
+                cross_game_success_rate=cross_game_success_rate,
+                rlvr_validation_passed=rlvr_validation_passed,
+                unlocked=False,
+            )
+            self.db.execute_query(
+                """
+                INSERT OR IGNORE INTO primitive_unlock_attempts (
+                    attempt_id, primitive_name, agent_id, generation, discovered_pattern,
+                    pattern_hash, game_ids_tested, games_tested_count, success_rate,
+                    cross_game_success_rate, rlvr_validation_passed, oracle_verdict,
+                    oracle_reasoning, similarity_to_locked, unlocked, marked_as_novel
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    attempt.attempt_id,
+                    primitive_name,
+                    agent_id,
+                    generation,
+                    attempt.discovered_pattern,
+                    None,
+                    json.dumps(attempt.game_ids_tested),
+                    len(attempt.game_ids_tested),
+                    success_rate,
+                    cross_game_success_rate,
+                    1 if rlvr_validation_passed else 0,
+                    unlock_reason,
+                    None,
+                    0.0,
+                    0,
+                    0,
+                ),
+            )
+        except Exception:
+            logger.debug("attempt_unlock compatibility stub failed (ignored)")
+        return False
     
     def _initialize_schema(self):
         """Create database tables for primitive tracking."""

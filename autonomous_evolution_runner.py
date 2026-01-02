@@ -3111,7 +3111,7 @@ class AutonomousEvolutionRunner:
             
             cursor.execute("""
                 SELECT COUNT(*) as new_seqs FROM winning_sequences 
-                WHERE is_active = 1 AND created_at >= datetime('now', '-3 hours')
+                WHERE is_active = 1 AND discovered_at >= datetime('now', '-3 hours')
             """)
             new_seqs = cursor.fetchone()['new_seqs']
             

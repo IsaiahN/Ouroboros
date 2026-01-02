@@ -393,7 +393,7 @@ class OracleHealthMonitor:
         new_completions = self.db.execute_query("""
             SELECT COUNT(DISTINCT game_id || '-' || CAST(level_number AS TEXT)) as unique_levels
             FROM winning_sequences
-            WHERE created_at >= datetime('now', '-3 hours')
+            WHERE COALESCE(discovered_at, '1970-01-01') >= datetime('now', '-3 hours')
             AND is_active = 1
         """)
         new_level_count = new_completions[0]['unique_levels'] if new_completions else 0
@@ -456,8 +456,8 @@ class OracleHealthMonitor:
         cods_usage = self.db.execute_query("""
             SELECT 
                 COUNT(*) as total_operators,
-                SUM(CASE WHEN times_used > 0 THEN 1 ELSE 0 END) as operators_used,
-                SUM(times_used) as total_uses
+                SUM(CASE WHEN times_tested > 0 THEN 1 ELSE 0 END) as operators_used,
+                SUM(times_tested) as total_uses
             FROM composed_operators
             WHERE status != 'pruned'
         """)
@@ -521,7 +521,7 @@ class OracleHealthMonitor:
         games_result = self.db.execute_query("""
             SELECT 
                 COUNT(*) as total_games,
-                SUM(CASE WHEN levels_completed > 0 THEN 1 ELSE 0 END) as with_progress
+                SUM(CASE WHEN level_completions > 0 THEN 1 ELSE 0 END) as with_progress
             FROM game_results
             WHERE generation = ?
         """, (generation,))
