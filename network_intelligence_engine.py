@@ -10,9 +10,6 @@ Following Rule 2: Database-Only Storage
 Following Roadmap: Network Foundation (prerequisite for all other systems)
 """
 
-import os
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
-
 import json
 import math
 import uuid

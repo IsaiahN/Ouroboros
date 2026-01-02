@@ -135,7 +135,8 @@ class GameSessionManager:
         return self.current_session_id
 
     async def create_game(self, game_id: str, tags: Optional[list] = None, 
-                         agent_id: Optional[str] = None, agent_mode: Optional[str] = None) -> Dict[str, Any]:
+                         agent_id: Optional[str] = None, agent_mode: Optional[str] = None,
+                         mode: Optional[str] = None) -> Dict[str, Any]:
         """Create and initialize a new game.
 
         Args:
@@ -172,7 +173,8 @@ class GameSessionManager:
                 game_id=game_id,
                 session_id=self.current_session_id,
                 agent_id=agent_id,
-                agent_mode=agent_mode
+                agent_mode=agent_mode,
+                mode=mode
             )
 
         # Create game via API

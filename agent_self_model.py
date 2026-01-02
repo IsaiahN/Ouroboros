@@ -41,6 +41,9 @@ class AgentSelfModel:
     def __init__(self, db_path: str = "core_data.db"):
         """Initialize self-model system."""
         self.db = DatabaseInterface(db_path)
+        self.db_path = db_path
+        self._abstraction_engine = None
+        self._abstraction_unavailable = False
         self._ensure_tables()
     
     def _ensure_tables(self):
@@ -140,7 +143,7 @@ class AgentSelfModel:
             CREATE INDEX IF NOT EXISTS idx_pseudo_button_game 
             ON pseudo_button_behavior(game_type, level_number)
         """)
-        
+
         # =====================================================================
         # OBJECT SELECTION STATE (Added 2025-12-08)
         # =====================================================================
@@ -2445,6 +2448,43 @@ class AgentSelfModel:
     # NETWORK KNOWLEDGE SHARING: "I AM THIS OBJECT" HYPOTHESES
     # ========================================================================
     
+    # ------------------------------------------------------------------
+    # Few-shot relational patterns (SequenceAbstraction bridge)
+    # ------------------------------------------------------------------
+    def _get_abstraction_engine(self):
+        """Lazy init abstraction engine; returns None if unavailable."""
+        if self._abstraction_engine or self._abstraction_unavailable:
+            return self._abstraction_engine
+        try:
+            from sequence_abstraction import SequenceAbstraction
+            self._abstraction_engine = SequenceAbstraction(self.db_path)
+            return self._abstraction_engine
+        except Exception as exc:
+            logger.debug(f"Abstraction engine unavailable for self-model: {exc}")
+            self._abstraction_unavailable = True
+            return None
+
+    def get_few_shot_control_relations(
+        self,
+        game_id: str,
+        level: int,
+        min_confidence: float = 0.5,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Expose few-shot invariants/variants from sequence abstraction for control bootstrapping.
+        Returns None if insufficient data or low confidence.
+        """
+        engine = self._get_abstraction_engine()
+        if not engine:
+            return None
+
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        relations = engine.get_few_shot_relations(game_type, level)
+
+        if not relations or relations.get("confidence", 0.0) < min_confidence:
+            return None
+        return relations
+
     def share_control_discovery_to_network(
         self,
         agent_id: str,
@@ -7972,6 +8012,9 @@ class MetacognitiveReasoningEngine:
         """Initialize metacognitive engine."""
         self.db = db
         self._ensure_tables()
+
+        # Provenance for the current session (attempt/mode/generation/role)
+        self._session_provenance: Dict[str, Any] = {}
         
         # Session state (cleared per game)
         self._current_assumptions = []
@@ -7980,6 +8023,21 @@ class MetacognitiveReasoningEngine:
         self._eliminated_actions = set()
         self._theory_revisions = []
         self._current_theory = None
+
+    def set_session_provenance(
+        self,
+        attempt_id: Optional[str],
+        mode: Optional[str],
+        generation: Optional[int],
+        role: Optional[str],
+    ) -> None:
+        """Record provenance for metacog inserts (DB-only, no side effects)."""
+        self._session_provenance = {
+            'attempt_id': attempt_id,
+            'mode': mode,
+            'generation': generation,
+            'role': role,
+        }
     
     def _ensure_tables(self):
         """Create metacognitive tracking tables."""
@@ -7999,6 +8057,14 @@ class MetacognitiveReasoningEngine:
                 is_valid BOOLEAN DEFAULT NULL,  -- NULL = untested, TRUE/FALSE = tested
                 tested_at DATETIME,
                 test_result TEXT,
+
+                -- Provenance/decay
+                source_attempt_id TEXT,
+                source_mode TEXT,
+                last_observed_generation INTEGER DEFAULT 0,
+                decay_score REAL DEFAULT 0.0,
+                reliability REAL DEFAULT 0.5,
+                consensus REAL DEFAULT 0.0,
                 
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -8021,6 +8087,14 @@ class MetacognitiveReasoningEngine:
                 actual_outcome TEXT,
                 prediction_correct BOOLEAN,
                 theory_revised BOOLEAN DEFAULT FALSE,
+
+                -- Provenance/decay
+                source_attempt_id TEXT,
+                source_mode TEXT,
+                last_observed_generation INTEGER DEFAULT 0,
+                decay_score REAL DEFAULT 0.0,
+                reliability REAL DEFAULT 0.5,
+                consensus REAL DEFAULT 0.0,
                 
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -8042,6 +8116,14 @@ class MetacognitiveReasoningEngine:
                 -- Insight derived
                 insight TEXT,
                 insight_applied BOOLEAN DEFAULT FALSE,
+
+                -- Provenance/decay
+                source_attempt_id TEXT,
+                source_mode TEXT,
+                last_observed_generation INTEGER DEFAULT 0,
+                decay_score REAL DEFAULT 0.0,
+                reliability REAL DEFAULT 0.5,
+                consensus REAL DEFAULT 0.0,
                 
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -8063,6 +8145,14 @@ class MetacognitiveReasoningEngine:
                 -- Evidence
                 test_count INTEGER DEFAULT 1,
                 consistent_failure BOOLEAN DEFAULT TRUE,
+
+                -- Provenance/decay
+                source_attempt_id TEXT,
+                source_mode TEXT,
+                last_observed_generation INTEGER DEFAULT 0,
+                decay_score REAL DEFAULT 0.0,
+                reliability REAL DEFAULT 0.5,
+                consensus REAL DEFAULT 0.0,
                 
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -8088,6 +8178,14 @@ class MetacognitiveReasoningEngine:
                 -- Transferability
                 is_transferable BOOLEAN DEFAULT FALSE,
                 applicable_to TEXT,  -- JSON list of similar game types
+
+                -- Provenance/decay
+                source_attempt_id TEXT,
+                source_mode TEXT,
+                last_observed_generation INTEGER DEFAULT 0,
+                decay_score REAL DEFAULT 0.0,
+                reliability REAL DEFAULT 0.5,
+                consensus REAL DEFAULT 0.0,
                 
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -8136,9 +8234,23 @@ class MetacognitiveReasoningEngine:
         
         self.db.execute_query("""
             INSERT INTO metacognitive_assumptions 
-            (assumption_id, agent_id, game_type, level_number, assumption_text, assumption_type)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (assumption_id, agent_id, game_type, level_number, assumption, assumption_type))
+            (assumption_id, agent_id, game_type, level_number, assumption_text, assumption_type,
+             source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            assumption_id,
+            agent_id,
+            game_type,
+            level_number,
+            assumption,
+            assumption_type,
+            self._session_provenance.get('attempt_id'),
+            self._session_provenance.get('mode'),
+            self._session_provenance.get('generation') or 0,
+            0.0,
+            0.5,
+            0.0,
+        ))
         
         # Track in session
         self._current_assumptions.append({
@@ -8256,29 +8368,146 @@ class MetacognitiveReasoningEngine:
         
         self.db.execute_query("""
             INSERT INTO metacognitive_predictions 
-            (prediction_id, agent_id, game_type, level_number, theory_text, predicted_outcome, action_taken)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (prediction_id, agent_id, game_type, level_number, theory, predicted_outcome, action))
+            (prediction_id, agent_id, game_type, level_number, theory_text, predicted_outcome, action_taken,
+             source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            prediction_id,
+            agent_id,
+            game_type,
+            level_number,
+            theory,
+            predicted_outcome,
+            action,
+            self._session_provenance.get('attempt_id'),
+            self._session_provenance.get('mode'),
+            self._session_provenance.get('generation') or 0,
+            0.0,
+            0.5,
+            0.0,
+        ))
         
         # Store pending prediction for outcome evaluation
         self._pending_prediction = {
             'id': prediction_id,
             'theory': theory,
             'predicted': predicted_outcome,
-            'action': action
+            'action': action,
+            'game_type': game_type,
+            'level_number': level_number,
         }
         
         self._current_theory = theory
         
         logger.info(f"[METACOG] PREDICTION: If '{theory}' then {action} should cause '{predicted_outcome}'")
         return prediction_id
+
+    def peek_prediction(self) -> Optional[str]:
+        """Lightweight peek at the pending prediction outcome, if any."""
+        if not self._pending_prediction:
+            return None
+        return self._pending_prediction.get('predicted')
+
+    def _record_significance_observation(
+        self,
+        prediction_id: str,
+        theory: str,
+        game_type: str,
+        level_number: int,
+        prediction_correct: bool,
+        generation: Optional[int],
+    ) -> None:
+        """Update reliability/consensus and promote strong hypotheses to beliefs."""
+        try:
+            total_rows = self.db.execute_query(
+                """
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN prediction_correct = 1 THEN 1 ELSE 0 END) AS successes
+                FROM metacognitive_predictions
+                WHERE theory_text = ?
+            """,
+                (theory,),
+            ) or []
+
+            total = total_rows[0]['total'] if total_rows and 'total' in total_rows[0] else 0
+            successes = total_rows[0]['successes'] if total_rows and 'successes' in total_rows[0] else 0
+            reliability = round(successes / total, 3) if total else 0.5
+            consensus = reliability  # proxy until cross-agent consensus is recorded
+            decay_score = max(0.0, 1.0 - reliability)
+            last_gen = generation or self._session_provenance.get('generation') or 0
+
+            self.db.execute_query(
+                """
+                UPDATE metacognitive_predictions
+                SET reliability = ?,
+                    consensus = ?,
+                    last_observed_generation = ?,
+                    decay_score = ?
+                WHERE prediction_id = ?
+                """,
+                (reliability, consensus, last_gen, decay_score, prediction_id),
+            )
+
+            # Keep assumptions in sync with observed reliability
+            self.db.execute_query(
+                """
+                UPDATE metacognitive_assumptions
+                SET reliability = COALESCE(?, reliability),
+                    consensus = COALESCE(?, consensus),
+                    last_observed_generation = COALESCE(?, last_observed_generation),
+                    decay_score = COALESCE(?, decay_score)
+                WHERE game_type = ? AND level_number = ?
+                """,
+                (reliability, consensus, last_gen, decay_score, game_type, level_number),
+            )
+
+            # Promotion: after ≥3 observations and reliability >= 0.7, persist as belief/insight
+            if total >= 3 and reliability >= 0.7:
+                existing = self.db.execute_query(
+                    """SELECT insight_id FROM metacognitive_insights
+                        WHERE key_insight = ? LIMIT 1""",
+                    (theory,),
+                )
+                if not existing:
+                    insight_id = f"insight_{uuid.uuid4().hex[:12]}"
+                    self.db.execute_query(
+                        """
+                        INSERT INTO metacognitive_insights(
+                            insight_id, agent_id, game_type, level_number, key_insight, winning_strategy,
+                            breakthrough_action, theory_at_breakthrough, actions_before_breakthrough,
+                            is_transferable, source_attempt_id, source_mode, last_observed_generation,
+                            decay_score, reliability, consensus
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            insight_id,
+                            'metacog_auto',
+                            game_type,
+                            level_number,
+                            theory,
+                            f"Significance loop confirmed ({successes}/{total})",
+                            None,
+                            theory,
+                            total,
+                            True,
+                            self._session_provenance.get('attempt_id'),
+                            self._session_provenance.get('mode'),
+                            last_gen,
+                            decay_score,
+                            reliability,
+                            consensus,
+                        ),
+                    )
+        except Exception:
+            logger.debug("Significance observation recording failed (non-critical)")
     
     def evaluate_prediction(
         self,
         actual_outcome: str,
         score_before: float,
         score_after: float,
-        frame_changed: bool
+        frame_changed: bool,
+        generation: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate the pending prediction against actual outcome.
@@ -8308,9 +8537,11 @@ class MetacognitiveReasoningEngine:
         # Record outcome
         self.db.execute_query("""
             UPDATE metacognitive_predictions 
-            SET actual_outcome = ?, prediction_correct = ?
+            SET actual_outcome = ?, prediction_correct = ?,
+                last_observed_generation = COALESCE(?, last_observed_generation, 0),
+                decay_score = COALESCE(decay_score, 0.0)
             WHERE prediction_id = ?
-        """, (actual_outcome, prediction_correct, prediction_id))
+        """, (actual_outcome, prediction_correct, generation, prediction_id))
         
         result = {
             'prediction_id': prediction_id,
@@ -8336,6 +8567,16 @@ class MetacognitiveReasoningEngine:
         
         # Clear pending prediction
         self._pending_prediction = None
+
+        # Update reliability/consensus and promotion ladder
+        self._record_significance_observation(
+            prediction_id=prediction_id,
+            theory=pred['theory'],
+            game_type=pred.get('game_type', 'unknown'),
+            level_number=pred.get('level_number', 1),
+            prediction_correct=prediction_correct,
+            generation=generation,
+        )
         
         return result
     
@@ -8474,13 +8715,20 @@ class MetacognitiveReasoningEngine:
         pattern_id = f"fail_{uuid.uuid4().hex[:12]}"
         self.db.execute_query("""
             INSERT INTO metacognitive_failure_patterns
-            (pattern_id, agent_id, game_type, level_number, common_factor, failure_count, example_actions, insight)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (pattern_id, agent_id, game_type, level_number, common_factor, failure_count, example_actions, insight,
+             source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             pattern_id, agent_id, game_type, level_number,
             common_factor, len(recent_failures),
             json.dumps([f['action'] for f in recent_failures]),
-            insight
+            insight,
+            self._session_provenance.get('attempt_id'),
+            self._session_provenance.get('mode'),
+            self._session_provenance.get('generation') or 0,
+            0.0,
+            0.5,
+            0.0,
         ))
         
         logger.info(f"[METACOG] FAILURE PATTERN: {common_factor} - {insight}")
@@ -8545,17 +8793,36 @@ class MetacognitiveReasoningEngine:
             # Increment test count
             self.db.execute_query("""
                 UPDATE metacognitive_eliminations 
-                SET test_count = test_count + 1
+                SET test_count = test_count + 1,
+                    last_observed_generation = COALESCE(?, last_observed_generation, 0),
+                    decay_score = COALESCE(decay_score, 0.0)
                 WHERE elimination_id = ?
-            """, (existing[0]['elimination_id'],))
+            """, (
+                self._session_provenance.get('generation'),
+                existing[0]['elimination_id'],
+            ))
         else:
             # Insert new elimination
             elimination_id = f"elim_{uuid.uuid4().hex[:12]}"
             self.db.execute_query("""
                 INSERT INTO metacognitive_eliminations
-                (elimination_id, agent_id, game_type, level_number, eliminated_action, reason)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (elimination_id, agent_id, game_type, level_number, action, reason))
+                (elimination_id, agent_id, game_type, level_number, eliminated_action, reason,
+                 source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                elimination_id,
+                agent_id,
+                game_type,
+                level_number,
+                action,
+                reason,
+                self._session_provenance.get('attempt_id'),
+                self._session_provenance.get('mode'),
+                self._session_provenance.get('generation') or 0,
+                0.0,
+                0.5,
+                0.0,
+            ))
         
         logger.debug(f"[METACOG] ELIMINATED: {action} - {reason}")
     
@@ -8652,12 +8919,19 @@ class MetacognitiveReasoningEngine:
         self.db.execute_query("""
             INSERT INTO metacognitive_insights
             (insight_id, agent_id, game_type, level_number, key_insight, winning_strategy,
-             breakthrough_action, theory_at_breakthrough, actions_before_breakthrough, is_transferable)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             breakthrough_action, theory_at_breakthrough, actions_before_breakthrough, is_transferable,
+             source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             insight_id, agent_id, game_type, level_number,
             key_insight, winning_strategy, breakthrough_action,
-            theory_at_breakthrough, actions_before_breakthrough, is_transferable
+            theory_at_breakthrough, actions_before_breakthrough, is_transferable,
+            self._session_provenance.get('attempt_id'),
+            self._session_provenance.get('mode'),
+            self._session_provenance.get('generation') or 0,
+            0.0,
+            0.5,
+            0.0,
         ))
         
         logger.info(f"[METACOG] WIN REFLECTION: '{key_insight}' (strategy: {winning_strategy})")
@@ -10754,6 +11028,21 @@ class AgentHypothesisSystem:
             CREATE INDEX IF NOT EXISTS idx_agent_hypotheses_agent 
             ON agent_hypotheses(agent_id, status)
         """)
+
+        # Telemetry for hypothesis promotion/decay events (DB-only)
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS metacog_hypothesis_events (
+                event_id TEXT PRIMARY KEY,
+                hypothesis_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,         -- 'promotion', 'decay'
+                from_status TEXT,
+                to_status TEXT,
+                confidence_before REAL,
+                confidence_after REAL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
     
     def can_create_hypothesis(self, agent_id: str) -> bool:
         """Check if agent has the cognitive capability to create hypotheses."""
@@ -10832,6 +11121,41 @@ class AgentHypothesisSystem:
             logger.info(f"[HYPOTHESIS] Agent {agent_id[:8]} created: {hypothesis_text[:50]}...")
         
         return hypothesis_id
+
+    def _log_hypothesis_event(
+        self,
+        *,
+        hypothesis_id: str,
+        agent_id: str,
+        event_type: str,
+        from_status: Optional[str],
+        to_status: Optional[str],
+        confidence_before: Optional[float],
+        confidence_after: Optional[float]
+    ) -> None:
+        """Record promotion/decay telemetry (DB-only)."""
+        try:
+            event_id = f"h_evt_{uuid.uuid4().hex[:12]}"
+            self.db.execute_query(
+                """
+                INSERT INTO metacog_hypothesis_events (
+                    event_id, hypothesis_id, agent_id, event_type,
+                    from_status, to_status, confidence_before, confidence_after
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    hypothesis_id,
+                    agent_id,
+                    event_type,
+                    from_status,
+                    to_status,
+                    confidence_before,
+                    confidence_after,
+                ),
+            )
+        except Exception as e:
+            logger.debug(f"[HYPOTHESIS] Event log failed: {e}")
     
     def record_test_result(
         self,
@@ -10882,6 +11206,30 @@ class AgentHypothesisSystem:
             status = 'refuted'
         elif status == 'proposed':
             status = 'testing'
+
+        # Telemetry: log promotion/decay when status changes or confidence drops
+        try:
+            event_type = None
+            from_status = h['status']
+            to_status = status
+
+            if to_status != from_status:
+                event_type = 'promotion' if to_status in {'testing', 'confirmed'} else 'decay'
+            elif new_confidence < prior:
+                event_type = 'decay'
+
+            if event_type:
+                self._log_hypothesis_event(
+                    hypothesis_id=hypothesis_id,
+                    agent_id=h['agent_id'],
+                    event_type=event_type,
+                    from_status=from_status,
+                    to_status=to_status,
+                    confidence_before=prior,
+                    confidence_after=new_confidence,
+                )
+        except Exception:
+            pass
         
         self.db.execute_query(f"""
             UPDATE agent_hypotheses

@@ -1,5 +1,31 @@
 # Progress Log - Silent Failure Fixes & Engine Integration Review
 
+## Session: January 1, 2026 - Intrinsic Milestones Scaffold
+
+---
+
+### Approach: Close remaining schema gap + thought experiment logger
+
+- Added intrinsic_milestones table with provenance/decay for thought experiments/intrinsic milestones; idempotent migration added (migrations/add_intrinsic_milestones.py) and schema updated.
+- Introduced record_intrinsic_milestone helper in DatabaseInterface for DB-only telemetry (no control-path changes).
+- Added ThoughtExperimentPlugin (STEP_COMPLETE, RUN_FINALIZED) to persist intrinsic_milestones payloads; mode-gated and emit-only; wired into default observability plugins.
+- Updated refactor-plan schema audit to mark provenance/decay items resolved and note intrinsic milestones scaffold.
+
+## Session: January 1, 2026 - Naming Alignment
+
+---
+
+### Approach: Decentralized Steward Naming
+
+**Change**: Renamed the Ouroboros coordinator component to `OuroborosNetworkSteward` to better reflect decentralized orchestration (database-as-organism) while keeping backward-compatible aliases for prior names.
+
+**Files**:
+- ouroboros_coordinator.py: class rename and docstring framing update; legacy aliases retained.
+- autonomous_evolution_runner.py: imports/instantiation updated to new class name.
+- diagrams/C4-container-diagram.md: diagram label updated to steward name.
+
+---
+
 ## Session: December 30, 2025 - Comprehensive Engine Review & Bug Fixes
 
 ---
@@ -197,6 +223,29 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 ---
 
 ## Current Status
+
+## Session: January 1, 2026 - Decay Scoring & Mixed-Domain Telemetry
+
+---
+
+### Approach: Finish refactor checklist items before tests/docs
+
+**Timestamp**: ~10:00 PM-11:15 PM  
+**Status**: IN PROGRESS (tests/docs pending)
+
+### Changes
+- Added provenance/decay fields via migration and updated schema status in [architecture/refactor-plan.md](architecture/refactor-plan.md).
+- Hardened observability plugins (MetacogObserver, resonance/meta-operators, lesson stubs) with ladder/PCTL/ambiguity tags and cross-domain lineage in [observability_plugins.py](observability_plugins.py).
+- Enabled mixed-domain telemetry flag in schedulers for observability-only tagging in [game_scheduler.py](game_scheduler.py) and [evolution_game_scheduler.py](evolution_game_scheduler.py); defaults remain OFF.
+- Applied decay scoring during cleanup for metacog/gap/intervention/oracle/valence tables and backfilled generation provenance where missing in [safe_cleanup.py](safe_cleanup.py).
+- Ensured decay/provenance migration executed successfully (source_mode legacy safe) in [migrations/add_provenance_decay_metacog.py](migrations/add_provenance_decay_metacog.py).
+
+### Validation
+- db_validation: passed (foreign_keys=ON, modes/booleans clean).
+- replay_validation: 2 passed, 1 skipped; no __pycache__ left behind.
+
+### Completed
+- Docs/readiness updated in refactor plan (mixed-domain default OFF; decay fields expected; PYTHONDONTWRITEBYTECODE enforced).
 
 **Timestamp**: 7:56:03 AM
 

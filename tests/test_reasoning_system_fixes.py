@@ -163,20 +163,20 @@ class TestCODSGuidedEscape:
         # We just verify the expected value
         assert expected_escape_attempts == 21
 
-    def test_escape_phases_cover_all_actions(self):
-        """Verify escape phases cycle through all 7 actions multiple times."""
-        # Phase 1: actions 1-7 in order
-        # Phase 2: actions 7-1 in reverse  
-        # Phase 3: weighted random based on Q5/Q1 data
+    def test_escape_stages_cover_all_actions(self):
+        """Verify escape stages cycle through all 7 actions multiple times."""
+        # Stage 1: actions 1-7 in order
+        # Stage 2: actions 7-1 in reverse
+        # Stage 3: weighted random based on Q5/Q1 data
         
-        phase1_actions = list(range(1, 8))  # [1, 2, 3, 4, 5, 6, 7]
-        phase2_actions = list(range(7, 0, -1))  # [7, 6, 5, 4, 3, 2, 1]
+        stage1_actions = list(range(1, 8))  # [1, 2, 3, 4, 5, 6, 7]
+        stage2_actions = list(range(7, 0, -1))  # [7, 6, 5, 4, 3, 2, 1]
         
-        assert len(phase1_actions) == 7
-        assert len(phase2_actions) == 7
-        assert set(phase1_actions) == set(range(1, 8))
-        assert phase1_actions[0] == 1
-        assert phase2_actions[0] == 7
+        assert len(stage1_actions) == 7
+        assert len(stage2_actions) == 7
+        assert set(stage1_actions) == set(range(1, 8))
+        assert stage1_actions[0] == 1
+        assert stage2_actions[0] == 7
 
     def test_cods_escape_threshold_is_lower(self):
         """Verify CODS uses lower confidence threshold in escape mode."""

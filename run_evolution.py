@@ -52,6 +52,10 @@ def main():
                        help='Specialist mode: Narrow agents, deep mastery, repetition-based learning')
     parser.add_argument('--game', type=str, default=None,
                        help='Focus on specific game (e.g., --game as66). All agents play only this game.')
+    parser.add_argument('--replay-validation', action='store_true',
+                       help='Run replay validation batch using replay_index pointers (no live gameplay)')
+    parser.add_argument('--replay-limit', type=int, default=None,
+                       help='Limit number of replay validations (most recent first)')
     
     args = parser.parse_args()
     
@@ -122,6 +126,9 @@ def main():
         print(f"  Specialist Mode: ENABLED (deep mastery focus)")
     if args.game:
         print(f"  Target Game: {args.game} (focused mastery)")
+    if args.replay_validation:
+        limit_text = f"limit {args.replay_limit}" if args.replay_limit else "no limit"
+        print(f"  Replay Validation Batch: ENABLED ({limit_text})")
     if config.get('ensure_game_type_coverage'):
         print(f"  Game Type Coverage: ENABLED (one game per type guaranteed)")
     print(f"{'='*60}\n")
@@ -137,6 +144,14 @@ def main():
     # Add target game filter if specified
     if args.game:
         config['target_game'] = args.game
+
+    # Replay validation batch (REPLAY_VALIDATION mode)
+    if args.replay_validation:
+        config['replay_validation_batch'] = True
+        if args.replay_limit:
+            config['replay_validation_limit'] = args.replay_limit
+    else:
+        config['replay_validation_batch'] = False
     
     # Create and run
     runner = AutonomousEvolutionRunner(**config)

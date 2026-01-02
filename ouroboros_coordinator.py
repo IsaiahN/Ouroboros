@@ -2,7 +2,7 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
-Ouroboros Coordinator - Claude Code LLM Coordinator
+Ouroboros Network Steward - decentralized orchestration (no central command)
 Following LLM Operating Rules:
 - Rule 1: PYTHONDONTWRITEBYTECODE=1 (disabled pycache)
 - Rule 2: Database-only storage (no log files)
@@ -15,8 +15,9 @@ Following LLM Operating Rules:
 OUROBOROS ARCHITECTURE - THREE-LAYER EPIGENETIC SYSTEM
 =========================================================
 
-This coordinator implements the complete Ouroboros evolutionary system with
-three-layer epigenetic architecture as designed in Tasks 1-7.
+This steward orchestrates the Ouroboros evolutionary system (database-as-organism)
+using the three-layer epigenetic architecture as designed in Tasks 1-7, without
+acting as a central authority.
 
 THREE LAYERS OF EVOLUTION:
 -------------------------
@@ -129,16 +130,17 @@ from typing import Dict, List, Any, Optional
 from database_interface import DatabaseInterface
 
 
-class OuroborosCoordinator:
+class OuroborosNetworkSteward:
     """
-    Claude Code LLM coordinator for autonomous Ouroboros operation
-    Central coordinator that manages the entire evolutionary system
+    Claude Code steward for autonomous Ouroboros operation.
+    Acts as a distributed orchestrator aligning agents to the database-as-organism
+    philosophy (no central command, database holds authority and memory).
     """
 
     def __init__(self, database_interface: DatabaseInterface, api_key: Optional[str] = None,
                  specialist_mode: bool = False, agi_mode: bool = False):
         """
-        Initialize Ouroboros Coordinator with enhanced modes.
+        Initialize the Ouroboros Network Steward with enhanced modes.
         
         Args:
             database_interface: DatabaseInterface instance for data operations
@@ -849,3 +851,8 @@ class PopulationManager:
             "UPDATE agents SET is_active = ? WHERE agent_id = ?",
             (True, agent_id)
         )
+
+
+# Backward compatibility aliases to avoid breaking legacy imports
+OuroborosNetworkFacilitator = OuroborosNetworkSteward
+OuroborosCoordinator = OuroborosNetworkSteward

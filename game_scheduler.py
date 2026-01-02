@@ -69,6 +69,7 @@ class GameScheduler:
         self.is_shutting_down: bool = False  # Graceful shutdown flag
         self._game_info_cache: Optional[List[GameTypeInfo]] = None  # Cache game info per generation
         self._cache_generation: Optional[int] = None
+        self.mixed_domain_flag: bool = False  # Telemetry-only flag set by scheduler wrapper
         
     def get_next_game_for_agent(
         self,
@@ -484,6 +485,7 @@ class GameScheduler:
             'total_agents_playing': len(all_active),  # Total agents across all games
             'game_types_active': len(set(a.agent_mode for a in all_active)),
             'mode_distribution': self.game_type_mode_counts,
+            'mixed_domain': self.mixed_domain_flag,
             'active_game_list': [
                 {
                     'game_id': a.game_id,

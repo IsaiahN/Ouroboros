@@ -31,6 +31,92 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class RelationalPatternCache:
+    """Lightweight cache for pattern → outcome pairs harvested from telemetry."""
+
+    def __init__(self, db: DatabaseInterface):
+        self.db = db
+        self._ensure_table()
+
+    def _ensure_table(self) -> None:
+        try:
+            self.db.execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS relational_patterns (
+                    pattern_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pattern_signature TEXT NOT NULL,
+                    pattern_json TEXT,
+                    context_tags TEXT,
+                    outcome REAL,
+                    support INTEGER DEFAULT 1,
+                    reliability REAL DEFAULT 0.5,
+                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            self.db.execute_query(
+                """
+                CREATE INDEX IF NOT EXISTS idx_relational_patterns_signature
+                ON relational_patterns(pattern_signature)
+                """
+            )
+        except Exception as exc:
+            logger.debug(f"[RELATIONS] table ensure failed: {exc}")
+
+    def upsert_pattern(self, signature: str, pattern_json: str, context: str, outcome: float) -> None:
+        try:
+            existing = self.db.execute_query(
+                """
+                SELECT pattern_id, support, reliability
+                FROM relational_patterns
+                WHERE pattern_signature = ?
+                """,
+                (signature,),
+            )
+            if existing:
+                row = existing[0]
+                new_support = row['support'] + 1
+                # Increment reliability mildly toward outcome quality (bounded)
+                new_reliability = min(1.0, row['reliability'] + 0.05)
+                self.db.execute_query(
+                    """
+                    UPDATE relational_patterns
+                    SET pattern_json = ?, context_tags = ?, outcome = ?,
+                        support = ?, reliability = ?, last_seen = CURRENT_TIMESTAMP
+                    WHERE pattern_id = ?
+                    """,
+                    (pattern_json, context, outcome, new_support, new_reliability, row['pattern_id']),
+                )
+            else:
+                self.db.execute_query(
+                    """
+                    INSERT INTO relational_patterns
+                    (pattern_signature, pattern_json, context_tags, outcome, support, reliability)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (signature, pattern_json, context, outcome, 1, 0.55),
+                )
+        except Exception as exc:
+            logger.debug(f"[RELATIONS] upsert failed: {exc}")
+
+    def query_by_context(self, context_like: str, min_support: int = 2, limit: int = 5) -> List[Dict[str, Any]]:
+        try:
+            rows = self.db.execute_query(
+                """
+                SELECT pattern_json, context_tags, outcome, support, reliability
+                FROM relational_patterns
+                WHERE context_tags LIKE ? AND support >= ?
+                ORDER BY reliability DESC, support DESC, last_seen DESC
+                LIMIT ?
+                """,
+                (f"%{context_like}%", min_support, limit),
+            )
+            return rows or []
+        except Exception as exc:
+            logger.debug(f"[RELATIONS] query failed: {exc}")
+            return []
+
+
 @dataclass
 class AbstractTemplate:
     """An executable abstract template derived from multiple winning sequences."""
@@ -65,6 +151,173 @@ class SequenceAbstraction:
     def __init__(self, db_path: str = "core_data.db"):
         """Initialize abstraction engine."""
         self.db = DatabaseInterface(db_path)
+        # Cache few-shot relational patterns (action invariants/variants) to avoid repeated queries
+        self._relation_cache: Dict[Tuple[str, int], Optional[Dict[str, Any]]] = {}
+        self._pattern_cache = RelationalPatternCache(self.db)
+
+    # --------------------------------------------------------------------
+    # Few-shot relational pattern mining (minimal support = 2 sequences)
+    # --------------------------------------------------------------------
+    def get_few_shot_relations(
+        self,
+        game_type: str,
+        level_number: int,
+        min_sequences: int = 2,
+        max_sequences: int = 10,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Derive lightweight relational patterns (invariants/variants) from a handful of sequences.
+
+        This enables few-shot generalization: after 2-3 consistent examples, expose
+        the positions that are reliably stable vs flexible without running full
+        template synthesis. Safe for emit-only guidance (no direct mutations).
+        """
+        cache_key = (game_type, level_number)
+        if cache_key in self._relation_cache:
+            return self._relation_cache[cache_key]
+
+        try:
+            sequences = self.db.execute_query(
+                """
+                SELECT action_sequence, coordinate_sequence
+                FROM winning_sequences
+                WHERE game_id LIKE ? AND level_number = ?
+                ORDER BY total_score DESC, total_actions ASC
+                LIMIT ?
+                """,
+                (f"{game_type}%", level_number, max_sequences),
+            )
+
+            if not sequences or len(sequences) < min_sequences:
+                self._relation_cache[cache_key] = None
+                return None
+
+            patterns: List[List[int]] = []
+            coord_sequences: List[List] = []
+
+            for seq in sequences:
+                actions = seq.get("action_sequence")
+                coords = seq.get("coordinate_sequence")
+                try:
+                    actions_list = json.loads(actions) if isinstance(actions, str) else actions
+                    coords_list = json.loads(coords) if isinstance(coords, str) else coords
+                    pattern = self._extract_pattern(actions_list)
+                    if pattern:
+                        patterns.append(pattern)
+                        coord_sequences.append(coords_list if isinstance(coords_list, list) else [])
+                except Exception as parse_exc:
+                    logger.debug(f"[RELATIONS] parse skip: {parse_exc}")
+                    continue
+
+            if len(patterns) < min_sequences:
+                self._relation_cache[cache_key] = None
+                return None
+
+            min_len = min(len(p) for p in patterns)
+            invariants: List[Dict[str, Any]] = []
+            variant_regions: List[Dict[str, Any]] = []
+            current_variant_start: Optional[int] = None
+
+            for pos in range(min_len):
+                actions_at_pos = [p[pos] for p in patterns]
+                unique_actions = set(actions_at_pos)
+
+                if len(unique_actions) == 1:
+                    action_type = actions_at_pos[0]
+                    coords = self._get_averaged_coords(
+                        [
+                            {
+                                "actions": patterns[idx],
+                                "coordinates": coord_sequences[idx],
+                                "length": len(patterns[idx]),
+                            }
+                            for idx in range(len(patterns))
+                        ],
+                        pos,
+                    )
+                    invariants.append(
+                        {
+                            "position": pos,
+                            "action": action_type,
+                            "support": len(patterns),
+                            "coordinates": coords,
+                        }
+                    )
+                    if current_variant_start is not None:
+                        variant_regions.append(
+                            {
+                                "start": current_variant_start,
+                                "end": pos - 1,
+                                "options": self._get_variant_options(
+                                    [
+                                        {
+                                            "actions": patterns[idx],
+                                            "coordinates": coord_sequences[idx],
+                                            "length": len(patterns[idx]),
+                                        }
+                                        for idx in range(len(patterns))
+                                    ],
+                                    current_variant_start,
+                                    pos - 1,
+                                ),
+                            }
+                        )
+                        current_variant_start = None
+                else:
+                    if current_variant_start is None:
+                        current_variant_start = pos
+
+            if current_variant_start is not None:
+                variant_regions.append(
+                    {
+                        "start": current_variant_start,
+                        "end": min_len - 1,
+                        "options": self._get_variant_options(
+                            [
+                                {
+                                    "actions": patterns[idx],
+                                    "coordinates": coord_sequences[idx],
+                                    "length": len(patterns[idx]),
+                                }
+                                for idx in range(len(patterns))
+                            ],
+                            current_variant_start,
+                            min_len - 1,
+                        ),
+                    }
+                )
+
+            invariant_ratio = len(invariants) / min_len if min_len else 0.0
+            sample_confidence = min(len(patterns) / 5.0, 1.0)
+            confidence = (invariant_ratio * 0.6) + (sample_confidence * 0.4)
+
+            result = {
+                "game_type": game_type,
+                "level": level_number,
+                "invariants": invariants,
+                "variant_regions": variant_regions,
+                "sample_size": len(patterns),
+                "confidence": confidence,
+            }
+
+            self._relation_cache[cache_key] = result
+            # Emit to relational pattern cache (emit-only, no control mutations here)
+            try:
+                signature = json.dumps([inv.get('action') for inv in invariants])
+                self._pattern_cache.upsert_pattern(
+                    signature=signature,
+                    pattern_json=json.dumps(result),
+                    context=f"{game_type}@L{level_number}",
+                    outcome=confidence,
+                )
+            except Exception as exc:
+                logger.debug(f"[RELATIONS] cache emit failed: {exc}")
+            return result
+
+        except Exception as exc:
+            logger.debug(f"[RELATIONS] compute failure: {exc}")
+            self._relation_cache[cache_key] = None
+            return None
     
     def _coords_to_region(self, x: int, y: int) -> str:
         """Convert (x, y) coordinates to region name (NW, N, NE, W, C, E, SW, S, SE)."""
@@ -326,6 +579,17 @@ class SequenceAbstraction:
             )
             
             logger.info(f"[TEMPLATE] Generated {template}")
+            try:
+                # Store template summary in relational cache for heuristic reuse
+                signature = json.dumps([step.get('action') for step in template_sequence[:10]])
+                self._pattern_cache.upsert_pattern(
+                    signature=signature,
+                    pattern_json=json.dumps(template_sequence[:10]),
+                    context=f"template:{game_type}@L{level_number}",
+                    outcome=confidence,
+                )
+            except Exception as exc:
+                logger.debug(f"[RELATIONS] template cache emit failed: {exc}")
             return template
             
         except Exception as e:
@@ -371,6 +635,136 @@ class SequenceAbstraction:
             if end < len(pattern):
                 options.append(pattern[start:end+1])
         return options
+
+    # --------------------------------------------------------------------
+    # Telemetry harvesting (action_proposals_log, lesson_interpretations)
+    # --------------------------------------------------------------------
+    def harvest_relational_patterns(self, max_rows: int = 200) -> None:
+        """Ingest recent telemetry into relational pattern cache (emit-only)."""
+        try:
+            rows = self.db.execute_query(
+                """
+                SELECT attempt_id, step_idx, resonance_tags, chosen_action, chosen_reason
+                FROM action_proposals_log
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (max_rows,),
+            )
+            for row in rows or []:
+                signature = row.get('resonance_tags') or row.get('chosen_action') or 'unknown'
+                context = row.get('chosen_reason') or 'action_proposals'
+                pattern_json = json.dumps({
+                    'resonance_tags': row.get('resonance_tags'),
+                    'chosen_action': row.get('chosen_action'),
+                    'step_idx': row.get('step_idx'),
+                })
+                self._pattern_cache.upsert_pattern(signature=str(signature), pattern_json=pattern_json, context=context, outcome=0.5)
+        except Exception as exc:
+            logger.debug(f"[RELATIONS] harvest (proposals) failed: {exc}")
+
+        try:
+            rows = self.db.execute_query(
+                """
+                SELECT interpretation, resonance_tags, reasoning_tags, score_delta
+                FROM lesson_interpretations
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (max_rows // 2,),
+            )
+            for row in rows or []:
+                signature = row.get('interpretation') or 'lesson'
+                context = row.get('reasoning_tags') or 'lesson_interpretation'
+                pattern_json = json.dumps({
+                    'interpretation': row.get('interpretation'),
+                    'resonance_tags': row.get('resonance_tags'),
+                })
+                outcome = float(row.get('score_delta') or 0.0)
+                self._pattern_cache.upsert_pattern(signature=str(signature), pattern_json=pattern_json, context=str(context), outcome=outcome)
+        except Exception as exc:
+            logger.debug(f"[RELATIONS] harvest (lessons) failed: {exc}")
+
+    # --------------------------------------------------------------------
+    # Contrastive near-miss mining (win vs near-miss deltas)
+    # --------------------------------------------------------------------
+    def generate_contrastive_hints(
+        self,
+        game_type: str,
+        level_number: int,
+        near_miss_limit: int = 5,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Derive minimal contrasts between wins and near-misses (emit-only hints).
+        Uses attempts table if available. Safe to ignore failures.
+        """
+        try:
+            wins = self.db.execute_query(
+                """
+                SELECT action_sequence FROM winning_sequences
+                WHERE game_id LIKE ? AND level_number = ?
+                ORDER BY total_score DESC, total_actions ASC
+                LIMIT 3
+                """,
+                (f"{game_type}%", level_number),
+            )
+            if not wins:
+                return None
+
+            near = self.db.execute_query(
+                """
+                SELECT action_sequence, final_score
+                FROM attempts
+                WHERE game_id LIKE ? AND level_number = ? AND final_score > 0 AND win = 0
+                ORDER BY final_score DESC
+                LIMIT ?
+                """,
+                (f"{game_type}%", level_number, near_miss_limit),
+            )
+            if not near:
+                return None
+
+            win_pattern = self._extract_pattern(json.loads(wins[0]['action_sequence'])) if isinstance(wins[0]['action_sequence'], str) else self._extract_pattern(wins[0]['action_sequence'])
+            contrasts = []
+
+            for nm in near:
+                nm_actions = json.loads(nm['action_sequence']) if isinstance(nm['action_sequence'], str) else nm['action_sequence']
+                nm_pattern = self._extract_pattern(nm_actions)
+                if not nm_pattern or not win_pattern:
+                    continue
+                # Find earliest divergence
+                min_len = min(len(win_pattern), len(nm_pattern))
+                divergence_pos = None
+                for idx in range(min_len):
+                    if win_pattern[idx] != nm_pattern[idx]:
+                        divergence_pos = idx
+                        break
+                if divergence_pos is not None:
+                    contrasts.append({
+                        'divergence_at': divergence_pos,
+                        'win_action': win_pattern[divergence_pos],
+                        'near_action': nm_pattern[divergence_pos],
+                        'near_score': nm.get('final_score', 0),
+                    })
+
+            if not contrasts:
+                return None
+
+            summary = {
+                'game_type': game_type,
+                'level': level_number,
+                'contrasts': contrasts[:5],
+            }
+            self._pattern_cache.upsert_pattern(
+                signature=f"contrast:{game_type}@L{level_number}",
+                pattern_json=json.dumps(summary),
+                context='contrastive_near_miss',
+                outcome=0.6,
+            )
+            return summary
+        except Exception as exc:
+            logger.debug(f"[RELATIONS] contrastive hints failed: {exc}")
+            return None
     
     def get_template_for_replay(
         self,

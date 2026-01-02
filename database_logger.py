@@ -43,6 +43,7 @@ class DatabaseLogHandler(logging.Handler):
         # Auto-cleanup settings
         self.auto_cleanup = auto_cleanup
         self.cleanup_threshold = cleanup_threshold
+        self.retention_keep = 5000  # Align with safe_cleanup retention target
         self._log_count = 0
         self._last_cleanup_check = 0
 
@@ -62,6 +63,12 @@ class DatabaseLogHandler(logging.Handler):
                 check_same_thread=False
             )
             self._local.connection.row_factory = sqlite3.Row
+            try:
+                self._local.connection.execute("PRAGMA foreign_keys=ON")
+                self._local.connection.execute("PRAGMA journal_mode=WAL")
+                self._local.connection.execute("PRAGMA synchronous=NORMAL")
+            except Exception:
+                pass
         return self._local.connection
 
     def _ensure_logs_table(self):
@@ -224,27 +231,24 @@ class DatabaseLogHandler(logging.Handler):
             row = cursor.fetchone()
             total_logs = row[0] if row else 0
             
-            if total_logs > self.cleanup_threshold:
-                # Clean up old logs (keep last 24 hours + errors from last 7 days)
-                cursor.execute("""
+            if total_logs > self.retention_keep:
+                # Delete oldest logs, keep most recent retention_keep
+                cursor.execute(
+                    """
                     DELETE FROM system_logs
-                    WHERE timestamp < datetime('now', '-1 day')
-                    AND level NOT IN ('ERROR', 'CRITICAL')
-                """)
-                
-                cursor.execute("""
-                    DELETE FROM system_logs
-                    WHERE timestamp < datetime('now', '-7 days')
-                """)
-                
+                    WHERE id NOT IN (
+                        SELECT id FROM system_logs
+                        ORDER BY id DESC
+                        LIMIT ?
+                    )
+                    """,
+                    (self.retention_keep,)
+                )
                 conn.commit()
-                
-                # Log the cleanup (but don't recurse!)
                 cursor.execute("SELECT COUNT(*) as count FROM system_logs")
                 row = cursor.fetchone()
                 new_count = row[0] if row else 0
-                
-                print(f"[DatabaseLogHandler] Auto-cleanup: {total_logs:,} → {new_count:,} logs", 
+                print(f"[DatabaseLogHandler] Auto-cleanup: {total_logs:,} → {new_count:,} logs",
                       file=__import__('sys').stderr)
                 
         except Exception as e:

@@ -25,48 +25,36 @@ import asyncio
 import logging
 import json
 import uuid
-import numpy as np
-from typing import Dict, Any, List, Optional, Callable, Tuple
-from collections import Counter
-from dataclasses import dataclass, field
-import random
+import hashlib
 from datetime import datetime
+import numpy as np
+import tempfile
+from typing import Dict, Any, List, Optional, Callable, Tuple, Set, Sequence
 
+from database_interface import DatabaseInterface
+from arc_api_client import GameState
 from game_session_manager import GameSessionManager
 from action_handler import ActionHandler
-from arc_api_client import GameState
-from database_interface import DatabaseInterface
+from event_bus import EventBus, EventType
+from plugin_interfaces import Plugin, PluginManager
+from observability_plugins import default_observability_plugins
 from prestige_engine import PrestigeEngine
-from sensation_engine import SensationEngine, get_sensation_mode
+from sensation_engine import SensationEngine
 from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
 from agent_self_model import (
-    AgentSelfModel, WeavingReporter, 
-    CognitiveStageSystem, EpisodicMemorySystem, AgentHypothesisSystem,
-    MetacognitiveReasoningEngine
+    AgentSelfModel,
+    WeavingReporter,
+    CognitiveStageSystem,
+    EpisodicMemorySystem,
+    AgentHypothesisSystem,
+    MetacognitiveReasoningEngine,
 )
 from object_detector import ObjectDetector
-
-# SCIENTIFIC METHOD ENGINE: Autonomous theory formation, testing, and generalization
-try:
-    from scientific_method_engine import ScientificMethodEngine
-    SCIENTIFIC_METHOD_AVAILABLE = True
-except ImportError:
-    SCIENTIFIC_METHOD_AVAILABLE = False
-    ScientificMethodEngine = None
-
-# NETWORK KNOWLEDGE SYNTHESIS: Agent-accessible collective intelligence
-# Agents query this when stuck to get synthesized death zones, theories, etc.
-try:
-    from network_knowledge_synthesis import NetworkKnowledgeSynthesis
-    KNOWLEDGE_SYNTHESIS_AVAILABLE = True
-except ImportError:
-    KNOWLEDGE_SYNTHESIS_AVAILABLE = False
-    NetworkKnowledgeSynthesis = None
-
-# Two-Streams: Import cohort wisdom for role-based sequence selection
+from collections import Counter
+from dataclasses import dataclass, field
 try:
     from viral_package_engine import get_cohort_wisdom, update_sequence_role_reputation
     COHORT_WISDOM_AVAILABLE = True
@@ -393,6 +381,256 @@ class SequenceFallbackResult:
     frontier_level: Any = None  # int or 'unknown'
 
 
+class SpineEmitter:
+    """Thin helper to write attempt/action events into the spine tables."""
+
+    _ALLOWED_MODES = {'LIVE', 'REPLAY_VALIDATION', 'EVAL', 'LEGACY'}
+
+    def __init__(self, db: DatabaseInterface):
+        self.db = db
+
+    def _stack_hash(self, message: str) -> str:
+        """Compute a short, stable hash for grouping hook failures."""
+        try:
+            return hashlib.sha256(message.encode("utf-8", "ignore")).hexdigest()[:12]
+        except Exception:
+            return message[:64]
+
+    def _validate_mode(self, mode: Optional[str]) -> str:
+        """Normalize and validate mode; fall back to LEGACY when absent."""
+        normalized = (mode or 'LEGACY').upper()
+        if normalized not in self._ALLOWED_MODES:
+            raise ValueError(f"Invalid mode '{mode}' supplied to spine write")
+        return normalized
+
+    def record_attempt_start(
+        self,
+        *,
+        attempt_id: str,
+        game_id: str,
+        level: Optional[int],
+        agent_id: Optional[str],
+        role: str,
+        mode: str,
+        generation: Optional[int],
+        actions_budget: Optional[int],
+        game_actions_budget: Optional[int],
+        w_A: Optional[float],
+        w_B: Optional[float],
+        w_R: Optional[float],
+        scorecard_id: Optional[str],
+    ) -> None:
+        self.db.execute_query(
+            """
+            INSERT OR IGNORE INTO attempts (
+              attempt_id, game_id, level, agent_id, role, mode, generation,
+              actions_budget, game_actions_budget, w_A_weight, w_B_weight, w_R_weight,
+              scorecard_id, guard_budget_ok, guard_role_ok, guard_mode_ok
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1)
+            """,
+            (
+                attempt_id,
+                game_id,
+                level,
+                agent_id,
+                role,
+                self._validate_mode(mode),
+                generation,
+                actions_budget,
+                game_actions_budget,
+                w_A,
+                w_B,
+                w_R,
+                scorecard_id,
+            ),
+        )
+
+    def record_attempt_end(
+        self,
+        *,
+        attempt_id: str,
+        actions_used: int,
+        game_actions_used: int,
+        levels_completed: int,
+        score: float,
+        time_ms: int,
+        succeeded: bool,
+        guard_budget_ok: bool,
+        guard_role_ok: bool,
+        guard_mode_ok: bool,
+    ) -> None:
+        self.db.execute_query(
+            """
+            UPDATE attempts
+            SET actions_used = ?, game_actions_used = ?, levels_completed = ?,
+                score = ?, time_ms = ?, succeeded = ?,
+                guard_budget_ok = ?, guard_role_ok = ?, guard_mode_ok = ?
+            WHERE attempt_id = ?
+            """,
+            (
+                actions_used,
+                game_actions_used,
+                levels_completed,
+                score,
+                time_ms,
+                1 if succeeded else 0,
+                1 if guard_budget_ok else 0,
+                1 if guard_role_ok else 0,
+                1 if guard_mode_ok else 0,
+                attempt_id,
+            ),
+        )
+
+    def record_guard_failure(
+        self,
+        *,
+        attempt_id: str,
+        guard_name: str,
+        guard_code: str,
+        game_id: Optional[str],
+        level: Optional[int],
+        agent_id: Optional[str],
+        generation: Optional[int],
+        message: str,
+    ) -> None:
+        stack_signature = self._stack_hash(f"{guard_name}:{guard_code}:{message}")
+        self.db.execute_query(
+            """
+            INSERT INTO hook_failures (
+              attempt_id, hook_name, hook_phase, exception_type, message, stack_hash,
+              auto_disabled_flag, game_id, level, agent_id, generation, guard_code
+            ) VALUES (?, ?, 'guard', ?, ?, ?, 0, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                guard_name,
+                guard_code,
+                message,
+                stack_signature,
+                0,
+                game_id,
+                level,
+                agent_id,
+                generation,
+                guard_code,
+            ),
+        )
+
+    def record_hook_failure(
+        self,
+        *,
+        attempt_id: str,
+        hook_name: str,
+        hook_phase: str,
+        message: str,
+        game_id: Optional[str] = None,
+        level: Optional[int] = None,
+        agent_id: Optional[str] = None,
+        generation: Optional[int] = None,
+        stack_hash: Optional[str] = None,
+    ) -> None:
+        stack_signature = stack_hash or self._stack_hash(f"{hook_name}:{hook_phase}:{message}")
+        self.db.execute_query(
+            """
+            INSERT INTO hook_failures (
+              attempt_id, hook_name, hook_phase, exception_type, message, stack_hash,
+              auto_disabled_flag, game_id, level, agent_id, generation, guard_code
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, '')
+            """,
+            (
+                attempt_id,
+                hook_name,
+                hook_phase,
+                hook_name,
+                message,
+                stack_signature,
+                game_id,
+                level,
+                agent_id,
+                generation,
+            ),
+        )
+
+    def log_action_proposal(
+        self,
+        *,
+        attempt_id: str,
+        step_idx: int,
+        chosen_action: str,
+        chosen_reason: str,
+        mode: str,
+        available_actions: Optional[List[int]] = None,
+        proposals: Optional[Dict[str, Any]] = None,
+        w_A: Optional[float] = None,
+        w_B: Optional[float] = None,
+        w_R: Optional[float] = None,
+        resonance_tags: Optional[str] = None,
+        role_compliance: Optional[str] = None,
+        theory_validation_state: Optional[str] = None,
+        attention_window_id: Optional[str] = None,
+    ) -> None:
+        self.db.execute_query(
+            """
+            INSERT INTO action_proposals_log (
+              attempt_id, step_idx, available_actions, proposals, chosen_action,
+              chosen_reason, w_A, w_B, w_R, resonance_tags, role_compliance,
+              theory_validation_state, attention_window_id, mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                step_idx,
+                json.dumps(available_actions) if available_actions is not None else None,
+                json.dumps(proposals) if proposals else None,
+                chosen_action,
+                chosen_reason,
+                w_A,
+                w_B,
+                w_R,
+                resonance_tags,
+                role_compliance,
+                theory_validation_state,
+                attention_window_id,
+                self._validate_mode(mode),
+            ),
+        )
+
+    def record_replay_pointer(
+        self,
+        *,
+        attempt_id: str,
+        scorecard_id: str,
+        arc_game_id: str,
+        agent_type: str,
+        tags_payload: Any = None,
+        local_recording_path: Optional[str] = None,
+        mode: str = 'LIVE',
+    ) -> None:
+        """Persist replay_index pointer (thin metadata, no frames)."""
+        normalized_mode = self._validate_mode(mode)
+        if normalized_mode != 'LIVE':
+            return
+
+        try:
+            self.db.execute_query(
+                """
+                INSERT OR IGNORE INTO replay_index (
+                  attempt_id, scorecard_id, replay_id, arc_game_id, agent_type, tags, local_recording_path
+                ) VALUES (?, ?, NULL, ?, ?, ?, ?)
+                """,
+                (
+                    attempt_id,
+                    scorecard_id,
+                    arc_game_id,
+                    agent_type,
+                    json.dumps(tags_payload) if tags_payload is not None else None,
+                    local_recording_path,
+                ),
+            )
+        except Exception as err:
+            logger.warning(f"Failed to record replay_index for attempt {attempt_id}: {err}")
+
+
 class GameplayEngine:
     """Core engine for playing ARC games with integrated pattern learning."""
 
@@ -403,9 +641,14 @@ class GameplayEngine:
             api_key: ARC API key
             db_path: Database file path
         """
-        self.session_manager = GameSessionManager(api_key, db_path)
+        self.session_manager: Any = GameSessionManager(api_key, db_path)
         self.action_handler = ActionHandler(self.session_manager)
-        self.db = DatabaseInterface(db_path)  # Pattern learning database access
+        self.db: Any = DatabaseInterface(db_path)  # Pattern learning database access
+        self.spine_emitter: Any = SpineEmitter(self.db)  # Event spine writer
+        self.event_bus = EventBus()
+        self.plugin_manager: Optional[PluginManager] = None
+        self.event_bus.set_hook_failure_event(EventType.HOOK_FAILURE_DETECTED)
+        self.event_bus.subscribe(EventType.HOOK_FAILURE_DETECTED, self._on_hook_failure_event)
         self.prestige_engine = PrestigeEngine(self.db)  # Phase 1: Prestige tracking
         self.sensation_engine = SensationEngine(self.db)  # Phase 4.5: Emotional intelligence
         self.budget_allocator = BreakthroughBudgetAllocator(self.db)  # Tier 1: Dynamic budgets
@@ -430,6 +673,10 @@ class GameplayEngine:
         # Metacognitive Reasoning: Scientific hypothesis testing and theory revision
         # Implements: assumptions, predictions, theory revision, failure analysis, elimination
         self.metacognitive_engine = MetacognitiveReasoningEngine(self.db)
+
+        # Reflex-level action viability cache (pre-concept gate)
+        self._action_viability_stats: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
+        self._action_viability_enabled = bool(int(os.getenv('ACTION_VIABILITY_ENABLED', '0')))
         
         # Inject subgoal activator into action handler for real-time guidance
         self.action_handler.subgoal_activator = self.subgoal_activator  # type: ignore[attr-defined]
@@ -452,6 +699,11 @@ class GameplayEngine:
         if ABSTRACTION_AVAILABLE and is_abstraction_enabled():
             try:
                 self.abstraction_engine = SequenceAbstraction(db_path)  # type: ignore[misc]
+                try:
+                    # Harvest recent telemetry into relational cache (emit-only)
+                    self.abstraction_engine.harvest_relational_patterns(max_rows=150)  # type: ignore[attr-defined]
+                except Exception as harvest_exc:
+                    logger.debug(f"Abstraction harvest skipped: {harvest_exc}")
                 logger.info("Abstraction engine initialized")
             except Exception as e:
                 self.abstraction_engine = None
@@ -548,6 +800,8 @@ class GameplayEngine:
             'enable_pattern_learning': True,  # Toggle pattern learning
             'learning_mode': 'smart_exploration',  # 'exploit', 'explore', 'smart_exploration'
             'enable_sensation_navigation': True,  # Phase 4.5: Toggle sensation-based emotional intelligence
+            'enable_observability_plugins': False,  # Observability plugins off by default
+            'hypothesis_warmup_actions': 5,  # Hypothesis-before-action window (action-count based, not time)
             
             # Diversity-focused settings (generalization over specialization)
             'diversity_mode': False,              # Enable diversity and generalization focus
@@ -555,6 +809,24 @@ class GameplayEngine:
             'enforce_game_diversity': False,       # Prevent game overfitting
             'novel_game_priority': 1.0,           # Priority weight for unseen games
         }
+
+        stage_env = os.getenv('ARC_STAGE_RECORDINGS') or os.getenv('STAGE_RECORDINGS')
+        self.game_config['stage_recordings'] = str(stage_env).lower() in ('1', 'true', 'yes', 'on') if stage_env is not None else False
+        self._recording_delta_count = 0
+        self._recording_contradictions = 0
+        self._staged_recording_path: Optional[str] = None
+
+        # Enable Phase 2 plugins via env flag without changing default parity
+        if os.getenv('ENABLE_OBSERVABILITY_PLUGINS', '0').lower() in ('1', 'true', 'yes', 'on'):
+            self.game_config['enable_observability_plugins'] = True
+
+        # Phase 2 plugins: opt-in, emit-only, idempotent
+        if self.game_config.get('enable_observability_plugins'):
+            try:
+                self.register_plugins(default_observability_plugins(self.db))
+                logger.info("Observability plugins registered (emit-only)")
+            except Exception as plugin_err:
+                logger.debug(f"Observability plugins not registered: {plugin_err}")
 
     def configure(self, **config):
         """Update game configuration.
@@ -573,6 +845,188 @@ class GameplayEngine:
                 self.session_manager.set_current_generation(gen)
         
         logger.info(f"Updated game config: {config}")
+
+    def _maybe_prompt_games_as_teacher(
+        self,
+        step_idx: Optional[int],
+        game_id: Optional[str],
+        agent_id: Optional[str],
+    ) -> None:
+        """Lightweight instrumentation: prompt teacher-mode reflection periodically."""
+        try:
+            if step_idx is None or step_idx <= 0:
+                return
+            if step_idx % 25 != 0:
+                return
+            logger.debug(
+                f"[TEACHER_PROMPT] step={step_idx} game={game_id or 'unknown'} agent={agent_id or 'anon'} "
+                "questions=['teacher showing?','what changed?','what to manipulate?','does interpretation cover examples?']"
+            )
+        except Exception:
+            # Non-critical instrumentation
+            pass
+
+    def _emit_lesson_stub(
+        self,
+        *,
+        interpretation: str,
+        attempt_id: Optional[str],
+        game_id: Optional[str],
+        level: Optional[int],
+        mode: Optional[str],
+        agent_id: Optional[str] = None,
+        role: Optional[str] = None,
+        score_delta: Optional[float] = None,
+        reasoning: Optional[str] = None,
+        resonance_tags: Optional[Any] = None,
+        contradictions: Optional[Any] = None,
+    ) -> None:
+        """Emit a lightweight lesson_interpretations-ready event for plugins to persist."""
+        try:
+            evt = make_event(
+                EventType.LESSON_INTERPRETATION_READY,
+                interpretation=interpretation,
+                attempt_id=attempt_id,
+                game_id=game_id,
+                level=level,
+                mode=mode,
+                agent_id=agent_id,
+                role=role,
+                score_delta=score_delta,
+                reasoning=reasoning,
+                resonance_tags=resonance_tags,
+                contradictions=contradictions,
+            )
+            failures = self.event_bus.publish(evt)
+            if failures:
+                logger.debug(f"LESSON_INTERPRETATION_READY handlers failed: {len(failures)}")
+        except Exception as err:
+            logger.debug(f"Lesson stub emission failed: {err}")
+
+    def _log_theory_action_gap(
+        self,
+        action: str,
+        reasoning: str,
+        predicted_outcome: Optional[str],
+        actual_outcome: str,
+        attempt_id: Optional[str],
+        step_idx: int,
+        mode: str,
+    ) -> None:
+        """Record theory vs action mismatch for instrumentation (non-blocking)."""
+        try:
+            normalized_mode = (mode or 'LEGACY').upper()
+            if normalized_mode != 'LIVE':
+                return
+            # Minimal payload, no new tables: reuse action_proposals_log via resonance_tags
+            payload = {
+                'predicted': predicted_outcome,
+                'actual': actual_outcome,
+                'gap': predicted_outcome != actual_outcome,
+            }
+            self.spine_emitter.log_action_proposal(
+                attempt_id=attempt_id,
+                step_idx=step_idx,
+                chosen_action=action,
+                chosen_reason=reasoning,
+                mode=mode,
+                resonance_tags=json.dumps({'theory_action_gap': payload}),
+            )
+        except Exception:
+            logger.debug("Theory-action gap log failed (non-critical)")
+
+    def _merge_resonance_tags(
+        self,
+        base_tags: Optional[Any],
+        new_payload: Dict[str, Any]
+    ) -> Optional[str]:
+        """Merge new resonance payload into existing tags safely."""
+        try:
+            merged: Dict[str, Any] = {}
+            if base_tags:
+                if isinstance(base_tags, str):
+                    merged = json.loads(base_tags)
+                elif isinstance(base_tags, dict):
+                    merged = dict(base_tags)
+            if not isinstance(merged, dict):
+                merged = {'legacy': merged}
+            merged.update(new_payload)
+            return json.dumps(merged)
+        except Exception:
+            try:
+                return json.dumps(new_payload)
+            except Exception:
+                return None
+
+    def _action_viability_reflex(
+        self,
+        action: Any,
+        game_state: 'GameState',
+        level: int
+    ) -> Tuple[Any, bool]:
+        """Fast reflex gate: avoid repeating actions that never cause change."""
+        try:
+            available = getattr(game_state, 'available_actions', None) or []
+            if not available or len(available) <= 1:
+                return action, False
+
+            game_key = self.session_manager.current_game_id or 'unknown'
+            key = (game_key, level, str(action))
+            stats = self._action_viability_stats.get(key, {'trials': 0, 'change_events': 0})
+
+            dead = stats['trials'] >= 3 and stats['change_events'] == 0
+            if not dead:
+                return action, False
+
+            # Pick an alternative action (reflex reroute) excluding the dead one
+            alternatives = [a for a in available if str(a) != str(action)]
+            if not alternatives:
+                return action, False
+
+            new_action = random.choice(alternatives)
+            return new_action, True
+        except Exception:
+            return action, False
+
+    def _record_action_viability(
+        self,
+        action: Any,
+        level: int,
+        score_delta: float,
+        frame_changed: bool
+    ) -> None:
+        """Update reflex cache with observed outcomes."""
+        try:
+            game_key = self.session_manager.current_game_id or 'unknown'
+            key = (game_key, level, str(action))
+            stats = self._action_viability_stats.get(key, {'trials': 0, 'change_events': 0})
+            stats['trials'] += 1
+            if frame_changed or score_delta != 0:
+                stats['change_events'] += 1
+            self._action_viability_stats[key] = stats
+        except Exception:
+            logger.debug("Action viability record failed (non-critical)")
+
+    def _log_gap_signal(
+        self,
+        attempt_id: Optional[str],
+        step_idx: int,
+        mode: str,
+        gap_type: str,
+        details: Dict[str, Any]
+    ) -> None:
+        """Emit gap signal (performance/comprehension/metacog/pedagogical) via spine."""
+        try:
+            self.spine_emitter.log_action_proposal(
+                attempt_id=attempt_id,
+                step_idx=step_idx,
+                chosen_action='GAP_SIGNAL',
+                chosen_reason=gap_type,
+                mode=mode,
+                resonance_tags=json.dumps({'gap_signal': {'type': gap_type, 'details': details}}),
+            )
+        except Exception:
+            logger.debug("Gap signal log failed (non-critical)")
 
     # =========================================================================
     # REFACTORED HELPER METHODS (December 2025)
@@ -1069,7 +1523,8 @@ class GameplayEngine:
             # Scientific reasoning: Did our prediction come true?
             # If wrong, trigger theory revision. Track failures for pattern analysis.
             # ================================================================
-            if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine and agent_id:
+            mode_for_spine = self.game_config.get('mode', 'LIVE')
+            if mode_for_spine == 'LIVE' and hasattr(self, 'metacognitive_engine') and self.metacognitive_engine and agent_id:
                 try:
                     score_before = getattr(loop_state, 'previous_score', 0)
                     score_after = game_state.score
@@ -1097,7 +1552,8 @@ class GameplayEngine:
                         actual_outcome=actual_outcome,
                         score_before=score_before,
                         score_after=score_after,
-                        frame_changed=frame_changed
+                        frame_changed=frame_changed,
+                        generation=self.game_config.get('generation'),
                     )
                     
                     # If prediction was wrong, revise theory
@@ -1194,6 +1650,7 @@ class GameplayEngine:
             agent_mode: Agent operating mode
         """
         loop_state.level_completions += 1
+        mode_for_spine = self.game_config.get('mode', 'LIVE')
         logger.info(f" Level {loop_state.current_level} completed! Score: {loop_state.previous_score} -> {game_state.score}")
         logger.info(f" Level {loop_state.current_level} stats: {loop_state.level_action_count} actions, {loop_state.level_api_resets} API resets used")
         
@@ -1205,7 +1662,7 @@ class GameplayEngine:
         # Save the trigger sequence that led to this level win.
         # Order of triggers matters - this records the successful order.
         # ================================================================
-        if hasattr(self, 'agent_self_model'):
+        if mode_for_spine == 'LIVE' and hasattr(self, 'agent_self_model'):
             try:
                 self.agent_self_model.finalize_sequence(
                     game_id=game_id,
@@ -1264,7 +1721,7 @@ class GameplayEngine:
         # 1. Update confidence in all theories for this level
         # 2. Attempt to generalize supported theories across levels
         # ================================================================
-        if hasattr(self, 'science_engine') and self.science_engine:
+        if mode_for_spine == 'LIVE' and hasattr(self, 'science_engine') and self.science_engine:
             try:
                 game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
                 
@@ -1283,7 +1740,7 @@ class GameplayEngine:
         
         # KNOWLEDGE SYNTHESIS: Report breakthrough to help other stuck agents
         # Agent shares what worked so the network can learn
-        if hasattr(self, 'knowledge_synthesis') and self.knowledge_synthesis and agent_id:
+        if mode_for_spine == 'LIVE' and hasattr(self, 'knowledge_synthesis') and self.knowledge_synthesis and agent_id:
             try:
                 game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
                 what_worked = f"Completed level {loop_state.current_level} with {loop_state.level_action_count} actions"
@@ -1589,6 +2046,155 @@ class GameplayEngine:
             'end_time': end_time
         }
 
+        attempt_id = self.game_config.get('attempt_id')
+        mode_for_spine = self.game_config.get('mode', 'LIVE')
+        staged_recording: Optional[Dict[str, Any]] = None
+        if attempt_id:
+            elapsed_ms = int(duration * 1000)
+            guard_budget_ok = loop_state.action_count <= self.game_config.get('max_total_actions', loop_state.action_count)
+            guard_role_ok = True
+            guard_mode_ok = True
+            # Future: wire real guard states from RunContext/guards
+            self.spine_emitter.record_attempt_end(
+                attempt_id=attempt_id,
+                actions_used=loop_state.action_count,
+                game_actions_used=loop_state.action_count,
+                levels_completed=loop_state.level_completions,
+                score=game_state.score,
+                time_ms=elapsed_ms,
+                succeeded=(game_state.state == "WIN"),
+                guard_budget_ok=guard_budget_ok,
+                guard_role_ok=guard_role_ok,
+                guard_mode_ok=guard_mode_ok,
+            )
+
+            # ================================================================
+            # COMPETENCE / BIOGRAPHY SNAPSHOT (non-blocking)
+            # ================================================================
+            try:
+                bio_tags = {}
+                if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                    bio_tags['metacog'] = self.metacognitive_engine.get_metacognitive_summary()
+                if hasattr(self, 'episodic_memory') and self.episodic_memory:
+                    autobiography = self.game_config.get('agent_autobiography')
+                    if autobiography:
+                        bio_tags['autobiography'] = {
+                            'wA': autobiography.get('session_state', {}).get('wA'),
+                            'wB': autobiography.get('session_state', {}).get('wB'),
+                            'actions_taken': autobiography.get('session_state', {}).get('actions_taken_this_game'),
+                        }
+                if bio_tags:
+                    self.spine_emitter.log_action_proposal(
+                        attempt_id=attempt_id,
+                        step_idx=loop_state.action_count,
+                        chosen_action='SESSION_SUMMARY',
+                        chosen_reason='competence_snapshot',
+                        mode=mode_for_spine,
+                        resonance_tags=json.dumps({'competence_snapshot': bio_tags}),
+                    )
+            except Exception:
+                logger.debug("Competence snapshot logging failed (non-critical)")
+            try:
+                intrinsic_milestones = []
+                if game_state.state == "WIN":
+                    intrinsic_milestones.append({
+                        "hypothesis": "sequence_produced_full_win",
+                        "expected_signal": "WIN on completion",
+                        "observed_signal": "WIN",
+                        "outcome": "win",
+                        "status": "observed",
+                        "milestone_tag": "run_outcome",
+                        "confidence": 0.9,
+                        "evidence": {
+                            "levels_completed": loop_state.level_completions,
+                            "actions_used": loop_state.action_count,
+                        },
+                    })
+                else:
+                    intrinsic_milestones.append({
+                        "hypothesis": "run_ended_without_win",
+                        "expected_signal": "WIN on completion",
+                        "observed_signal": game_state.state,
+                        "outcome": "incomplete",
+                        "status": "observed",
+                        "milestone_tag": "run_outcome",
+                        "confidence": 0.4,
+                        "evidence": {
+                            "levels_completed": loop_state.level_completions,
+                            "actions_used": loop_state.action_count,
+                        },
+                    })
+
+                evt = make_event(
+                    EventType.RUN_FINALIZED,
+                    attempt_id=attempt_id,
+                    game_id=game_id,
+                    score=game_state.score,
+                    actions_used=loop_state.action_count,
+                    levels_completed=loop_state.level_completions,
+                    guard_budget_ok=guard_budget_ok,
+                    guard_role_ok=guard_role_ok,
+                    guard_mode_ok=guard_mode_ok,
+                    intrinsic_milestones=intrinsic_milestones,
+                )
+                failures = self.event_bus.publish(evt)
+                if failures:
+                    logger.debug(f"RUN_FINALIZED handlers failed: {len(failures)}")
+            except Exception as ev_err:
+                logger.debug(f"Event publish RUN_FINALIZED failed: {ev_err}")
+
+            # Peer-teaching edge (simple): log who taught us (hypothesis source) and outcome
+            try:
+                hypothesis_source = getattr(self, '_last_hypothesis_source_agent', None)
+                if hypothesis_source:
+                    self.spine_emitter.log_action_proposal(
+                        attempt_id=attempt_id,
+                        step_idx=loop_state.action_count,
+                        chosen_action='PEER_TEACHING',
+                        chosen_reason='hypothesis_usage',
+                        mode=mode_for_spine,
+                        resonance_tags=json.dumps({
+                            'peer_teaching': {
+                                'teacher_agent_id': hypothesis_source,
+                                'game_id': game_id,
+                                'level': loop_state.current_level,
+                                'final_score': game_state.score,
+                                'win': game_state.state == 'WIN'
+                            }
+                        })
+                    )
+            except Exception:
+                logger.debug("Peer-teaching edge log failed (non-critical)")
+
+            if self.game_config.get('stage_recordings') and mode_for_spine == 'LIVE':
+                staged_recording = self._stage_recording_summary(
+                    attempt_id=attempt_id,
+                    game_id=game_id,
+                    scorecard_id=self.game_config.get('scorecard_id'),
+                    actions_used=loop_state.action_count,
+                )
+
+            # Persist replay pointer so ARC replays can be fetched later
+            scorecard_id = self.game_config.get('scorecard_id')
+            scorecard_tags = self.game_config.get('scorecard_tags')
+            role_for_spine = self.game_config.get('role_for_spine')
+            if scorecard_id:
+                tags_payload: Any = scorecard_tags
+                if staged_recording:
+                    tags_payload = {
+                        'tags': scorecard_tags,
+                        'recording_summary': staged_recording
+                    }
+                self.spine_emitter.record_replay_pointer(
+                    attempt_id=attempt_id,
+                    scorecard_id=scorecard_id,
+                    arc_game_id=game_id,
+                    agent_type=role_for_spine or '',
+                    tags_payload=tags_payload,
+                    local_recording_path=staged_recording.get('path') if staged_recording else None,
+                    mode=mode_for_spine,
+                )
+
         # Track agent performance
         if agent_id:
             self._track_agent_performance(
@@ -1604,6 +2210,10 @@ class GameplayEngine:
         # Diversity tracking
         if self.game_config.get('diversity_mode'):
             self._track_game_diversity(game_id, game_state.score, loop_state.action_count)
+
+        # Clear scorecard linkage to avoid leaking into future attempts
+        self.game_config.pop('scorecard_id', None)
+        self.game_config.pop('scorecard_tags', None)
 
         # Finish game in session manager
         await self.session_manager.finish_game(game_state.state, game_state.score, loop_state.level_completions, loop_state.action_count)
@@ -1780,7 +2390,7 @@ class GameplayEngine:
 
         # Step 7: Save world model state at game end (CPU-efficient - once per game)
         # Persists learned world knowledge for future games of same type
-        if self.symbolic_engine and game_state.frame:
+        if mode_for_spine == 'LIVE' and self.symbolic_engine and game_state.frame:
             try:
                 # Final update with end-of-game frame
                 self.symbolic_engine.update(
@@ -1812,7 +2422,7 @@ class GameplayEngine:
                 logger.debug(f"World model save failed (non-critical): {e}")
         
         # Viral Packages & Pariahs
-        if agent_id:
+        if mode_for_spine == 'LIVE' and agent_id:
             await self._handle_viral_evolution(results, game_state, game_id, agent_id)
         
         # ===================================================================
@@ -1825,7 +2435,7 @@ class GameplayEngine:
         # This replaces the old heuristic-based meta-bias update with actual
         # tracked wA/wB from the autobiography system.
         # ===================================================================
-        if agent_id and hasattr(self, 'episodic_memory') and self.episodic_memory:
+        if mode_for_spine == 'LIVE' and agent_id and hasattr(self, 'episodic_memory') and self.episodic_memory:
             try:
                 autobiography = self.game_config.get('agent_autobiography')
                 if autobiography and 'session_state' in autobiography:
@@ -1985,6 +2595,91 @@ class GameplayEngine:
             Game results dictionary
         """
         logger.info(f"Starting game: {game_id}" + (f" (agent: {agent_id})" if agent_id else ""))
+
+        # REPLAY VALIDATION: consume replay_index pointer instead of live play
+        mode_for_spine = self.game_config.get('mode', 'LIVE')
+        if mode_for_spine == 'REPLAY_VALIDATION':
+            replay_row = self.db.execute_query(
+                """
+                SELECT replay_id, scorecard_id, arc_game_id, tags
+                FROM replay_index
+                WHERE arc_game_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (game_id,),
+            )
+
+            attempt_id = f"att_{uuid.uuid4().hex[:16]}"
+            role_for_spine = self.game_config.get('agent_role') or 'generalist'
+
+            # Record attempt stub for provenance even when no replay available
+            self.spine_emitter.record_attempt_start(
+                attempt_id=attempt_id,
+                game_id=game_id,
+                level=None,
+                agent_id=agent_id,
+                role=role_for_spine,
+                mode=mode_for_spine,
+                generation=self.game_config.get('generation'),
+                actions_budget=self.game_config.get('max_total_actions'),
+                game_actions_budget=self.game_config.get('max_total_actions'),
+                w_A=self.game_config.get('w_A_weight'),
+                w_B=self.game_config.get('w_B_weight'),
+                w_R=self.game_config.get('w_R_weight'),
+                scorecard_id=None,
+            )
+
+            if not replay_row:
+                # No replay available for this game
+                self.spine_emitter.record_attempt_end(
+                    attempt_id=attempt_id,
+                    actions_used=0,
+                    game_actions_used=0,
+                    levels_completed=0,
+                    score=0.0,
+                    time_ms=0,
+                    succeeded=False,
+                    guard_budget_ok=True,
+                    guard_role_ok=True,
+                    guard_mode_ok=True,
+                )
+                return {
+                    'game_id': game_id,
+                    'final_state': 'REPLAY_MISSING',
+                    'final_score': 0.0,
+                    'actions_taken': 0,
+                    'win': False,
+                    'replay_available': False,
+                    'reason': 'no replay_index entry found'
+                }
+
+            entry = replay_row[0]
+            # Mark attempt end as reference-only (no live actions)
+            self.spine_emitter.record_attempt_end(
+                attempt_id=attempt_id,
+                actions_used=0,
+                game_actions_used=0,
+                levels_completed=0,
+                score=0.0,
+                time_ms=0,
+                succeeded=False,
+                guard_budget_ok=True,
+                guard_role_ok=True,
+                guard_mode_ok=True,
+            )
+
+            return {
+                'game_id': entry.get('arc_game_id') or game_id,
+                'final_state': 'REPLAY_POINTER',
+                'final_score': 0.0,
+                'actions_taken': 0,
+                'win': False,
+                'replay_available': True,
+                'replay_id': entry.get('replay_id'),
+                'scorecard_id': entry.get('scorecard_id'),
+                'replay_tags': entry.get('tags')
+            }
         
         # PHASE 2: Check if agent can afford to play this game
         if agent_id:
@@ -2034,14 +2729,192 @@ class GameplayEngine:
         
         # Create game with agent info in tags
         game_data = await self.session_manager.create_game(
-            game_id, 
+            game_id,
             agent_id=agent_id,
-            agent_mode=agent_mode
+            agent_mode=agent_mode,
+            mode=mode_for_spine
         )
         game_state = GameState.from_dict(game_data)
+
+        # Track scorecard linkage for attempts/replays
+        if game_data.get('scorecard_id'):
+            self.game_config['scorecard_id'] = game_data.get('scorecard_id')
+        if game_data.get('scorecard_tags'):
+            self.game_config['scorecard_tags'] = game_data.get('scorecard_tags')
         
         # Store game_id for later use in reasoning context
         self.game_config['current_game_id'] = game_id
+        self.game_config['role_for_spine'] = role_for_spine
+        self.game_config['attempt_mode'] = mode_for_spine
+
+        # Spine: record attempt start
+        attempt_id = f"att_{uuid.uuid4().hex[:16]}"
+        self.game_config['attempt_id'] = attempt_id
+        attempt_started_at = datetime.now()
+        self.game_config['attempt_started_at'] = attempt_started_at
+        run_context: Optional[RunContext] = None
+        if self.game_config.get('stage_recordings'):
+            self._recording_delta_count = 0
+            self._recording_contradictions = 0
+            self._staged_recording_path = None
+        role_for_spine = agent_mode or self.game_config.get('agent_role') or 'generalist'
+        mode_for_spine = self.game_config.get('mode', 'LIVE')
+        self.spine_emitter.record_attempt_start(
+            attempt_id=attempt_id,
+            game_id=game_id,
+            level=int(game_state.score) + 1 if game_state else None,
+            agent_id=agent_id,
+            role=role_for_spine,
+            mode=mode_for_spine,
+            generation=self.game_config.get('generation'),
+            actions_budget=self.game_config.get('max_total_actions'),
+            game_actions_budget=self.game_config.get('max_total_actions'),
+            w_A=self.game_config.get('w_A_weight'),
+            w_B=self.game_config.get('w_B_weight'),
+            w_R=self.game_config.get('w_R_weight'),
+            scorecard_id=self.game_config.get('scorecard_id'),
+        )
+
+        # Event: run init
+        try:
+            event = make_event(
+                EventType.RUN_INIT,
+                attempt_id=attempt_id,
+                game_id=game_id,
+                level=int(game_state.score) + 1 if game_state else None,
+                agent_id=agent_id,
+                role=role_for_spine,
+                mode=mode_for_spine,
+                generation=self.game_config.get('generation'),
+                actions_budget=self.game_config.get('max_total_actions'),
+                game_actions_budget=self.game_config.get('max_total_actions'),
+            )
+            self.event_bus.publish(event)
+        except Exception as ev_err:
+            logger.debug(f"Event publish RUN_INIT failed: {ev_err}")
+
+        # RunContext: track budgets/guards for event-first loop
+        max_actions = self.game_config.get('max_total_actions') or 0
+        run_context = RunContext(
+            attempt_id=attempt_id,
+            game_id=game_id,
+            level=int(game_state.score) + 1 if game_state else None,
+            generation=self.game_config.get('generation'),
+            agent_id=agent_id,
+            role=role_for_spine,
+            mode=mode_for_spine,
+            budgets=BudgetState(
+                actions_remaining=max_actions,
+                game_actions_remaining=max_actions,
+            ),
+            w_A_weight=self.game_config.get('w_A_weight'),
+            w_B_weight=self.game_config.get('w_B_weight'),
+            w_R_weight=self.game_config.get('w_R_weight'),
+        )
+        self.game_config['run_context'] = run_context
+
+        # Emit a lesson stub at level start for Games-as-Teacher telemetry
+        self._emit_lesson_stub(
+            interpretation="level_start",
+            attempt_id=attempt_id,
+            game_id=game_id,
+            level=int(game_state.score) + 1 if game_state else None,
+            mode=mode_for_spine,
+            agent_id=agent_id,
+            role=role_for_spine,
+            reasoning="level_start",
+            resonance_tags=self.game_config.get('resonance_tags'),
+        )
+
+        # Cross-domain operator tagging (read-only): pull resonant template hints for telemetry
+        if mode_for_spine == 'LIVE':
+            cross_domain_hint = self._load_cross_domain_operator_hint(game_id, role_for_spine)
+            if cross_domain_hint:
+                self.game_config['cross_domain_operator'] = cross_domain_hint
+                merged_tags = self._merge_resonance_tags(
+                    self.game_config.get('resonance_tags'),
+                    {'cross_domain_operator': cross_domain_hint}
+                )
+                if merged_tags:
+                    self.game_config['resonance_tags'] = merged_tags
+
+        # Problem decomposition heuristic (observability-only): prefer lowest-variability subproblems
+        if mode_for_spine == 'LIVE':
+            try:
+                decomposed_hint = {
+                    'strategy': 'lowest_variability_first',
+                    'source': 'planner',
+                    'optimizer_target_level': self.game_config.get('optimizer_target_level'),
+                }
+                self.game_config['decomposition_hint'] = decomposed_hint
+                merged_tags = self._merge_resonance_tags(
+                    self.game_config.get('resonance_tags'),
+                    {'decomposition_hint': decomposed_hint}
+                )
+                if merged_tags:
+                    self.game_config['resonance_tags'] = merged_tags
+
+                if hasattr(self, 'spine_emitter') and self.spine_emitter and attempt_id:
+                    try:
+                        self.spine_emitter.log_action_proposal(
+                            attempt_id=attempt_id,
+                            step_idx=0,
+                            chosen_action='DECOMPOSITION_HINT',
+                            chosen_reason='lowest_variability_first',
+                            mode=mode_for_spine,
+                            resonance_tags=json.dumps({'decomposition_hint': decomposed_hint}),
+                            role_compliance=role_for_spine,
+                            theory_validation_state=self.game_config.get('theory_validation_state'),
+                            attention_window_id=None,
+                        )
+                    except Exception:
+                        logger.debug("Decomposition hint telemetry log skipped (non-critical)")
+            except Exception as decomp_err:
+                logger.debug(f"Decomposition hint tag failed: {decomp_err}")
+
+            # Governance/decay hygiene: mark telemetry with decay hint for safe_cleanup/compression awareness
+            try:
+                decay_hint = {'decay_hint': {'preferred_ttl_generations': 10, 'source': 'governance', 'mode': mode_for_spine}}
+                merged_tags = self._merge_resonance_tags(self.game_config.get('resonance_tags'), decay_hint)
+                if merged_tags:
+                    self.game_config['resonance_tags'] = merged_tags
+            except Exception as decay_err:
+                logger.debug(f"Decay hint tag failed: {decay_err}")
+
+        # Guard: role compliance (optional required_role hint)
+        required_role = self.game_config.get('required_role')
+        if required_role and role_for_spine != required_role:
+            run_context.guards.role_ok = False
+            try:
+                self.spine_emitter.record_guard_failure(
+                    attempt_id=attempt_id,
+                    guard_name="role",
+                    guard_code="role_violation",
+                    game_id=game_id,
+                    level=1,
+                    agent_id=agent_id,
+                    generation=self.game_config.get('generation'),
+                    message=f"Required role {required_role} but got {role_for_spine}",
+                )
+            except Exception as guard_err:
+                logger.debug(f"Guard failure log failed (role_violation): {guard_err}")
+
+        # Guard: mode write blocked outside LIVE
+        if mode_for_spine != 'LIVE':
+            run_context.guards.mode_ok = False
+            try:
+                self.spine_emitter.record_guard_failure(
+                    attempt_id=attempt_id,
+                    guard_name="mode",
+                    guard_code="mode_write_blocked",
+                    game_id=game_id,
+                    level=1,
+                    agent_id=agent_id,
+                    generation=self.game_config.get('generation'),
+                    message=f"Writes blocked in mode {mode_for_spine}",
+                )
+            except Exception as guard_err:
+                logger.debug(f"Guard failure log failed (mode_write_blocked): {guard_err}")
         
         # Initialize action history for abstraction engine (with memory leak protection)
         self.game_config['current_actions'] = []
@@ -2137,6 +3010,15 @@ class GameplayEngine:
         self._q3_failure_count = 0
         self._q4_failure_count = 0
         self._q5_failure_count = 0
+        self._pending_action6_target = None
+        self._pending_action6_reason = None
+        self._cods_operator_queue: List[str] = []
+        self._struggle_guard_state = {
+            'no_delta_frames': 0,
+            'oscillation_sweeps': 0,
+            'fired': set(),
+            'level': 1,
+        }
         
         # FIX: Reset delta tracking for new game
         # This prevents score_change calculation from using previous game's values
@@ -2200,6 +3082,12 @@ class GameplayEngine:
                 # ================================================================
                 if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
                     try:
+                        self.metacognitive_engine.set_session_provenance(
+                            attempt_id=attempt_id,
+                            mode=mode_for_spine,
+                            generation=self.game_config.get('generation'),
+                            role=role_for_spine,
+                        )
                         self.metacognitive_engine.reset_session()
                         
                         # Register opening assumptions based on autobiography
@@ -2714,14 +3602,14 @@ class GameplayEngine:
             CYCLE_DETECTION_WINDOW = 8  # Check last 8 actions for cycles
             
             # STUCK STATE ESCAPE: Before giving up, try intelligent escape actions
-            # FIX 2.2: Increased to 21 attempts in 3 phases:
-            # Phase 1 (1-7): Intelligent escape using CODS, Q1-Q5, network wisdom
-            # Phase 2 (8-14): Reset biases, try different strategies
-            # Phase 3 (15-21): Pure random exploration (last resort)
-            ESCAPE_ATTEMPTS_PHASE1 = 7   # Intelligent escape with CODS
-            ESCAPE_ATTEMPTS_PHASE2 = 7   # After resetting biases
-            ESCAPE_ATTEMPTS_PHASE3 = 7   # Pure random (last resort)
-            ESCAPE_ATTEMPTS_MAX = ESCAPE_ATTEMPTS_PHASE1 + ESCAPE_ATTEMPTS_PHASE2 + ESCAPE_ATTEMPTS_PHASE3  # 21 total
+            # FIX 2.2: Increased to 21 attempts in 3 stages:
+            # Stage 1 (1-7): Intelligent escape using CODS, Q1-Q5, network wisdom
+            # Stage 2 (8-14): Reset biases, try different strategies
+            # Stage 3 (15-21): Pure random exploration (last resort)
+            ESCAPE_ATTEMPTS_STAGE1 = 7   # Intelligent escape with CODS
+            ESCAPE_ATTEMPTS_STAGE2 = 7   # After resetting biases
+            ESCAPE_ATTEMPTS_STAGE3 = 7   # Pure random (last resort)
+            ESCAPE_ATTEMPTS_MAX = ESCAPE_ATTEMPTS_STAGE1 + ESCAPE_ATTEMPTS_STAGE2 + ESCAPE_ATTEMPTS_STAGE3  # 21 total
             escape_attempts = 0  # Track escape attempts
             in_escape_mode = False  # Flag for escape mode
             pure_exploration_mode = False  # Flag for pure exploration after escape fails
@@ -2729,15 +3617,48 @@ class GameplayEngine:
             # Track queried hypotheses for later contradiction if they don't help
             queried_hypothesis_ids = []  # IDs of hypotheses used this game
 
+            # Metacog instrumentation (per game/level, non-blocking)
+            metacog_level_assumptions_logged: Set[Tuple[str, int]] = set()
+            metacog_stall_counters: Dict[str, int] = {}
+
             # API ERROR TRACKING (to prevent spam when API is having issues)
             consecutive_api_errors = 0  # Track consecutive API errors
             MAX_CONSECUTIVE_API_ERRORS = 5  # Break out after 5 consecutive errors
             api_error_backoff = 0  # Seconds to wait after API error (exponential backoff)
 
+            # Reset struggle guard counters per level
+            self._reset_struggle_guard_state(level=current_level, clear_fired=True)
+
             # Game loop - continue until action budget exhausted
             # BUGFIX: Don't trust game_state.state - some games report WIN prematurely
             # Only stop on action limit or explicit session shutdown
             while action_count < self.game_config['max_total_actions']:
+
+                if run_context:
+                    run_context.next_step()
+
+                live_level = int(game_state.score) + 1 if game_state else current_level
+                if self._struggle_guard_state.get('level') != live_level:
+                    self._reset_struggle_guard_state(level=live_level, clear_fired=True)
+                current_level = live_level
+
+                # Metacog: log baseline control assumption once per level (instrumentation only)
+                if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine and game_id:
+                    assumption_key = (game_id, current_level)
+                    if assumption_key not in metacog_level_assumptions_logged:
+                        try:
+                            available = game_state.available_actions if hasattr(game_state, 'available_actions') else []
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            self.metacognitive_engine.register_assumption(
+                                agent_id=agent_id or 'unknown',
+                                game_type=game_type,
+                                level_number=current_level,
+                                assumption=f"Available actions {available} imply a controllable object is present",
+                                assumption_type='control'
+                            )
+                            metacog_level_assumptions_logged.add(assumption_key)
+                        except Exception:
+                            logger.debug("Metacog assumption tracking failed (non-critical)")
 
                 # Check if session is still active (graceful shutdown detection)
                 # Check BOTH is_running AND is_shutting_down
@@ -2916,6 +3837,8 @@ class GameplayEngine:
                     if actual_level_from_score > current_level:
                         logger.info(f" Level sync: current_level was {current_level}, updating to {actual_level_from_score} (score={game_state.score})")
                         current_level = actual_level_from_score
+                        if run_context:
+                            run_context.level = current_level
                         level_action_count = 0  # Reset level counter
                         level_start_action = action_count
                         consecutive_no_frame_change = 0
@@ -2943,12 +3866,142 @@ class GameplayEngine:
                                 raise ValueError(f"Invalid action callback result: {action_result}")
                         else:
                             # Use default action selection
+                            if run_context and hasattr(game_state, 'available_actions'):
+                                try:
+                                    run_context.set_available_actions(game_state.available_actions or [])
+                                except Exception:
+                                    pass
                             action, reasoning = await self._select_action(game_state)
+
+                            # THEORY/ACTION guard: require role compliance + theory validation in LIVE
+                            if mode_for_spine == 'LIVE':
+                                if not role_for_spine:
+                                    raise RuntimeError("Missing role_compliance in LIVE mode")
+                                theory_state = self.game_config.get('theory_validation_state')
+                                if theory_state is None:
+                                    raise RuntimeError("Missing theory_validation_state in LIVE mode")
+
+                            # Reflex: reroute if action is dead (no effect) and alternatives exist
+                            suppressed_by_reflex = False
+                            try:
+                                action, suppressed_by_reflex = self._action_viability_reflex(action, game_state, current_level)
+                            except Exception:
+                                suppressed_by_reflex = False
+
+                            # Event: action chosen
+                            if run_context:
+                                try:
+                                    evt = make_event(
+                                        EventType.ACTION_CHOSEN,
+                                        attempt_id=attempt_id,
+                                        step_idx=run_context.heartbeat.step_idx,
+                                        action=action,
+                                        reasoning=reasoning,
+                                        available_actions=run_context.available_actions,
+                                        game_id=game_id,
+                                        agent_id=agent_id,
+                                        role=role_for_spine,
+                                        mode=mode_for_spine,
+                                        level=current_level,
+                                        w_A_weight=self.game_config.get('w_A_weight'),
+                                        w_B_weight=self.game_config.get('w_B_weight'),
+                                        w_R_weight=self.game_config.get('w_R_weight'),
+                                        ladder_rung=getattr(self, '_last_ladder_rung', None),
+                                        ladder_trace=getattr(self, '_last_ladder_trace', None),
+                                        operator_hint=self.game_config.get('cross_domain_operator'),
+                                        decomposition_hint=self.game_config.get('decomposition_hint'),
+                                    )
+                                    failures = self.event_bus.publish(evt)
+                                    if failures:
+                                        logger.debug(f"ACTION_CHOSEN handlers failed: {len(failures)}")
+                                except Exception as ev_err:
+                                    logger.debug(f"Event publish ACTION_CHOSEN failed: {ev_err}")
+
+                            # Spine: log chosen action/proposal
+                            attempt_id_for_spine = self.game_config.get('attempt_id')
+                            if attempt_id_for_spine:
+                                try:
+                                    chosen_action = action if isinstance(action, str) else f"ACTION{action}"
+                                    available_actions = game_state.available_actions if hasattr(game_state, 'available_actions') else None
+                                    role_compliance = self.game_config.get('agent_operating_mode') or self.game_config.get('agent_role')
+                                    resonance_tags = self.game_config.get('resonance_tags')
+                                    # Hypothesis warmup window (action-count based, per level)
+                                    warmup_limit = self.game_config.get('hypothesis_warmup_actions', 0) or 0
+                                    if warmup_limit and loop_state.level_action_count < warmup_limit:
+                                        resonance_tags = self._merge_resonance_tags(
+                                            resonance_tags,
+                                            {
+                                                'hypothesis_warmup': {
+                                                    'remaining': max(warmup_limit - loop_state.level_action_count, 0),
+                                                    'level': current_level,
+                                                }
+                                            }
+                                        )
+                                    # Carry forward any bottleneck hint from prior score gains
+                                    if self.game_config.get('bottleneck_hint'):
+                                        resonance_tags = self._merge_resonance_tags(
+                                            resonance_tags,
+                                            {'bottleneck_hint': self.game_config.get('bottleneck_hint')}
+                                        )
+                                    # Light concept label from cross-domain operator if present
+                                    if self.game_config.get('cross_domain_operator'):
+                                        concept_label = self.game_config['cross_domain_operator']
+                                        resonance_tags = self._merge_resonance_tags(
+                                            resonance_tags,
+                                            {'concept_label': concept_label}
+                                        )
+                                    # Ambiguity signal: record choice breadth for dashboards (observability only)
+                                    if available_actions and len(available_actions) > 1:
+                                        resonance_tags = self._merge_resonance_tags(
+                                            resonance_tags,
+                                            {
+                                                'ambiguity_signal': {
+                                                    'option_count': len(available_actions),
+                                                    'mode': mode_for_spine,
+                                                    'role': role_for_spine,
+                                                }
+                                            }
+                                        )
+                                    if suppressed_by_reflex:
+                                        resonance_tags = self._merge_resonance_tags(
+                                            resonance_tags,
+                                            {'action_viability_reflex': {'suppressed': True, 'new_action': chosen_action}}
+                                        )
+
+                                    # Cross-domain resonance tagging (rotation/translation/progression/containment)
+                                    try:
+                                        cross_domain = self.game_config.get('cross_domain_operator')
+                                        if cross_domain:
+                                            resonance_tags = self._merge_resonance_tags(
+                                                resonance_tags,
+                                                {'cross_domain_operator': cross_domain}
+                                            )
+                                    except Exception:
+                                        pass
+                                    theory_state = self.game_config.get('theory_validation_state')
+                                    attention_window_id = self.game_config.get('current_attention_window_id')
+                                    self.spine_emitter.log_action_proposal(
+                                        attempt_id=attempt_id_for_spine,
+                                        step_idx=action_count + 1,
+                                        chosen_action=chosen_action,
+                                        chosen_reason=reasoning,
+                                        mode=self.game_config.get('mode', 'LIVE'),
+                                        available_actions=available_actions,
+                                        w_A=self.game_config.get('w_A_weight'),
+                                        w_B=self.game_config.get('w_B_weight'),
+                                        w_R=self.game_config.get('w_R_weight'),
+                                        role_compliance=role_compliance,
+                                        resonance_tags=resonance_tags,
+                                        theory_validation_state=theory_state,
+                                        attention_window_id=attention_window_id,
+                                    )
+                                except Exception as spine_exc:
+                                    logger.debug(f"Spine proposal log failed: {spine_exc}")
                             
                             # ================================================================
-                            # METACOGNITIVE: PREDICTION BEFORE ACTION
+                            # METACOGNITIVE: PREDICTION BEFORE ACTION (LIVE-only)
                             # ================================================================
-                            if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                            if mode_for_spine == 'LIVE' and hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
                                 try:
                                     game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
                                     expected_outcome = 'score_increase'
@@ -2966,11 +4019,130 @@ class GameplayEngine:
                                 except Exception as e:
                                     logger.debug(f"Metacognitive prediction failed: {e}")
                             
+                            if run_context:
+                                try:
+                                    self._maybe_prompt_games_as_teacher(
+                                        getattr(run_context.heartbeat, 'step_idx', None),
+                                        game_id,
+                                        agent_id,
+                                    )
+                                except Exception:
+                                    logger.debug("Teacher prompt instrumentation failed (non-critical)")
+
+                            # Prediction-before-action (lightweight): store expected change when available
+                            predicted_outcome = None
+                            if mode_for_spine == 'LIVE' and hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                                try:
+                                    predicted_outcome = self.metacognitive_engine.peek_prediction()
+                                except Exception:
+                                    predicted_outcome = None
+
+                            pre_action_available = getattr(game_state, 'available_actions', None)
+                            ambiguity_metrics = self._compute_ambiguity_metrics(pre_action_available, None, None)
+
+                            pre_score = game_state.score if hasattr(game_state, 'score') else None
                             game_state = await self._execute_action(action, game_state, reasoning, current_level)
+
+                            score_delta_for_action = None
+                            if pre_score is not None and hasattr(game_state, 'score'):
+                                score_delta_for_action = (game_state.score or 0) - (pre_score or 0)
+                                if ambiguity_metrics is not None:
+                                    ambiguity_metrics['score_delta'] = score_delta_for_action
+                                    ambiguity_metrics['accuracy_proxy'] = 1.0 if score_delta_for_action > 0 else 0.0 if score_delta_for_action < 0 else 0.5
+
+                            operator_hint_payload = self.game_config.get('cross_domain_operator') or {}
+                            operator_domain = operator_hint_payload.get('pattern_type') or operator_hint_payload.get('operator_domain')
+                            operator_lineage = operator_hint_payload.get('lineage') or operator_hint_payload.get('source')
+                            operator_decay = operator_hint_payload.get('decay_score')
+
+                            # Event: action executed
+                            if run_context:
+                                try:
+                                    evt = make_event(
+                                        EventType.ACTION_EXECUTED,
+                                        attempt_id=attempt_id,
+                                        step_idx=run_context.heartbeat.step_idx,
+                                        action=action,
+                                        score=game_state.score,
+                                        game_state=game_state.state,
+                                        game_id=game_id,
+                                        agent_id=agent_id,
+                                        role=role_for_spine,
+                                        mode=mode_for_spine,
+                                        generation=self.game_config.get('generation'),
+                                        level=current_level,
+                                        reasoning=reasoning,
+                                        w_A_weight=self.game_config.get('w_A_weight'),
+                                        w_B_weight=self.game_config.get('w_B_weight'),
+                                        w_R_weight=self.game_config.get('w_R_weight'),
+                                        ladder_rung=getattr(self, '_last_ladder_rung', None),
+                                        ladder_trace=getattr(self, '_last_ladder_trace', None),
+                                        operator_hint=self.game_config.get('cross_domain_operator'),
+                                        operator_domain=operator_domain,
+                                        operator_lineage=operator_lineage,
+                                        operator_decay=operator_decay,
+                                        ambiguity_metrics=ambiguity_metrics,
+                                    )
+                                    failures = self.event_bus.publish(evt)
+                                    if failures:
+                                        logger.debug(f"ACTION_EXECUTED handlers failed: {len(failures)}")
+                                except Exception as ev_err:
+                                    logger.debug(f"Event publish ACTION_EXECUTED failed: {ev_err}")
                         
                         # Action succeeded - reset error counter
                         consecutive_api_errors = 0
                         action_succeeded = True
+
+                        # Lesson stub: record score deltas as teacher signals
+                        try:
+                            score_delta = score_delta_for_action
+                            if score_delta not in (None, 0):
+                                self._emit_lesson_stub(
+                                    interpretation="score_delta",
+                                    attempt_id=attempt_id,
+                                    game_id=game_id,
+                                    level=current_level,
+                                    mode=mode_for_spine,
+                                    agent_id=agent_id,
+                                    role=role_for_spine,
+                                    score_delta=score_delta,
+                                    reasoning=reasoning,
+                                    resonance_tags=self.game_config.get('resonance_tags'),
+                                )
+                        except Exception:
+                            logger.debug("Score-delta lesson stub failed (non-critical)")
+
+                        # Theory-action gap instrumentation (non-blocking)
+                        if run_context and hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                            try:
+                                score_after = game_state.score if hasattr(game_state, 'score') else None
+                                actual_outcome = f"score={score_after}" if score_after is not None else "unknown"
+                                self._log_theory_action_gap(
+                                    action=str(action),
+                                    reasoning=reasoning,
+                                    predicted_outcome=predicted_outcome,
+                                    actual_outcome=actual_outcome,
+                                    attempt_id=attempt_id,
+                                    step_idx=run_context.heartbeat.step_idx,
+                                    mode=mode_for_spine,
+                                )
+                            except Exception:
+                                logger.debug("Theory-action gap instrumentation failed (non-critical)")
+
+                        # Bottleneck capture: log score-improving states as sub-goal hints
+                        try:
+                            post_score = game_state.score if hasattr(game_state, 'score') else None
+                            if pre_score is not None and post_score is not None and post_score > pre_score:
+                                bottleneck_hint = {
+                                    'level': current_level,
+                                    'score': post_score,
+                                    'step': run_context.heartbeat.step_idx if run_context else None,
+                                    'game_id': game_id,
+                                    'source': 'score_gain_subgoal'
+                                }
+                                self.game_config['bottleneck_hint'] = bottleneck_hint
+                        except Exception:
+                            pass
                         
                     except Exception as action_error:
                         # Check if this is an API error (400, 500, connection issue, etc.)
@@ -3011,6 +4183,40 @@ class GameplayEngine:
                     if action_succeeded:
                         action_count += 1
                         level_action_count += 1
+                        if run_context:
+                            budget_ok_before = run_context.guards.budget_ok
+                            run_context.decrement_actions()
+                            if budget_ok_before and not run_context.guards.budget_ok:
+                                try:
+                                    self.spine_emitter.record_guard_failure(
+                                        attempt_id=attempt_id,
+                                        guard_name="budget",
+                                        guard_code="budget_exhausted",
+                                        game_id=game_id,
+                                        level=current_level,
+                                        agent_id=agent_id,
+                                        generation=self.game_config.get('generation'),
+                                        message="Budget exhausted during action loop",
+                                    )
+                                except Exception as guard_err:
+                                    logger.debug(f"Guard failure log failed: {guard_err}")
+                                try:
+                                    evt = make_event(
+                                        EventType.GUARD_TRIGGERED,
+                                        attempt_id=attempt_id,
+                                        guard_code="budget_exhausted",
+                                        step_idx=run_context.heartbeat.step_idx,
+                                        game_id=game_id,
+                                        agent_id=agent_id,
+                                        role=role_for_spine,
+                                        mode=mode_for_spine,
+                                        level=current_level,
+                                    )
+                                    failures = self.event_bus.publish(evt)
+                                    if failures:
+                                        logger.debug(f"GUARD_TRIGGERED handlers failed: {len(failures)}")
+                                except Exception as ev_err:
+                                    logger.debug(f"Event publish GUARD_TRIGGERED failed: {ev_err}")
                         
                         # Store level action count in game_config for frontier abstraction templates
                         self.game_config['level_action_count'] = level_action_count
@@ -3019,7 +4225,7 @@ class GameplayEngine:
                         # Update world model and self-model after EVERY exploration action
                         # NOTE: This only runs for exploration, not sequence replay
                         # (Sequence replay has its own loop in _replay_sequence_inline)
-                        if self.symbolic_engine and game_state.frame:
+                        if mode_for_spine == 'LIVE' and self.symbolic_engine and game_state.frame:
                             try:
                                 self.symbolic_engine.update(
                                     action=action if isinstance(action, int) else 0,
@@ -3037,6 +4243,9 @@ class GameplayEngine:
                         
                         # Q1-Q5 EMERGENT REASONING: Track action traces for what changes vs fixed
                         # FIX: Moved outside agent_self_model check - Q1 needs traces regardless
+                        frame_changed_for_step = False
+                        score_change = 0.0
+                        frame_changed = False
                         try:
                             score_change = game_state.score - previous_score
                             outcome_type = 'neutral'
@@ -3044,18 +4253,223 @@ class GameplayEngine:
                                 outcome_type = 'score_increase'
                             elif game_state.state == 'GAME_OVER' and game_state.score == 0:
                                 outcome_type = 'game_over'
+                            try:
+                                if self.action_handler.last_frame is not None and game_state.frame:
+                                    prev_arr = np.array(self.action_handler.last_frame)
+                                    curr_arr = np.array(game_state.frame)
+                                    if prev_arr.shape == curr_arr.shape:
+                                        frame_changed = not np.array_equal(prev_arr, curr_arr)
+                            except Exception:
+                                frame_changed = False
+                            frame_changed_for_step = frame_changed
                             
                             self._recent_action_traces.append({
                                 'action_type': action,
                                 'frame_before': self.action_handler.last_frame,
                                 'frame_after': game_state.frame,
                                 'score_change': score_change,  # Q5: score delta
-                                'outcome_type': outcome_type   # Q5: neutral/score_increase/game_over
+                                'outcome_type': outcome_type,  # Q5: neutral/score_increase/game_over
+                                'frame_changed': frame_changed
                             })
                             # Keep last 10 actions for control detection
                             self._recent_action_traces = self._recent_action_traces[-10:]
                         except Exception as e:
                             logger.debug(f"Action trace recording failed: {e}")
+                            frame_changed_for_step = False
+
+                        # Metacognitive evaluation: prediction vs outcome + elimination/failure tagging
+                        if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                            try:
+                                actual_outcome = f"score_delta={score_change}, frame_changed={frame_changed}"
+                                eval_result = self.metacognitive_engine.evaluate_prediction(
+                                    actual_outcome=actual_outcome,
+                                    score_before=previous_score,
+                                    score_after=game_state.score,
+                                    frame_changed=frame_changed_for_step,
+                                    generation=self.game_config.get('generation'),
+                                )
+
+                                if eval_result.get('recommendation') == 'revise_theory':
+                                    revised = self.metacognitive_engine.revise_theory(
+                                        eval_result.get('theory', ''),
+                                        eval_result.get('predicted', ''),
+                                        eval_result.get('actual', actual_outcome)
+                                    )
+                                    try:
+                                        self.spine_emitter.log_action_proposal(
+                                            attempt_id=attempt_id,
+                                            step_idx=run_context.heartbeat.step_idx if run_context else action_count + 1,
+                                            chosen_action=str(action),
+                                            chosen_reason=reasoning,
+                                            mode=mode_for_spine,
+                                            resonance_tags=json.dumps({'theory_revision': {'from': eval_result.get('theory'), 'to': revised}}),
+                                        )
+                                    except Exception:
+                                        logger.debug("Metacog revision spine log failed (non-critical)")
+
+                                # Record failure pattern candidates (no change = likely wrong theory)
+                                if score_change == 0 and not frame_changed_for_step:
+                                    self.metacognitive_engine.record_failure(
+                                        action=str(action),
+                                        context={
+                                            'level': current_level,
+                                            'state': game_state.state,
+                                            'available_actions': game_state.available_actions,
+                                            'reasoning': reasoning[:80] if isinstance(reasoning, str) else ''
+                                        }
+                                    )
+
+                                    pattern = self.metacognitive_engine.analyze_failure_commonality(
+                                        agent_id=agent_id or 'unknown',
+                                        game_type=game_id.split('-')[0] if game_id else 'unknown',
+                                        level_number=current_level,
+                                        min_failures=3,
+                                    )
+                                    if pattern:
+                                        try:
+                                            self.spine_emitter.log_action_proposal(
+                                                attempt_id=attempt_id,
+                                                step_idx=run_context.heartbeat.step_idx if run_context else action_count + 1,
+                                                chosen_action=str(action),
+                                                chosen_reason=reasoning,
+                                                mode=mode_for_spine,
+                                                resonance_tags=json.dumps({'failure_pattern': pattern}),
+                                            )
+                                        except Exception:
+                                            logger.debug("Failure pattern spine log failed (non-critical)")
+
+                                    # Elimination tracker: bump stall counter per action
+                                    action_key = str(action)
+                                    metacog_stall_counters[action_key] = metacog_stall_counters.get(action_key, 0) + 1
+                                    if metacog_stall_counters[action_key] >= 3:
+                                        try:
+                                            self.metacognitive_engine.eliminate_action(
+                                                agent_id=agent_id or 'unknown',
+                                                game_type=game_id.split('-')[0] if game_id else 'unknown',
+                                                level_number=current_level,
+                                                action=action_key,
+                                                reason="No score/frame change after repeated attempts"
+                                            )
+                                        except Exception:
+                                            logger.debug("Metacog elimination log failed (non-critical)")
+                                else:
+                                    # Reset stall counter on meaningful change
+                                    metacog_stall_counters[str(action)] = 0
+                            except Exception:
+                                logger.debug("Metacognitive evaluation failed (non-critical)")
+
+                        # GAP SIGNALING: comprehension/performance/metacog stalls
+                        try:
+                            if score_change == 0 and not frame_changed_for_step:
+                                self._log_gap_signal(
+                                    attempt_id=attempt_id,
+                                    step_idx=run_context.heartbeat.step_idx if run_context else action_count + 1,
+                                    mode=mode_for_spine,
+                                    gap_type='performance_stall',
+                                    details={
+                                        'level': current_level,
+                                        'action': str(action),
+                                        'state': game_state.state,
+                                        'available_actions': game_state.available_actions,
+                                    }
+                                )
+                            if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                                summary = self.metacognitive_engine.get_metacognitive_summary()
+                                if summary.get('pending_prediction'):
+                                    self._log_gap_signal(
+                                        attempt_id=attempt_id,
+                                        step_idx=run_context.heartbeat.step_idx if run_context else action_count + 1,
+                                        mode=mode_for_spine,
+                                        gap_type='metacog_pending_prediction',
+                                        details=summary,
+                                    )
+                                if summary.get('failures_recorded', 0) >= 3:
+                                    self._log_gap_signal(
+                                        attempt_id=attempt_id,
+                                        step_idx=run_context.heartbeat.step_idx if run_context else action_count + 1,
+                                        mode=mode_for_spine,
+                                        gap_type='metacog_failure_cluster',
+                                        details=summary,
+                                    )
+                        except Exception:
+                            logger.debug("Gap signal emission failed (non-critical)")
+
+                        # Reflex cache update (fast viability stats)
+                        try:
+                            self._record_action_viability(
+                                action=action,
+                                level=current_level,
+                                score_delta=score_change,
+                                frame_changed=frame_changed_for_step,
+                            )
+                        except Exception:
+                            logger.debug("Action viability record failed (non-critical)")
+
+                        # Event: frame changed
+                        if run_context and frame_changed_for_step:
+                            try:
+                                evt = make_event(
+                                    EventType.FRAME_CHANGED,
+                                    attempt_id=attempt_id,
+                                    step_idx=run_context.heartbeat.step_idx,
+                                    frame_changed=True,
+                                    score=game_state.score,
+                                    state=game_state.state,
+                                    game_id=game_id,
+                                    agent_id=agent_id,
+                                    role=role_for_spine,
+                                    mode=mode_for_spine,
+                                    level=current_level,
+                                )
+                                failures = self.event_bus.publish(evt)
+                                if failures:
+                                    logger.debug(f"FRAME_CHANGED handlers failed: {len(failures)}")
+                            except Exception as ev_err:
+                                logger.debug(f"Event publish FRAME_CHANGED failed: {ev_err}")
+
+                        # Event: step complete (lightweight state snapshot + optional intrinsic milestone)
+                        if run_context:
+                            try:
+                                guard_snapshot = run_context.guard_snapshot()
+                                intrinsic_milestones = []
+                                if score_change == 0 and not frame_changed_for_step:
+                                    intrinsic_milestones.append({
+                                        "hypothesis": "action_had_no_observable_effect",
+                                        "expected_signal": "frame change or score delta",
+                                        "observed_signal": "no change",
+                                        "outcome": "no_effect",
+                                        "status": "observed",
+                                        "milestone_tag": "viability:no_effect",
+                                        "confidence": 0.35,
+                                        "evidence": {
+                                            "action": str(action),
+                                            "available_actions": game_state.available_actions,
+                                        },
+                                    })
+
+                                evt = make_event(
+                                    EventType.STEP_COMPLETE,
+                                    attempt_id=attempt_id,
+                                    step_idx=run_context.heartbeat.step_idx,
+                                    action=action,
+                                    score=game_state.score,
+                                    state=game_state.state,
+                                    frame_changed=frame_changed_for_step,
+                                    guard_budget_ok=guard_snapshot.get('budget_ok'),
+                                    guard_mode_ok=guard_snapshot.get('mode_ok'),
+                                    guard_role_ok=guard_snapshot.get('role_ok'),
+                                    game_id=game_id,
+                                    agent_id=agent_id,
+                                    role=role_for_spine,
+                                    mode=mode_for_spine,
+                                    level=current_level,
+                                    intrinsic_milestones=intrinsic_milestones,
+                                )
+                                failures = self.event_bus.publish(evt)
+                                if failures:
+                                    logger.debug(f"STEP_COMPLETE handlers failed: {len(failures)}")
+                            except Exception as ev_err:
+                                logger.debug(f"Event publish STEP_COMPLETE failed: {ev_err}")
                         
                         # ================================================================
                         # AVAILABLE_ACTIONS CHANGE DETECTION (Control Proof)
@@ -3086,7 +4500,7 @@ class GameplayEngine:
                                         logger.info(f"[CONTROL PROOF] {action} unlocked movement: +{list(new_actions)}")
                                         
                                         # Store in agent_self_model as strong control evidence
-                                        if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                        if mode_for_spine == 'LIVE' and hasattr(self, 'agent_self_model') and self.agent_self_model:
                                             self.agent_self_model.record_availability_control_proof(
                                                 agent_id=agent_id,
                                                 game_id=game_id,
@@ -3214,6 +4628,12 @@ class GameplayEngine:
                             game_state.frame,
                             game_state.score
                         )
+
+                        if frame_changed and self.game_config.get('stage_recordings'):
+                            self._recording_delta_count = self._recording_delta_count + 1
+
+                        if frame_changed or score_increase > 0:
+                            self._reset_struggle_guard_state(level=current_level)
                         
                         if not frame_changed and score_increase == 0:
                             consecutive_no_frame_change += 1
@@ -3235,6 +4655,34 @@ class GameplayEngine:
                                     if last_6[0] == last_6[3] and last_6[1] == last_6[4] and last_6[2] == last_6[5]:  # ABC-ABC
                                         cycle_detected = True
                                         logger.debug(f"[CYCLE] Detected 3-action oscillation: {last_6}")
+
+                            struggle_state = getattr(self, '_struggle_guard_state', None)
+                            if struggle_state is not None:
+                                struggle_state['no_delta_frames'] = struggle_state.get('no_delta_frames', 0) + 1
+                                if cycle_detected:
+                                    struggle_state['oscillation_sweeps'] = struggle_state.get('oscillation_sweeps', 0) + 1
+                                else:
+                                    struggle_state['oscillation_sweeps'] = 0
+
+                                fired = struggle_state.get('fired', set())
+                                if struggle_state['no_delta_frames'] >= 5 and 'no_delta' not in fired:
+                                    self._emit_comprehension_gap(
+                                        gap_code='no_delta',
+                                        game_id=game_id,
+                                        level=current_level,
+                                        attempt_id=attempt_id,
+                                        agent_id=agent_id,
+                                        enqueue_closure_probe=True,
+                                    )
+                                if struggle_state['oscillation_sweeps'] >= 4 and 'oscillation_no_closure' not in fired:
+                                    self._emit_comprehension_gap(
+                                        gap_code='oscillation_no_closure',
+                                        game_id=game_id,
+                                        level=current_level,
+                                        attempt_id=attempt_id,
+                                        agent_id=agent_id,
+                                        enqueue_closure_probe=True,
+                                    )
                             
                             # Trigger escape if threshold hit OR cycle detected with enough stagnation
                             # With frame_changed now computed correctly in game_session_manager.py,
@@ -4147,6 +5595,73 @@ class GameplayEngine:
                 except Exception as e:
                     logger.debug(f"Cognitive competency update failed (non-critical): {e}")
 
+            run_context = self.game_config.get('run_context')
+            guard_snapshot = run_context.guard_snapshot() if run_context else {
+                "budget_ok": action_count <= self.game_config.get('max_total_actions', action_count),
+                "mode_ok": True,
+                "role_ok": True,
+            }
+
+            heartbeat_lost = False
+            if run_context and action_count > 0:
+                recorded_steps = getattr(run_context.heartbeat, 'step_idx', 0)
+                if recorded_steps < action_count:
+                    heartbeat_lost = True
+                    try:
+                        self.spine_emitter.record_guard_failure(
+                            attempt_id=attempt_id,
+                            guard_name="heartbeat",
+                            guard_code="heartbeat_lost",
+                            game_id=game_id,
+                            level=loop_state.current_level,
+                            agent_id=agent_id,
+                            generation=self.game_config.get('generation'),
+                            message=f"Heartbeat steps ({recorded_steps}) behind actions ({action_count})",
+                        )
+                    except Exception as guard_err:
+                        logger.debug(f"Guard failure log failed (heartbeat_lost): {guard_err}")
+
+            if attempt_id:
+                failing_guards = []
+                if not guard_snapshot.get("budget_ok", True):
+                    failing_guards.append(("budget", "budget_exhausted", "Budget exhausted during finalize"))
+                if not guard_snapshot.get("role_ok", True):
+                    failing_guards.append(("role", "role_violation", "Role guard failed during finalize"))
+                if not guard_snapshot.get("mode_ok", True):
+                    failing_guards.append(("mode", "mode_write_blocked", "Mode guard failed during finalize"))
+
+                for guard_name, guard_code, message in failing_guards:
+                    try:
+                        self.spine_emitter.record_guard_failure(
+                            attempt_id=attempt_id,
+                            guard_name=guard_name,
+                            guard_code=guard_code,
+                            game_id=game_id,
+                            level=loop_state.current_level,
+                            agent_id=agent_id,
+                            generation=self.game_config.get('generation'),
+                            message=message,
+                        )
+                    except Exception as guard_err:
+                        logger.debug(f"Guard failure log failed at finalize: {guard_err}")
+            if attempt_id:
+                try:
+                    elapsed_ms = int((datetime.now() - attempt_started_at).total_seconds() * 1000)
+                    self.spine_emitter.record_attempt_end(
+                        attempt_id=attempt_id,
+                        actions_used=action_count,
+                        game_actions_used=action_count,
+                        levels_completed=level_completions,
+                        score=game_state.score,
+                        time_ms=elapsed_ms,
+                        succeeded=(game_state.state == "WIN"),
+                        guard_budget_ok=guard_snapshot.get("budget_ok", True),
+                        guard_role_ok=guard_snapshot.get("role_ok", True),
+                        guard_mode_ok=guard_snapshot.get("mode_ok", True),
+                    )
+                except Exception as spine_exc:
+                    logger.debug(f"Spine attempt_end log failed: {spine_exc}")
+
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
                        f"Actions: {action_count}, Levels Completed: {level_completions}/{current_level}")
             return results
@@ -4183,6 +5698,455 @@ class GameplayEngine:
         self._last_action_source = source
         return action, reasoning
 
+    def _assert_frame_sanity(self, frame: Optional[list]) -> None:
+        """Raise FRAME_SANITY_FAIL when frame is malformed or exceeds safe bounds."""
+        if frame is None:
+            return
+        if not isinstance(frame, list) or not frame:
+            raise RuntimeError("FRAME_SANITY_FAIL: frame missing or not a list")
+
+        height = len(frame)
+        first_row_len = len(frame[0]) if isinstance(frame[0], list) else -1
+        if first_row_len <= 0:
+            raise RuntimeError("FRAME_SANITY_FAIL: first row invalid")
+
+        if height > 128 or first_row_len > 128:
+            raise RuntimeError(
+                f"FRAME_SANITY_FAIL: frame too large ({height}x{first_row_len})"
+            )
+
+        for row in frame:
+            if not isinstance(row, list) or len(row) != first_row_len:
+                raise RuntimeError("FRAME_SANITY_FAIL: ragged frame")
+            for cell in row:
+                if not isinstance(cell, int) or cell < 0 or cell > 255:
+                    raise RuntimeError("FRAME_SANITY_FAIL: non-int or out-of-range cell")
+
+    # ================================================================
+    # GUARD + GAP HELPERS
+    # ================================================================
+    def _reset_struggle_guard_state(self, level: Optional[int] = None, clear_fired: bool = False) -> None:
+        """Reset struggle guard counters (frame stagnation / oscillation)."""
+        state = getattr(self, '_struggle_guard_state', None)
+        if state is None:
+            state = {
+                'no_delta_frames': 0,
+                'oscillation_sweeps': 0,
+                'fired': set(),
+                'level': level or 1,
+            }
+            self._struggle_guard_state = state
+            return
+
+        state['no_delta_frames'] = 0
+        state['oscillation_sweeps'] = 0
+        if level is not None:
+            state['level'] = level
+        if clear_fired:
+            state['fired'] = set()
+
+    def _record_gap_registry(
+        self,
+        gap_type: str,
+        game_id: Optional[str],
+        level: Optional[int],
+        severity: str = "warning",
+        root_cause: str = "runtime_struggle_guard"
+    ) -> Optional[int]:
+        """Add a gap_registry row and seed interventions."""
+        try:
+            conn = self.db._get_connection()  # type: ignore[attr-defined]
+            with conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO gap_registry (gap_type, root_cause, severity, affected_population, status, concept_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (gap_type, root_cause, severity, 1, "open", None),
+                )
+                gap_id = cursor.lastrowid
+
+                # Seed interventions for gap triage
+                conn.execute(
+                    """
+                    INSERT INTO interventions (gap_id, intervention_type, resources, success_criteria, rollback_conditions, outcome_status, outcome_metrics)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        gap_id,
+                        "peer_fetch",
+                        "collect peer sequences and hypotheses",
+                        "gap resolved via peer replay",
+                        "rollback if peer data worsens outcomes",
+                        "pending",
+                        None,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO interventions (gap_id, intervention_type, resources, success_criteria, rollback_conditions, outcome_status, outcome_metrics)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        gap_id,
+                        "operator_change",
+                        "enqueue closure_probe",
+                        "closure_probe improves frame change or score",
+                        "rollback if regression detected",
+                        "pending",
+                        None,
+                    ),
+                )
+
+                logger.info(f"[GAP] Recorded comprehension gap '{gap_type}' for {game_id or 'unknown'} L{level or 0}")
+                return int(gap_id)
+        except Exception as e:
+            logger.debug(f"Failed to record gap_registry entry: {e}")
+        return None
+
+    def _publish_cods_operator_used(
+        self,
+        operator_name: str,
+        attempt_id: Optional[str],
+        game_id: Optional[str],
+        level: Optional[int],
+        agent_id: Optional[str],
+        validation_state: Optional[str]
+    ) -> None:
+        """Emit CODS operator usage event for observability."""
+        try:
+            evt = make_event(
+                EventType.CODS_OPERATOR_USED,
+                attempt_id=attempt_id,
+                operator=operator_name,
+                game_id=game_id,
+                level=level,
+                agent_id=agent_id,
+                validation_state=validation_state,
+            )
+            failures = self.event_bus.publish(evt)
+            if failures:
+                logger.debug(f"CODS_OPERATOR_USED handlers failed: {len(failures)}")
+        except Exception as e:
+            logger.debug(f"Failed to emit CODS_OPERATOR_USED: {e}")
+
+    def _enqueue_closure_probe(
+        self,
+        attempt_id: Optional[str],
+        game_id: Optional[str],
+        level: Optional[int],
+        agent_id: Optional[str],
+        validation_state: Optional[str]
+    ) -> None:
+        """Queue closure_probe operator and log usage."""
+        queue = getattr(self, '_cods_operator_queue', [])
+        queue.append('closure_probe')
+        self._cods_operator_queue = queue
+        self._last_cods_operators_used = ['closure_probe']
+        self._publish_cods_operator_used(
+            operator_name='closure_probe',
+            attempt_id=attempt_id,
+            game_id=game_id,
+            level=level,
+            agent_id=agent_id,
+            validation_state=validation_state,
+        )
+
+    def _ingest_staged_recording(self, recording_path: str) -> Dict[str, Any]:
+        """Parse staged recording (JSONL) into a thin summary and delete the file."""
+        summary = {'actions': 0, 'deltas': 0, 'contradictions': 0}
+        try:
+            with open(recording_path, 'r', encoding='utf-8') as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        if isinstance(rec, dict):
+                            if 'action' in rec:
+                                summary['actions'] += 1
+                            if 'delta' in rec:
+                                summary['deltas'] += 1
+                            if rec.get('type') == 'contradiction' or rec.get('contradiction'):
+                                summary['contradictions'] += 1
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.debug(f"Recording ingest failed (non-critical): {e}")
+        try:
+            os.remove(recording_path)
+        except Exception:
+            logger.debug(f"Failed to delete staged recording {recording_path}")
+        return summary
+
+    def _stage_recording_summary(
+        self,
+        *,
+        attempt_id: Optional[str],
+        game_id: Optional[str],
+        scorecard_id: Optional[str],
+        actions_used: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Stage a minimal JSONL recording, ingest summary, and delete the file."""
+        if not self.game_config.get('stage_recordings'):
+            return None
+
+        path = self._staged_recording_path
+        try:
+            if not path:
+                fd, path = tempfile.mkstemp(prefix=f"{attempt_id or 'attempt'}_", suffix=".jsonl")
+                os.close(fd)
+                self._staged_recording_path = path
+
+            payload = {
+                'attempt_id': attempt_id,
+                'game_id': game_id,
+                'scorecard_id': scorecard_id,
+                'actions': actions_used,
+                'deltas': getattr(self, '_recording_delta_count', 0),
+                'contradictions': getattr(self, '_recording_contradictions', 0),
+            }
+
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write(json.dumps(payload) + "\n")
+
+            summary = self._ingest_staged_recording(path)
+            summary['path'] = path
+            self._staged_recording_path = None
+            return summary
+        except Exception as e:
+            logger.debug(f"Recording staging failed (non-critical): {e}")
+            return None
+
+    def _emit_comprehension_gap(
+        self,
+        gap_code: str,
+        game_id: Optional[str],
+        level: Optional[int],
+        attempt_id: Optional[str],
+        agent_id: Optional[str],
+        enqueue_closure_probe: bool = False,
+    ) -> None:
+        """Publish COMPREHENSION_GAP_DETECTED and persist gap/intentions."""
+        state = getattr(self, '_struggle_guard_state', None)
+        if state is not None:
+            fired = state.get('fired', set())
+            fired.add(gap_code)
+            state['fired'] = fired
+
+        try:
+            evt = make_event(
+                EventType.COMPREHENSION_GAP_DETECTED,
+                gap_code=gap_code,
+                attempt_id=attempt_id,
+                game_id=game_id,
+                level=level,
+                agent_id=agent_id,
+            )
+            failures = self.event_bus.publish(evt)
+            if failures:
+                logger.debug(f"COMPREHENSION_GAP_DETECTED handlers failed: {len(failures)}")
+        except Exception as ev_err:
+            logger.debug(f"Failed to emit COMPREHENSION_GAP_DETECTED: {ev_err}")
+
+        gap_id = self._record_gap_registry(gap_code, game_id, level)
+        # Emit a lesson stub so downstream plugins persist structured interpretations
+        try:
+            self._emit_lesson_stub(
+                interpretation=gap_code,
+                attempt_id=attempt_id,
+                game_id=game_id,
+                level=level,
+                mode=self.game_config.get('mode'),
+                agent_id=agent_id,
+                role=self.game_config.get('role_for_spine') or self.game_config.get('agent_role'),
+                resonance_tags=self.game_config.get('resonance_tags'),
+                contradictions=None,
+            )
+        except Exception:
+            logger.debug("Gap lesson stub emission failed (non-critical)")
+        if enqueue_closure_probe:
+            validation_state = self.game_config.get('theory_validation_state')
+            self._enqueue_closure_probe(attempt_id, game_id, level, agent_id, validation_state)
+            # Link intervention to gap if available (idempotent seed done in _record_gap_registry)
+            if gap_id is None:
+                logger.debug("closure_probe enqueued without gap_id (registry insert failed)")
+
+    def _prepare_action6_target(
+        self,
+        game_state: GameState,
+        run_context: Optional[Any] = None,
+        reason_prefix: str = "salient target"
+    ) -> Optional[Dict[str, Any]]:
+        """Derive ACTION6 coordinates from visual salience/attention windows."""
+        if not game_state.frame or not hasattr(self.action_handler, 'visual_analyzer'):
+            self._pending_action6_target = None
+            return None
+
+        try:
+            analysis = self.action_handler.visual_analyzer.analyze_frame(game_state.frame)
+            target = self.action_handler.visual_analyzer.select_best_target(analysis)
+            if not target:
+                self._pending_action6_target = None
+                return None
+
+            x, y, reason = target
+            window_id = f"salience_{int(datetime.now().timestamp() * 1000)}"
+            selected = {"x": x, "y": y, "reason": reason, "window_id": window_id}
+            self._pending_action6_target = selected
+            self._pending_action6_reason = f"{reason_prefix}: {reason}"
+            self.game_config['current_attention_window_id'] = window_id
+
+            if run_context:
+                try:
+                    run_context.record_attention_window(
+                        run_context.heartbeat.step_idx,
+                        {
+                            "window_id": window_id,
+                            "analysis": {"targets": analysis.get("targets", [])},
+                            "selected": selected,
+                        },
+                    )
+                except Exception as ctx_err:
+                    logger.debug(f"Attention window record failed: {ctx_err}")
+            return selected
+        except Exception as e:
+            logger.debug(f"Action6 salience selection failed: {e}")
+            self._pending_action6_target = None
+        return None
+
+    def _prefer_non_action6(self, available_actions: Optional[List[Any]]) -> Optional[str]:
+        """Choose a non-ACTION6 candidate when available."""
+        if not available_actions:
+            return None
+        normalized = []
+        for a in available_actions:
+            if isinstance(a, str) and a.upper().startswith('ACTION'):
+                try:
+                    normalized.append(int(a.upper().replace('ACTION', '')))
+                except ValueError:
+                    continue
+            elif isinstance(a, int):
+                normalized.append(a)
+        preference_order = [1, 2, 3, 4, 5, 7]
+        for candidate in preference_order:
+            if candidate in normalized:
+                return f"ACTION{candidate}"
+        return None
+
+    def _is_action_viability_active(self) -> bool:
+        """Check if the action viability gate should run for this mode."""
+        mode = (self.game_config.get('mode') or 'LIVE').upper() if hasattr(self, 'game_config') else 'LIVE'
+        if mode == 'REPLAY_VALIDATION':
+            return False
+        return bool(self._action_viability_enabled)
+
+    def _check_action_viability(self, action: Any, game_state: GameState) -> tuple[bool, str]:
+        """Fast reflex gate: returns False when the action is obviously inert/invalid."""
+        try:
+            if action is None:
+                return False, "action is None"
+
+            # Normalize action to int for availability checks
+            action_num = None
+            if isinstance(action, str) and action.upper().startswith('ACTION'):
+                try:
+                    action_num = int(action.upper().replace('ACTION', ''))
+                except ValueError:
+                    pass
+            elif isinstance(action, int):
+                action_num = action
+
+            available = getattr(game_state, 'available_actions', None)
+            if available and action_num is not None:
+                try:
+                    normalized_avail = []
+                    for a in available:
+                        if isinstance(a, str) and a.upper().startswith('ACTION'):
+                            normalized_avail.append(int(a.upper().replace('ACTION', '')))
+                        elif isinstance(a, int):
+                            normalized_avail.append(a)
+                    if action_num not in normalized_avail:
+                        return False, f"A{action_num} not available"
+                except Exception:
+                    # Availability check should not block if parsing fails
+                    pass
+
+            # Guard: ACTION6 should have a target prepared already
+            if action_num == 6 and not getattr(self, '_pending_action6_target', None):
+                return False, "ACTION6 has no salience target"
+
+            return True, "viable"
+        except Exception as err:
+            logger.debug(f"Action viability check failed: {err}")
+            return True, "viability check error (ignored)"
+
+    def _compute_ambiguity_metrics(
+        self,
+        available_actions: Optional[Sequence[Any]],
+        score_delta: Optional[float],
+        frame_changed: Optional[bool],
+    ) -> Dict[str, Any]:
+        """Derive consensus/accuracy proxies for ambiguity observability (DB-only)."""
+        metrics: Dict[str, Any] = {}
+        try:
+            if available_actions is not None:
+                ambiguity = len(list(available_actions)) if isinstance(available_actions, Sequence) else None
+                metrics['ambiguity'] = ambiguity
+                if ambiguity and ambiguity > 0:
+                    metrics['consensus_proxy'] = round(1.0 / ambiguity, 3)
+            if score_delta is not None:
+                metrics['accuracy_proxy'] = 1.0 if score_delta > 0 else 0.0 if score_delta < 0 else 0.5
+            if frame_changed is not None:
+                metrics['frame_changed'] = bool(frame_changed)
+        except Exception:
+            logger.debug("Ambiguity metric computation failed (non-critical)")
+        return metrics
+
+    # ================================================================
+    # PLUGIN REGISTRATION (Event-first runtime)
+    # ================================================================
+    def register_plugins(self, plugins: List[Plugin]) -> None:
+        """Register plugins to receive EventBus events."""
+        if not plugins:
+            return
+        self.plugin_manager = PluginManager(bus=self.event_bus, plugins=plugins)
+        self.plugin_manager.register_all()
+
+    def _on_hook_failure_event(self, event_type: EventType, payload: Dict[str, Any]) -> None:
+        """Persist hook failure events into hook_failures for observability."""
+        try:
+            attempt_id = payload.get('attempt_id', '')
+            hook_name = payload.get('hook', 'unknown')
+            hook_phase = payload.get('hook_phase', 'unknown')
+            message = '; '.join(payload.get('errors', [])) if payload.get('errors') else 'hook failure'
+            game_id = payload.get('game_id')
+            level = payload.get('level')
+            agent_id = payload.get('agent_id')
+            generation = payload.get('generation') or self.game_config.get('generation')
+            stack_source = message or hook_name
+            stack_hash = payload.get('stack_hash')
+            if not stack_hash and stack_source:
+                try:
+                    stack_hash = hashlib.sha256(stack_source.encode('utf-8', 'ignore')).hexdigest()[:12]
+                except Exception:
+                    stack_hash = None
+            if attempt_id:
+                self.spine_emitter.record_hook_failure(
+                    attempt_id=attempt_id,
+                    hook_name=hook_name,
+                    hook_phase=hook_phase,
+                    message=message,
+                    game_id=game_id,
+                    level=level,
+                    agent_id=agent_id,
+                    generation=generation,
+                    stack_hash=stack_hash,
+                )
+        except Exception as e:
+            logger.debug(f"Failed to persist hook failure event: {e}")
+
     async def _select_action(self, game_state: GameState) -> tuple[str, str]:
         """Select the next action to take with reasoning.
         
@@ -4204,6 +6168,131 @@ class GameplayEngine:
             Tuple of (action, reasoning) where reasoning explains why this action was chosen
         """
         agent_id = self.game_config.get('agent_id')
+        run_context = self.game_config.get('run_context')
+        # Sanity check incoming frame before any processing to avoid operating on malformed grids
+        self._assert_frame_sanity(getattr(game_state, 'frame', None))
+        # Deterministic ladder trace for Phase 4 (Sequence → CODS → Heuristic/Escape → Noop)
+        ladder_trace = {
+            'sequence': {'status': 'skipped', 'reason': 'no sequence replay path in selector'},
+            'cods': {'status': 'pending', 'reason': ''},
+            'heuristic': {'status': 'pending', 'reason': ''},
+            'noop': {'status': 'pending', 'reason': ''},
+            'viability': {'status': 'skipped', 'reason': 'viability gate disabled'},
+        }
+        action_source = None
+
+        def _log_ladder_decision(chosen_action: str, chosen_reason: str, rung: str) -> None:
+            """Emit action_proposals/ladder provenance when attempt context is available."""
+            try:
+                if not hasattr(self, 'spine_emitter') or not self.spine_emitter:
+                    return
+
+                attempt_id = None
+                step_idx = 0
+                heartbeat = getattr(run_context, 'heartbeat', None) if run_context else None
+                if run_context and hasattr(run_context, 'attempt_id'):
+                    attempt_id = getattr(run_context, 'attempt_id')
+                if heartbeat and hasattr(heartbeat, 'attempt_id'):
+                    attempt_id = attempt_id or getattr(heartbeat, 'attempt_id')
+                if heartbeat and hasattr(heartbeat, 'step_idx'):
+                    step_idx = getattr(heartbeat, 'step_idx') or 0
+
+                if not attempt_id:
+                    return
+
+                mode_for_spine = self.game_config.get('mode', 'LIVE')
+                role_for_spine = self.game_config.get('role_for_spine') or self.game_config.get('agent_role')
+                available_actions = getattr(game_state, 'available_actions', None)
+                current_level = getattr(run_context, 'level', None) if run_context else None
+
+                try:
+                    evt = make_event(
+                        EventType.ACTION_PROPOSALS,
+                        attempt_id=attempt_id,
+                        step_idx=step_idx,
+                        proposals={'ladder': ladder_trace},
+                        proposal_count=len(ladder_trace),
+                        chosen_action=chosen_action,
+                        chosen_reason=chosen_reason,
+                        ladder_rung=rung,
+                        available_actions=available_actions,
+                        game_id=self.session_manager.current_game_id,
+                        agent_id=agent_id,
+                        role=role_for_spine,
+                        mode=mode_for_spine,
+                        level=current_level,
+                        w_A_weight=self.game_config.get('w_A_weight'),
+                        w_B_weight=self.game_config.get('w_B_weight'),
+                        w_R_weight=self.game_config.get('w_R_weight'),
+                        operator_hint=self.game_config.get('cross_domain_operator'),
+                        decomposition_hint=self.game_config.get('decomposition_hint'),
+                        resonance_tags=self.game_config.get('resonance_tags'),
+                    )
+                    failures = self.event_bus.publish(evt)
+                    if failures:
+                        logger.debug(f"ACTION_PROPOSALS handlers failed: {len(failures)}")
+                except Exception as ev_err:
+                    logger.debug(f"Event publish ACTION_PROPOSALS failed: {ev_err}")
+
+                self.spine_emitter.log_action_proposal(
+                    attempt_id=attempt_id,
+                    step_idx=step_idx,
+                    chosen_action=chosen_action,
+                    chosen_reason=chosen_reason,
+                    mode=mode_for_spine,
+                    available_actions=available_actions,
+                    proposals={'ladder': ladder_trace},
+                    w_A=self.game_config.get('w_A_weight'),
+                    w_B=self.game_config.get('w_B_weight'),
+                    w_R=self.game_config.get('w_R_weight'),
+                    role_compliance=role_for_spine,
+                    theory_validation_state=self.game_config.get('theory_validation_state'),
+                    attention_window_id=self.game_config.get('current_attention_window_id'),
+                )
+            except Exception as log_err:
+                logger.debug(f"Ladder proposal log skipped: {log_err}")
+
+        def _finalize_ladder_and_return(action: str, reason: str, rung: str) -> tuple[str, str]:
+            """Finalize ladder statuses, emit telemetry, and return the chosen action."""
+            nonlocal action_source
+
+            if rung == 'sequence':
+                ladder_trace['sequence'] = {'status': 'selected', 'reason': reason}
+                if ladder_trace.get('cods', {}).get('status') == 'pending':
+                    ladder_trace['cods'] = {'status': 'skipped', 'reason': 'sequence satisfied ladder'}
+                ladder_trace['heuristic'] = {'status': 'skipped', 'reason': 'sequence satisfied ladder'}
+                ladder_trace['noop'] = {'status': 'skipped', 'reason': 'ladder satisfied'}
+            elif rung == 'cods':
+                ladder_trace['cods'] = {'status': 'selected', 'reason': reason}
+                ladder_trace['heuristic'] = {'status': 'skipped', 'reason': 'cods satisfied ladder'}
+                ladder_trace['noop'] = {'status': 'skipped', 'reason': 'ladder satisfied'}
+                if ladder_trace.get('sequence', {}).get('status') == 'pending':
+                    ladder_trace['sequence'] = {'status': 'skipped', 'reason': 'no sequence selected before cods'}
+            elif rung == 'heuristic':
+                if ladder_trace.get('sequence', {}).get('status') == 'pending':
+                    ladder_trace['sequence'] = {'status': 'skipped', 'reason': 'no sequence selected'}
+                if ladder_trace.get('cods', {}).get('status') == 'pending':
+                    ladder_trace['cods'] = {'status': 'skipped', 'reason': 'no cods selection'}
+                ladder_trace['heuristic'] = {'status': 'selected', 'reason': reason}
+                ladder_trace['noop'] = {'status': 'skipped', 'reason': 'ladder satisfied'}
+            else:  # noop rung
+                if ladder_trace.get('sequence', {}).get('status') == 'pending':
+                    ladder_trace['sequence'] = {'status': 'skipped', 'reason': 'no sequence available'}
+                if ladder_trace.get('cods', {}).get('status') == 'pending':
+                    ladder_trace['cods'] = {'status': 'skipped', 'reason': 'no cods available'}
+                if ladder_trace.get('heuristic', {}).get('status') == 'pending':
+                    ladder_trace['heuristic'] = {'status': 'skipped', 'reason': 'no heuristic available'}
+                ladder_trace['noop'] = {'status': 'selected', 'reason': reason}
+
+            action_source = action_source or rung
+            # Store ladder outcomes for observability/tests
+            try:
+                self._last_ladder_trace = ladder_trace
+                self._last_ladder_rung = action_source
+            except Exception:
+                pass
+            _log_ladder_decision(action, reason, rung)
+            return action, reason
         
         # === ESCAPE MODE: Force escape action if stuck ===
         # When stuck detection triggers escape mode, override normal action selection
@@ -4228,7 +6317,7 @@ class GameplayEngine:
             
             reasoning = f"ESCAPE MODE: Trying ACTION{escape_action} to break out of frozen state"
             logger.info(f"[ESCAPE] {reasoning}")
-            return f"ACTION{escape_action}", reasoning
+            return _finalize_ladder_and_return(f"ACTION{escape_action}", reasoning, 'heuristic')
         
         # ===================================================================
         # SCIENTIFIC METHOD: CHECK FOR EXPERIMENT OPPORTUNITY
@@ -4261,7 +6350,7 @@ class GameplayEngine:
                         self._experiment_frame_before = game_state.frame
                         
                         logger.info(f"[SCIENCE] {reasoning}")
-                        return action, reasoning
+                        return _finalize_ladder_and_return(action, reasoning, 'heuristic')
             except Exception as e:
                 logger.debug(f"Science experiment check failed: {e}")
         
@@ -4275,6 +6364,24 @@ class GameplayEngine:
             # (We don't have action_count here, but we can estimate from game_state or just stay in mode)
             # For now, just log and skip the deterministic early-returns
             logger.debug(f"[SELF-DIRECTED] Agent exploring on its own (off-script)")
+
+        # ===================================================================
+        # CODS OPERATOR QUEUE (closure_probe)
+        # ===================================================================
+        queued_ops = getattr(self, '_cods_operator_queue', [])
+        if queued_ops:
+            op = queued_ops.pop(0)
+            if op == 'closure_probe':
+                target = self._prepare_action6_target(
+                    game_state,
+                    run_context=run_context,
+                    reason_prefix="closure_probe salience",
+                )
+                if target:
+                    reason = self._pending_action6_reason or "closure_probe: probing salient target"
+                    logger.info(f"[CLOSURE-PROBE] Using ACTION6 at ({target['x']},{target['y']})")
+                    return _finalize_ladder_and_return("ACTION6", reason, 'sequence')
+                logger.debug("closure_probe queued but no salient target found; continuing with normal selection")
         
         # ===================================================================
         # QUERY PEER INSIGHTS (Decentralized Knowledge Sharing)
@@ -4360,7 +6467,7 @@ class GameplayEngine:
                             )
                             logger.info(reasoning)
                             self._last_action_source = 'wA'
-                            return f"ACTION{action}", reasoning
+                            return _finalize_ladder_and_return(f"ACTION{action}", reasoning, 'heuristic')
         
         # ===================================================================
         # OBJECT DISCOVERY PHASE (Seed Capability)
@@ -4401,7 +6508,7 @@ class GameplayEngine:
                         
                         reasoning = f"[DISCOVERY] {reason}"
                         logger.info(f"[DISCOVERY PHASE] {action} - {reason}")
-                        return action, reasoning
+                        return _finalize_ladder_and_return(action, reasoning, 'heuristic')
                         
             except Exception as e:
                 logger.debug(f"Object discovery check failed (non-critical): {e}")
@@ -4433,7 +6540,7 @@ class GameplayEngine:
                             reasoning = f"[wB={wB:.2f}] Following learned rule '{rule_id}' (confidence: {confidence:.2f})"
                             logger.info(f"[RULE] {reasoning}: ACTION{suggested_action}")
                             self._last_action_source = 'wB'
-                            return f"ACTION{suggested_action}", reasoning
+                            return _finalize_ladder_and_return(f"ACTION{suggested_action}", reasoning, 'sequence')
             except Exception as e:
                 logger.debug(f"Rule query failed (falling back to other strategies): {e}")
         
@@ -4489,7 +6596,7 @@ class GameplayEngine:
                                     )
                                     reasoning = f"[wB] Win-validated control: {trigger_action} proven to unlock movement"
                                     self._last_action_source = 'wB'
-                                    return trigger_action, reasoning
+                                    return _finalize_ladder_and_return(trigger_action, reasoning, 'sequence')
                             
                             # If we have action_response mapping, suggest a direction
                             if action_response:
@@ -4503,7 +6610,7 @@ class GameplayEngine:
                                         )
                                         reasoning = f"[wB] Win-validated: ACTION{action_num} causes {response}"
                                         self._last_action_source = 'wB'
-                                        return f"ACTION{action_num}", reasoning
+                                        return _finalize_ladder_and_return(f"ACTION{action_num}", reasoning, 'sequence')
                         
             except Exception as e:
                 logger.debug(f"Win-validated hypothesis check failed: {e}")
@@ -4613,7 +6720,7 @@ class GameplayEngine:
                                 logger.info(reasoning)
                                 # Track for decision_contributors
                                 self._self_model_drove_action = len(controlled)
-                                return action, reasoning
+                                return _finalize_ladder_and_return(action, reasoning, 'heuristic')
                         
                         # Strategy 2: No goals visible - explore systematically
                         # Prefer directions away from edges, toward center
@@ -4656,7 +6763,7 @@ class GameplayEngine:
                                 logger.info(reasoning)
                                 # Track for decision_contributors
                                 self._self_model_drove_action = len(controlled)
-                                return action, reasoning
+                                return _finalize_ladder_and_return(action, reasoning, 'heuristic')
                         
             except Exception as e:
                 logger.debug(f"Self-model driven action failed: {e}")
@@ -4735,7 +6842,7 @@ class GameplayEngine:
                             goal_reason = closest_goal.get('reason', 'rare object')
                             reasoning = f"[INFERRED GOAL] Moving {dir_name} toward {goal_reason} at ({gx},{gy}), dist={min_dist}"
                             logger.info(reasoning)
-                            return action, reasoning
+                            return _finalize_ladder_and_return(action, reasoning, 'heuristic')
                             
             except Exception as e:
                 logger.debug(f"Inferred goals action selection failed: {e}")
@@ -4809,7 +6916,7 @@ class GameplayEngine:
                                             f"before movement"
                                         )
                                         logger.info(f"[SELECTION] {reasoning}")
-                                        return "ACTION6", reasoning
+                                        return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')
                             except (ValueError, IndexError):
                                 pass  # Could not parse coordinates
                     
@@ -4862,7 +6969,7 @@ class GameplayEngine:
                                 f"{len(objects_to_try)} objects to try"
                             )
                             logger.info(f"[SHAPE] {reasoning}")
-                            return "ACTION6", reasoning
+                            return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')
                                 
             except Exception as e:
                 logger.debug(f"Selection-aware check failed (non-critical): {e}")
@@ -4904,7 +7011,7 @@ class GameplayEngine:
                                 action_id = subgoal_action_ids[0]
                                 reasoning = f"Following hierarchical subgoal plan (plan_id: {plan_id[:8]})"
                                 logger.info(f" {reasoning}: ACTION{action_id}")
-                                return f"ACTION{action_id}", reasoning
+                                return _finalize_ladder_and_return(f"ACTION{action_id}", reasoning, 'heuristic')
                     
                     # No active plan - create one if game is making progress
                     elif game_state.score > 0 and game_state.score < 20:
@@ -5124,7 +7231,7 @@ class GameplayEngine:
                         cognitive_stage_action = f"ACTION{random_action}"
                         cognitive_stage_reasoning = f"Preoperational exploration: Random ACTION{random_action}"
                         logger.debug(f"[STAGE] {cognitive_stage_reasoning}")
-                        return cognitive_stage_action, cognitive_stage_reasoning
+                        return _finalize_ladder_and_return(cognitive_stage_action, cognitive_stage_reasoning, 'heuristic')
                 
                 elif stage == 'formal_operational':
                     # Formal operational agents can hypothesize and experiment
@@ -5151,7 +7258,7 @@ class GameplayEngine:
                                 cognitive_stage_action = action
                                 cognitive_stage_reasoning = f"Formal agent (primitive-aware): {reasoning[:50]} [conf={confidence:.0%}]"
                                 logger.info(f"[STAGE] {cognitive_stage_reasoning} using {primitives[:3]}")
-                                return cognitive_stage_action, cognitive_stage_reasoning
+                                return _finalize_ladder_and_return(cognitive_stage_action, cognitive_stage_reasoning, 'heuristic')
                             else:
                                 # Lower confidence = add bias but don't force
                                 action_num = int(action.replace('ACTION', '')) if action.startswith('ACTION') else 0
@@ -5263,7 +7370,7 @@ class GameplayEngine:
                     salient_obj = q3_data['top_salient'][0] if q3_data['top_salient'] else 'unknown'
                     reasoning = f"Q3 Targeted Experiment: Testing interaction with salient object '{salient_obj}' via ACTION{recommended_action}"
                     logger.info(f"[EMERGENT-Q3] {reasoning}")
-                    return f"ACTION{recommended_action}", reasoning
+                    return _finalize_ladder_and_return(f"ACTION{recommended_action}", reasoning, 'heuristic')
                     
         except Exception as e:
             logger.debug(f"Emergent reasoning build error: {e}")
@@ -5574,7 +7681,7 @@ class GameplayEngine:
                                     self._pattern_action_queue = actions[1:]  # Queue remaining actions
                                     
                                     reasoning = f"Meta-learned {pattern_result['pattern_type']} pattern (confidence: {pattern_result['confidence']:.2f})"
-                                    return "ACTION6", reasoning  # Will be executed with stored coordinates
+                                    return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')  # Will be executed with stored coordinates
                             
             except Exception as e:
                 logger.debug(f"Meta-learning error (falling back to default): {e}")
@@ -5588,7 +7695,7 @@ class GameplayEngine:
                     self._meta_pattern_tracker['applications'] += 1
                 reasoning = f"Continuing meta-learned pattern: {next_action['reason']}"
                 logger.info(f" {reasoning}: ACTION6 at {next_action['coordinate']}")
-                return "ACTION6", reasoning
+                return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')
         elif hasattr(self, '_meta_pattern_tracker') and self._meta_pattern_tracker.get('current_pattern_id'):
             # Queue is empty but pattern was active - pattern completed naturally
             # Check if it was successful (made any progress during its run)
@@ -5614,6 +7721,7 @@ class GameplayEngine:
         # - At beaten levels: higher threshold (0.6) to rely on proven sequences
         # - Also track operators used for reasoning log
         # ===================================================================
+        cods_selected = False
         if self.cods_engine and game_state.frame:
             try:
                 # Get CODS suggestion based on current frame analysis
@@ -5645,12 +7753,15 @@ class GameplayEngine:
                     if confidence >= cods_threshold:
                         reasoning = f"CODS operator '{operator_name}' suggests ACTION{action_num} (confidence: {confidence:.2f}, threshold: {cods_threshold} [{threshold_reason}])"
                         logger.info(f"[CODS] {reasoning}")
-                        return f"ACTION{action_num}", reasoning
+                        cods_selected = True
+                        return _finalize_ladder_and_return(f"ACTION{action_num}", reasoning, 'cods')
                     else:
                         # Still log but at debug level
                         logger.debug(f"[CODS] Below threshold ({confidence:.2f} < {cods_threshold}): '{operator_name}' -> ACTION{action_num}")
             except Exception as e:
                 logger.debug(f"CODS suggestion failed (non-critical): {e}")
+        if not cods_selected:
+            ladder_trace['cods'] = {'status': 'skipped', 'reason': 'no CODS proposal above threshold'}
         
         # Fall back to default action selection WITH viral/pariah influence
         strategy = self.game_config.get('strategy', 'balanced')
@@ -5726,9 +7837,43 @@ class GameplayEngine:
                             template_action = template_actions[level_action_count]
                             action_code = template_action.get('action', 'ACTION1')
                             logger.info(f"[TEMPLATE] Frontier L{current_level}: Using template action {level_action_count+1}/{len(template_actions)} - {action_code} (conf: {template.confidence:.0%})")
-                            return action_code, f"Abstract template for L{current_level} (action {level_action_count+1}/{len(template_actions)}, {template.confidence:.0%} confidence)"
+                            template_reason = (
+                                f"Abstract template for L{current_level} (action {level_action_count+1}/{len(template_actions)}, "
+                                f"{template.confidence:.0%} confidence)"
+                            )
+                            return _finalize_ladder_and_return(action_code, template_reason, 'heuristic')
             except Exception as e:
                 logger.debug(f"Frontier abstraction template error: {e}")
+
+        # Few-shot invariants (relational bias) when template not applied
+        if hasattr(self, 'agent_self_model') and self.agent_self_model and current_game_id:
+            try:
+                if self.game_config.get('few_shot_bias_used'):
+                    raise RuntimeError("few-shot bias already applied for this level")
+                relations = self.agent_self_model.get_few_shot_control_relations(
+                    current_game_id, current_level, min_confidence=0.55
+                )
+                if relations and relations.get('invariants') and relations.get('sample_size', 0) >= 2:
+                    level_action_count = self.game_config.get('level_action_count', 0)
+                    invariants = sorted(relations['invariants'], key=lambda inv: inv.get('position', 0))
+                    target_inv = next(
+                        (inv for inv in invariants if inv.get('position') == level_action_count),
+                        None,
+                    )
+                    if not target_inv:
+                        target_inv = next((inv for inv in invariants if inv.get('position', 0) > level_action_count), None)
+
+                    action_num = target_inv.get('action') if target_inv else None
+                    if isinstance(action_num, int) and 1 <= action_num <= 7:
+                        reason = (
+                            f"Few-shot invariant for L{current_level} pos {target_inv.get('position')} "
+                            f"(conf {relations.get('confidence', 0.0):.0%}, support {relations.get('sample_size')})"
+                        )
+                        logger.info(f"[RELATIONS] {reason}")
+                        self.game_config['few_shot_bias_used'] = True
+                        return _finalize_ladder_and_return(f"ACTION{action_num}", reason, 'heuristic')
+            except Exception as e:
+                logger.debug(f"Few-shot relation bias error: {e}")
         
         # ===================================================================
         # PHASE 4: ABSTRACTION HINTS - Apply conceptual guidance from failed sequences
@@ -5782,6 +7927,17 @@ class GameplayEngine:
                     logger.debug(f"[ABSTRACTION] Reinforcing {base_action} (abstraction bias: {current_abstraction_bias:.2f})")
                     abstraction_reasoning = f"Abstraction-reinforced (bias: {current_abstraction_bias:.2f})"
         
+        # PHASE 4.5: Apply sensation-based biasing for navigation actions (1-7)
+        # Contrastive near-miss hints (emit-only) - log for awareness
+        if hasattr(self, 'abstraction_engine') and self.abstraction_engine and current_game_id:
+            try:
+                game_type = current_game_id.split('-')[0] if '-' in current_game_id else current_game_id
+                contrast = self.abstraction_engine.generate_contrastive_hints(game_type, current_level)  # type: ignore[attr-defined]
+                if contrast and contrast.get('contrasts'):
+                    logger.info(f"[CONTRAST] Near-miss divergence hints: {contrast['contrasts'][:2]}")
+            except Exception as e:
+                logger.debug(f"Contrastive hints error: {e}")
+
         # PHASE 4.5: Apply sensation-based biasing for navigation actions (1-7)
         if sensation_biases and agent_id:
             action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
@@ -5916,7 +8072,7 @@ class GameplayEngine:
                     if sensation_reasoning:
                         reasoning = f"{reasoning} | {sensation_reasoning}"
                     
-                    return f"ACTION{best_alt}", reasoning
+                    return _finalize_ladder_and_return(f"ACTION{best_alt}", reasoning, 'heuristic')
             
             elif net_influence > 0.3:
                 logger.info(f"[VIRAL] Reinforcing {base_action} (viral package boost: {weight:.2f})")
@@ -5944,6 +8100,26 @@ class GameplayEngine:
             reasoning_parts.append(f"Standard {strategy} strategy")
         
         final_reasoning = " | ".join(reasoning_parts)
+
+        # =====================================================================
+        # ACTION VIABILITY GATE (pre-concept reflex)
+        # Fast check to avoid obviously inert/invalid actions. DB-only telemetry.
+        # =====================================================================
+        if self._is_action_viability_active():
+            ladder_trace['viability'] = {'status': 'pending', 'reason': 'checking action viability'}
+            is_viable, viability_reason = self._check_action_viability(base_action, game_state)
+
+            if not is_viable:
+                ladder_trace['viability'] = {'status': 'blocked', 'reason': viability_reason}
+                fallback = self._prefer_non_action6(getattr(game_state, 'available_actions', None))
+                if fallback and fallback != base_action:
+                    final_reasoning = f"Viability gate: {viability_reason}; fallback to {fallback} | {final_reasoning}"
+                    base_action = fallback
+                else:
+                    final_reasoning = f"Viability gate blocked action ({viability_reason}) | {final_reasoning}"
+                    return _finalize_ladder_and_return("ACTION7", final_reasoning, 'noop')
+            else:
+                ladder_trace['viability'] = {'status': 'passed', 'reason': 'viable'}
         
         # =====================================================================
         # TERMINAL PATTERN FORESIGHT CHECK
@@ -6073,8 +8249,35 @@ class GameplayEngine:
                                         final_reasoning = f"DANGER-OBJ: {obj_danger.get('reason', 'Avoided lethal object')} | {final_reasoning}"
             except Exception as e:
                 logger.debug(f"Terminal foresight check failed: {e}")
-        
-        return base_action, final_reasoning
+
+        # ACTION6 preference ordering + salience justification
+        if (
+            (isinstance(base_action, str) and base_action.upper() == 'ACTION6')
+            or (isinstance(base_action, int) and base_action == 6)
+        ):
+            target = self._prepare_action6_target(game_state, run_context=self.game_config.get('run_context'))
+            if not target:
+                fallback_action = self._prefer_non_action6(getattr(game_state, 'available_actions', None))
+                if fallback_action:
+                    self._pending_action6_target = None
+                    self._pending_action6_reason = None
+                    return _finalize_ladder_and_return(
+                        fallback_action,
+                        f"Prefer movement over blind ACTION6 | {final_reasoning}",
+                        'heuristic'
+                    )
+                # Guard: never issue ACTION6 without a salience-derived coordinate
+                raise RuntimeError("ACTION6 blocked: no salience target available and no safe fallback")
+            else:
+                if self._pending_action6_reason:
+                    final_reasoning = f"{final_reasoning} | {self._pending_action6_reason}"
+                else:
+                    final_reasoning = f"{final_reasoning} | ACTION6 salience target"
+        if not base_action:
+            empty_reason = "ACTION_SOURCE_EMPTY - no heuristic action available"
+            return _finalize_ladder_and_return("ACTION7", empty_reason, 'noop')
+
+        return _finalize_ladder_and_return(base_action, final_reasoning, 'heuristic')
 
     async def _execute_action(self, action: str, game_state: GameState, reasoning: str = "", current_level: int = 1) -> GameState:
         """Execute an action with reasoning sent to ARC API.
@@ -6160,6 +8363,14 @@ class GameplayEngine:
                     )
                     full_reasoning = f"{reasoning} | Visual: {reason}"
                     logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
+            elif getattr(self, '_pending_action6_target', None):
+                target = self._pending_action6_target
+                x, y = target.get('x'), target.get('y')
+                reason = target.get('reason', 'salience target')
+                full_reasoning = f"{reasoning} | {self._pending_action6_reason or 'Salience target'}"
+                logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
+                self._pending_action6_target = None
+                self._pending_action6_reason = None
             else:
                 # Use smart coordinate selection
                 x, y, reason = self.action_handler.get_smart_coordinates(
@@ -6168,6 +8379,14 @@ class GameplayEngine:
                 )
                 full_reasoning = f"{reasoning} | Visual: {reason}"
                 logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
+
+            # Guard: ensure coordinates are valid before sending ACTION6
+            if game_state.frame is None:
+                raise RuntimeError("ACTION6 requires frame for coordinate selection")
+            if x is None or y is None:
+                raise RuntimeError("ACTION6 missing coordinates")
+            if not (0 <= y < len(game_state.frame)) or not (0 <= x < len(game_state.frame[0])):
+                raise RuntimeError(f"ACTION6 coordinates out of bounds: ({x},{y})")
             
             # Update reasoning JSON with coordinate info
             if reasoning_json:
@@ -7990,6 +10209,19 @@ class GameplayEngine:
                         context['objects_agent_controls'] = network_controlled
                         context['control_confidence'] = best_hypothesis.get('reliability', 0.6)
                         context['control_source'] = 'network_bootstrap'  # Mark as borrowed
+
+            # If still empty, surface few-shot relational invariants as guidance
+            if not controlled and 'objects_agent_controls' not in context:
+                relations = self.agent_self_model.get_few_shot_control_relations(
+                    game_id, level, min_confidence=0.55
+                )
+                if relations:
+                    context['few_shot_control_relations'] = {
+                        'confidence': relations.get('confidence'),
+                        'sample_size': relations.get('sample_size'),
+                        'invariants': relations.get('invariants', [])[:5],
+                        'variant_regions': relations.get('variant_regions', [])[:3],
+                    }
             
             # Get network-validated control hypotheses (other agents' discoveries)
             network_hypotheses = self.agent_self_model.get_network_control_hypotheses(
@@ -9937,6 +12169,57 @@ class GameplayEngine:
         
         return reasoning_obj
     
+    def _map_resonance_to_operator(self, pattern: Dict[str, Any]) -> str:
+        """Map resonance pattern types to cross-domain operator template names."""
+        theory = (pattern.get('theory_type') or '').lower()
+        control = (pattern.get('control_type') or '').lower()
+
+        if 'pattern' in theory:
+            return 'progression'
+        if 'movement' in theory or 'cursor' in control:
+            return 'translation'
+        if 'environment' in theory or 'contain' in theory:
+            return 'containment'
+        if 'general' in theory and control:
+            return 'rotation'
+        return 'generalized'
+
+    def _load_cross_domain_operator_hint(
+        self,
+        game_id: str,
+        role_for_spine: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
+        """Pull cross-domain operator hints from resonance_patterns (read-only)."""
+        try:
+            from resonance_detector import ResonanceDetector
+
+            detector = ResonanceDetector(self.db)
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+            patterns = detector.get_resonant_patterns(min_score=0.5, limit=5)
+            relevant = [p for p in patterns if game_type in (p.get('game_types') or [])]
+            if not relevant:
+                return None
+
+            top = relevant[0]
+            operator = self._map_resonance_to_operator(top)
+            return {
+                'operator': operator,
+                'source': 'resonance_patterns',
+                'resonance_score': top.get('resonance_score'),
+                'role_diversity': top.get('role_diversity'),
+                'roles_found': top.get('roles_found', []),
+                'pattern_type': top.get('theory_type', 'unknown'),
+                'control_type': top.get('control_type', 'unknown'),
+                'game_types': top.get('game_types', []),
+                'role_for_spine': role_for_spine,
+                'lineage': top.get('pattern_id'),
+                'operator_domain': top.get('control_type') or top.get('theory_type'),
+                'decay_score': top.get('decay_score'),
+            }
+        except Exception as e:
+            logger.debug(f"Cross-domain operator hint load failed: {e}")
+            return None
+
     def _build_resonance_context(
         self,
         agent_id: Optional[str],
@@ -11217,6 +13500,12 @@ class GameplayEngine:
                         pass
             
             efficiency = final_score / len(actions) if len(actions) > 0 else 0.0
+
+            # Mode hygiene: block sequence storage outside LIVE (telemetry-only in REPLAY/EVAL)
+            source_mode = self.game_config.get('mode', 'LIVE')
+            if source_mode != 'LIVE':
+                logger.debug(f"[MODE] Skip sequence capture in mode={source_mode}")
+                return
             
             # NO ACTION CEILING: Even very long sequences can contain valuable subroutines
             # that agents can pattern-match and extract for optimization
@@ -11367,31 +13656,57 @@ class GameplayEngine:
                 except Exception:
                     pass  # scorecard_id is optional
                 
-                self.db.execute_query("""
-                    INSERT INTO winning_sequences (
+                # Enforce single active sequence per game/level (matches partial unique index)
+                if source_mode == 'LIVE':
+                    self.db.execute_query(
+                        """
+                        UPDATE winning_sequences
+                        SET is_active = 0, flag_reason = 'replaced_by_new'
+                        WHERE game_id = ? AND level_number = ? AND is_active = 1
+                        """,
+                        (game_id, level_number),
+                    )
+
+                attempt_id = (
+                    self.game_config.get('attempt_id')
+                    or session_id
+                    or f"att_{uuid.uuid4().hex[:16]}"
+                )
+                source_mode = self.game_config.get('mode', 'LIVE')
+                w_A = self.game_config.get('w_A_weight')
+                w_B = self.game_config.get('w_B_weight')
+                w_R = self.game_config.get('w_R_weight')
+
+                if source_mode == 'LIVE':
+                    self.db.execute_query("""
+                        INSERT INTO winning_sequences (
+                            sequence_id, game_id, level_number, agent_id, session_id, scorecard_id,
+                            action_sequence, coordinate_sequence, total_actions, total_score,
+                            efficiency_score, initial_frame, final_frame, frame_transitions,
+                            pattern_tags, game_type, discovered_at, generation_discovered, level_breakpoints,
+                            source_attempt_id, source_mode, w_A, w_B, w_R
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
                         sequence_id, game_id, level_number, agent_id, session_id, scorecard_id,
-                        action_sequence, coordinate_sequence, total_actions, total_score,
-                        efficiency_score, initial_frame, final_frame, frame_transitions,
-                        pattern_tags, game_type, discovered_at, generation_discovered, level_breakpoints
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    sequence_id, game_id, level_number, agent_id, session_id, scorecard_id,
-                    json.dumps(actions), json.dumps(coordinates), len(actions),
-                    final_score, efficiency, json.dumps(initial_frame),
-                    json.dumps(final_frame), json.dumps(frame_transitions),
-                    json.dumps(pattern_tags), game_type, datetime.now().isoformat(),
-                    generation, json.dumps(level_breakpoints)  # Store level breakpoints for partial replay
-                ))
+                        json.dumps(actions), json.dumps(coordinates), len(actions),
+                        final_score, efficiency, json.dumps(initial_frame),
+                        json.dumps(final_frame), json.dumps(frame_transitions),
+                        json.dumps(pattern_tags), game_type, datetime.now().isoformat(),
+                        generation, json.dumps(level_breakpoints),
+                        attempt_id, source_mode, w_A, w_B, w_R
+                    ))
                 
-                # CRITICAL: Force immediate commit to ensure sequence is saved
-                self.db.checkpoint_wal()
-                logger.info(f" Sequence {sequence_id} committed to database immediately")
+                if source_mode == 'LIVE':
+                    # CRITICAL: Force immediate commit to ensure sequence is saved
+                    self.db.checkpoint_wal()
+                    logger.info(f" Sequence {sequence_id} committed to database immediately")
                 
                 # Try to detect and store abstract pattern (only if we have valid sequence_id)
-                self._detect_and_store_abstract_pattern(
-                    sequence_id, game_id, level_number, pattern_signature, 
-                    pattern_tags, efficiency
-                )
+                if source_mode == 'LIVE':
+                    self._detect_and_store_abstract_pattern(
+                        sequence_id, game_id, level_number, pattern_signature, 
+                        pattern_tags, efficiency
+                    )
                 
                 # ================================================================
                 # FORMULA EXTRACTION (Metatheory: Store WHY, not just WHAT)
@@ -11412,18 +13727,23 @@ class GameplayEngine:
                     )
                     
                     if inferred_beliefs:
-                        self._store_inferred_beliefs(
-                            sequence_id=sequence_id,
-                            beliefs=inferred_beliefs,
-                            agent_id=agent_id
-                        )
-                        logger.info(f"[FORMULA] Extracted discoverer beliefs for {sequence_id[:12]} "
-                                   f"(Q1-Q5 inferences: {len(inferred_beliefs.get('inferences', {}))})")
+                        if self.game_config.get('mode', 'LIVE') != 'LIVE':
+                            logger.debug("[MODE] Skip inferred beliefs storage in non-LIVE mode")
+                        else:
+                            self._store_inferred_beliefs(
+                                sequence_id=sequence_id,
+                                beliefs=inferred_beliefs,
+                                agent_id=agent_id
+                            )
+                            logger.info(
+                                f"[FORMULA] Extracted discoverer beliefs for {sequence_id[:12]} "
+                                f"(Q1-Q5 inferences: {len(inferred_beliefs.get('inferences', {}))})"
+                            )
                 except Exception as e:
                     logger.debug(f"Formula extraction during discovery failed (non-critical): {e}")
                 
-                # Phase 1: Record discovery for prestige tracking
-                if agent_id != 'unknown':
+                # Phase 1: Record discovery for prestige tracking (LIVE only)
+                if source_mode == 'LIVE' and agent_id != 'unknown':
                     try:
                         innovation_value = 0.5 if not existing else 0.8  # Higher for improvements
                         enrichment_score = efficiency * 2.0  # Efficiency-based enrichment
@@ -13515,6 +15835,10 @@ class GameplayEngine:
             agent_epigenetics: Agent's epigenetic state (for analysis)
             failure_reason: If failed, why?
         """
+        mode_for_spine = self.game_config.get('mode', 'LIVE')
+        if mode_for_spine != 'LIVE':
+            return
+
         try:
             import uuid
             validation_id = f"val_{uuid.uuid4().hex[:12]}"

@@ -395,6 +395,24 @@ class SafeDatabaseCleaner:
             table='valence_associations',
             use_confidence=True
         )
+
+        # 24. Apply decay scores to metacog/observer telemetry (no deletes; skip legacy)
+        if verbose:
+            print('\n24. Apply decay scores (metacog/observer/oracle/valence)')
+        results['tables_cleaned']['decay_updates'] = self._apply_decay_scores(
+            c, conn, dry_run, verbose,
+            tables=[
+                'metacognitive_assumptions',
+                'metacognitive_eliminations',
+                'metacognitive_failure_patterns',
+                'metacognitive_insights',
+                'metacognitive_predictions',
+                'gap_registry',
+                'interventions',
+                'oracle_observations',
+                'valence_associations',
+            ]
+        )
         
         # NOTE: grid_region_classification, detected_resource_counters, inferred_goal_states
         # do NOT have is_active columns - they're structural data that doesn't become stale.
@@ -984,6 +1002,102 @@ class SafeDatabaseCleaner:
                 print(f'   Deprecated: {deprecated:,} patterns')
         
         return {'found': total_stale, 'deleted': 0, 'deprecated': deprecated if not dry_run else 0}
+
+    def _apply_decay_scores(self, c, conn, dry_run, verbose, tables):
+        """Update decay_score for telemetry tables using generation-based decay.
+
+        Decay formula: max(0, 1 - (current_gen - last_observed_generation) / pattern_staleness_generations)
+        Skips legacy rows (source_mode='LEGACY'). No deletions are performed.
+        """
+        updated_total = 0
+        backfilled_total = 0
+
+        try:
+            c.execute('SELECT value FROM evolutionary_state WHERE key = "current_generation"')
+            row = c.fetchone()
+            current_gen = int(row[0]) if row else 0
+        except Exception:
+            current_gen = 0
+
+        for table in tables:
+            try:
+                c.execute(f"PRAGMA table_info({table})")
+                columns = {row[1] for row in c.fetchall()}
+                if 'decay_score' not in columns or 'last_observed_generation' not in columns:
+                    if verbose:
+                        print(f'   Table {table} missing decay_score/last_observed_generation (skip)')
+                    continue
+
+                # Backfill missing last_observed_generation for non-legacy rows
+                c.execute(
+                    f'''
+                    SELECT COUNT(*) FROM {table}
+                    WHERE (source_mode IS NULL OR source_mode != 'LEGACY')
+                    AND last_observed_generation = 0
+                    '''
+                )
+                to_backfill = c.fetchone()[0]
+                if not dry_run and to_backfill > 0:
+                    c.execute(
+                        f'''
+                        UPDATE {table}
+                        SET last_observed_generation = ?
+                        WHERE (source_mode IS NULL OR source_mode != 'LEGACY')
+                        AND last_observed_generation = 0
+                        ''',
+                        (current_gen,),
+                    )
+                    backfilled_total += to_backfill
+
+                # Apply decay score for non-legacy rows with last_observed_generation > 0
+                c.execute(
+                    f'''
+                    SELECT COUNT(*) FROM {table}
+                    WHERE (source_mode IS NULL OR source_mode != 'LEGACY')
+                    AND last_observed_generation > 0
+                    '''
+                )
+                eligible = c.fetchone()[0]
+                if not dry_run and eligible > 0:
+                    c.execute(
+                        f'''
+                        UPDATE {table}
+                        SET decay_score = CASE
+                            WHEN (? - last_observed_generation) <= 0 THEN 1.0
+                            WHEN (? - last_observed_generation) >= ? THEN 0.0
+                            ELSE 1.0 - CAST((? - last_observed_generation) AS REAL) / ?
+                        END
+                        WHERE (source_mode IS NULL OR source_mode != 'LEGACY')
+                        AND last_observed_generation > 0
+                        ''',
+                        (
+                            current_gen,
+                            current_gen,
+                            self.pattern_staleness_generations,
+                            current_gen,
+                            self.pattern_staleness_generations,
+                        ),
+                    )
+                    updated_total += eligible
+
+                if dry_run and verbose:
+                    print(f'   {table}: would backfill {to_backfill:,}, update decay for {eligible:,}')
+            except Exception as exc:
+                if verbose:
+                    print(f'   Table {table} decay update skipped: {exc}')
+
+        if not dry_run and (updated_total > 0 or backfilled_total > 0):
+            conn.commit()
+
+        if verbose:
+            print(f'   Decay updated rows: {updated_total:,}, backfilled generations: {backfilled_total:,}')
+
+        return {
+            'found': updated_total + backfilled_total,
+            'updated': updated_total,
+            'backfilled': backfilled_total,
+            'deleted': 0,
+        }
     
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""

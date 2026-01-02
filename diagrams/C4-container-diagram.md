@@ -25,7 +25,7 @@ This diagram shows the major containers (deployable units/major code modules) wi
 |   | - Cleanup coordination           |    +--------------------------------+ |
 |   | - Checkpoint/resume              |                                       |
 |   +------------------+---------------+    +--------------------------------+ |
-|                      |                    |   OuroborosCoordinator         | |
+|                      |                    |   OuroborosNetworkSteward      | |
 |                      |                    |   [ouroboros_coordinator]      | |
 |                      |                    |--------------------------------| |
 |                      +-------------------->  - Multi-agent coordination    | |

@@ -30,6 +30,7 @@ if sys.platform == 'win32':
         sys.stderr.reconfigure(encoding='utf-8')  # type: ignore[union-attr]
 
 import asyncio
+import json
 from safe_cleanup import SafeDatabaseCleaner  # Primary cleanup routine
 import time
 import argparse
@@ -51,7 +52,7 @@ except ImportError:
 from database_logger import setup_database_logging
 from enhanced_database_interface import EnhancedDatabaseInterface as DatabaseInterface
 from evolution_with_vampires import check_for_vampires  # Vampire detection
-from ouroboros_coordinator import OuroborosCoordinator
+from ouroboros_coordinator import OuroborosNetworkSteward
 from agent_factory import AgentFactory
 from performance_analyzer import PerformanceAnalyzer
 from disk_space_monitor import DiskSpaceMonitor
@@ -150,7 +151,9 @@ class AutonomousEvolutionRunner:
         specialist_mode: bool = False,  # NEW: Enable specialist-focused evolution
         skip_cleanup: bool = False,  # Skip database cleanup on startup (for test mode)
         ensure_game_type_coverage: bool = False,  # Force one game per unique game type
-        target_game: str | None = None  # NEW: Focus on specific game (e.g., "as66")
+        target_game: str | None = None,  # NEW: Focus on specific game (e.g., "as66")
+        replay_validation_batch: bool = False,  # Run REPLAY_VALIDATION pass over replay_index (no live play)
+        replay_validation_limit: Optional[int] = None,  # Optional cap on validations
     ):
         """
         Initialize autonomous runner.
@@ -168,7 +171,7 @@ class AutonomousEvolutionRunner:
             target_game: Focus all agents on specific game prefix (e.g., "as66")
         """
         self.db = DatabaseInterface(db_path)
-        self.coordinator = OuroborosCoordinator(self.db)
+        self.coordinator = OuroborosNetworkSteward(self.db)
         self.analyzer = PerformanceAnalyzer(self.db)
         self.factory = AgentFactory(self.db)
         self.adaptive_limits = AdaptiveActionLimits(self.db)  # Adaptive action limit manager
@@ -235,6 +238,8 @@ class AutonomousEvolutionRunner:
         self.skip_cleanup = skip_cleanup  # Skip database cleanup on startup
         self.ensure_game_type_coverage = ensure_game_type_coverage  # Force one game per type
         self.target_game = target_game  # Focus on specific game (e.g., "as66")
+        self.replay_validation_batch = replay_validation_batch
+        self.replay_validation_limit = replay_validation_limit
         
         self.current_generation = 0
         self.total_games_played = 0
@@ -474,7 +479,23 @@ class AutonomousEvolutionRunner:
                 print(f"  [DB] Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
                 
         except Exception as e:
-            print(f"  [WARN]  Log cleanup failed (non-critical): {e}")
+            print(f"[WARN]  Log cleanup failed (non-critical): {e}")
+
+    def _enforce_no_pycache(self, root: Optional[str] = None) -> None:
+        """Fail early if __pycache__ directories exist (rule: pycache off)."""
+        base_dir = root or os.getcwd()
+        forbidden = []
+        for dirpath, dirnames, _ in os.walk(base_dir):
+            parts = dirpath.split(os.sep)
+            if any(part in {'.git', '.venv', 'env', 'node_modules'} for part in parts):
+                dirnames[:] = []
+                continue
+            if os.path.basename(dirpath) == '__pycache__':
+                forbidden.append(dirpath)
+                dirnames[:] = []
+        if forbidden:
+            sample = "; ".join(sorted(forbidden)[:5])
+            raise RuntimeError(f"__pycache__ present: {sample}")
     
     def _save_checkpoint(self):
         """Save checkpoint data for resume capability."""
@@ -947,6 +968,269 @@ class AutonomousEvolutionRunner:
                     selected.append(game)
             
             return selected[:games_per_agent]
+
+    async def run_replay_validation_batch(self, limit: Optional[int] = None) -> Dict[str, Any]:
+        """Run REPLAY_VALIDATION over stored replay_index pointers without live gameplay."""
+
+        print("\n[?] Running replay validation batch (REPLAY_VALIDATION mode)...")
+
+        api_key = os.getenv('ARC_API_KEY')
+        if not api_key:
+            print("[?] ARC_API_KEY not found in environment")
+            return {'validated': 0, 'pointers_found': 0, 'missing': 0}
+
+        params = []
+        query = (
+            """
+            SELECT arc_game_id, MAX(id) as latest_id
+            FROM replay_index
+            WHERE arc_game_id IS NOT NULL
+            """
+        )
+
+        if self.target_game:
+            query += " AND arc_game_id LIKE ?"
+            params.append(f"{self.target_game}%")
+
+        query += " GROUP BY arc_game_id ORDER BY latest_id DESC"
+
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        replay_rows = self.db.execute_query(query, tuple(params)) if params else self.db.execute_query(query)
+
+        if not replay_rows:
+            scope = f" for target '{self.target_game}'" if self.target_game else ""
+            print(f"[?] No replay_index entries found{scope}")
+            return {'validated': 0, 'pointers_found': 0, 'missing': 0}
+
+        replay_games = [row['arc_game_id'] for row in replay_rows if row.get('arc_game_id')]
+        print(f"  Found {len(replay_games)} replay_index entries for validation" + (f" (limit {limit})" if limit else ""))
+
+        # Use any active agent for provenance; optional in replay path
+        agent_id = None
+        try:
+            active_agents = self.db.get_active_agents()
+            if active_agents:
+                agent_id = active_agents[0]['agent_id']
+        except Exception as e:
+            print(f"  [WARN] Unable to fetch active agents for replay provenance: {e}")
+
+        validated = 0
+        pointer_hits = 0
+        missing = []
+        guard_violations = 0
+
+        async with GameplayEngine(api_key, db_path=self.db.db_path) as engine:
+            # Keep config minimal: we only want REPLAY pointer reads
+            engine.configure(
+                mode='REPLAY_VALIDATION',
+                strategy='balanced',
+                enable_random_exploration=False,
+                enable_pattern_learning=False,
+                max_actions_per_level=1,
+                max_total_actions=1,
+                current_generation=self.current_generation,
+                agent_operating_mode='generalist'
+            )
+
+            try:
+                available_games = await engine.session_manager.get_available_games()
+                available_ids = [g.get('id', g.get('game_id')) for g in available_games if g.get('id') or g.get('game_id')]
+                available_ids = [gid for gid in available_ids if gid]
+            except Exception as e:
+                available_ids = []
+                print(f"  [WARN] Unable to fetch available games for missing report: {e}")
+
+            for entry in replay_rows:
+                game_id = entry.get('arc_game_id') or "unknown"
+                if self.shutdown_requested:
+                    engine.session_manager.is_shutting_down = True
+                    break
+                try:
+                    result = await engine.play_single_game(game_id, agent_id=agent_id)
+                except asyncio.CancelledError:
+                    engine.session_manager.is_shutting_down = True
+                    raise
+                validated += 1
+                if result.get('final_state') == 'REPLAY_POINTER':
+                    pointer_hits += 1
+                else:
+                    missing.append(game_id)
+
+                # Validate ACTION6 coordinates for this replay entry
+                try:
+                    guard_stats = self._validate_action6_replay(entry)
+                    guard_violations += guard_stats.get('violations', 0)
+                    if guard_stats.get('violations', 0) > 0:
+                        msg = guard_stats.get('message', 'ACTION6 validation failures')
+                        print(f"  [WARN] {msg} for replay {entry.get('replay_id') or entry.get('attempt_id')}")
+                except Exception as guard_err:
+                    guard_violations += 1
+                    print(f"  [WARN] ACTION6 validation error: {guard_err}")
+
+        # Report coverage against available games (optional)
+        coverage_gap = []
+        if available_ids:
+            filtered_available = [gid for gid in available_ids if not self.target_game or gid.startswith(self.target_game)]
+            coverage_gap = [gid for gid in filtered_available if gid not in set(replay_games)]
+            if coverage_gap:
+                gap_display = ", ".join(coverage_gap[:5])
+                if len(coverage_gap) > 5:
+                    gap_display += f" ... (+{len(coverage_gap)-5} more)"
+                print(f"  [GAP] Games without replay_index entries: {gap_display}")
+
+        self.total_games_played += validated
+
+        print(f"[OK] Replay validation complete: {pointer_hits}/{validated} pointers found")
+        if missing:
+            print(f"  [WARN] {len(missing)} replay entries returned missing pointers")
+        if guard_violations:
+            print(f"  [WARN] {guard_violations} ACTION6 coordinate validation failures")
+
+        return {
+            'validated': validated,
+            'pointers_found': pointer_hits,
+            'missing': len(missing),
+            'coverage_gap': len(coverage_gap),
+            'guard_violations': guard_violations
+        }
+
+    def _validate_action6_replay(self, replay_entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Check recorded ACTION6 traces for coordinates and bounds; log guard failures if missing."""
+
+        attempt_id = replay_entry.get('attempt_id')
+        scorecard_id = replay_entry.get('scorecard_id')
+        arc_game_id = replay_entry.get('arc_game_id')
+
+        # Locate session via game_results using scorecard_id
+        session_row = None
+        if scorecard_id:
+            rows = self.db.execute_query(
+                "SELECT session_id, game_id FROM game_results WHERE scorecard_id = ? ORDER BY end_time DESC LIMIT 1",
+                (scorecard_id,),
+            )
+            session_row = rows[0] if rows else None
+
+        if not session_row:
+            # Without session we cannot validate frames; record failure if attempt_id exists
+            if attempt_id:
+                self.db.execute_query(
+                    "INSERT INTO hook_failures (attempt_id, hook_name, hook_phase, exception_type, message, stack_hash, auto_disabled_flag, game_id, level, agent_id, generation, guard_code) "
+                    "VALUES (?, ?, 'guard', ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+                    (
+                        attempt_id,
+                        'action6_validation',
+                        'action6_missing_session',
+                        'No session for scorecard',
+                        'action6_missing_session',
+                        arc_game_id,
+                        None,
+                        None,
+                        None,
+                        'action6_missing_session',
+                    ),
+                )
+            return {'checked': 0, 'violations': 1, 'message': 'No session found for scorecard'}
+
+        session_id = session_row.get('session_id')
+        game_id = session_row.get('game_id') or arc_game_id
+
+        # Fetch agent/generation for provenance
+        attempt_row = None
+        if attempt_id:
+            rows = self.db.execute_query(
+                "SELECT agent_id, generation FROM attempts WHERE attempt_id = ? LIMIT 1",
+                (attempt_id,),
+            )
+            attempt_row = rows[0] if rows else None
+        agent_id = attempt_row.get('agent_id') if attempt_row else None
+        generation = attempt_row.get('generation') if attempt_row else None
+
+        traces = self.db.execute_query(
+            "SELECT action_number, coordinates, frame_before, frame_after FROM action_traces WHERE session_id = ? AND action_number = 6",
+            (session_id,),
+        )
+        if not traces:
+            return {'checked': 0, 'violations': 0}
+
+        # Cross-check proposals: ACTION6 should have an attention window id (salience source)
+        attention_rows = self.db.execute_query(
+            "SELECT chosen_action, attention_window_id FROM action_proposals_log WHERE attempt_id = ? AND chosen_action LIKE 'ACTION6%'",
+            (attempt_id,),
+        ) if attempt_id else []
+
+        attention_missing = 0
+        if traces and attempt_id:
+            if not attention_rows:
+                attention_missing = len(traces)
+            else:
+                for row in attention_rows:
+                    aw = row.get('attention_window_id') if row else None
+                    if not aw:
+                        attention_missing += 1
+
+        # Determine frame bounds from first available frame
+        def _parse_frame(frame_blob: Any) -> Optional[list]:
+            if not frame_blob:
+                return None
+            if isinstance(frame_blob, str):
+                try:
+                    return json.loads(frame_blob)
+                except Exception:
+                    return None
+            return frame_blob if isinstance(frame_blob, list) else None
+
+        sample_frame = None
+        for t in traces:
+            sample_frame = _parse_frame(t.get('frame_before')) or _parse_frame(t.get('frame_after'))
+            if sample_frame:
+                break
+
+        height = len(sample_frame) if sample_frame else None
+        width = len(sample_frame[0]) if sample_frame and sample_frame and sample_frame[0] else None
+
+        violations = 0
+        for t in traces:
+            coord_raw = t.get('coordinates')
+            try:
+                coord = json.loads(coord_raw) if isinstance(coord_raw, str) else coord_raw
+            except Exception:
+                coord = None
+            if not coord or 'x' not in coord or 'y' not in coord:
+                violations += 1
+                continue
+            x, y = coord.get('x'), coord.get('y')
+            if height is not None and width is not None:
+                if x is None or y is None or x < 0 or y < 0 or y >= height or x >= width:
+                    violations += 1
+
+        violations += attention_missing
+
+        if violations and attempt_id:
+            self.db.execute_query(
+                "INSERT INTO hook_failures (attempt_id, hook_name, hook_phase, exception_type, message, stack_hash, auto_disabled_flag, game_id, level, agent_id, generation, guard_code) "
+                "VALUES (?, ?, 'guard', ?, ?, ?, 0, ?, ?, ?, ?, ?)",
+                (
+                    attempt_id,
+                    'action6_validation',
+                    'action6_missing_coords',
+                    f'{violations} ACTION6 traces missing/invalid coordinates or salience windows',
+                    'action6_missing_coords',
+                    game_id,
+                    None,
+                    agent_id,
+                    generation,
+                    'action6_missing_coords',
+                ),
+            )
+
+        return {
+            'checked': len(traces),
+            'violations': violations,
+            'attention_missing': attention_missing,
+        }
     
     async def run_evaluation_games(self, num_games: int) -> Dict[str, Any]:
         """
@@ -1152,11 +1436,11 @@ class AutonomousEvolutionRunner:
                 total_wins = 0
                 total_score = 0
                 rules_learned = 0  # NEW: Track rule learning
-                
+
                 # NEW: Use GameScheduler to prevent duplicate game plays
                 # This prevents the inefficiency where multiple agents play same game type sequentially
                 print("\n GAME SCHEDULER: Assigning games to prevent duplicate plays...")
-                
+
                 # Prepare agents for scheduler (need mode from mode_assignments)
                 agents_with_modes = []
                 for agent in selected_agents:
@@ -1167,430 +1451,354 @@ class AutonomousEvolutionRunner:
                         'mode': agent_mode,
                         'generation': self.current_generation
                     })
-                
+
                 # Assign games using scheduler (prevents duplicate game types)
+                mixed_domain_flag = bool(int(os.getenv("ENABLE_MIXED_DOMAIN", "0")))
+
                 game_assignments = self.game_scheduler.assign_games_to_agents(
                     agents=agents_with_modes,
                     total_games_to_play=num_games,
                     available_game_ids=game_ids,
-                    ensure_game_type_coverage=self.ensure_game_type_coverage
+                    ensure_game_type_coverage=self.ensure_game_type_coverage,
+                    mixed_domain=mixed_domain_flag,
                 )
-                
+
                 if not game_assignments:
                     print("[?] No games could be assigned (all games may be in use)")
                     return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
-                
+
                 print(f" Assigned {sum(len(g) for g in game_assignments.values())} games to {len(game_assignments)} agents\n")
-                
-                # ================================================================
-                # ERROR DETECTION: Stop evolution early if API is broken
-                # ================================================================
-                # Track consecutive failures to detect system-wide issues
-                # This prevents wasting compute when API is down or games aren't working
-                # 
-                # IMPORTANT: Only count TRUE errors, not normal game endings:
-                # - GAME_OVER with score 0 = hard game (not an error)
-                # - NO_SEQUENCE_AVAILABLE = pioneer on frontier (not an error)
-                # - ERROR, API_ERROR, TIMEOUT = true errors
-                # ================================================================
-                consecutive_zero_score_games = 0  # Games with 0 score
-                consecutive_error_games = 0  # Games that threw TRUE errors
-                ZERO_SCORE_THRESHOLD = 20  # Warn after 20 consecutive zero-score games (don't stop)
-                ERROR_THRESHOLD = 15  # Stop after 15 consecutive TRUE errors (was 5, too aggressive)
-                total_zero_score_games = 0  # Track total for reporting
-                total_error_games = 0
-                
-                # Define what counts as a TRUE error vs normal game ending
-                TRUE_ERROR_STATES = {'ERROR', 'API_ERROR', 'TIMEOUT', 'CONNECTION_ERROR'}
-                NORMAL_END_STATES = {'GAME_OVER', 'WIN', 'NO_SEQUENCE_AVAILABLE', 'NOT_FINISHED'}
-                
-                for agent_idx, agent in enumerate(selected_agents):  # FIXED: Use selected_agents
+
+                # ------------------------------------------------------------------
+                # SWARM EXECUTION: launch one task per game slot (concurrent per game)
+                # ------------------------------------------------------------------
+                swarm_slots = []
+                for agent in selected_agents:
                     agent_id = agent['agent_id']
-                    
-                    # Get games assigned by scheduler
                     agent_games = game_assignments.get(agent_id, [])
-                    
                     if not agent_games:
-                        # Agent didn't get any games (all games in use or not selected)
                         continue
-                    
-                    # Get agent's operating mode (pioneer/optimizer/generalist)
+                    # Determine agent mode
                     agent_mode = mode_assignments.get(agent_id, 'generalist')
-                    
-                    # Log assignment
-                    game_types_assigned = list(set(g[:4] for g in agent_games))
-                    print(f"  [SCHEDULED] {agent_mode.upper()} {agent_id[:8]} → {', '.join(game_types_assigned)} ({len(agent_games)} games)")
-                    
-                    # Check for shutdown before starting this agent's games
-                    if self.shutdown_requested:
-                        print(f"[PAUSE]  Shutdown requested, skipping agent {agent_id[:8]} and remaining agents")
-                        break
-                    
-                    # Run games for this agent
-                    for game_idx, game_id in enumerate(agent_games):
-                        if self.shutdown_requested:
-                            print("[PAUSE]  Shutdown requested during game, stopping evaluation")
-                            break
-                        
-                        # PERSISTENT MODE MEMORY: Assign mode for this specific game
-                        # Agent remembers which mode (pioneer/optimizer/generalist) works best per game
-                        agent_mode = mode_system.get_best_mode_for_game(agent_id, game_id)
-                        if not agent_mode:
-                            # No history - use population assignment
-                            agent_mode = mode_assignments.get(agent_id, 'generalist')
-                            mode_system._record_mode_assignment(
-                                agent_id, game_id, self.current_generation, 
-                                agent_mode, "First attempt - using population role"
-                            )
-                        
-                        # === NEW: Collective reasoning for difficult games ===
-                        # Trigger ensemble intelligence when game attempted 3+ times without win
-                        if self.collective_reasoner:
-                            try:
-                                # Check game difficulty (attempts without win)
-                                attempts = self.db.execute_query("""
-                                    SELECT COUNT(*) as attempt_count
-                                    FROM agent_arc_performance
-                                    WHERE game_id = ? AND win_achieved = FALSE
-                                """, (game_id,))
-                                
-                                if attempts and attempts[0]['attempt_count'] >= 3:
-                                    # Start collective session (auto-selects top agents)
-                                    session_id = self.collective_reasoner.start_collective_session(
-                                        game_id=game_id,
-                                        generation=self.current_generation,
-                                        reasoning_mode='consensus'  # Use consensus for difficult games
-                                    )
-                                    if session_id:
-                                        print(f"  [ENSEMBLE] Collective reasoning session started for difficult game")
-                            except Exception as e:
-                                print(f"  [WARN] Collective reasoning setup failed: {e}")
-                        
-                        # Determine target level for optimizers
+                    # Persist best mode for this game if known
+                    for game_id in agent_games:
+                        best_mode = mode_system.get_best_mode_for_game(agent_id, game_id)
+                        if best_mode:
+                            agent_mode = best_mode
+                        # Optimizer target level per game
                         optimizer_target_level = None
                         if agent_mode == 'optimizer':
-                            # Get optimization targets for this game
                             all_targets = self.optimization_tracker.get_optimization_targets(
                                 agent_mode='optimizer',
                                 limit=100
                             )
-                            # Filter to this game
                             game_targets = [t for t in all_targets if t['game_id'] == game_id]
                             if game_targets:
                                 optimizer_target_level = game_targets[0]['level_number']
-                        
-                        # Use BREAKTHROUGH BUDGET ALLOCATOR (Tier 1: +50% gain)
-                        # Dynamic per-game budgets: 800 (unbeaten), 400 (partial), 150 (beaten)
+                        # Dynamic budgets per game with role/w_B multipliers
+                        agent_salary = self.adaptive_limits.calculate_agent_salary(agent_id, self.current_generation)
                         game_budget_dict = self.budget_allocator.calculate_game_budget(game_id)
-                        game_budget = game_budget_dict['action_allowance_total']
-                        actions_per_level = game_budget_dict['action_allowance_per_level']
-                        print(f"[BUDGET] Game {game_id[:8]}: {game_budget} total actions allocated")
-                        
-                        # Use adaptive action limits (adjusted per generation)
-                        # Configure engine with current adaptive limits
-                        engine.configure(
-                            strategy='balanced',
-                            max_actions_per_level=actions_per_level,  # Adaptive: adjusts based on performance
-                            max_total_actions=game_budget,  # BREAKTHROUGH: Dynamic per-game budget
-                            enable_random_exploration=True,
-                            enable_pattern_learning=True,
-                            # Diversity Mode settings (Rule 10: enhance existing)
-                            diversity_mode=self.agi_mode,  # CHANGED: use diversity_mode instead of agi_mode
-                            enforce_game_diversity=self.agi_mode,
-                            max_repeats_per_game=5 if self.agi_mode else 999,
-                            # Specialist Mode settings (NEW)
-                            specialist_mode=self.specialist_mode,
-                            # Agent role settings (NEW)
-                            agent_operating_mode=agent_mode,
-                            optimizer_target_level=optimizer_target_level,
-                            # Generation tracking for scorecard tags
-                            current_generation=self.current_generation
+
+                        budget_multiplier = agent_salary.get('budget_multiplier', 1.0)
+
+                        scaled_per_level = int(game_budget_dict['action_allowance_per_level'] * budget_multiplier)
+                        scaled_total = int(game_budget_dict['action_allowance_total'] * budget_multiplier)
+
+                        # Clamp by global bounds and agent-specific ceilings (dual economies: ATP only)
+                        final_per_level = min(
+                            agent_salary.get('action_allowance_per_level', scaled_per_level),
+                            max(
+                                self.adaptive_limits.MIN_ACTIONS_PER_LEVEL,
+                                min(self.adaptive_limits.MAX_ACTIONS_PER_LEVEL, scaled_per_level)
+                            ),
                         )
-                        
-                        # Play game - REAL ARC API CALL
-                        # Wrap in cancellable task for graceful shutdown
-                        try:
-                            # ORACLE METRICS: Record game start
-                            if self.metrics_capture:
-                                game_type = game_id[:4] if len(game_id) >= 4 else 'unknown'
-                                self.metrics_capture.start_game(game_id, game_type, agent_id)
-                            
-                            game_task = asyncio.create_task(engine.play_single_game(game_id, agent_id=agent_id))
-                            result = await game_task
-                            
-                            # ORACLE METRICS: Record game end
-                            if self.metrics_capture:
-                                self.metrics_capture.end_game(
-                                    game_id,
-                                    result.get('final_score', 0),
-                                    result.get('levels_completed', 0),
-                                    result.get('actions_taken', 0)
-                                )
-                        except asyncio.CancelledError:
-                            # Game was cancelled during shutdown
-                            print(f"[PAUSE]  Game {game_id[:8]} cancelled")
-                            if self.shutdown_requested:
-                                # Propagate shutdown to session manager to prevent new actions
-                                engine.session_manager.is_shutting_down = True
-                                break
-                            raise
-                        
-                        # Check for shutdown after game completes
-                        if self.shutdown_requested:
-                            # Propagate shutdown signal to prevent any new games
-                            engine.session_manager.is_shutting_down = True
-                            print(f"[PAUSE]  Shutdown detected after game {game_id[:8]}, ending generation early")
-                            break
-                        
-                        # ================================================================
-                        # ERROR DETECTION: Track game failures
-                        # ================================================================
-                        # Only count TRUE errors (API failures, timeouts, etc.)
-                        # NOT normal game endings like GAME_OVER or NO_SEQUENCE_AVAILABLE
-                        # ================================================================
-                        game_score = result.get('final_score', 0)
-                        final_state = result.get('final_state', 'UNKNOWN')
-                        explicit_error = result.get('error')
-                        
-                        # Determine if this is a TRUE error vs normal game ending
-                        is_true_error = (
-                            explicit_error is not None or 
-                            final_state in TRUE_ERROR_STATES
+
+                        final_total = min(
+                            agent_salary.get('action_allowance_total', scaled_total),
+                            max(
+                                self.adaptive_limits.MIN_TOTAL_ACTIONS,
+                                min(self.adaptive_limits.MAX_TOTAL_ACTIONS, scaled_total)
+                            ),
                         )
-                        is_normal_zero = (
-                            game_score == 0 and 
-                            final_state in NORMAL_END_STATES
-                        )
-                        
-                        if is_true_error:
-                            # TRUE error - API failure, timeout, etc.
-                            consecutive_error_games += 1
-                            total_error_games += 1
-                            consecutive_zero_score_games = 0  # Reset other counter
-                            
-                            # Check threshold
-                            if consecutive_error_games >= ERROR_THRESHOLD:
-                                print(f"\n[STOP] CRITICAL: {consecutive_error_games} consecutive TRUE errors detected!")
-                                print(f"   Stopping evolution to prevent wasted compute.")
-                                print(f"   Last error: {explicit_error or final_state}")
-                                print(f"   Total errors this generation: {total_error_games}")
-                                self.shutdown_requested = True
-                                engine.session_manager.is_shutting_down = True
-                                break
-                        elif is_normal_zero:
-                            # Normal game ending with 0 score (hard game or frontier pioneer)
-                            consecutive_zero_score_games += 1
-                            total_zero_score_games += 1
-                            consecutive_error_games = 0  # Reset - this isn't an error
-                            
-                            # Only warn, never stop for zero scores - could be hard games
-                            if consecutive_zero_score_games >= ZERO_SCORE_THRESHOLD:
-                                print(f"\n[WARN] {consecutive_zero_score_games} consecutive zero-score games")
-                                print(f"   This may indicate hard games or exploration on frontier.")
-                                print(f"   Total zero-score games: {total_zero_score_games}")
-                                consecutive_zero_score_games = 0  # Reset to give more chances
-                        else:
-                            # Game succeeded with score > 0
-                            consecutive_zero_score_games = 0
-                            consecutive_error_games = 0
-                        
-                        # Process ARC rewards
-                        rlvr = ARCRLVRFramework(self.db)
-                        game_session_results = {
-                            'game_id': game_id,
-                            'session_id': engine.session_manager.current_session_id,
-                            'win_detected': result.get('win', False),
-                            'final_score': result.get('final_score', 0),
-                            'win_score': 1.0,
-                            'total_actions': result.get('actions_taken', 0),
-                            'level_completions': int(result.get('final_score', 0)),  # Score = levels completed!
-                            'frame_changes': 0
-                        }
-                        
-                        reward_data = rlvr.process_arc_rewards(agent_id, game_session_results)
-                        
-                        # CRITICAL FIX: Store reward data so agents get credited for their games!
-                        self.db.store_arc_reward_data(agent_id, reward_data)
-                        
-                        # RACE CONDITION FIX: Deduct actions AFTER storing performance record
-                        # Previously was in core_gameplay.py before record existed
-                        try:
-                            engine.session_manager.deduct_actions_used(agent_id, game_id)
-                        except Exception as deduct_e:
-                            logger.debug(f"Action deduction failed (non-critical): {deduct_e}")
-                        
-                        # === NEW BREAKTHROUGH SYSTEMS: Post-game analysis ===
-                        
-                        # 1. Update frustration state (detect stuck agents)
-                        if self.frustration_detector:
-                            try:
-                                # Get agent's previous best score on this game
-                                prev_best = self.db.execute_query("""
-                                    SELECT MAX(final_score) as best_score
-                                    FROM agent_arc_performance
-                                    WHERE agent_id = ? AND game_id = ?
-                                """, (agent_id, game_id))
-                                previous_best_score = prev_best[0]['best_score'] if prev_best and prev_best[0]['best_score'] else 0.0
-                                
-                                self.frustration_detector.update_agent_frustration(
-                                    agent_id=agent_id,
-                                    game_id=game_id,
-                                    score_achieved=result.get('final_score', 0),
-                                    previous_best_score=previous_best_score,
-                                    actions_taken=result.get('actions_taken', 0),
-                                    generation=self.current_generation
-                                )
-                                
-                                # NOTE: Old frustration quorum disabled - used to emit useless mutation signals
-                                # The network_knowledge_synthesis now handles this at generation end
-                                # with intelligent knowledge synthesis and targeted interventions
-                            except Exception as e:
-                                print(f"  [WARN] Frustration detection failed: {e}")
-                        
-                        # 2. Analyze near-misses (high score failures)
-                        final_score = result.get('final_score', 0)
-                        if self.near_miss_analyzer and final_score >= 15 and not result.get('win', False):
-                            try:
-                                session_id = engine.session_manager.current_session_id or "unknown"
-                                insights_id = self.near_miss_analyzer.analyze_near_miss(
-                                    agent_id=agent_id,
-                                    game_id=game_id,
-                                    session_id=session_id,
-                                    final_score=final_score,
-                                    total_actions=result.get('actions_taken', 0),
-                                    generation=self.current_generation
-                                )
-                                if insights_id:
-                                    print(f"  [>] Near-miss analysis recorded (ID: {insights_id[:8]})")
-                                    
-                                    # CODS: Process near-miss patterns for primitive gap detection
-                                    if hasattr(engine, 'cods_engine') and engine.cods_engine:
-                                        try:
-                                            engine.cods_engine.process_near_miss_patterns(insights_id)
-                                        except Exception as cods_e:
-                                            pass  # Non-critical
-                            except Exception as e:
-                                print(f"  [WARN] Near-miss analysis failed: {e}")
-                        
-                        # 3. Counterfactual analysis on failures (learn from mistakes)
-                        if self.counterfactual_analyzer and not result.get('win', False) and final_score < 15:
-                            try:
-                                session_id = engine.session_manager.current_session_id or "unknown"
-                                learning_ids = self.counterfactual_analyzer.analyze_failure(
-                                    agent_id=agent_id,
-                                    game_id=game_id,
-                                    session_id=session_id,
-                                    final_score=final_score,
-                                    generation=self.current_generation
-                                )
-                                if learning_ids:
-                                    print(f"  [?] Counterfactual: {len(learning_ids)} alternative strategies identified")
-                                    
-                                    # CODS: Process counterfactual insights for primitive gap detection
-                                    if hasattr(engine, 'cods_engine') and engine.cods_engine:
-                                        try:
-                                            engine.cods_engine.process_counterfactual_insights(learning_ids)
-                                        except Exception as cods_e:
-                                            pass  # Non-critical
-                            except Exception as e:
-                                print(f"  [WARN] Counterfactual analysis failed: {e}")
-                        
-                        # 4. CODS: Record game outcome for failure-driven learning
-                        if hasattr(engine, 'cods_engine') and engine.cods_engine:
-                            try:
-                                cods_result = engine.cods_engine.record_game_outcome(
-                                    game_id=game_id,
-                                    final_score=final_score,
-                                    max_level_reached=result.get('level_completions', 0) + 1,  # Fixed: was 'levels_completed'
-                                    total_actions=result.get('actions_taken', 0),
-                                    won=result.get('win', False)
-                                )
-                                if cods_result.get('primitive_gaps'):
-                                    print(f"  [CODS] Detected {len(cods_result['primitive_gaps'])} primitive gaps")
-                            except Exception as e:
-                                pass  # Non-critical
-                        
-                        # PERSISTENT MODE MEMORY: Record mode effectiveness for this game
-                        mode_system.update_mode_effectiveness(
-                            agent_id=agent_id,
-                            generation=self.current_generation,
-                            score=result.get('final_score', 0),
-                            win=result.get('win', False),
-                            actions=result.get('actions_taken', 0)
-                        )
-                        
-                        # PHASE 3: Track viral package usage and effectiveness
-                        try:
-                            from viral_package_engine import ViralPackageEngine
-                            viral_engine = ViralPackageEngine(self.db)
-                            
-                            # Get packages this agent carries
-                            infections = self.db.execute_query("""
-                                SELECT package_id 
-                                FROM agent_viral_infections 
-                                WHERE agent_id = ? AND is_active = TRUE
-                            """, (agent_id,))
-                            
-                            # Record usage for each package
-                            success = result.get('win', False) or result.get('final_score', 0) > 0
-                            score_change = result.get('final_score', 0)
-                            current_gen = self.db.execute_query(
-                                "SELECT generation FROM agents WHERE agent_id = ?", 
-                                (agent_id,)
-                            )
-                            generation = current_gen[0]['generation'] if current_gen else self.current_generation
-                            
-                            for infection in infections:
-                                viral_engine.record_package_usage(
-                                    agent_id=agent_id,
-                                    package_id=infection['package_id'],
-                                    success=success,
-                                    score_change=score_change,
-                                    generation=generation
-                                )
-                        except Exception as e:
-                            # Non-critical - don't break evolution if Phase 3 fails
-                            pass
-                        
-                        if result.get('win', False):
-                            total_wins += 1
-                            
-                            # Extract rules from winning games for meta-learning
-                            if self.rule_engine and hasattr(engine, 'session_manager'):
-                                try:
-                                    game_session_data = {
-                                        'game_id': game_id,
-                                        'agent_id': agent_id,
-                                        'session_id': engine.session_manager.current_session_id,
-                                        'initial_frame': result.get('initial_frame'),
-                                        'action_sequence': result.get('action_sequence', []),
-                                        'frame_states': result.get('frame_states', []),
-                                        'won': True,
-                                        'score_achieved': result.get('final_score', 0)
-                                    }
-                                    new_rule = self.rule_engine.extract_rule_from_game_session(game_session_data)
-                                    if new_rule:
-                                        print(f"  [?] Learned new rule: {new_rule['rule_name']}")
-                                except Exception as e:
-                                    print(f"  [WARN]  Failed to extract rule: {e}")
-                        
-                        total_score += result.get('final_score', 0)
-                        
-                        results.append({
+
+                        # Ensure total budget can cover multi-level play (at least 3x per-level)
+                        final_total = max(final_total, final_per_level * 3)
+
+                        swarm_slots.append({
                             'agent_id': agent_id,
+                            'agent_mode': agent_mode,
                             'game_id': game_id,
-                            'result': result,
-                            'reward': reward_data
+                            'optimizer_target_level': optimizer_target_level,
+                            'game_budget': final_total,
+                            'actions_per_level': final_per_level
                         })
-                        
-                        # NEW: Release game so another agent can use it
-                        self.game_scheduler.release_game(game_id, agent_id=agent_id)
-                        
-                        # Brief pause between games
-                        await asyncio.sleep(0.5)
-                    
-                    if self.shutdown_requested:
-                        break
+
+                if not swarm_slots:
+                    print("[?] No swarm slots after scheduling")
+                    return {'games_played': 0, 'wins': 0, 'win_rate': 0.0, 'avg_score': 0.0}
+
+                # Parallel mixed-domain encouragement: interleave slots by game_type prefix
+                try:
+                    buckets: Dict[str, List[Dict[str, Any]]] = {}
+                    for slot in swarm_slots:
+                        gpref = (slot.get('game_id') or 'unk')[:4]
+                        buckets.setdefault(gpref, []).append(slot)
+                    interleaved: List[Dict[str, Any]] = []
+                    max_bucket = max(len(v) for v in buckets.values()) if buckets else 0
+                    for idx in range(max_bucket):
+                        for gpref, items in buckets.items():
+                            if idx < len(items):
+                                interleaved.append(items[idx])
+                    if interleaved:
+                        swarm_slots = interleaved
+                except Exception as mix_err:
+                    print(f"  [WARN] Domain interleave failed: {mix_err}")
+
+                semaphore = asyncio.Semaphore(min(8, len(swarm_slots)))
+
+                async def run_swarm_slot(slot):
+                    nonlocal rules_learned
+                    async with semaphore:
+                        agent_id = slot['agent_id']
+                        agent_mode = slot['agent_mode']
+                        game_id = slot['game_id']
+                        optimizer_target_level = slot.get('optimizer_target_level')
+                        game_budget = slot['game_budget']
+                        actions_per_level = slot['actions_per_level']
+
+                        async with GameplayEngine(api_key, db_path=self.db.db_path) as engine_slot:
+                            # Propagate shutdown early
+                            if self.shutdown_requested:
+                                engine_slot.session_manager.is_shutting_down = True
+                                return None
+
+                            try:
+                                # Configure engine per slot
+                                engine_slot.configure(
+                                    strategy='balanced',
+                                    max_actions_per_level=actions_per_level,
+                                    max_total_actions=game_budget,
+                                    enable_random_exploration=True,
+                                    enable_pattern_learning=True,
+                                    diversity_mode=self.agi_mode,
+                                    enforce_game_diversity=self.agi_mode,
+                                    max_repeats_per_game=5 if self.agi_mode else 999,
+                                    specialist_mode=self.specialist_mode,
+                                    agent_operating_mode=agent_mode,
+                                    optimizer_target_level=optimizer_target_level,
+                                    current_generation=self.current_generation
+                                )
+
+                                # ORACLE metrics capture per slot
+                                if self.metrics_capture:
+                                    game_type = game_id[:4] if len(game_id) >= 4 else 'unknown'
+                                    self.metrics_capture.start_game(game_id, game_type, agent_id)
+
+                                try:
+                                    result = await engine_slot.play_single_game(game_id, agent_id=agent_id)
+                                except asyncio.CancelledError:
+                                    if self.shutdown_requested:
+                                        engine_slot.session_manager.is_shutting_down = True
+                                    raise
+
+                                # Metrics end
+                                if self.metrics_capture:
+                                    self.metrics_capture.end_game(
+                                        game_id,
+                                        result.get('final_score', 0),
+                                        result.get('levels_completed', 0),
+                                        result.get('actions_taken', 0)
+                                    )
+
+                                # Reward processing and bookkeeping (same as sequential path)
+                                rlvr = ARCRLVRFramework(self.db)
+                                game_session_results = {
+                                    'game_id': game_id,
+                                    'session_id': engine_slot.session_manager.current_session_id,
+                                    'win_detected': result.get('win', False),
+                                    'final_score': result.get('final_score', 0),
+                                    'win_score': 1.0,
+                                    'total_actions': result.get('actions_taken', 0),
+                                    'level_completions': int(result.get('final_score', 0)),
+                                    'frame_changes': 0
+                                }
+                                reward_data = rlvr.process_arc_rewards(agent_id, game_session_results)
+                                self.db.store_arc_reward_data(agent_id, reward_data)
+
+                                try:
+                                    engine_slot.session_manager.deduct_actions_used(agent_id, game_id)
+                                except Exception as deduct_e:
+                                    logger.debug(f"Action deduction failed (non-critical): {deduct_e}")
+
+                                # Frustration tracking
+                                if self.frustration_detector:
+                                    try:
+                                        prev_best = self.db.execute_query(
+                                            """
+                                            SELECT MAX(final_score) as best_score
+                                            FROM agent_arc_performance
+                                            WHERE agent_id = ? AND game_id = ?
+                                            """,
+                                            (agent_id, game_id),
+                                        )
+                                        previous_best_score = prev_best[0]['best_score'] if prev_best and prev_best[0]['best_score'] else 0.0
+                                        self.frustration_detector.update_agent_frustration(
+                                            agent_id=agent_id,
+                                            game_id=game_id,
+                                            score_achieved=result.get('final_score', 0),
+                                            previous_best_score=previous_best_score,
+                                            actions_taken=result.get('actions_taken', 0),
+                                            generation=self.current_generation,
+                                        )
+                                    except Exception as e:
+                                        print(f"  [WARN] Frustration detection failed: {e}")
+
+                                # Near-miss analysis
+                                final_score = result.get('final_score', 0)
+                                if self.near_miss_analyzer and final_score >= 15 and not result.get('win', False):
+                                    try:
+                                        session_id = engine_slot.session_manager.current_session_id or "unknown"
+                                        insights_id = self.near_miss_analyzer.analyze_near_miss(
+                                            agent_id=agent_id,
+                                            game_id=game_id,
+                                            session_id=session_id,
+                                            final_score=final_score,
+                                            total_actions=result.get('actions_taken', 0),
+                                            generation=self.current_generation,
+                                        )
+                                        if insights_id and hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:
+                                            try:
+                                                engine_slot.cods_engine.process_near_miss_patterns(insights_id)
+                                            except Exception:
+                                                pass
+                                    except Exception as e:
+                                        print(f"  [WARN] Near-miss analysis failed: {e}")
+
+                                # Counterfactual analysis
+                                if self.counterfactual_analyzer and not result.get('win', False) and final_score < 15:
+                                    try:
+                                        session_id = engine_slot.session_manager.current_session_id or "unknown"
+                                        learning_ids = self.counterfactual_analyzer.analyze_failure(
+                                            agent_id=agent_id,
+                                            game_id=game_id,
+                                            session_id=session_id,
+                                            final_score=final_score,
+                                            generation=self.current_generation,
+                                        )
+                                        if learning_ids and hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:
+                                            try:
+                                                engine_slot.cods_engine.process_counterfactual_insights(learning_ids)
+                                            except Exception:
+                                                pass
+                                    except Exception as e:
+                                        print(f"  [WARN] Counterfactual analysis failed: {e}")
+
+                                # CODS outcome logging
+                                if hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:
+                                    try:
+                                        cods_result = engine_slot.cods_engine.record_game_outcome(
+                                            game_id=game_id,
+                                            final_score=final_score,
+                                            max_level_reached=result.get('level_completions', 0) + 1,
+                                            total_actions=result.get('actions_taken', 0),
+                                            won=result.get('win', False),
+                                        )
+                                        if cods_result.get('primitive_gaps'):
+                                            print(f"  [CODS] Detected {len(cods_result['primitive_gaps'])} primitive gaps")
+                                    except Exception:
+                                        pass
+
+                                # Mode effectiveness tracking
+                                mode_system.update_mode_effectiveness(
+                                    agent_id=agent_id,
+                                    generation=self.current_generation,
+                                    score=result.get('final_score', 0),
+                                    win=result.get('win', False),
+                                    actions=result.get('actions_taken', 0),
+                                )
+
+                                # Viral package usage tracking
+                                try:
+                                    from viral_package_engine import ViralPackageEngine
+                                    viral_engine = ViralPackageEngine(self.db)
+                                    infections = self.db.execute_query(
+                                        """
+                                        SELECT package_id 
+                                        FROM agent_viral_infections 
+                                        WHERE agent_id = ? AND is_active = TRUE
+                                        """,
+                                        (agent_id,),
+                                    )
+                                    success = result.get('win', False) or result.get('final_score', 0) > 0
+                                    score_change = result.get('final_score', 0)
+                                    current_gen = self.db.execute_query(
+                                        "SELECT generation FROM agents WHERE agent_id = ?",
+                                        (agent_id,),
+                                    )
+                                    generation = current_gen[0]['generation'] if current_gen else self.current_generation
+                                    for infection in infections:
+                                        viral_engine.record_package_usage(
+                                            agent_id=agent_id,
+                                            package_id=infection['package_id'],
+                                            success=success,
+                                            score_change=score_change,
+                                            generation=generation,
+                                        )
+                                except Exception:
+                                    pass
+
+                                # Rule extraction on wins
+                                if result.get('win', False) and self.rule_engine and hasattr(engine_slot, 'session_manager'):
+                                    try:
+                                        game_session_data = {
+                                            'game_id': game_id,
+                                            'agent_id': agent_id,
+                                            'session_id': engine_slot.session_manager.current_session_id,
+                                            'initial_frame': result.get('initial_frame'),
+                                            'action_sequence': result.get('action_sequence', []),
+                                            'frame_states': result.get('frame_states', []),
+                                            'won': True,
+                                            'score_achieved': result.get('final_score', 0),
+                                        }
+                                        new_rule = self.rule_engine.extract_rule_from_game_session(game_session_data)
+                                        if new_rule:
+                                            print(f"  [?] Learned new rule: {new_rule['rule_name']}")
+                                            rules_learned += 1
+                                    except Exception as e:
+                                        print(f"  [WARN]  Failed to extract rule: {e}")
+
+                                # Release game slot and return summary
+                                return {
+                                    'agent_id': agent_id,
+                                    'game_id': game_id,
+                                    'result': result,
+                                    'reward': reward_data
+                                }
+                            finally:
+                                # Ensure scheduler release even on early exit
+                                self.game_scheduler.release_game(game_id, agent_id=agent_id)
+
+                # Launch all swarm slots concurrently
+                swarm_tasks = [asyncio.create_task(run_swarm_slot(slot)) for slot in swarm_slots]
+                slot_results = await asyncio.gather(*swarm_tasks, return_exceptions=True)
+
+                # Aggregate results, handling cancellations/errors
+                for slot_res in slot_results:
+                    if slot_res is None:
+                        continue
+                    if isinstance(slot_res, Exception):
+                        print(f"  [WARN] Swarm slot failed: {slot_res}")
+                        continue
+                    result = slot_res['result']
+                    agent_id = slot_res['agent_id']
+                    game_id = slot_res['game_id']
+                    reward_data = slot_res['reward']
+
+                    final_score = result.get('final_score', 0)
+                    if result.get('win', False):
+                        total_wins += 1
+                    total_score += final_score
+                    results.append(slot_res)
                 
                 self.total_games_played += len(results)
                 
@@ -2655,6 +2863,23 @@ class AutonomousEvolutionRunner:
                 print("[OK] Schema file synced with database")
             except Exception as e:
                 print(f"[WARN] Schema sync failed: {e}")
+
+        # Enforce pycache rule before any gameplay
+        try:
+            self._enforce_no_pycache()
+        except Exception as e:
+            print(f"[ERROR] __pycache__ detected: {e}")
+            await self._cleanup()
+            return
+
+        # Optional replay validation batch (no live gameplay)
+        if self.replay_validation_batch:
+            try:
+                summary = await self.run_replay_validation_batch(self.replay_validation_limit)
+                print(f"\n[SUMMARY] Replay validation batch: {summary['pointers_found']} pointers, {summary['missing']} missing, {summary['coverage_gap']} coverage gaps")
+            finally:
+                await self._cleanup()
+            return
         
         try:
             # Initialize population

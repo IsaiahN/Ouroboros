@@ -301,7 +301,8 @@ class ARCClient:
         return response
 
     def generate_tags(self, game_id: Optional[str] = None, session_id: Optional[str] = None, 
-                     agent_id: Optional[str] = None, agent_mode: Optional[str] = None) -> List[str]:
+                     agent_id: Optional[str] = None, agent_mode: Optional[str] = None,
+                     mode: Optional[str] = None) -> List[str]:
         """Generate tags for scorecard identification.
         
         Args:
@@ -309,6 +310,7 @@ class ARCClient:
             session_id: Session identifier
             agent_id: Agent identifier (optional)
             agent_mode: Agent operating mode - 'pioneer', 'optimizer', 'generalist' (optional)
+            mode: Attempt mode (LIVE/REPLAY_VALIDATION/EVAL)
         """
         import threading
         import platform
@@ -361,6 +363,10 @@ class ARCClient:
         # Add session information
         if session_id:
             tags.append(f"session_{session_id[:8]}")
+
+        # Add attempt mode tag to mirror attempts.mode
+        if mode:
+            tags.append(f"runmode_{mode.lower()}")
 
         # Add game information
         if game_id:
@@ -654,6 +660,7 @@ class ARCClient:
                 'game_id': game_state.game_id,
                 'guid': game_state.guid,
                 'scorecard_id': scorecard.card_id,
+                'scorecard_tags': scorecard.tags,
                 'frame': game_state.frame,
                 'state': game_state.state,
                 'score': game_state.score,

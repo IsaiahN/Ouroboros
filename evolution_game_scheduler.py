@@ -40,7 +40,8 @@ class EvolutionGameScheduler:
         agents: List[Dict],
         total_games_to_play: int,
         available_game_ids: Optional[List[str]] = None,
-        ensure_game_type_coverage: bool = False
+        ensure_game_type_coverage: bool = False,
+        mixed_domain: bool = False,
     ) -> Dict[str, List[str]]:
         """
         Assign games to agents, ensuring no duplicate game types running simultaneously.
@@ -52,6 +53,7 @@ class EvolutionGameScheduler:
             ensure_game_type_coverage: If True, ensures one game from each unique game type
                                        before random assignment (good when total_games_to_play
                                        equals the number of game types)
+            mixed_domain: If True, mark this batch as mixed-domain (telemetry-only)
             
         Returns:
             Dict mapping agent_id -> list of game_ids to play
@@ -62,6 +64,11 @@ class EvolutionGameScheduler:
         if not available_game_ids:
             print("[WARN]  No games available in database!")
             return {}
+
+        # Telemetry-only mixed-domain flag (does not change scheduling logic)
+        self.scheduler.mixed_domain_flag = mixed_domain
+        if mixed_domain:
+            print("[SCHEDULER] Mixed-domain batch enabled (telemetry only; role ratios/budgets unchanged)")
         
         # ENSURE GAME TYPE COVERAGE: When enabled, make sure each unique game type is played
         if ensure_game_type_coverage:
@@ -123,6 +130,8 @@ class EvolutionGameScheduler:
         print(f"   Games per agent: {games_per_agent}")
         print(f"   Available games: {len(available_game_ids)}")
         print(f"   Mode distribution: {self._count_modes(selected_agents)}\n")
+        if mixed_domain:
+            print("   Batch tag: mixed-domain (telemetry)")
         
         # Assign games to each agent
         assignments: Dict[str, List[str]] = {}
@@ -146,7 +155,7 @@ class EvolutionGameScheduler:
                 game_id = self.scheduler.get_next_game_for_agent(
                     agent_id=agent_id,
                     agent_mode=agent_mode,
-                    session_id=f"gen_{agent_generation}",
+                    session_id=f"gen_{agent_generation}{'_mixed' if mixed_domain else ''}",
                     available_games=available_game_ids,
                     generation=agent_generation  # Pass generation for rotation
                 )

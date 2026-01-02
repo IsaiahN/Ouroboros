@@ -19,6 +19,7 @@ import threading
 import uuid
 import shutil
 import os
+import weakref
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,19 @@ class DatabaseInterface:
         """
         self.db_path = db_path
         self._local = threading.local()
+        # Ensure connections close even if caller forgets (prevents ResourceWarning)
+        self._finalizer = weakref.finalize(self, DatabaseInterface._finalize_cleanup, weakref.ref(self))
         self._initialize_database_from_template()
+
+    @staticmethod
+    def _finalize_cleanup(self_ref: weakref.ReferenceType):
+        inst = self_ref()
+        if inst is None:
+            return
+        try:
+            inst.close()
+        except Exception:
+            pass
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get thread-local database connection."""
@@ -45,6 +58,11 @@ class DatabaseInterface:
                 check_same_thread=False
             )
             self._local.connection.row_factory = sqlite3.Row
+            # Enforce referential integrity on every connection (Phase 0: foreign_keys=ON)
+            try:
+                self._local.connection.execute("PRAGMA foreign_keys=ON")
+            except Exception as e:
+                logger.warning(f"Failed to enable foreign_keys pragma: {e}")
             # Enable WAL mode for better concurrent access
             self._local.connection.execute("PRAGMA journal_mode=WAL")
             # Aggressive WAL checkpointing to prevent data loss on force-close
@@ -116,6 +134,12 @@ class DatabaseInterface:
             finally:
                 self._local.connection.close()
                 delattr(self._local, 'connection')
+        # Detach finalizer now that we handled cleanup explicitly
+        if hasattr(self, '_finalizer'):
+            try:
+                self._finalizer.detach()
+            except Exception:
+                pass
 
     def checkpoint_wal(self):
         """
@@ -946,6 +970,76 @@ class DatabaseInterface:
                 action_data.get('action_accepted', True)
             ))
             conn.commit()
+
+    def record_intrinsic_milestone(
+        self,
+        *,
+        hypothesis: str,
+        attempt_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        game_type: Optional[str] = None,
+        level_number: Optional[int] = None,
+        expected_signal: Optional[str] = None,
+        observed_signal: Optional[str] = None,
+        outcome: Optional[str] = None,
+        status: str = "pending",
+        milestone_tag: Optional[str] = None,
+        confidence: Optional[float] = None,
+        evidence: Optional[Any] = None,
+        source_mode: Optional[str] = None,
+        generation: Optional[int] = None,
+        decay_score: Optional[float] = None,
+        reliability: Optional[float] = None,
+        consensus: Optional[float] = None,
+        source_attempt_id: Optional[str] = None,
+    ) -> str:
+        """Persist a thought experiment/intrinsic milestone telemetry row (DB-only)."""
+
+        if not hypothesis:
+            raise ValueError("hypothesis is required for intrinsic milestone")
+
+        milestone_id = f"milestone_{uuid.uuid4().hex[:12]}"
+        evidence_payload = json.dumps(evidence) if isinstance(evidence, (dict, list)) else evidence
+        provenance_attempt = source_attempt_id or attempt_id
+        default_generation = generation if generation is not None else 0
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO intrinsic_milestones (
+                    milestone_id, attempt_id, agent_id, game_type, level_number,
+                    hypothesis, expected_signal, observed_signal, outcome, status,
+                    milestone_tag, confidence, evidence, source_attempt_id,
+                    source_mode, generation, last_observed_generation, decay_score,
+                    reliability, consensus
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    milestone_id,
+                    attempt_id,
+                    agent_id,
+                    game_type,
+                    level_number,
+                    hypothesis,
+                    expected_signal,
+                    observed_signal,
+                    outcome,
+                    status or "pending",
+                    milestone_tag,
+                    confidence if isinstance(confidence, (int, float)) else None,
+                    evidence_payload,
+                    provenance_attempt,
+                    source_mode,
+                    generation,
+                    default_generation,
+                    decay_score if isinstance(decay_score, (int, float)) else 0.0,
+                    reliability if isinstance(reliability, (int, float)) else 0.5,
+                    consensus if isinstance(consensus, (int, float)) else 0.0,
+                ),
+            )
+            conn.commit()
+
+        return milestone_id
 
     # General logging method
     def log_event(self, logger_name: str, level: str, message: str, **kwargs):
