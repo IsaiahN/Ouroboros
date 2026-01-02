@@ -171,6 +171,7 @@ class AgentOperatingModeSystem:
                 game_id TEXT,
                 generation INTEGER NOT NULL,
                 assigned_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 
                 -- Mode assignment
                 operating_mode TEXT NOT NULL,  -- 'pioneer', 'optimizer', 'generalist'
@@ -190,6 +191,28 @@ class AgentOperatingModeSystem:
                 FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
             )
         """)
+
+        # Backfill created_at for legacy rows and keep schema aligned
+        try:
+            self.db.execute_query("SELECT created_at FROM agent_operating_modes LIMIT 1")
+        except Exception:
+            try:
+                # SQLite ALTER does not allow non-constant defaults; add column then backfill
+                self.db.execute_query("""
+                    ALTER TABLE agent_operating_modes
+                    ADD COLUMN created_at TIMESTAMP
+                """)
+            except Exception:
+                pass
+
+        try:
+            self.db.execute_query("""
+                UPDATE agent_operating_modes
+                SET created_at = COALESCE(created_at, assigned_timestamp, CURRENT_TIMESTAMP)
+                WHERE created_at IS NULL
+            """)
+        except Exception:
+            pass
 
         # Index for fast agent mode lookups
         self.db.execute_query("""

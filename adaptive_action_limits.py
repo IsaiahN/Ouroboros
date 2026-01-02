@@ -642,15 +642,17 @@ class AdaptiveActionLimits:
         Returns:
             Dictionary with role, initial_w_B, current_w_B, or defaults if not found
         """
+        self._ensure_agent_modes_created_at()
         role_info = self.db.execute_query("""
             SELECT 
                 operating_mode,
                 initial_w_B_for_role,
                 current_w_B,
-                progress_score
+                progress_score,
+                COALESCE(created_at, assigned_timestamp, CURRENT_TIMESTAMP) AS created_ts
             FROM agent_operating_modes
             WHERE agent_id = ? AND generation = ?
-            ORDER BY created_at DESC
+            ORDER BY created_ts DESC
             LIMIT 1
         """, (agent_id, generation))
         
@@ -677,6 +679,28 @@ class AdaptiveActionLimits:
             }
         
         return {'role': 'generalist', 'initial_w_B': 0.5, 'current_w_B': 0.5, 'progress_score': 0.0}
+
+    def _ensure_agent_modes_created_at(self) -> None:
+        """Ensure agent_operating_modes has created_at for ordering; backfill if missing."""
+        try:
+            self.db.execute_query("SELECT created_at FROM agent_operating_modes LIMIT 1")
+            return
+        except Exception:
+            try:
+                self.db.execute_query("""
+                    ALTER TABLE agent_operating_modes
+                    ADD COLUMN created_at TIMESTAMP
+                """)
+            except Exception:
+                pass
+            try:
+                self.db.execute_query("""
+                    UPDATE agent_operating_modes
+                    SET created_at = COALESCE(created_at, assigned_timestamp, CURRENT_TIMESTAMP)
+                    WHERE created_at IS NULL
+                """)
+            except Exception:
+                pass
     
     def _get_network_role_need(self, role: str) -> float:
         """
@@ -690,17 +714,36 @@ class AdaptiveActionLimits:
         Returns:
             ATP adjustment (-0.3 to +0.3)
         """
-        # Query regulatory_signals table for population dynamics
-        signals = self.db.execute_query("""
-            SELECT 
-                signal_type,
-                signal_value,
-                signal_metadata
-            FROM regulatory_signals
-            WHERE signal_type IN ('population_balance', 'role_need', 'exploration_ratio')
-            ORDER BY generation DESC
-            LIMIT 5
-        """)
+        # Query regulatory signals; legacy name was regulatory_signals, current table is
+        # network_regulatory_signals. Alias columns to expected names to keep downstream logic stable.
+        signals = []
+        try:
+            signals = self.db.execute_query("""
+                SELECT 
+                    signal_type,
+                    current_strength AS signal_value,
+                    target_parameter AS signal_metadata,
+                    generation
+                FROM network_regulatory_signals
+                WHERE signal_type IN ('population_balance', 'role_need', 'exploration_ratio')
+                ORDER BY generation DESC
+                LIMIT 5
+            """)
+        except Exception:
+            try:
+                signals = self.db.execute_query("""
+                    SELECT 
+                        signal_type,
+                        signal_value,
+                        signal_metadata,
+                        generation
+                    FROM regulatory_signals
+                    WHERE signal_type IN ('population_balance', 'role_need', 'exploration_ratio')
+                    ORDER BY generation DESC
+                    LIMIT 5
+                """)
+            except Exception:
+                signals = []
         
         if not signals:
             return 0.0  # No signals, no adjustment

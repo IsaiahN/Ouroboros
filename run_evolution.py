@@ -69,6 +69,8 @@ def main():
     # Configure based on mode
     if args.test:
         print(">> TEST MODE - Minimal test (1 agent, 1 game)")
+        # Skip heavy pariah backfill during quick smoke test
+        os.environ["OUROBOROS_SKIP_PARIAH_BACKFILL"] = "1"
         config = {
             'initial_population_size': 1,
             'games_per_generation': 1,

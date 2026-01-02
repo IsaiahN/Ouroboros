@@ -59,6 +59,9 @@ class ViralPackageEngine:
         Example: If as66 has been beaten to level 4, all as66 pariahs get source_level_number=4.
         This means on level 5 (frontier), those pariahs apply at only 5% strength.
         """
+        # Allow quick-start/test mode to skip potentially heavy backfill
+        if os.getenv("OUROBOROS_SKIP_PARIAH_BACKFILL") == "1":
+            return
         try:
             # Check if column exists
             self.db.execute_query("SELECT source_level_number FROM pariahs LIMIT 1")
