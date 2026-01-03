@@ -52,6 +52,8 @@ from agent_self_model import (
     AgentHypothesisSystem,
     MetacognitiveReasoningEngine,
 )
+from persona_runtime import PersonaManager
+from counterfactual_analyzer import CounterfactualAnalyzer
 from object_detector import ObjectDetector
 from collections import Counter
 from dataclasses import dataclass, field
@@ -672,11 +674,21 @@ class GameplayEngine:
         self.matching_pipeline = MultiStageMatchingPipeline(self.db)  # Tier 1: Multi-stage matching (+40%)
         self.subgoal_activator = SubgoalPlanningActivator(self.db)  # Tier 1: Subgoal planning (+30%)
         self.agent_self_model = AgentSelfModel(db_path)  # Self-model: Track controlled objects
+        self.persona_manager = PersonaManager(self.db)  # Persona submodeling runtime
+        self._last_persona_decision = None
+        self._last_persona_logged = []
+        self._last_observer_flags = {}
+        self._last_theory_hint: Dict[str, Any] = {}
+        self._last_cods_confidence: Optional[float] = None
+        self._last_cods_operator: Optional[str] = None
+        self._current_stage: Optional[int] = None
+        self.counterfactual_analyzer = CounterfactualAnalyzer(self.db)
         self.object_detector = ObjectDetector(db_path)  # Object detection for tetrahedral perception
         
         # FIX: Initialize action traces for Q1-Q5 emergent reasoning
         # These traces track frame changes per action for learning what changes vs what's fixed
         self._recent_action_traces = []
+        self._recent_actions: List[str] = []
         
         # Two-Streams: Weaving reporter for self-reflection in every action
         self.weaving_reporter = WeavingReporter(self.db)
@@ -859,6 +871,13 @@ class GameplayEngine:
             if hasattr(self, 'session_manager') and self.session_manager:
                 # Use the proper method which handles propagation
                 self.session_manager.set_current_generation(gen)
+
+        # Update persona manager with current agent context
+        if 'agent_id' in config and self.persona_manager:
+            try:
+                self.persona_manager.set_agent(config.get('agent_id'))
+            except Exception:
+                logger.debug("Persona manager agent binding skipped")
         
         logger.info(f"Updated game config: {config}")
 
@@ -1619,6 +1638,119 @@ class GameplayEngine:
                                     
                 except Exception as e:
                     logger.debug(f"Metacognitive evaluation failed: {e}")
+
+            # ================================================================
+            # PERSONA OUTCOME LOGGING (proposal -> outcome bridge)
+            # ================================================================
+            try:
+                if self.persona_manager and getattr(self, '_last_persona_decision', None):
+                    delta_score = game_state.score - getattr(loop_state, 'previous_score', 0)
+                    outcome_score = getattr(game_state, 'score', None)
+                    safety_incident = getattr(game_state, 'state', '') == 'GAME_OVER'
+                    observer_flags = self._compute_observer_flags(game_state, loop_state)
+                    self._last_observer_flags = observer_flags
+                    surprise_score = None
+                    try:
+                        self._recent_actions = (self._recent_actions or [])[-9:]
+                        counts = {}
+                        for a in self._recent_actions:
+                            counts[a] = counts.get(a, 0) + 1
+                        freq = counts.get(action, 0) / float(len(self._recent_actions)) if self._recent_actions else 0.0
+                        surprise_score = max(0.0, min(1.0, 1.0 - freq))
+                    except Exception:
+                        surprise_score = None
+                    self.persona_manager.record_outcome(
+                        self._last_persona_decision,
+                        delta_score=delta_score,
+                        delta_actions=1,
+                        outcome_score=outcome_score,
+                        safety_incident=safety_incident,
+                        surprise_score=surprise_score,
+                        stuck_flag=bool(observer_flags.get('stuckness')),
+                        observer_flags=observer_flags,
+                    )
+                    try:
+                        self.persona_manager.record_observer_output(
+                            proposal_id=getattr(self._last_persona_decision, 'proposal_id', None),
+                            persona_id=getattr(self._last_persona_decision, 'persona_id', None),
+                            problem_signature=getattr(self._last_persona_decision, 'problem_signature', None),
+                            observer_flags=observer_flags,
+                        )
+                    except Exception:
+                        pass
+                    if getattr(self, '_last_persona_logged', None):
+                        self.persona_manager.record_hindsight_outcomes(
+                            self._last_persona_logged,
+                            problem_signature=getattr(self._last_persona_decision, 'problem_signature', None),
+                            delta_score=delta_score,
+                            safety_incident=safety_incident,
+                            surprise_score=surprise_score,
+                        )
+                    # Counterfactual credit: give micro-rollout persona partial credit if not chosen
+                    try:
+                        if getattr(self, '_last_micro_cf_proposals', None) and self._last_micro_cf_proposals and getattr(self, '_last_ladder_rung', None) != 'micro_cf':
+                            retrospective_credit = 0.0
+                            if delta_score is not None and delta_score < 0:
+                                retrospective_credit = abs(delta_score) * 0.5
+                            elif delta_score is not None and delta_score > 0:
+                                retrospective_credit = delta_score * 0.25
+                            self.persona_manager.record_hindsight_credit(
+                                original_proposal_id=getattr(self._last_persona_decision, 'proposal_id', ''),
+                                alternative_persona_id='persona_micro_cf',
+                                problem_signature=getattr(self._last_persona_decision, 'problem_signature', None),
+                                estimated_outcome=delta_score,
+                                retrospective_credit=retrospective_credit,
+                                surprise_score=surprise_score,
+                                observer_flags=observer_flags,
+                            )
+                    except Exception:
+                        pass
+                    # Metrics snapshot
+                    try:
+                        if self.persona_manager:
+                            self.persona_manager.record_metrics(
+                                problem_signature=getattr(self._last_persona_decision, 'problem_signature', None),
+                                synthesis_used=(getattr(self, '_last_ladder_rung', None) == 'synthesis'),
+                                observer_veto=bool(self._last_observer_flags.get('veto_unsafe')), 
+                                micro_cf_used=(getattr(self, '_last_ladder_rung', None) == 'micro_cf'),
+                                hindsight_updates=len(self._last_persona_logged or []),
+                            )
+                    except Exception:
+                        pass
+                    # Counterfactual credit: reward top alternative rung if chosen performed poorly
+                    try:
+                        alt_rung = None
+                        if isinstance(getattr(self, '_last_ladder_trace', None), dict):
+                            alt_rung = self._last_ladder_trace.get('best_alternative')
+                        if alt_rung and isinstance(self._last_persona_logged, list):
+                            alt_entries = [e for e in self._last_persona_logged if e.get('persona_id') == f"persona_{alt_rung}"]
+                            if alt_entries:
+                                alt_id = alt_entries[0].get('persona_id')
+                                alt_prop = alt_entries[0].get('proposal_id')
+                                if alt_id and alt_prop:
+                                    retrospective_credit = 0.0
+                                    if delta_score is not None and delta_score < 0:
+                                        retrospective_credit = abs(delta_score) * 0.5
+                                    self.persona_manager.record_hindsight_credit(
+                                        original_proposal_id=getattr(self._last_persona_decision, 'proposal_id', ''),
+                                        alternative_persona_id=alt_id,
+                                        problem_signature=getattr(self._last_persona_decision, 'problem_signature', None),
+                                        estimated_outcome=delta_score,
+                                        retrospective_credit=retrospective_credit,
+                                        surprise_score=surprise_score,
+                                        observer_flags=observer_flags,
+                                    )
+                    except Exception:
+                        pass
+                    self._last_persona_decision = None
+                    self._last_persona_logged = []
+                    try:
+                        self._last_action_taken = action
+                        self._recent_actions.append(action)
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.debug(f"Persona outcome logging skipped: {exc}")
             
         except Exception as action_error:
             error_msg = str(action_error).lower()
@@ -1778,7 +1910,10 @@ class GameplayEngine:
                 self.cods_engine.set_context(
                     game_id=game_id,
                     level_number=new_level,
-                    agent_id=agent_id
+                    agent_id=agent_id,
+                    persona_id=getattr(self._last_persona_decision, 'persona_id', None) if getattr(self, '_last_persona_decision', None) else None,
+                    world_model=persona_context.get('world_model') if isinstance(persona_context, dict) else None,
+                    problem_signature=persona_context.get('problem_signature') if isinstance(persona_context, dict) else None,
                 )
                 logger.debug(f"[CODS] Advanced to level {new_level}")
             except Exception as e:
@@ -6120,6 +6255,125 @@ class GameplayEngine:
             logger.debug("Ambiguity metric computation failed (non-critical)")
         return metrics
 
+    def _compute_observer_flags(
+        self,
+        game_state: GameState,
+        loop_state: GameLoopState,
+    ) -> Dict[str, Any]:
+        """Simple observer persona flags: stuckness/control-loss/safety."""
+        flags: Dict[str, Any] = {}
+        try:
+            score_before = getattr(loop_state, 'previous_score', 0)
+            score_after = getattr(game_state, 'score', score_before)
+            frame_changed = False
+            if hasattr(self, '_previous_frame') and self._previous_frame and game_state.frame:
+                import numpy as np
+                prev_arr = np.array(self._previous_frame)
+                curr_arr = np.array(game_state.frame)
+                if prev_arr.shape == curr_arr.shape:
+                    frame_changed = not np.array_equal(prev_arr, curr_arr)
+            stuckness = 1.0 if (not frame_changed and score_after <= score_before) else 0.0
+            control_loss = 1.0 if (frame_changed and score_after < score_before) else 0.0
+            # Simple confidence trend heuristic: stable unless score dropping with control loss
+            confidence_trend = 'falling' if control_loss else ('rising' if score_after > score_before else 'stable')
+            suggested_approach = 'cautious' if control_loss else ('radical_change' if stuckness else 'standard')
+            flags = {
+                'stuckness': stuckness,
+                'control_loss': control_loss,
+                'confidence_trend': confidence_trend,
+                'pattern_tag': None,
+                'suggested_approach': suggested_approach,
+                'veto_unsafe': bool(control_loss),
+                'score_delta': score_after - score_before,
+                'frame_changed': frame_changed,
+            }
+        except Exception:
+            logger.debug("Observer flag computation failed (non-critical)")
+        return flags
+
+    # ================================================================
+    # PERSONA SUBMODELING HELPERS
+    # ================================================================
+    def _build_persona_context(self, game_state: GameState) -> Dict[str, Any]:
+        """Construct persona context (world tag, problem signature, identity)."""
+        current_game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+        level_number = int(game_state.score) + 1 if hasattr(game_state, 'score') else None
+        world_model = None
+        try:
+            if game_state.frame and isinstance(game_state.frame, list) and game_state.frame:
+                world_model = f"grid_{len(game_state.frame)}x{len(game_state.frame[0])}"
+        except Exception:
+            world_model = None
+
+        self_identity_snapshot = None
+        if hasattr(self, 'agent_self_model') and self.agent_self_model:
+            try:
+                self_identity_snapshot = self.agent_self_model.get_self_identity_snapshot(
+                    self.game_config.get('agent_id'),
+                    current_game_id,
+                    level_number,
+                    getattr(game_state, 'frame', None),
+                )
+            except Exception:
+                self_identity_snapshot = None
+
+        problem_signature = None
+        if self.persona_manager:
+            try:
+                problem_signature = self.persona_manager.build_problem_signature(
+                    game_id=current_game_id,
+                    level_number=level_number,
+                    frame=getattr(game_state, 'frame', None),
+                    world_model=world_model,
+                )
+            except Exception:
+                problem_signature = None
+
+        step_idx = None
+        run_context = self.game_config.get('run_context') if hasattr(self, 'game_config') else None
+        heartbeat = getattr(run_context, 'heartbeat', None) if run_context else None
+        if heartbeat and hasattr(heartbeat, 'step_idx'):
+            step_idx = getattr(heartbeat, 'step_idx')
+
+        return {
+            'game_id': current_game_id,
+            'level_number': level_number,
+            'world_model': world_model,
+            'problem_signature': problem_signature,
+            'self_identity_snapshot': self_identity_snapshot,
+            'step_idx': step_idx,
+        }
+
+    def _log_persona_dialogue(
+        self,
+        ladder_trace: Dict[str, Dict[str, Any]],
+        chosen_action: str,
+        chosen_reason: str,
+        chosen_rung: str,
+        persona_context: Dict[str, Any],
+        enable_synthesis: bool = True,
+    ) -> None:
+        """Log persona proposals mapped from ladder decisions."""
+        if not self.persona_manager:
+            return
+        try:
+            decision = self.persona_manager.record_from_ladder(
+                ladder_trace,
+                chosen_action=chosen_action,
+                chosen_reason=chosen_reason,
+                chosen_rung=chosen_rung,
+                game_id=persona_context.get('game_id'),
+                level_number=persona_context.get('level_number'),
+                step_idx=persona_context.get('step_idx'),
+                world_model=persona_context.get('world_model'),
+                problem_signature=persona_context.get('problem_signature'),
+                self_identity_snapshot=persona_context.get('self_identity_snapshot'),
+                enable_synthesis=enable_synthesis,
+            )
+            self._last_persona_decision = decision
+        except Exception as exc:
+            logger.debug(f"Persona dialogue log failed (non-critical): {exc}")
+
     # ================================================================
     # PLUGIN REGISTRATION (Event-first runtime)
     # ================================================================
@@ -6191,11 +6445,78 @@ class GameplayEngine:
         ladder_trace = {
             'sequence': {'status': 'skipped', 'reason': 'no sequence replay path in selector'},
             'cods': {'status': 'pending', 'reason': ''},
+            'micro_cf': {'status': 'pending', 'reason': '', 'persona_type': 'counterfactual'},
             'heuristic': {'status': 'pending', 'reason': ''},
             'noop': {'status': 'pending', 'reason': ''},
             'viability': {'status': 'skipped', 'reason': 'viability gate disabled'},
+            'observer': {'status': 'pending', 'reason': 'observer readout', 'persona_type': 'observer'},
+            'strategy': {'status': 'pending', 'reason': 'problem classifier', 'persona_type': 'classifier'},
         }
         action_source = None
+        persona_context = self._build_persona_context(game_state)
+        self._last_persona_decision = None
+        self._last_persona_logged = []
+        self._last_observer_flags = {}
+        self._last_theory_hint = {}
+        self._last_cods_confidence = None
+        self._last_cods_operator = None
+        self._last_micro_cf_proposals = []
+        try:
+            if hasattr(self, 'cognitive_stage_system') and self.cognitive_stage_system and self.game_config.get('agent_id'):
+                self._current_stage = self.cognitive_stage_system.get_stage(self.game_config.get('agent_id'))
+            else:
+                self._current_stage = None
+        except Exception:
+            self._current_stage = None
+        allow_observers = (self._current_stage or 0) >= 2
+        allow_synthesis = (self._current_stage or 0) >= 3
+        if allow_synthesis:
+            ladder_trace['synthesis'] = {'status': 'pending', 'reason': 'synthesis candidate', 'persona_type': 'synthesis'}
+        if hasattr(self, 'science_engine') and self.science_engine:
+            try:
+                hint_fn = getattr(self.science_engine, 'get_active_theory_hint', None)
+                theory_hint = hint_fn() if callable(hint_fn) else None
+                if theory_hint:
+                    self._last_theory_hint = theory_hint if isinstance(theory_hint, dict) else {'summary': str(theory_hint)}
+            except Exception:
+                self._last_theory_hint = {}
+        if not self._last_theory_hint and hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+            try:
+                predicted = self.metacognitive_engine.peek_prediction()
+                if predicted:
+                    self._last_theory_hint = {
+                        'rung_weights': {'sequence': 0.05, 'cods': 0.05},
+                        'prediction': predicted,
+                    }
+            except Exception:
+                pass
+        observer_personas_active = True if getattr(self, 'agent_self_model', None) and allow_observers else False
+        if observer_personas_active:
+            try:
+                ladder_trace['observer']['observer_flags'] = self._compute_observer_flags(game_state, getattr(self, 'loop_state', None))
+            except Exception:
+                ladder_trace['observer']['observer_flags'] = None
+        try:
+            if persona_context.get('problem_signature'):
+                ladder_trace['strategy']['observer_flags'] = {'problem_signature': persona_context.get('problem_signature')}
+        except Exception:
+            ladder_trace['strategy']['observer_flags'] = None
+
+        # Lifecycle maintenance: prune/spawn/min-ensemble when mature or stalled
+        try:
+            stalled_flag = False
+            if isinstance(ladder_trace.get('observer', {}), dict):
+                obs_flags = ladder_trace['observer'].get('observer_flags') or {}
+                stalled_flag = bool(obs_flags.get('stuckness'))
+            if self.persona_manager:
+                self.persona_manager.enforce_lifecycle(
+                    min_personas=3,
+                    max_experimental=6,
+                    stalled=stalled_flag,
+                    stage=self._current_stage,
+                )
+        except Exception:
+            logger.debug("Persona lifecycle maintenance skipped")
 
         def _log_ladder_decision(chosen_action: str, chosen_reason: str, rung: str) -> None:
             """Emit action_proposals/ladder provenance when attempt context is available."""
@@ -6271,43 +6592,253 @@ class GameplayEngine:
         def _finalize_ladder_and_return(action: str, reason: str, rung: str) -> tuple[str, str]:
             """Finalize ladder statuses, emit telemetry, and return the chosen action."""
             nonlocal action_source
+            def _set_rung(name: str, status: str, why: str) -> None:
+                existing = ladder_trace.get(name) if isinstance(ladder_trace.get(name), dict) else {}
+                merged = dict(existing) if isinstance(existing, dict) else {}
+                merged.update({'status': status, 'reason': why})
+                ladder_trace[name] = merged
+            # Observer veto: if flagged unsafe and choice is not noop, prefer noop fallback
+            try:
+                if observer_personas_active and self._last_observer_flags.get('veto_unsafe') and rung != 'noop':
+                    # Forced safest path: noop to avoid unknown unsafe actions
+                    prev_action = action
+                    rung = 'noop'
+                    action = 'NOOP'
+                    reason = f"observer veto unsafe; fallback from {prev_action} to noop"
+            except Exception:
+                pass
+            # Compute simple observer-aware score for each rung and pick top proposal for logging
+            try:
+                scores: Dict[str, float] = {}
+                flags = self._compute_observer_flags(game_state, getattr(self, 'loop_state', None)) if observer_personas_active else {}
+                self._last_observer_flags = flags or {}
+                local_enable_synthesis = allow_synthesis and not (self._last_observer_flags.get('veto_unsafe') or False)
+                budget_pressure = 0.0
+                try:
+                    if hasattr(self, 'loop_state') and getattr(self.loop_state, 'action_count', None):
+                        budget_pressure = min(1.0, getattr(self.loop_state, 'action_count', 0) / 400.0)
+                except Exception:
+                    budget_pressure = 0.0
+                theory_hint = self._last_theory_hint if isinstance(getattr(self, '_last_theory_hint', {}), dict) else {}
+                preferred_rung = theory_hint.get('preferred_rung') if isinstance(theory_hint, dict) else None
+                preferred_weight = theory_hint.get('weight', 0.1) if preferred_rung else 0.0
+                rung_weights = theory_hint.get('rung_weights') if isinstance(theory_hint, dict) else {}
+                metacog_bonus = 0.05 if theory_hint.get('prediction') else 0.0
+                cods_conf_cached = getattr(self, '_last_cods_confidence', None)
+
+                def _parse_signature(sig: Optional[str]) -> Dict[str, Any]:
+                    if not sig or not isinstance(sig, str):
+                        return {}
+                    parts = sig.split(':')
+                    parsed: Dict[str, Any] = {}
+                    try:
+                        if len(parts) >= 3:
+                            parsed['shape'] = parts[2]
+                        if len(parts) >= 7:
+                            parsed['components'] = parts[6]
+                        if len(parts) >= 8:
+                            parsed['largest'] = parts[7]
+                        if len(parts) >= 10:
+                            parsed['sym'] = parts[9]
+                        if len(parts) >= 11:
+                            parsed['pattern'] = parts[10]
+                    except Exception:
+                        return {}
+                    return parsed
+
+                parsed_sig = _parse_signature(persona_context.get('problem_signature')) if persona_context else {}
+                # Add classifier/persona-neutral rung for logging problem typing
+                try:
+                    if observer_personas_active and persona_context.get('problem_signature'):
+                        ladder_trace['problem_classifier'] = {
+                            'status': 'observed',
+                            'reason': persona_context.get('problem_signature'),
+                            'persona_type': 'classifier',
+                            'observer_flags': {'pattern_tag': parsed_sig.get('pattern'), 'sym_tag': parsed_sig.get('sym')},
+                        }
+                except Exception:
+                    pass
+
+                def score_rung(name: str, info: Dict[str, Any]) -> float:
+                    base_conf = 0.6 if info.get('status') == 'selected' else 0.3
+                    safe_penalty = 0.2 if flags.get('veto_unsafe') and name != 'noop' else 0.0
+                    stuck_bonus = 0.1 if flags.get('stuckness') and name in ('micro_cf', 'heuristic') else 0.0
+                    budget_penalty = 0.1 * budget_pressure if name == 'noop' else 0.0
+                    theory_bonus = 0.0
+                    # Signature-informed hints: prefer structured rungs when symmetry/pattern evident
+                    try:
+                        sym_tag = (parsed_sig.get('sym') or '').lower()
+                        pattern_tag = (parsed_sig.get('pattern') or '').lower()
+                        if sym_tag.startswith('sym_') and sym_tag != 'sym_unknown':
+                            if name in ('sequence', 'cods'):
+                                theory_bonus += 0.05
+                        if pattern_tag.startswith('pattern_') and pattern_tag not in ('pattern_unknown', ''):
+                            if name in ('sequence', 'cods'):
+                                theory_bonus += 0.05
+                        comp_tag = parsed_sig.get('components') or ''
+                        if comp_tag.startswith('comp_'):
+                            try:
+                                comp_val = int(comp_tag.replace('comp_', '') or 0)
+                                if comp_val >= 5 and name == 'micro_cf':
+                                    theory_bonus += 0.05
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    if preferred_rung and preferred_rung == name:
+                        theory_bonus += preferred_weight
+                    if isinstance(rung_weights, dict):
+                        try:
+                            theory_bonus += float(rung_weights.get(name, 0) or 0)
+                        except Exception:
+                            pass
+                    if name == 'cods':
+                        cods_conf = info.get('confidence') if isinstance(info, dict) else None
+                        if cods_conf is None:
+                            cods_conf = cods_conf_cached
+                        if cods_conf is not None:
+                            try:
+                                theory_bonus += min(0.25, max(-0.25, float(cods_conf) * 0.3))
+                            except Exception:
+                                pass
+                    try:
+                        if name in ('sequence', 'cods') and hasattr(self, 'science_engine') and self.science_engine:
+                            theory_score_fn = getattr(self.science_engine, 'score_action_with_theory', None)
+                            if callable(theory_score_fn):
+                                theory_score = theory_score_fn(info.get('action')) if isinstance(info, dict) else theory_score_fn(None)
+                                if theory_score is not None:
+                                    theory_bonus += min(0.2, max(-0.2, float(theory_score)))
+                    except Exception:
+                        pass
+                    try:
+                        persona_id = f"persona_{name}"
+                        if name == 'cods' and info.get('operator'):
+                            persona_id = f"persona_cods_{info.get('operator')}"
+                        rel = self.persona_manager.get_reliability(persona_id, persona_context.get('problem_signature')) if self.persona_manager else {}
+                        rel_g = rel.get('reliability_global')
+                        rel_c = rel.get('reliability_context')
+                        if rel_g is not None:
+                            theory_bonus += min(0.15, max(-0.15, (float(rel_g) - 0.5)))
+                        if rel_c is not None:
+                            theory_bonus += min(0.2, max(-0.2, (float(rel_c) - 0.5)))
+                    except Exception:
+                        pass
+                    adjusted = base_conf - safe_penalty - budget_penalty + stuck_bonus + theory_bonus + metacog_bonus
+                    return max(0.0, min(1.0, adjusted))
+
+                for rk, rv in ladder_trace.items():
+                    if isinstance(rv, dict):
+                        scores[rk] = score_rung(rk, rv)
+                        ladder_trace[rk]['score'] = scores[rk]
+                # Optional synthesis scoring over top two rungs (non-noop)
+                try:
+                    if allow_synthesis and not (self._last_observer_flags.get('veto_unsafe') or False):
+                        scored_non_noop = [(n, s) for n, s in scores.items() if n not in ('noop', 'synthesis')]
+                        top_two = sorted(scored_non_noop, key=lambda t: t[1], reverse=True)[:2]
+                        if len(top_two) == 2:
+                            synth_score = round((top_two[0][1] + top_two[1][1]) / 2.0, 3)
+                            ladder_trace['synthesis'] = ladder_trace.get('synthesis', {})
+                            ladder_trace['synthesis'].update({
+                                'status': 'proposed',
+                                'reason': f"synthesis of {top_two[0][0]}+{top_two[1][0]}",
+                                'score': synth_score,
+                            })
+                            chosen_score = scores.get(rung, 0.0)
+                            if synth_score > chosen_score + 0.05:
+                                rung = 'synthesis'
+                                # Reuse current action; prefer top rung action if present
+                                top_rung_info = ladder_trace.get(top_two[0][0], {}) if isinstance(ladder_trace.get(top_two[0][0]), dict) else {}
+                                alt_action = top_rung_info.get('action') or action
+                                action = alt_action or action
+                                reason = ladder_trace['synthesis'].get('reason') or reason
+                        elif 'synthesis' in ladder_trace:
+                            ladder_trace['synthesis'].update({'status': 'skipped', 'reason': 'insufficient rungs'})
+                    elif 'synthesis' in ladder_trace:
+                        ladder_trace['synthesis'].update({'status': 'skipped', 'reason': 'synthesis gated or vetoed'})
+                except Exception:
+                    if 'synthesis' in ladder_trace:
+                        ladder_trace['synthesis'].update({'status': 'skipped', 'reason': 'synthesis scoring failed'})
+                # Choose best non-noop rung for persona logging if available
+                if scores:
+                    best_rung = max((r for r in scores.items() if r[0] != 'noop'), key=lambda t: t[1], default=(rung, 0.0))[0]
+                    ladder_trace['selected_by_scorer'] = best_rung
+                    ladder_trace['best_alternative'] = best_rung if best_rung != rung else None
+            except Exception:
+                pass
 
             if rung == 'sequence':
-                ladder_trace['sequence'] = {'status': 'selected', 'reason': reason}
+                _set_rung('sequence', 'selected', reason)
                 if ladder_trace.get('cods', {}).get('status') == 'pending':
-                    ladder_trace['cods'] = {'status': 'skipped', 'reason': 'sequence satisfied ladder'}
-                ladder_trace['heuristic'] = {'status': 'skipped', 'reason': 'sequence satisfied ladder'}
-                ladder_trace['noop'] = {'status': 'skipped', 'reason': 'ladder satisfied'}
+                    _set_rung('cods', 'skipped', 'sequence satisfied ladder')
+                _set_rung('heuristic', 'skipped', 'sequence satisfied ladder')
+                _set_rung('noop', 'skipped', 'ladder satisfied')
             elif rung == 'cods':
-                ladder_trace['cods'] = {'status': 'selected', 'reason': reason}
-                ladder_trace['heuristic'] = {'status': 'skipped', 'reason': 'cods satisfied ladder'}
-                ladder_trace['noop'] = {'status': 'skipped', 'reason': 'ladder satisfied'}
+                _set_rung('cods', 'selected', reason)
+                _set_rung('heuristic', 'skipped', 'cods satisfied ladder')
+                _set_rung('noop', 'skipped', 'ladder satisfied')
                 if ladder_trace.get('sequence', {}).get('status') == 'pending':
-                    ladder_trace['sequence'] = {'status': 'skipped', 'reason': 'no sequence selected before cods'}
+                    _set_rung('sequence', 'skipped', 'no sequence selected before cods')
             elif rung == 'heuristic':
                 if ladder_trace.get('sequence', {}).get('status') == 'pending':
-                    ladder_trace['sequence'] = {'status': 'skipped', 'reason': 'no sequence selected'}
+                    _set_rung('sequence', 'skipped', 'no sequence selected')
                 if ladder_trace.get('cods', {}).get('status') == 'pending':
-                    ladder_trace['cods'] = {'status': 'skipped', 'reason': 'no cods selection'}
-                ladder_trace['heuristic'] = {'status': 'selected', 'reason': reason}
-                ladder_trace['noop'] = {'status': 'skipped', 'reason': 'ladder satisfied'}
+                    _set_rung('cods', 'skipped', 'no cods selection')
+                if ladder_trace.get('micro_cf', {}).get('status') == 'pending':
+                    _set_rung('micro_cf', 'skipped', 'heuristic satisfied ladder')
+                _set_rung('heuristic', 'selected', reason)
+                _set_rung('noop', 'skipped', 'ladder satisfied')
+            elif rung == 'micro_cf':
+                if ladder_trace.get('sequence', {}).get('status') == 'pending':
+                    _set_rung('sequence', 'skipped', 'no sequence selected')
+                _set_rung('micro_cf', 'selected', reason)
+                if ladder_trace.get('heuristic', {}).get('status') == 'pending':
+                    _set_rung('heuristic', 'skipped', 'micro counterfactual satisfied ladder')
+                _set_rung('noop', 'skipped', 'ladder satisfied')
+                if ladder_trace.get('cods', {}).get('status') == 'pending':
+                    _set_rung('cods', 'skipped', 'no cods selection')
             else:  # noop rung
                 if ladder_trace.get('sequence', {}).get('status') == 'pending':
-                    ladder_trace['sequence'] = {'status': 'skipped', 'reason': 'no sequence available'}
+                    _set_rung('sequence', 'skipped', 'no sequence available')
                 if ladder_trace.get('cods', {}).get('status') == 'pending':
-                    ladder_trace['cods'] = {'status': 'skipped', 'reason': 'no cods available'}
+                    _set_rung('cods', 'skipped', 'no cods available')
                 if ladder_trace.get('heuristic', {}).get('status') == 'pending':
-                    ladder_trace['heuristic'] = {'status': 'skipped', 'reason': 'no heuristic available'}
-                ladder_trace['noop'] = {'status': 'selected', 'reason': reason}
+                    _set_rung('heuristic', 'skipped', 'no heuristic available')
+                _set_rung('noop', 'selected', reason)
 
             action_source = action_source or rung
             # Store ladder outcomes for observability/tests
             try:
+                if 'score_rung' in locals():
+                    for rk, rv in ladder_trace.items():
+                        if isinstance(rv, dict):
+                            ladder_trace[rk]['score'] = score_rung(rk, rv)
+                else:
+                    for rk, rv in ladder_trace.items():
+                        status = (rv or {}).get('status')
+                        score = 1.0 if status == 'selected' else (0.5 if status == 'pending' else 0.2)
+                        if isinstance(rv, dict):
+                            score = max(0.0, min(1.0, score))
+                            ladder_trace[rk]['score'] = score
                 self._last_ladder_trace = ladder_trace
                 self._last_ladder_rung = action_source
             except Exception:
                 pass
             _log_ladder_decision(action, reason, rung)
+            try:
+                logged = self._log_persona_dialogue(
+                    ladder_trace,
+                    action,
+                    reason,
+                    rung,
+                    persona_context,
+                    enable_synthesis=locals().get('local_enable_synthesis', allow_synthesis),
+                )
+                # Store logged rung personas for hindsight updates
+                if isinstance(logged, dict):
+                    self._last_persona_decision = logged.get('decision') or self._last_persona_decision
+                    self._last_persona_logged = logged.get('logged') or []
+            except Exception:
+                logger.debug("Persona dialogue emission skipped")
             return action, reason
         
         # === ESCAPE MODE: Force escape action if stuck ===
@@ -6364,6 +6895,11 @@ class GameplayEngine:
                         self._running_experiment = True
                         self._experiment_score_before = game_state.score
                         self._experiment_frame_before = game_state.frame
+                        self._last_theory_hint = {
+                            'preferred_rung': 'heuristic',
+                            'weight': 0.1,
+                            'reason': 'science_experiment',
+                        }
                         
                         logger.info(f"[SCIENCE] {reasoning}")
                         return _finalize_ladder_and_return(action, reasoning, 'heuristic')
@@ -6437,6 +6973,45 @@ class GameplayEngine:
                         logger.debug(f"[PEER] {len(peer_failures)} failures to avoid")
             except Exception as e:
                 logger.debug(f"Peer insight query failed: {e}")
+
+        # ===================================================================
+        # MICRO COUNTERFACTUAL ROLLOUTS (3-5 step heuristic) as proposals
+        # ===================================================================
+        persona_stage_ok = True
+        try:
+            if self.cognitive_stage_system and self.game_config.get('agent_id'):
+                current_stage = self.cognitive_stage_system.get_stage(self.game_config.get('agent_id'))
+                if current_stage == CognitiveStageSystem.PREOPERATIONAL:
+                    persona_stage_ok = False
+        except Exception:
+            persona_stage_ok = True
+
+        if persona_stage_ok and hasattr(self, 'counterfactual_analyzer') and self.counterfactual_analyzer and game_state.frame:
+            try:
+                cf_proposals = self.counterfactual_analyzer.generate_micro_rollouts(
+                    frame_before=getattr(self, '_previous_frame', None),
+                    frame_after=game_state.frame,
+                    available_actions=getattr(game_state, 'available_actions', None),
+                )
+                if cf_proposals:
+                    best_cf = cf_proposals[0]
+                    try:
+                        ladder_trace['micro_cf'].update({
+                            'action': best_cf.get('action'),
+                            'confidence': best_cf.get('confidence'),
+                            'reason': best_cf.get('reason'),
+                            'proposal_count': len(cf_proposals),
+                        })
+                    except Exception:
+                        pass
+                    self._last_micro_cf_proposals = cf_proposals
+                    action = best_cf.get('action')
+                    reason = best_cf.get('reason', 'micro counterfactual heuristic')
+                    logger.info(f"[MICRO-CF] {reason}")
+                    self._last_action_source = 'micro_cf'
+                    return _finalize_ladder_and_return(action, reason, 'micro_cf')
+            except Exception as e:
+                logger.debug(f"Micro counterfactual generation failed: {e}")
         
         # ===================================================================
         # AUTOBIOGRAPHY-BASED STRATEGY SELECTION
@@ -7769,14 +8344,30 @@ class GameplayEngine:
                     if confidence >= cods_threshold:
                         reasoning = f"CODS operator '{operator_name}' suggests ACTION{action_num} (confidence: {confidence:.2f}, threshold: {cods_threshold} [{threshold_reason}])"
                         logger.info(f"[CODS] {reasoning}")
+                        self._last_cods_confidence = confidence
+                        self._last_cods_operator = operator_name
+                        ladder_trace['cods'] = {
+                            'status': 'selected',
+                            'reason': f"operator '{operator_name}' over threshold",
+                            'confidence': confidence,
+                            'operator': operator_name,
+                            'action': f"ACTION{action_num}",
+                        }
                         cods_selected = True
                         return _finalize_ladder_and_return(f"ACTION{action_num}", reasoning, 'cods')
                     else:
                         # Still log but at debug level
                         logger.debug(f"[CODS] Below threshold ({confidence:.2f} < {cods_threshold}): '{operator_name}' -> ACTION{action_num}")
+                        ladder_trace['cods'] = {
+                            'status': 'pending',
+                            'reason': 'confidence below threshold',
+                            'confidence': confidence,
+                            'operator': operator_name,
+                            'action': f"ACTION{action_num}",
+                        }
             except Exception as e:
                 logger.debug(f"CODS suggestion failed (non-critical): {e}")
-        if not cods_selected:
+        if not cods_selected and not ladder_trace.get('cods'):
             ladder_trace['cods'] = {'status': 'skipped', 'reason': 'no CODS proposal above threshold'}
         
         # Fall back to default action selection WITH viral/pariah influence

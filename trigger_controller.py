@@ -284,9 +284,15 @@ class TriggerController:
             return None
         
         # Check corroboration
+        # Accept dict or list/tuple for corroboration metrics
+        try:
+            corroboration_values = list(secondary_metric_values.values())
+        except AttributeError:
+            corroboration_values = list(secondary_metric_values or [])
+
         if not self.require_corroboration(
             primary_metric_value,
-            list(secondary_metric_values.values())
+            corroboration_values
         ):
             logger.debug(f"Trigger '{trigger_name}' blocked by corroboration requirement")
             return None
@@ -306,7 +312,8 @@ class TriggerController:
         # Record the fire
         trigger_id = self.record_fire(
             trigger_name, generation, primary_metric_value,
-            actual_adjustment, list(secondary_metric_values.keys())
+            actual_adjustment,
+            list(secondary_metric_values.keys()) if hasattr(secondary_metric_values, 'keys') else []
         )
         
         return {
@@ -316,7 +323,7 @@ class TriggerController:
             'primary_value': primary_metric_value,
             'adjustment_applied': actual_adjustment,
             'was_damped': actual_adjustment < base_adjustment,
-            'corroborating_metrics': list(secondary_metric_values.keys()),
+            'corroborating_metrics': list(secondary_metric_values.keys()) if hasattr(secondary_metric_values, 'keys') else [],
             'result': result
         }
     

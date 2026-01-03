@@ -85,6 +85,9 @@ class CODSGameContext:
     previous_frame: Optional[List[List[int]]] = None
     action_history: List[int] = field(default_factory=list)
     score: float = 0.0
+    persona_id: Optional[str] = None
+    world_model: Optional[str] = None
+    problem_signature: Optional[str] = None
     
     def update_frame(self, frame: List[List[int]]):
         """Update current frame, moving old to previous."""
@@ -269,14 +272,20 @@ class CODSEngine:
         game_id: str,
         level_number: int = 1,
         agent_id: Optional[str] = None,
-        generation: int = 0
+        generation: int = 0,
+        persona_id: Optional[str] = None,
+        world_model: Optional[str] = None,
+        problem_signature: Optional[str] = None,
     ):
         """Set the current game context."""
         self._context = CODSGameContext(
             game_id=game_id,
             level_number=level_number,
             agent_id=agent_id,
-            generation=generation
+            generation=generation,
+            persona_id=persona_id,
+            world_model=world_model,
+            problem_signature=problem_signature,
         )
         
         # Set episode context in seed primitives

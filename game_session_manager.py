@@ -181,17 +181,26 @@ class GameSessionManager:
         game_data = await self.client.create_game(game_id, tags)
 
         # Store game start in database (including scorecard_id for tracking)
-        self.db.save_game_result({
-            'game_id': game_id,
-            'session_id': self.current_session_id,
-            'scorecard_id': game_data.get('scorecard_id'),  # Track ARC scorecard
-            'start_time': datetime.now(),
-            'status': 'started',
-            'final_score': game_data.get('score', 0.0),
-            'total_actions': 0,
-            'available_actions': game_data.get('available_actions', []),
-            'generation': self._current_generation  # Track generation for cleanup
-        })
+        scorecard_id = game_data.get('scorecard_id')
+        if not scorecard_id:
+            logger.warning(f"[GAME-RESULT] scorecard_id missing for game {game_id} (session {self.current_session_id})")
+
+        try:
+            self.db.save_game_result({
+                'game_id': game_id,
+                'session_id': self.current_session_id,
+                'scorecard_id': scorecard_id,  # Track ARC scorecard
+                'start_time': datetime.now(),
+                'status': 'started',
+                'final_score': game_data.get('score', 0.0),
+                'total_actions': 0,
+                'available_actions': game_data.get('available_actions', []),
+                'generation': self._current_generation  # Track generation for cleanup
+            })
+            logger.info(f"[GAME-RESULT] Saved start for game {game_id} session {self.current_session_id} scorecard {scorecard_id}")
+        except Exception as e:
+            logger.error(f"[GAME-RESULT] Failed to save start for game {game_id} session {self.current_session_id}: {e}")
+            raise
 
         self.current_game_id = game_id
         logger.info(f"Created game: {game_id} with actions: {game_data.get('available_actions', [])}")

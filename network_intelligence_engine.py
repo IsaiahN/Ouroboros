@@ -63,6 +63,9 @@ class NetworkIntelligenceEngine:
         
         # Resilience metrics (the organism's "immune system")
         resilience_metrics = self._calculate_resilience_metrics()
+
+        # Persona reliability metrics (per persona submodeling proposal)
+        persona_metrics = self._calculate_persona_metrics()
         
         # Population metrics (temporary agent expressions)
         population_metrics = self._calculate_population_metrics(generation)
@@ -85,6 +88,7 @@ class NetworkIntelligenceEngine:
             **knowledge_metrics,
             **flow_metrics,
             **resilience_metrics,
+            **persona_metrics,
             **population_metrics,
             **health_indicators,
             'health_status': health_status,
@@ -228,6 +232,35 @@ class NetworkIntelligenceEngine:
             'avg_actions_per_level': avg_actions_per_level,
             'network_learning_rate': network_learning_rate
         }
+
+    def _calculate_persona_metrics(self) -> Dict:
+        """Aggregate persona health metrics for persona submodeling."""
+        try:
+            total_personas = self.db.execute_query(
+                "SELECT COUNT(*) as count FROM persona_profiles"
+            )[0]['count'] or 0
+
+            active_personas = self.db.execute_query(
+                "SELECT COUNT(*) as count FROM persona_proposals WHERE created_at >= datetime('now', '-1 day')"
+            )[0]['count'] or 0
+
+            avg_reliability_row = self.db.execute_query(
+                "SELECT AVG(reliability_score) as avg_rel FROM persona_context_reliability"
+            )[0]
+            avg_reliability = avg_reliability_row['avg_rel'] if avg_reliability_row and avg_reliability_row['avg_rel'] is not None else 0.5
+
+            return {
+                'persona_count': total_personas,
+                'persona_active_24h': active_personas,
+                'persona_avg_context_reliability': avg_reliability,
+            }
+        except Exception as exc:
+            self.logger.debug(f"Persona metrics skipped: {exc}")
+            return {
+                'persona_count': 0,
+                'persona_active_24h': 0,
+                'persona_avg_context_reliability': 0.5,
+            }
     
     def _calculate_resilience_metrics(self) -> Dict:
         """Calculate how resilient the network's knowledge is."""

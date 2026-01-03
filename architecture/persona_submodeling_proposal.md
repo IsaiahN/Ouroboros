@@ -3,6 +3,32 @@
 ## Goal
 Embed agent-native, emergent persona submodels as a core way of thinking: each agent self-models, spawns and evolves its own latent personas, lets them propose actions, locally scores proposals, and learns which personas to trust. This feeds CODS and the unified network intelligence loop without fixed names, external labels, or simulation of fake games. This document now explicitly targets artificial metacognition (self-observation, dialogue, synthesis, identity continuity) in addition to performance.
 
+## Mental World Simulation (Internal World Models)
+Agents build internal simulations of problem worlds, not just problem instances. Personas are embedded in these simulated contexts so behavior is conditioned on the active world model.
+
+**What gets modeled:**
+- Problem space structures (symmetry world, counting world, transformation world)
+- Affordances (what actions are possible in this world)
+- Causal rules (what leads to what in this world)
+- Success patterns (what works in this world)
+
+**Personas inside world models:**
+- Not just “cautious persona” but “cautious approach to symmetry problems”
+- Same persona adapts per world model; context-conditional reliability is tracked per world
+- problem_signature captures which world model is active
+
+**Developmental progression:**
+- Stage 1–2: crude world models (basic pattern recognition)
+- Stage 3: multiple distinct world models (symmetry vs. counting vs. transformation)
+- Stage 4: rich causal models (can predict outcomes within worlds)
+- Stage 5: mental multi-step trajectories inside known worlds (short rollouts guiding persona selection)
+
+**Integration points:**
+- `problem_signature` tags proposals with world model identity for logging and scoring
+- Counterfactual micro-rollouts use world-model assumptions (no fake ARC games; 3–5 step heuristics only)
+- CODS treats persona-conditioned operators as world-aware operators
+- Sequence abstraction tags replay hints with persona_id and world model for retrieval
+
 ## Scope clarification
 - Core objective: internal ensemble as metacognition architecture, not just action optimization.
 - Performance remains secondary: action gains emerge from better self-observation, multi-perspective reasoning, and synthesis.

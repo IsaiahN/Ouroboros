@@ -69,37 +69,28 @@ class DatabaseLogHandler(logging.Handler):
                 self._local.connection.execute("PRAGMA synchronous=NORMAL")
             except Exception:
                 pass
-                    try:
-                        conn = self._get_connection()
-                        cursor = conn.cursor()
+        return self._local.connection
 
-                        cursor.execute("""
-                            INSERT INTO system_logs (
-                                timestamp, level, logger_name, message, module,
-                                function_name, line_number, session_id, game_id,
-                                process_id, thread_id, extra_data
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            timestamp,
-                            record.levelname,
-                            record.name,
-                            message,
-                            record.module if hasattr(record, 'module') else record.filename,
-                            record.funcName,
-                            record.lineno,
-                            self.current_session_id,
-                            self.current_game_id,
-                            record.process,
-                            record.thread,
-                            json.dumps(extra_data) if extra_data else None
-                        ))
+    def _ensure_logs_table(self):
+        """Ensure the system_logs table exists."""
+        try:
+            self._initialize_database_from_template()
+            conn = self._get_connection()
+            cursor = conn.cursor()
 
-                        conn.commit()
-                    except (sqlite3.ProgrammingError, sqlite3.OperationalError) as e:
-                        # If the database is already closed (common during shutdown), silently drop the log.
-                        if 'closed' in str(e).lower():
-                            return
-                        raise
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    level TEXT NOT NULL,
+                    logger_name TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    module TEXT,
+                    function_name TEXT,
+                    line_number INTEGER,
+                    session_id TEXT,
+                    game_id TEXT,
+                    process_id INTEGER,
                     thread_id INTEGER,
                     extra_data TEXT
                 )
@@ -118,6 +109,28 @@ class DatabaseLogHandler(logging.Handler):
                 CREATE INDEX IF NOT EXISTS idx_system_logs_logger_name
                 ON system_logs(logger_name)
             """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_system_logs_session_id
+                ON system_logs(session_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_system_logs_game_id
+                ON system_logs(game_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_system_logs_process_id
+                ON system_logs(process_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_system_logs_thread_id
+                ON system_logs(thread_id)
+            """)
+
+            conn.commit()
+
+        except Exception as e:
+            # Fallback to stderr if database logging fails during setup
+            print(f"Warning: Failed to initialize database logging: {e}", file=__import__('sys').stderr)
 
             conn.commit()
 

@@ -595,3 +595,68 @@ class CounterfactualAnalyzer:
         except Exception as e:
             self.logger.error(f"Error generating report: {e}")
             return {}
+
+    # ------------------------------------------------------------------
+    # MICRO ROLLOUTS (3–5 step heuristic, no simulated games)
+    # ------------------------------------------------------------------
+    def generate_micro_rollouts(
+        self,
+        frame_before: Optional[List[List[int]]],
+        frame_after: Optional[List[List[int]]],
+        available_actions: Optional[List[Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return lightweight counterfactual action suggestions.
+
+        This is a cheap heuristic used online during gameplay (no DB writes).
+        It inspects recent change and proposes 1-2 actions with confidence/safety.
+        """
+        proposals: List[Dict[str, Any]] = []
+        try:
+            avail_norm: List[str] = []
+            if available_actions:
+                for a in available_actions:
+                    if isinstance(a, str) and a.upper().startswith('ACTION'):
+                        avail_norm.append(a.upper())
+                    elif isinstance(a, int):
+                        avail_norm.append(f"ACTION{a}")
+
+            movement_detected = False
+            if frame_before and frame_after:
+                try:
+                    import numpy as np
+                    fb = np.array(frame_before)
+                    fa = np.array(frame_after)
+                    if fb.shape == fa.shape:
+                        movement_detected = not np.array_equal(fb, fa)
+                except Exception:
+                    movement_detected = False
+
+            default_action = None
+            for candidate in ['ACTION6', 'ACTION1', 'ACTION2', 'ACTION3', 'ACTION4']:
+                if candidate in avail_norm:
+                    default_action = candidate
+                    break
+
+            if default_action:
+                reason = "micro rollout: probe movement" if movement_detected else "micro rollout: probe salience"
+                proposals.append({
+                    'action': default_action,
+                    'confidence': 0.55,
+                    'safety_flag': False,
+                    'novelty_flag': True,
+                    'reason': reason,
+                })
+
+            if movement_detected and 'ACTION6' in avail_norm and default_action != 'ACTION6':
+                proposals.append({
+                    'action': 'ACTION6',
+                    'confidence': 0.5,
+                    'safety_flag': False,
+                    'novelty_flag': False,
+                    'reason': 'micro rollout: click salient region',
+                })
+
+            return proposals
+        except Exception as exc:
+            self.logger.debug(f"Micro rollout proposal failed: {exc}")
+            return proposals

@@ -1622,6 +1622,35 @@ class AgentSelfModel:
             return json.loads(result[0]['controlled_objects'])
         
         return None
+
+    def get_self_identity_snapshot(
+        self,
+        agent_id: Optional[str],
+        game_id: Optional[str],
+        level: Optional[int],
+        frame: Optional[List[List[int]]] = None
+    ) -> Dict[str, Any]:
+        """Lightweight self-identity snapshot for persona reasoning."""
+        controlled: List[str] = []
+        try:
+            if agent_id and game_id and level is not None:
+                controlled = self.get_controlled_objects(agent_id, game_id, level) or []
+        except Exception:
+            controlled = []
+
+        shape: Optional[str] = None
+        try:
+            if frame and isinstance(frame, list) and frame and isinstance(frame[0], list):
+                shape = f"{len(frame)}x{len(frame[0])}"
+        except Exception:
+            shape = None
+
+        return {
+            'controlled_objects': controlled,
+            'frame_shape': shape,
+            'level': level,
+            'game_id': game_id,
+        }
     
     # ========================================================================
     # SYSTEMATIC OBJECT CONTROL DISCOVERY

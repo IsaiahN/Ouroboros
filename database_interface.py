@@ -38,6 +38,10 @@ class DatabaseInterface:
         # Ensure connections close even if caller forgets (prevents ResourceWarning)
         self._finalizer = weakref.finalize(self, DatabaseInterface._finalize_cleanup, weakref.ref(self))
         self._initialize_database_from_template()
+        # Persona submodeling tables must exist even on legacy databases
+        self._ensure_persona_tables()
+        # Role transition tracking tables must exist for adaptive action limits
+        self._ensure_role_transition_tables()
 
     @staticmethod
     def _finalize_cleanup(self_ref: weakref.ReferenceType):
@@ -99,6 +103,524 @@ class DatabaseInterface:
     def _ensure_database_exists(self):
         """Ensure database exists with schema (maintained for backward compatibility)."""
         self._create_database_from_schema()
+
+    # --------------------------------------------------------------------
+    # Persona Submodeling (profiles, proposals, outcomes, reliability)
+    # --------------------------------------------------------------------
+    def _ensure_persona_tables(self) -> None:
+        """Create persona tables if missing (idempotent)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+        """Create role transition tracking tables if missing (idempotent)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS role_transition_attempts (
+                    transition_id TEXT PRIMARY KEY,
+                    agent_id TEXT,
+                    from_role TEXT,
+                    to_role TEXT,
+                    success_probability REAL,
+                    was_successful BOOLEAN,
+                    atp_cost REAL,
+                    generation INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_role_transition_agent_gen
+                ON role_transition_attempts(agent_id, generation)
+                """
+            )
+
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error ensuring role transition tables: {e}")
+            raise
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS persona_profiles (
+                    persona_id TEXT PRIMARY KEY,
+                    agent_id TEXT,
+                    persona_type TEXT,
+                    role TEXT,
+                    stage INTEGER,
+                    world_model TEXT,
+                    bias_vector TEXT,
+                    bias_risk REAL,
+                    bias_abstraction REAL,
+                    bias_symbolic REAL,
+                    persistence_class TEXT DEFAULT 'tactical',
+                    lifetime_exposures INTEGER DEFAULT 0,
+                    reliability_global REAL DEFAULT 0.5,
+                    novelty_bias REAL DEFAULT 0.0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS persona_proposals (
+                    proposal_id TEXT PRIMARY KEY,
+                    persona_id TEXT NOT NULL,
+                    agent_id TEXT,
+                    persona_type TEXT,
+                    game_id TEXT,
+                    session_id TEXT,
+                    level_number INTEGER,
+                    step_idx INTEGER,
+                    problem_signature TEXT,
+                    world_model TEXT,
+                    self_identity_snapshot TEXT,
+                    action TEXT,
+                    rationale_embedding TEXT,
+                    confidence REAL DEFAULT 0.5,
+                    safety_flag INTEGER DEFAULT 0,
+                    novelty_flag INTEGER DEFAULT 0,
+                    surprise_score REAL,
+                    observer_flags TEXT,
+                    synthesis_source TEXT,
+                    scorer_score REAL,
+                    chosen INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (persona_id) REFERENCES persona_profiles(persona_id)
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS persona_outcomes (
+                    outcome_id TEXT PRIMARY KEY,
+                    proposal_id TEXT NOT NULL,
+                    persona_id TEXT,
+                    agent_id TEXT,
+                    game_id TEXT,
+                    level_number INTEGER,
+                    delta_score REAL,
+                    delta_actions INTEGER,
+                    outcome_score REAL,
+                    safety_incident INTEGER DEFAULT 0,
+                    surprise_score REAL,
+                    stuck_flag INTEGER DEFAULT 0,
+                    observer_flags TEXT,
+                    observer_stuckness REAL,
+                    observer_control_loss REAL,
+                    observer_confidence_trend TEXT,
+                    observer_pattern_tag TEXT,
+                    observer_suggested_approach TEXT,
+                    observer_veto_unsafe INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (proposal_id) REFERENCES persona_proposals(proposal_id),
+                    FOREIGN KEY (persona_id) REFERENCES persona_profiles(persona_id)
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS persona_context_reliability (
+                    persona_id TEXT NOT NULL,
+                    problem_signature TEXT NOT NULL,
+                    reliability_score REAL DEFAULT 0.5,
+                    sample_count INTEGER DEFAULT 0,
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (persona_id, problem_signature),
+                    FOREIGN KEY (persona_id) REFERENCES persona_profiles(persona_id)
+                )
+                """
+            )
+
+            # Add new columns if missing (backfill-friendly)
+            try:
+                cursor.execute("ALTER TABLE persona_profiles ADD COLUMN persistence_class TEXT DEFAULT 'tactical'")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE persona_profiles ADD COLUMN lifetime_exposures INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                cursor.execute("ALTER TABLE persona_profiles ADD COLUMN persona_type TEXT")
+            except Exception:
+                pass
+            for col in [
+                "bias_risk REAL",
+                "bias_abstraction REAL",
+                "bias_symbolic REAL"
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE persona_profiles ADD COLUMN {col}")
+                except Exception:
+                    pass
+
+            # Add new columns to proposals/outcomes as needed
+            for col_stmt in [
+                "persona_type TEXT",
+                "synthesis_source TEXT",
+                "scorer_score REAL"
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE persona_proposals ADD COLUMN {col_stmt}")
+                except Exception:
+                    pass
+            for col_stmt in [
+                "observer_stuckness REAL",
+                "observer_control_loss REAL",
+                "observer_confidence_trend TEXT",
+                "observer_pattern_tag TEXT",
+                "observer_suggested_approach TEXT",
+                "observer_veto_unsafe INTEGER"
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE persona_outcomes ADD COLUMN {col_stmt}")
+                except Exception:
+                    pass
+
+            # Observer logs table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS persona_observer_logs (
+                    log_id TEXT PRIMARY KEY,
+                    proposal_id TEXT,
+                    persona_id TEXT,
+                    agent_id TEXT,
+                    problem_signature TEXT,
+                    stuckness_level REAL,
+                    control_loss REAL,
+                    confidence_trend TEXT,
+                    pattern_tag TEXT,
+                    suggested_approach TEXT,
+                    veto_unsafe INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (proposal_id) REFERENCES persona_proposals(proposal_id),
+                    FOREIGN KEY (persona_id) REFERENCES persona_profiles(persona_id)
+                )
+                """
+            )
+
+            # Hindsight relabeling table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS persona_hindsight (
+                    hindsight_id TEXT PRIMARY KEY,
+                    original_proposal_id TEXT NOT NULL,
+                    alternative_persona_id TEXT,
+                    agent_id TEXT,
+                    problem_signature TEXT,
+                    estimated_outcome REAL,
+                    retrospective_credit REAL,
+                    surprise_score REAL,
+                    observer_flags TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (original_proposal_id) REFERENCES persona_proposals(proposal_id)
+                )
+                """
+            )
+
+            # Persona metrics (lightweight monitoring)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS persona_metrics (
+                    metric_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent_id TEXT,
+                    problem_signature TEXT,
+                    synthesis_used INTEGER,
+                    observer_veto INTEGER,
+                    micro_cf_used INTEGER,
+                    hindsight_updates INTEGER,
+                    core_ratio REAL,
+                    diversity_count INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            conn.commit()
+        except Exception as exc:
+            logger.debug(f"Persona table initialization skipped: {exc}")
+
+    def upsert_persona_profile(
+        self,
+        persona_id: str,
+        agent_id: Optional[str],
+        role: Optional[str] = None,
+        persona_type: Optional[str] = None,
+        stage: Optional[int] = None,
+        world_model: Optional[str] = None,
+        bias_vector: Optional[str] = None,
+        bias_risk: Optional[float] = None,
+        bias_abstraction: Optional[float] = None,
+        bias_symbolic: Optional[float] = None,
+        persistence_class: Optional[str] = None,
+        lifetime_exposures: Optional[int] = None,
+        reliability_global: Optional[float] = None,
+        novelty_bias: Optional[float] = None,
+    ) -> None:
+        """Insert or update a persona profile."""
+        reliability_value = reliability_global if reliability_global is not None else 0.5
+        novelty_value = novelty_bias if novelty_bias is not None else 0.0
+        persistence_value = persistence_class if persistence_class is not None else None
+        exposures_value = lifetime_exposures if lifetime_exposures is not None else None
+        conn = self._get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO persona_profiles (
+                    persona_id, agent_id, role, stage, world_model, bias_vector,
+                    persona_type, bias_risk, bias_abstraction, bias_symbolic,
+                    persistence_class, lifetime_exposures, reliability_global, novelty_bias, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(persona_id) DO UPDATE SET
+                    agent_id=excluded.agent_id,
+                    role=COALESCE(excluded.role, persona_profiles.role),
+                    persona_type=COALESCE(excluded.persona_type, persona_profiles.persona_type),
+                    stage=COALESCE(excluded.stage, persona_profiles.stage),
+                    world_model=COALESCE(excluded.world_model, persona_profiles.world_model),
+                    bias_vector=COALESCE(excluded.bias_vector, persona_profiles.bias_vector),
+                    bias_risk=COALESCE(excluded.bias_risk, persona_profiles.bias_risk),
+                    bias_abstraction=COALESCE(excluded.bias_abstraction, persona_profiles.bias_abstraction),
+                    bias_symbolic=COALESCE(excluded.bias_symbolic, persona_profiles.bias_symbolic),
+                    persistence_class=COALESCE(excluded.persistence_class, persona_profiles.persistence_class),
+                    lifetime_exposures=COALESCE(excluded.lifetime_exposures, persona_profiles.lifetime_exposures),
+                    reliability_global=COALESCE(excluded.reliability_global, persona_profiles.reliability_global),
+                    novelty_bias=COALESCE(excluded.novelty_bias, persona_profiles.novelty_bias),
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    persona_id,
+                    agent_id,
+                    role,
+                    persona_type,
+                    stage,
+                    world_model,
+                    bias_vector,
+                    bias_risk,
+                    bias_abstraction,
+                    bias_symbolic,
+                    persistence_value,
+                    exposures_value,
+                    reliability_value,
+                    novelty_value,
+                ),
+            )
+
+    def log_persona_proposal(self, payload: Dict[str, Any]) -> str:
+        """Persist a persona proposal and return proposal_id."""
+        proposal_id = payload.get('proposal_id') or f"pp_{uuid.uuid4().hex[:12]}"
+        conn = self._get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO persona_proposals (
+                    proposal_id, persona_id, agent_id, persona_type, game_id, session_id, level_number, step_idx,
+                    problem_signature, world_model, self_identity_snapshot, action, rationale_embedding,
+                    confidence, safety_flag, novelty_flag, surprise_score, observer_flags, synthesis_source,
+                    scorer_score, chosen
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    proposal_id,
+                    payload.get('persona_id'),
+                    payload.get('agent_id'),
+                    payload.get('persona_type'),
+                    payload.get('game_id'),
+                    payload.get('session_id'),
+                    payload.get('level_number'),
+                    payload.get('step_idx'),
+                    payload.get('problem_signature'),
+                    payload.get('world_model'),
+                    payload.get('self_identity_snapshot'),
+                    payload.get('action'),
+                    payload.get('rationale_embedding'),
+                    payload.get('confidence', 0.5),
+                    1 if payload.get('safety_flag') else 0,
+                    1 if payload.get('novelty_flag') else 0,
+                    payload.get('surprise_score'),
+                    payload.get('observer_flags'),
+                    payload.get('synthesis_source'),
+                    payload.get('scorer_score'),
+                    1 if payload.get('chosen') else 0,
+                ),
+            )
+        return proposal_id
+
+    def log_persona_outcome(self, payload: Dict[str, Any]) -> str:
+        """Persist outcome for a persona proposal."""
+        outcome_id = payload.get('outcome_id') or f"po_{uuid.uuid4().hex[:12]}"
+        conn = self._get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO persona_outcomes (
+                    outcome_id, proposal_id, persona_id, agent_id, game_id, level_number,
+                    delta_score, delta_actions, outcome_score, safety_incident, surprise_score,
+                    stuck_flag, observer_flags, observer_stuckness, observer_control_loss,
+                    observer_confidence_trend, observer_pattern_tag, observer_suggested_approach,
+                    observer_veto_unsafe
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    outcome_id,
+                    payload.get('proposal_id'),
+                    payload.get('persona_id'),
+                    payload.get('agent_id'),
+                    payload.get('game_id'),
+                    payload.get('level_number'),
+                    payload.get('delta_score'),
+                    payload.get('delta_actions'),
+                    payload.get('outcome_score'),
+                    1 if payload.get('safety_incident') else 0,
+                    payload.get('surprise_score'),
+                    1 if payload.get('stuck_flag') else 0,
+                    payload.get('observer_flags'),
+                    payload.get('observer_stuckness'),
+                    payload.get('observer_control_loss'),
+                    payload.get('observer_confidence_trend'),
+                    payload.get('observer_pattern_tag'),
+                    payload.get('observer_suggested_approach'),
+                    1 if payload.get('observer_veto_unsafe') else 0,
+                ),
+            )
+        return outcome_id
+
+    def log_observer_output(self, payload: Dict[str, Any]) -> str:
+        """Persist rich observer outputs for a proposal/outcome."""
+        log_id = payload.get('log_id') or f"ob_{uuid.uuid4().hex[:12]}"
+        conn = self._get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO persona_observer_logs (
+                    log_id, proposal_id, persona_id, agent_id, problem_signature,
+                    stuckness_level, control_loss, confidence_trend, pattern_tag,
+                    suggested_approach, veto_unsafe
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    log_id,
+                    payload.get('proposal_id'),
+                    payload.get('persona_id'),
+                    payload.get('agent_id'),
+                    payload.get('problem_signature'),
+                    payload.get('stuckness_level'),
+                    payload.get('control_loss'),
+                    payload.get('confidence_trend'),
+                    payload.get('pattern_tag'),
+                    payload.get('suggested_approach'),
+                    1 if payload.get('veto_unsafe') else 0,
+                ),
+            )
+        return log_id
+
+    def log_persona_hindsight(self, payload: Dict[str, Any]) -> str:
+        """Persist hindsight relabeling / counterfactual credit."""
+        hindsight_id = payload.get('hindsight_id') or f"ph_{uuid.uuid4().hex[:12]}"
+        conn = self._get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO persona_hindsight (
+                    hindsight_id, original_proposal_id, alternative_persona_id, agent_id,
+                    problem_signature, estimated_outcome, retrospective_credit, surprise_score,
+                    observer_flags
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    hindsight_id,
+                    payload.get('original_proposal_id'),
+                    payload.get('alternative_persona_id'),
+                    payload.get('agent_id'),
+                    payload.get('problem_signature'),
+                    payload.get('estimated_outcome'),
+                    payload.get('retrospective_credit'),
+                    payload.get('surprise_score'),
+                    payload.get('observer_flags'),
+                ),
+            )
+        return hindsight_id
+
+    def log_persona_metrics(self, payload: Dict[str, Any]) -> None:
+        """Persist lightweight persona metrics snapshot."""
+        conn = self._get_connection()
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO persona_metrics (
+                    agent_id, problem_signature, synthesis_used, observer_veto, micro_cf_used,
+                    hindsight_updates, core_ratio, diversity_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload.get('agent_id'),
+                    payload.get('problem_signature'),
+                    1 if payload.get('synthesis_used') else 0,
+                    1 if payload.get('observer_veto') else 0,
+                    1 if payload.get('micro_cf_used') else 0,
+                    payload.get('hindsight_updates') or 0,
+                    payload.get('core_ratio'),
+                    payload.get('diversity_count'),
+                ),
+            )
+
+    def update_persona_context_reliability(
+        self,
+        persona_id: str,
+        problem_signature: str,
+        delta_score: Optional[float] = None,
+        safety_incident: bool = False,
+    ) -> None:
+        """Incrementally update context-conditional reliability."""
+        conn = self._get_connection()
+        with conn:
+            row = conn.execute(
+                "SELECT reliability_score, sample_count FROM persona_context_reliability WHERE persona_id=? AND problem_signature=?",
+                (persona_id, problem_signature),
+            ).fetchone()
+            reliability = 0.5
+            samples = 0
+            if row:
+                reliability = row['reliability_score'] or 0.5
+                samples = row['sample_count'] or 0
+
+            # Simple update rule: positive delta nudges up, safety incident nudges down
+            adjustment = 0.0
+            if delta_score is not None:
+                if delta_score > 0:
+                    adjustment += 0.05
+                elif delta_score < 0:
+                    adjustment -= 0.05
+            if safety_incident:
+                adjustment -= 0.1
+
+            new_reliability = max(0.0, min(1.0, reliability + adjustment))
+            conn.execute(
+                """
+                INSERT INTO persona_context_reliability (persona_id, problem_signature, reliability_score, sample_count, last_updated)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(persona_id, problem_signature) DO UPDATE SET
+                    reliability_score=?,
+                    sample_count=persona_context_reliability.sample_count + 1,
+                    last_updated=CURRENT_TIMESTAMP
+                """,
+                (
+                    persona_id,
+                    problem_signature,
+                    new_reliability,
+                    samples + 1,
+                    new_reliability,
+                ),
+            )
 
     def get_action_effectiveness(self, game_id: str) -> list:
         """Get action effectiveness data for a game (stub - not yet implemented).

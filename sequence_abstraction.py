@@ -128,6 +128,9 @@ class AbstractTemplate:
     confidence: float                         # 0.0-1.0 based on sample size
     sample_size: int                          # Number of sequences used
     avg_length: float                         # Average sequence length
+    persona_id: Optional[str] = None          # Provenance: which persona produced/used this template
+    world_model: Optional[str] = None         # Provenance: world model tag from persona runtime
+    problem_signature: Optional[str] = None   # Provenance: problem signature used for selection
     
     def to_executable(self) -> List[Dict[str, Any]]:
         """Convert to executable action sequence."""
@@ -438,7 +441,10 @@ class SequenceAbstraction:
         self,
         game_type: str,
         level_number: int,
-        min_sequences: int = 2
+        min_sequences: int = 2,
+        persona_id: Optional[str] = None,
+        world_model: Optional[str] = None,
+        problem_signature: Optional[str] = None,
     ) -> Optional[AbstractTemplate]:
         """
         Generate an executable abstract template from multiple winning sequences.
@@ -575,7 +581,10 @@ class SequenceAbstraction:
                 template_sequence=template_sequence,
                 confidence=confidence,
                 sample_size=len(parsed_sequences),
-                avg_length=avg_len
+                avg_length=avg_len,
+                persona_id=persona_id,
+                world_model=world_model,
+                problem_signature=problem_signature,
             )
             
             logger.info(f"[TEMPLATE] Generated {template}")
@@ -1217,7 +1226,10 @@ class SequenceAbstraction:
         self,
         game_type: str,
         level_number: int,
-        available_primitives: List[str]
+        available_primitives: List[str],
+        persona_id: Optional[str] = None,
+        world_model: Optional[str] = None,
+        problem_signature: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get a template enriched with primitive-based execution guidance.
@@ -1233,7 +1245,13 @@ class SequenceAbstraction:
         Returns:
             Dict with template, primitive requirements, and execution hints
         """
-        template = self.generate_abstract_template(game_type, level_number)
+        template = self.generate_abstract_template(
+            game_type,
+            level_number,
+            persona_id=persona_id,
+            world_model=world_model,
+            problem_signature=problem_signature,
+        )
         requirements = self.analyze_primitive_requirements(game_type, level_number)
         
         if not template:
@@ -1281,7 +1299,12 @@ class SequenceAbstraction:
             'execution_readiness': readiness,
             'execution_hints': execution_hints,
             'can_execute': readiness >= 0.8,  # 80% of required primitives
-            'sequence_type': requirements['sequence_type']
+            'sequence_type': requirements['sequence_type'],
+            'persona_provenance': {
+                'persona_id': template.persona_id,
+                'world_model': template.world_model,
+                'problem_signature': template.problem_signature,
+            },
         }
 
     def suggest_primitives_for_game(
