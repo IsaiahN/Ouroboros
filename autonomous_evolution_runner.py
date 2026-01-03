@@ -58,6 +58,7 @@ from performance_analyzer import PerformanceAnalyzer
 from disk_space_monitor import DiskSpaceMonitor
 from evolutionary_engine import EvolutionaryEngine
 from arc_rlvr_framework import ARCRLVRFramework
+from arc_api_client import ARCClient
 from core_gameplay import GameplayEngine
 from adaptive_action_limits import AdaptiveActionLimits
 from network_intelligence_engine import NetworkIntelligenceEngine, display_network_intelligence_dashboard
@@ -251,6 +252,7 @@ class AutonomousEvolutionRunner:
         self.shutdown_requested = False
         self.shutdown_press_count = 0
         self.shutdown_last_press_time = None
+        self._shutdown_listener_task = None
         
         # ORACLE HEALTH MONITOR - self-diagnostic and experimentation system
         if ORACLE_HEALTH_AVAILABLE and OracleHealthMonitor:
@@ -331,6 +333,49 @@ class AutonomousEvolutionRunner:
                 signal.signal(signal.SIGBREAK, self._signal_handler)
             except AttributeError:
                 pass  # SIGBREAK not available on all Windows versions
+
+    async def _verify_arc_api_live(self) -> bool:
+        """Ensure we are using the real ARC API (no simulated games)."""
+        api_key = os.getenv('ARC_API_KEY')
+        if not api_key:
+            print("[FATAL] ARC_API_KEY missing - refusing to run simulated games")
+            return False
+        try:
+            async with ARCClient(api_key=api_key) as client:
+                games = await client.get_available_games()
+                if not games:
+                    print("[FATAL] ARC API returned zero available games - aborting to avoid simulated runs")
+                    return False
+            return True
+        except Exception as e:
+            print(f"[FATAL] ARC API connectivity failed: {e}")
+            return False
+
+    async def _shutdown_listener(self):
+        """Listen for manual shutdown via Function key + Enter (enter 'F12')."""
+        import sys
+        while self.running and not self.shutdown_requested:
+            try:
+                line = await asyncio.to_thread(sys.stdin.readline)
+            except Exception:
+                break
+            if not line:
+                break
+            if line.strip().lower() == 'f12':
+                try:
+                    sys.stderr.write("\n[X] F12 shutdown requested\nInitiating graceful shutdown...\n\n")
+                    sys.stderr.flush()
+                except Exception:
+                    pass
+                self.running = False
+                self.shutdown_requested = True
+                try:
+                    self.game_scheduler.shutdown()
+                except Exception:
+                    pass
+                if hasattr(self, '_current_engine') and self._current_engine:
+                    self._current_engine.session_manager.is_shutting_down = True
+                break
     
     def _signal_handler(self, signum, frame):
         """
@@ -2836,6 +2881,9 @@ class AutonomousEvolutionRunner:
         """Main autonomous evolution loop with graceful shutdown support."""
         self.running = True
         self.shutdown_requested = False
+
+        # Start keyboard listener: type F12 then Enter to request shutdown
+        self._shutdown_listener_task = asyncio.create_task(self._shutdown_listener())
         
         # Try to load previous checkpoint
         checkpoint = self._load_checkpoint()
@@ -2872,6 +2920,12 @@ class AutonomousEvolutionRunner:
             await self._cleanup()
             return
 
+        # Verify ARC API connectivity to prevent simulated/offline runs
+        api_live = await self._verify_arc_api_live()
+        if not api_live:
+            await self._cleanup()
+            return
+
         # Optional replay validation batch (no live gameplay)
         if self.replay_validation_batch:
             try:
@@ -2888,7 +2942,7 @@ class AutonomousEvolutionRunner:
                 return
             
             print("\n[>>] Starting autonomous evolution...")
-            print("Press Ctrl+C for graceful shutdown\n")
+            print("Press F12 + Enter (or Ctrl+C) for graceful shutdown\n")
             
             cycle_count = 0
             
@@ -2973,6 +3027,10 @@ class AutonomousEvolutionRunner:
                     self.db.close()
             except:
                 pass
+
+            # Cancel keyboard listener if still running
+            if self._shutdown_listener_task and not self._shutdown_listener_task.done():
+                self._shutdown_listener_task.cancel()
     
     def print_final_summary(self):
         """Print final summary statistics."""

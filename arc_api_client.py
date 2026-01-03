@@ -168,20 +168,45 @@ class ARCClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         if self.session:
-            await self.session.close()
-            # Give aiohttp time to close connections
-            await asyncio.sleep(0.25)
+            try:
+                await self.session.close()
+                # Give aiohttp time to close connections
+                await asyncio.sleep(0.25)
+            except RuntimeError:
+                # Event loop may be closed; fall back to sync close
+                try:
+                    self.session.close()
+                except Exception:
+                    pass
             self.session = None
         self._reset_state()
 
     async def close(self):
         """Manually close the session and cleanup resources."""
         if self.session:
-            await self.session.close()
-            # Give aiohttp time to close connections
-            await asyncio.sleep(0.25)
+            try:
+                await self.session.close()
+                # Give aiohttp time to close connections
+                await asyncio.sleep(0.25)
+            except RuntimeError:
+                # Event loop may already be closed; do best-effort sync close
+                try:
+                    self.session.close()
+                except Exception:
+                    pass
             self.session = None
         self._reset_state()
+
+    def __del__(self):
+        """Best-effort cleanup to avoid unclosed session warnings at process exit."""
+        try:
+            if getattr(self, 'session', None) and not self.session.closed:
+                try:
+                    self.session.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _reset_state(self):
         """Reset internal state variables."""

@@ -69,31 +69,37 @@ class DatabaseLogHandler(logging.Handler):
                 self._local.connection.execute("PRAGMA synchronous=NORMAL")
             except Exception:
                 pass
-        return self._local.connection
+                    try:
+                        conn = self._get_connection()
+                        cursor = conn.cursor()
 
-    def _ensure_logs_table(self):
-        """Ensure the logs table exists in the database."""
-        try:
-            # Initialize database from template if needed (this preserves all tables)
-            self._initialize_database_from_template()
+                        cursor.execute("""
+                            INSERT INTO system_logs (
+                                timestamp, level, logger_name, message, module,
+                                function_name, line_number, session_id, game_id,
+                                process_id, thread_id, extra_data
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            timestamp,
+                            record.levelname,
+                            record.name,
+                            message,
+                            record.module if hasattr(record, 'module') else record.filename,
+                            record.funcName,
+                            record.lineno,
+                            self.current_session_id,
+                            self.current_game_id,
+                            record.process,
+                            record.thread,
+                            json.dumps(extra_data) if extra_data else None
+                        ))
 
-            conn = self._get_connection()
-            cursor = conn.cursor()
-
-            # Only create logs table if it doesn't exist (template should have it)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS system_logs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    level TEXT NOT NULL,
-                    logger_name TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    module TEXT,
-                    function_name TEXT,
-                    line_number INTEGER,
-                    session_id TEXT,
-                    game_id TEXT,
-                    process_id INTEGER,
+                        conn.commit()
+                    except (sqlite3.ProgrammingError, sqlite3.OperationalError) as e:
+                        # If the database is already closed (common during shutdown), silently drop the log.
+                        if 'closed' in str(e).lower():
+                            return
+                        raise
                     thread_id INTEGER,
                     extra_data TEXT
                 )
