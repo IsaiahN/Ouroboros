@@ -37,6 +37,7 @@ class DatabaseInterface:
         self._local = threading.local()
         # Ensure connections close even if caller forgets (prevents ResourceWarning)
         self._finalizer = weakref.finalize(self, DatabaseInterface._finalize_cleanup, weakref.ref(self))
+        # Initialize base schema
         self._initialize_database_from_template()
         # Persona submodeling tables must exist even on legacy databases
         self._ensure_persona_tables()
@@ -112,38 +113,6 @@ class DatabaseInterface:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-        """Create role transition tracking tables if missing (idempotent)."""
-        try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS role_transition_attempts (
-                    transition_id TEXT PRIMARY KEY,
-                    agent_id TEXT,
-                    from_role TEXT,
-                    to_role TEXT,
-                    success_probability REAL,
-                    was_successful BOOLEAN,
-                    atp_cost REAL,
-                    generation INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_role_transition_agent_gen
-                ON role_transition_attempts(agent_id, generation)
-                """
-            )
-
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error ensuring role transition tables: {e}")
-            raise
 
             cursor.execute(
                 """
@@ -349,6 +318,39 @@ class DatabaseInterface:
             conn.commit()
         except Exception as exc:
             logger.debug(f"Persona table initialization skipped: {exc}")
+
+    def _ensure_role_transition_tables(self) -> None:
+        """Create role transition tracking tables if missing (idempotent)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS role_transition_attempts (
+                    transition_id TEXT PRIMARY KEY,
+                    agent_id TEXT,
+                    from_role TEXT,
+                    to_role TEXT,
+                    success_probability REAL,
+                    was_successful BOOLEAN,
+                    atp_cost REAL,
+                    generation INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_role_transition_agent_gen
+                ON role_transition_attempts(agent_id, generation)
+                """
+            )
+
+            conn.commit()
+        except Exception as exc:
+            logger.error(f"Error ensuring role transition tables: {exc}")
 
     def upsert_persona_profile(
         self,
