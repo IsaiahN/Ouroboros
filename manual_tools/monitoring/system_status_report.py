@@ -46,11 +46,6 @@ def main():
     print(f"   Avg per-level budget: {economy[0]['avg_per_level']:.0f}")
     print(f"   Avg total budget: {economy[0]['avg_total']:.0f}")
     
-    # Phase 2.5: Knowledge Recombination
-    recomb = db.execute_query("SELECT COUNT(*) as count FROM sequence_dependencies")
-    print(f"\n[OK] PHASE 2.5: KNOWLEDGE RECOMBINATION")
-    print(f"   Sequence dependencies: {recomb[0]['count']:,}")
-    
     # Phase 3: Viral Packages
     packages = db.execute_query("""
         SELECT COUNT(*) as active_packages FROM viral_information_packages WHERE is_active = TRUE
@@ -130,12 +125,6 @@ def main():
         all_good = False
     else:
         print("[OK] Phase 2: Action economy active")
-    
-    if recomb[0]['count'] == 0:
-        print("[WARN]  Phase 2.5: No sequence dependencies yet")
-        all_good = False
-    else:
-        print("[OK] Phase 2.5: Knowledge recombination active")
     
     if packages[0]['active_packages'] == 0:
         print("[WARN]  Phase 3: No viral packages yet (run evolution to create)")

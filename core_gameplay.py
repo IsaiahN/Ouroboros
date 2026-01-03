@@ -25,6 +25,9 @@ import asyncio
 import logging
 import json
 import uuid
+
+# Local types
+from run_context import RunContext, BudgetState
 import hashlib
 from datetime import datetime
 import numpy as np
@@ -1340,10 +1343,6 @@ class GameplayEngine:
                 # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
                 # to avoid race condition (must be called AFTER store_arc_reward_data)
                 
-                # DISABLED 2025-12-28: Recombination system was 100% broken (INSERT silently failed)
-                # and redundant - organic cumulative sequences already capture L1->LN with level_breakpoints
-                recombinations = []
-                
                 logger.info(f" COMPLETE WIN via cumulative sequence replay!")
                 return {
                     'game_id': game_id,
@@ -1352,8 +1351,7 @@ class GameplayEngine:
                     'actions_taken': actions_taken,
                     'win': True,
                     'method': 'cumulative_sequence_replay',
-                    'sequence_id': known_sequence['sequence_id'],
-                    'recombinations_created': len(recombinations)
+                    'sequence_id': known_sequence['sequence_id']
                 }
             else:
                 # Replay succeeded but didn't win completely - at frontier
@@ -2482,10 +2480,6 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Post-win reflection failed (non-critical): {e}")
 
-        # Knowledge Recombination - DISABLED 2025-12-28
-        # Was 100% broken (INSERT failed silently) and redundant with organic cumulative sequences
-        # See progress.md "Recombination System Removal" section for details
-
         # Rule Induction: Extract transferable rules from wins
         # This enables the network to learn abstract strategies that generalize
         if self.rule_engine and game_state.state == "WIN":
@@ -2878,13 +2872,21 @@ class GameplayEngine:
                 if hasattr(self.session_manager, 'client') and self.session_manager.client:
                     self.session_manager.client._optimizer_target_level = target_level  # type: ignore[attr-defined]
         
-        # Create game with agent info in tags
-        game_data = await self.session_manager.create_game(
-            game_id,
-            agent_id=agent_id,
-            agent_mode=agent_mode,
-            mode=mode_for_spine
-        )
+        # Determine role/mode before game creation so downstream usage is initialized
+        role_for_spine = agent_mode or self.game_config.get('agent_role') or 'generalist'
+        mode_for_spine = self.game_config.get('mode', 'LIVE')
+
+        # Create game with agent info in tags (log and surface failures explicitly)
+        try:
+            game_data = await self.session_manager.create_game(
+                game_id,
+                agent_id=agent_id,
+                agent_mode=agent_mode,
+                mode=mode_for_spine
+            )
+        except Exception as exc:
+            logger.error(f"[GAME_START] Failed to create game {game_id} (agent_id={agent_id}, mode={agent_mode}): {exc}", exc_info=True)
+            raise
         game_state = GameState.from_dict(game_data)
 
         # Track scorecard linkage for attempts/replays
@@ -2908,8 +2910,6 @@ class GameplayEngine:
             self._recording_delta_count = 0
             self._recording_contradictions = 0
             self._staged_recording_path = None
-        role_for_spine = agent_mode or self.game_config.get('agent_role') or 'generalist'
-        mode_for_spine = self.game_config.get('mode', 'LIVE')
         self.spine_emitter.record_attempt_start(
             attempt_id=attempt_id,
             game_id=game_id,
@@ -3665,10 +3665,6 @@ class GameplayEngine:
                     # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
                     # to avoid race condition (must be called AFTER store_arc_reward_data)
                     
-                    # PHASE 2.5: Knowledge Recombination - DISABLED 2025-12-28
-                    # Was 100% broken and redundant with organic cumulative sequences
-                    recombinations = []
-                    
                     logger.info(f" COMPLETE WIN via cumulative sequence replay!")
                     return {
                         'game_id': game_id,
@@ -3677,8 +3673,7 @@ class GameplayEngine:
                         'actions_taken': actions_taken,
                         'win': True,
                         'method': 'cumulative_sequence_replay',
-                        'sequence_id': known_sequence['sequence_id'],
-                        'recombinations_created': len(recombinations)
+                        'sequence_id': known_sequence['sequence_id']
                     }
                 else:
                     # Replay succeeded but didn't win completely
@@ -5522,10 +5517,6 @@ class GameplayEngine:
                         logger.info(f"   → Future agents can replay this to guarantee {levels_completed_for_capture} level(s) minimum")
                 elif game_state.score > 0 and level_completions == 0:
                     logger.debug(f"Score {game_state.score} but no NEW level_completions - skipping sequence capture (likely from replay or shutdown)")
-            
-            # PHASE 2.5: Knowledge Recombination - DISABLED 2025-12-28
-            # Was 100% broken (INSERT missing NOT NULL columns, 75,880 orphaned dependencies)
-            # Redundant with organic cumulative sequences that already capture L1->LN with level_breakpoints
             
             # PHASE 3: Viral Packages & Pariahs (AUTOMATIC - runs after EVERY game)
             # Bidirectional evolution: extract success patterns AND failure patterns
@@ -14406,60 +14397,6 @@ class GameplayEngine:
             logger.error(f"Error capturing winning sequence: {e}")
             return None
     
-    def _explore_sequence_recombination(self, agent_id: str, game_id: str, 
-                                       level_index: int) -> List[str]:
-        """
-        Explore sequence recombination after EVERY game (AUTOMATIC - Phase 2.5).
-        
-        This is the viral evolution accelerator - attempts to combine known sequences
-        into new hypothetical sequences for the network to test.
-        
-        CRITICAL: This is OPPORTUNISTIC and runs automatically, not optional.
-        The roadmap explicitly states this should happen after every game.
-        
-        Args:
-            agent_id: Agent that just finished playing
-            game_id: Game context
-            level_index: Level reached (use this to target recombination)
-        
-        Returns:
-            List of newly created sequence_ids
-        """
-        try:
-            from knowledge_recombination_engine import KnowledgeRecombinationEngine
-            
-            # Get current generation for tracking
-            agent_data = self.db.execute_query(
-                "SELECT generation FROM agents WHERE agent_id = ?", (agent_id,)
-            )
-            generation = agent_data[0]['generation'] if agent_data else 0
-            
-            # Create recombination engine
-            engine = KnowledgeRecombinationEngine(self.db)
-            
-            # Attempt recombination for all levels up to current level
-            all_new_sequences = []
-            
-            for level in range(1, level_index + 1):
-                new_sequences = engine.discover_sequence_combinations(
-                    agent_id=agent_id,
-                    game_id=game_id,
-                    level_index=level - 1,  # 0-based for database
-                    generation=generation,
-                    max_attempts=5  # Limit to prevent exponential blowup
-                )
-                all_new_sequences.extend(new_sequences)
-            
-            return all_new_sequences
-            
-        except ImportError:
-            # Knowledge recombination engine not available
-            logger.warning("KnowledgeRecombinationEngine not found, skipping recombination")
-            return []
-        except Exception as e:
-            logger.error(f"Error during sequence recombination: {e}")
-            return []
-
     def _detect_pattern_tags(self, actions: List[int], coordinates: List) -> List[str]:
         """Detect pattern tags in action sequence."""
         tags = []

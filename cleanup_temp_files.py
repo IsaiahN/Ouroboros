@@ -69,7 +69,6 @@ KEEP_FILES = {
     "network_intelligence_engine.py",
     "regulatory_signal_engine.py",
     "collective_reasoning_engine.py",
-    "knowledge_recombination_engine.py",
     "sensation_engine.py",
     "sequence_abstraction.py",
     "sequence_pruning_system.py",
