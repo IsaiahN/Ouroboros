@@ -1737,10 +1737,10 @@ class AgentSelfModel:
         frame_before: List[List[int]],
         frame_after: List[List[int]],
         action_taken: str,
-        click_coords: Tuple[int, int] = None,
-        game_type: str = None,
-        level: int = None,
-        agent_id: str = None
+        click_coords: Optional[Tuple[int, int]] = None,
+        game_type: Optional[str] = None,
+        level: Optional[int] = None,
+        agent_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Analyze a single action to discover object control relationships.
@@ -6831,7 +6831,7 @@ class AgentSelfModel:
         self,
         game_id: str,
         level_number: int,
-        final_frame: Dict,
+        final_frame: Optional[Dict],
         initial_frame: Optional[Dict],
         action_history: List[Dict],
         final_score: float,
@@ -7856,10 +7856,10 @@ class CognitiveStageSystem:
         games_played_delta: int = 0,
         sequences_discovered_delta: int = 0,
         hypotheses_created_delta: int = 0,
-        object_control_learned: bool = None,
+        object_control_learned: Optional[bool] = None,
         action_effect_pairs_delta: int = 0,
-        cross_game_transfer: bool = None,
-        validation_success_rate: float = None
+        cross_game_transfer: Optional[bool] = None,
+        validation_success_rate: Optional[float] = None
     ) -> Dict[str, Any]:
         """
         Update agent's cognitive competencies and check for stage transition.
