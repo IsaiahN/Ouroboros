@@ -1,216 +1,750 @@
 import os
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
-
-"""
-Core Gameplay Logic
-
-Provides the fundamental gameplay loop and decision-making logic.
-Contains only essential game mechanics without architect/governor/director complexity.
-
-Enhanced with pattern learning (Rule 10: integrated, not new files):
-- Captures winning sequences
-- Discovers and reuses patterns
-- Learns from every game
-
-Refactored for maintainability (December 2025):
-- Extracted logical sections into helper methods
-- _handle_3_try_fallback() - The 3-try sequence system
-- _handle_sequence_replay_result() - Processing replay success/failure
-- _run_game_loop() - The main action loop
-- _handle_level_completion() - Level completion logic
-- _finalize_game() - End-of-game cleanup and results
-"""
-
-
-import asyncio
-import logging
-import json
-import uuid
-import random
-
-# Local types
-from run_context import RunContext, BudgetState
-import hashlib
-from datetime import datetime
-import numpy as np
-import tempfile
-from typing import Dict, Any, List, Optional, Callable, Tuple, Set, Sequence, Mapping, cast, no_type_check, TYPE_CHECKING
-
-from database_interface import DatabaseInterface
-from arc_api_client import GameState
-from game_session_manager import GameSessionManager
-from sensation_engine import get_sensation_mode
-from action_handler import ActionHandler
-from event_bus import EventBus, EventType, make_event
-from plugin_interfaces import Plugin, PluginManager
-from observability_plugins import default_observability_plugins
-from prestige_engine import PrestigeEngine
-from sensation_engine import SensationEngine
-from breakthrough_budget_allocator import BreakthroughBudgetAllocator
-from breakthrough_detector import BreakthroughDetector
-from multi_stage_matching_pipeline import MultiStageMatchingPipeline
-from subgoal_planning_activator import SubgoalPlanningActivator
-from agent_self_model import (
-    AgentSelfModel,
-    WeavingReporter,
-    CognitiveStageSystem,
-    EpisodicMemorySystem,
-    AgentHypothesisSystem,
-    MetacognitiveReasoningEngine,
-)
-from persona_runtime import PersonaManager
-from counterfactual_analyzer import CounterfactualAnalyzer
-from object_detector import ObjectDetector
-from collections import Counter
-from dataclasses import dataclass, field
-try:
-    from viral_package_engine import get_cohort_wisdom, update_sequence_role_reputation
-    COHORT_WISDOM_AVAILABLE = True
-except ImportError:
-    COHORT_WISDOM_AVAILABLE = False
-    get_cohort_wisdom = None
-    update_sequence_role_reputation = None
-
-# Rule induction and symbolic reasoning imports
-try:
-    from rule_induction_engine import RuleInductionEngine
-    RULE_INDUCTION_AVAILABLE = True
-except ImportError:
-    RULE_INDUCTION_AVAILABLE = False
-    RuleInductionEngine = None
-
-try:
-    from symbolic_reasoning_engine import SymbolicReasoningEngine
-    SYMBOLIC_REASONING_AVAILABLE = True
-except ImportError:
-    SYMBOLIC_REASONING_AVAILABLE = False
-    SymbolicReasoningEngine = None
-
-# Abstraction engine imports
-try:
-    from sequence_abstraction import SequenceAbstraction
-    from abstraction_config import is_abstraction_enabled
-    ABSTRACTION_AVAILABLE = True
-except ImportError:
-    ABSTRACTION_AVAILABLE = False
-    SequenceAbstraction = None
-    def is_abstraction_enabled() -> bool:
-        return False
-
-# CODS - Cognitive Operator Discovery System (earn-to-learn primitives)
-try:
-    from cods_engine import CODSEngine, CODSGameContext
-    CODS_AVAILABLE = True
-except ImportError:
-    CODS_AVAILABLE = False
-    CODSEngine = None
-    CODSGameContext = None
-
-# Seed Primitives - Baby-derived cognitive primitives for perception and decision-making
-try:
-    from seed_primitives import get_seed_primitives, SeedPrimitiveRegistry
-    PRIMITIVES_AVAILABLE = True
-except ImportError:
-    PRIMITIVES_AVAILABLE = False
-    get_seed_primitives = None
-    SeedPrimitiveRegistry = None
-
-# Terminal Pattern Detector - Foresight to avoid game_over
-try:
-    from terminal_pattern_detector import TerminalPatternDetector
-    TERMINAL_DETECTOR_AVAILABLE = True
-except ImportError:
-    TERMINAL_DETECTOR_AVAILABLE = False
-    TerminalPatternDetector = None
-
-# Scientific Method Engine - theory formation/testing
-try:
-    from scientific_method_engine import ScientificMethodEngine
-    SCIENTIFIC_METHOD_AVAILABLE = True
-except ImportError:
-    SCIENTIFIC_METHOD_AVAILABLE = False
-    ScientificMethodEngine = None
-
-# Reasoning Log Capture - For Oracle to detect reasoning bugs
-try:
-    from console_metrics_capture import record_reasoning, get_reasoning_capture
-    REASONING_CAPTURE_AVAILABLE = True
-except ImportError:
-    REASONING_CAPTURE_AVAILABLE = False
-    record_reasoning = None
-    get_reasoning_capture = None
-
-# Sequence Miner - Retroactive learning from winning sequences
-try:
-    from sequence_miner import SequenceMiner
-    SEQUENCE_MINER_AVAILABLE = True
-except ImportError:
-    SEQUENCE_MINER_AVAILABLE = False
-    SequenceMiner = None
-
-# Network Knowledge Synthesis - network-level insights
-try:
-    from network_knowledge_synthesis import NetworkKnowledgeSynthesis
-    KNOWLEDGE_SYNTHESIS_AVAILABLE = True
-except ImportError:
-    KNOWLEDGE_SYNTHESIS_AVAILABLE = False
-    NetworkKnowledgeSynthesis = None
-
-logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# PRIMITIVE HELPER - Bridges seed_primitives into gameplay decisions
-# ============================================================================
-class PrimitiveHelper:
-    """
-    Provides easy access to baby-derived cognitive primitives during gameplay.
-    
-    Wraps the seed_primitives registry to provide perception, attention, 
-    and metacognition capabilities for decision-making.
-    """
-    
-    def __init__(self):
-        """Initialize primitive helper with seed primitives registry."""
-        self._registry = None
-        self._initialized = False
-        
-        if PRIMITIVES_AVAILABLE and get_seed_primitives:
-            try:
-                self._registry = get_seed_primitives()
-                self._initialized = True
-                logger.debug("[PRIMITIVES] Primitive helper initialized with seed primitives")
-            except Exception as e:
-                logger.warning(f"[PRIMITIVES] Failed to initialize: {e}")
-    
-    @property
-    def available(self) -> bool:
-        """Check if primitives are available."""
-        return self._initialized and self._registry is not None
-    
-    def analyze_frame_changes(
+    async def _handle_3_try_fallback(
         self,
-        frame_before: List,
-        frame_after: List
-    ) -> Dict[str, Any]:
+        game_state: 'GameState',
+        ranked_sequences: List[Dict],
+        game_id: str,
+        import os
+        os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
         """
-        Use attention primitives to analyze what changed between frames.
-        
-        Returns:
-            Dict with change detection, motion, and attention guidance
+        Core Gameplay Logic
+
+        Provides the fundamental gameplay loop and decision-making logic.
+        Contains only essential game mechanics without architect/governor/director complexity.
+
+        Enhanced with pattern learning (Rule 10: integrated, not new files):
+        - Captures winning sequences
+        - Discovers and reuses patterns
+        - Learns from every game
+
+        Refactored for maintainability (December 2025):
+        - Extracted logical sections into helper methods
+        - _handle_3_try_fallback() - The 3-try sequence system
+        - _handle_sequence_replay_result() - Processing replay success/failure
+        - _run_game_loop() - The main action loop
+        - _handle_level_completion() - Level completion logic
+        - _finalize_game() - End-of-game cleanup and results
         """
-        if not self.available or not self._registry:
-            return {'available': False}
-        
-        try:
-            registry = self._registry
-            changes = registry.call('detect_change', frame_before, frame_after)
-            motion = registry.call('detect_motion', frame_before, frame_after)
-            
-            return {
-                'available': True,
-                'changed_positions': changes or [],
-                'moving_objects': motion or [],
+
+
+        import asyncio
+        import logging
+        import json
+        import uuid
+        ) -> SequenceFallbackResult:
+            async def _handle_3_try_fallback(
+                self,
+                game_state: 'GameState',
+                ranked_sequences: List[Dict],
+                game_id: str,
+                agent_mode: Optional[str]
+            ) -> SequenceFallbackResult:
+                """Execute the 3-try sequence fallback system.
+
+                Try up to 3 sequences in priority order. If one fails:
+                1. Flag it as failing
+                2. Reset the entire game (sequences may target different levels)
+                3. Try the next sequence from level 1
+                4. After 3 failures, use multi-stage matching pipeline
+                5. If pipeline fails, get abstraction guidance for exploration
+                """
+
+                result = SequenceFallbackResult()
+                async def _handle_3_try_fallback(
+                    self,
+                    game_state: 'GameState',
+                    ranked_sequences: List[Dict],
+                    game_id: str,
+                    agent_mode: Optional[str]
+                ) -> SequenceFallbackResult:
+                    """Execute the 3-try sequence fallback system."""
+
+                    result = SequenceFallbackResult()
+                    result.game_state = game_state
+
+                    if not ranked_sequences:
+                        result.all_failed = True
+                        return result
+
+                    for try_num, candidate_sequence in enumerate(ranked_sequences[:3], start=1):
+                        sequence_id = candidate_sequence['sequence_id']
+                        logger.info(
+                            f"[3-TRY] Attempt {try_num}/3: Trying sequence {sequence_id[:12]} "
+                            f"(score {candidate_sequence['total_score']}, {candidate_sequence['total_actions']} actions)"
+                        )
+
+                        validation_check = self.db.execute_query(
+                            """
+                            SELECT successful_validations, total_validation_attempts,
+                                   CAST(successful_validations AS FLOAT) / NULLIF(total_validation_attempts, 0) as success_rate
+                            FROM sequence_reputation
+                            WHERE sequence_id = ?
+                            """,
+                            (sequence_id,)
+                        )
+
+                        if validation_check and validation_check[0]['total_validation_attempts'] >= 3:
+                            sr = validation_check[0]['success_rate'] or 0.0
+                            if sr > 0.5:
+                                logger.info(f"  [PROVEN] {sr:.1%} success rate")
+                            elif sr < 0.3:
+                                logger.warning(f"  [WARN] Low success rate: {sr:.1%}")
+
+                        should_try = True
+                        if agent_mode in ['optimizer', 'exploiter']:
+                            current_network_level = self._get_network_max_level(game_id)
+                            sequence_level = int(candidate_sequence.get('total_score', 0))
+                            if sequence_level >= current_network_level:
+                                pariah_worth = self._analyze_pariah_worthiness(candidate_sequence, game_id)
+                                if not pariah_worth['worth_challenging']:
+                                    logger.info(f"  [SKIP] Pariah not worth challenging: {pariah_worth['reason']}")
+                                    should_try = False
+
+                        if not should_try:
+                            continue
+
+                        try:
+                            assert result.game_state is not None, "game_state must be set before replay"
+
+                            replay_result = await self._replay_sequence_inline(result.game_state, candidate_sequence)
+
+                            if replay_result and replay_result.get('success'):
+                                result.success = True
+                                result.successful_sequence = candidate_sequence
+                                result.game_state = replay_result['game_state']
+
+                                if replay_result.get('reached_frontier'):
+                                    frontier_level = replay_result.get('frontier_level', 'unknown')
+                                    logger.info(
+                                        f"[3-TRY] SUCCESS: {sequence_id[:12]} brought us to frontier Level {frontier_level}!"
+                                    )
+                                    result.reached_frontier = True
+                                    result.frontier_level = frontier_level
+                                else:
+                                    logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
+
+                                self.db.execute_query(
+                                    """UPDATE winning_sequences SET consecutive_failures = 0 WHERE sequence_id = ?""",
+                                    (sequence_id,)
+                                )
+                                return result
+
+                            if replay_result and replay_result.get('reset_detected'):
+                                logger.info(
+                                    f"[3-TRY] Reset detected on attempt {try_num}: {sequence_id[:12]} - NOT penalized"
+                                )
+                            else:
+                                failure_reason = f"replay_failed_attempt_{try_num}"
+                                if replay_result and replay_result.get('game_state'):
+                                    result.game_state = replay_result['game_state']
+                                    failure_reason = f"reached_score_{result.game_state.score}_not_target"
+                                self._flag_sequence_failure(sequence_id, failure_reason)
+                                logger.warning(
+                                    f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}"
+                                )
+
+                            if replay_result and replay_result.get('game_state'):
+                                result.game_state = replay_result['game_state']
+
+                            if try_num < min(3, len(ranked_sequences)):
+                                try:
+                                    logger.info(f"[3-TRY] Resetting GAME for attempt {try_num + 1}...")
+                                    reset_data = await self.session_manager.reset_game()
+                                    result.game_state = GameState.from_dict(reset_data)
+                                    logger.info(
+                                        f"[3-TRY] Game reset complete. New guid, Score: {result.game_state.score}"
+                                    )
+                                except Exception as reset_error:
+                                    logger.warning(
+                                        f"[3-TRY] Game reset failed: {reset_error} - continuing anyway"
+                                    )
+
+                        except ValueError as e:
+                            if "frame corruption" in str(e).lower():
+                                self._flag_sequence_failure(sequence_id, "frame_corruption")
+                                logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
+
+                                if try_num < min(3, len(ranked_sequences)):
+                                    try:
+                                        reset_data = await self.session_manager.reset_game()
+                                        result.game_state = GameState.from_dict(reset_data)
+                                    except Exception:
+                                        pass
+                                continue
+                            raise
+                        except Exception as e:
+                            self._flag_sequence_failure(sequence_id, f"exception: {str(e)[:50]}")
+                            logger.error(f"[3-TRY] Exception on attempt {try_num}: {e}")
+
+                            if try_num < min(3, len(ranked_sequences)):
+                                try:
+                                    reset_data = await self.session_manager.reset_game()
+                                    result.game_state = GameState.from_dict(reset_data)
+                                except Exception:
+                                    pass
+                            continue
+
+                    result.all_failed = True
+                    logger.warning(f"[3-TRY] All {min(3, len(ranked_sequences))} ranked sequence attempts failed")
+
+                    if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
+                        try:
+                            logger.info("[MULTI-STAGE] Trying multi-stage matching pipeline...")
+
+                            try:
+                                reset_data = await self.session_manager.reset_level()
+                                result.game_state = GameState.from_dict(reset_data)
+                            except Exception:
+                                pass
+
+                            current_actions = self.game_config.get('current_actions', [])
+                            agent_config = {
+                                'risk_tolerance': self.game_config.get('risk_tolerance', 0.5),
+                                'abstraction_threshold': self.game_config.get('abstraction_threshold', 0.7)
+                            }
+
+                            sequence_actions, stage_used, metadata = self.matching_pipeline.get_sequence_with_fallback(
+                                game_id=game_id,
+                                level_number=1,
+                                current_actions=current_actions,
+                                agent_config=agent_config
+                            )
+
+                            if sequence_actions and stage_used != 'random':
+                                logger.info(
+                                    f"[MULTI-STAGE] {stage_used.upper()} match found: {len(sequence_actions)} actions, "
+                                    f"confidence {metadata.get('confidence', 0):.2f}"
+                                )
+                                result.multi_stage_sequence = {
+                                    'actions': sequence_actions,
+                                    'stage': stage_used,
+                                    'confidence': metadata.get('confidence', 0)
+                                }
+                            else:
+                                logger.info("[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+
+                        except Exception as e:
+                            logger.debug(f"Multi-stage pipeline error: {e}")
+
+                    if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                        try:
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+
+                            should_use, template = self.abstraction_engine.should_use_template(
+                                game_type,
+                                level_number=1
+                            )  # type: ignore[attr-defined]
+
+                            if should_use and template:
+                                template_actions = self.abstraction_engine.get_template_for_replay(
+                                    game_type,
+                                    level_number=1
+                                )  # type: ignore[attr-defined]
+
+                                if template_actions:
+                                    logger.info(
+                                        f"[TEMPLATE] Using abstract template: {len(template_actions)} actions, "
+                                        f"confidence {template.confidence:.0%}, {len(template.invariant_actions)} invariants"
+                                    )
+                                    result.multi_stage_sequence = {
+                                        'actions': template_actions,
+                                        'stage': 'abstract_template',
+                                        'confidence': template.confidence,
+                                        'template': template
+                                    }
+                        except Exception as e:
+                            logger.debug(f"Abstract template error: {e}")
+
+                    if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                        try:
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            result.abstraction_guidance = self.abstraction_engine.get_conceptual_hints(game_type)  # type: ignore[attr-defined]
+                            if result.abstraction_guidance:
+                                logger.info(
+                                    f"[ABSTRACTION] Using conceptual hints: {result.abstraction_guidance.get('hints', [])[:3]}"
+                                )
+                        except Exception as e:
+                            logger.debug(f"Abstraction guidance error: {e}")
+
+                    return result
+
+                        if "frame corruption" in str(e).lower():
+                            self._flag_sequence_failure(sequence_id, "frame_corruption")
+                            logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
+
+                            if try_num < min(3, len(ranked_sequences)):
+                                try:
+                                    reset_data = await self.session_manager.reset_game()
+                                    result.game_state = GameState.from_dict(reset_data)
+                                except Exception:
+                                    pass
+                            continue
+                        raise
+                    except Exception as e:
+                        self._flag_sequence_failure(sequence_id, f"exception: {str(e)[:50]}")
+                        logger.error(f"[3-TRY] Exception on attempt {try_num}: {e}")
+
+                        if try_num < min(3, len(ranked_sequences)):
+                            try:
+                                reset_data = await self.session_manager.reset_game()
+                                result.game_state = GameState.from_dict(reset_data)
+                            except Exception:
+                                pass
+                        continue
+
+                result.all_failed = True
+                logger.warning(f"[3-TRY] All {min(3, len(ranked_sequences))} ranked sequence attempts failed")
+
+                if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
+                    try:
+                        logger.info("[MULTI-STAGE] Trying multi-stage matching pipeline...")
+
+                        try:
+                            reset_data = await self.session_manager.reset_level()
+                            result.game_state = GameState.from_dict(reset_data)
+                        except Exception:
+                            pass
+
+                        current_actions = self.game_config.get('current_actions', [])
+                        agent_config = {
+                            'risk_tolerance': self.game_config.get('risk_tolerance', 0.5),
+                            'abstraction_threshold': self.game_config.get('abstraction_threshold', 0.7)
+                        }
+
+                        sequence_actions, stage_used, metadata = self.matching_pipeline.get_sequence_with_fallback(
+                            game_id=game_id,
+                            level_number=1,
+                            current_actions=current_actions,
+                            agent_config=agent_config
+                        )
+
+                        if sequence_actions and stage_used != 'random':
+                            logger.info(
+                                f"[MULTI-STAGE] {stage_used.upper()} match found: {len(sequence_actions)} actions, "
+                                f"confidence {metadata.get('confidence', 0):.2f}"
+                            )
+                            result.multi_stage_sequence = {
+                                'actions': sequence_actions,
+                                'stage': stage_used,
+                                'confidence': metadata.get('confidence', 0)
+                            }
+                        else:
+                            logger.info("[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+
+                    except Exception as e:
+                        logger.debug(f"Multi-stage pipeline error: {e}")
+
+                if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                    try:
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+
+                        should_use, template = self.abstraction_engine.should_use_template(
+                            game_type,
+                            level_number=1
+                        )  # type: ignore[attr-defined]
+
+                        if should_use and template:
+                            template_actions = self.abstraction_engine.get_template_for_replay(
+                                game_type,
+                                level_number=1
+                            )  # type: ignore[attr-defined]
+
+                            if template_actions:
+                                logger.info(
+                                    f"[TEMPLATE] Using abstract template: {len(template_actions)} actions, "
+                                    f"confidence {template.confidence:.0%}, {len(template.invariant_actions)} invariants"
+                                )
+                                result.multi_stage_sequence = {
+                                    'actions': template_actions,
+                                    'stage': 'abstract_template',
+                                    'confidence': template.confidence,
+                                    'template': template
+                                }
+                    except Exception as e:
+                        logger.debug(f"Abstract template error: {e}")
+
+                if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                    try:
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                        result.abstraction_guidance = self.abstraction_engine.get_conceptual_hints(game_type)  # type: ignore[attr-defined]
+                        if result.abstraction_guidance:
+                            logger.info(
+                                f"[ABSTRACTION] Using conceptual hints: {result.abstraction_guidance.get('hints', [])[:3]}"
+                            )
+                    except Exception as e:
+                        logger.debug(f"Abstraction guidance error: {e}")
+
+                return result
+                            reset_data = await self.session_manager.reset_game()
+                            result.game_state = GameState.from_dict(reset_data)
+                            logger.info(
+                                f"[3-TRY] Game reset complete. New guid, Score: {result.game_state.score}"
+                            )
+                        except Exception as reset_error:
+                            logger.warning(
+                                f"[3-TRY] Game reset failed: {reset_error} - continuing anyway"
+                            )
+
+                except ValueError as e:
+                    if "frame corruption" in str(e).lower():
+                        self._flag_sequence_failure(sequence_id, "frame_corruption")
+                        logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
+
+                        if try_num < min(3, len(ranked_sequences)):
+                            try:
+                                reset_data = await self.session_manager.reset_game()
+                                result.game_state = GameState.from_dict(reset_data)
+                            except Exception:
+                                pass
+                        continue
+                    raise
+                except Exception as e:
+                    self._flag_sequence_failure(sequence_id, f"exception: {str(e)[:50]}")
+                    logger.error(f"[3-TRY] Exception on attempt {try_num}: {e}")
+
+                    if try_num < min(3, len(ranked_sequences)):
+                        try:
+                            reset_data = await self.session_manager.reset_game()
+                            result.game_state = GameState.from_dict(reset_data)
+                        except Exception:
+                            pass
+                    continue
+
+            result.all_failed = True
+            logger.warning(f"[3-TRY] All {min(3, len(ranked_sequences))} ranked sequence attempts failed")
+
+            if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
+                try:
+                    logger.info("[MULTI-STAGE] Trying multi-stage matching pipeline...")
+
+                    try:
+                        reset_data = await self.session_manager.reset_level()
+                        result.game_state = GameState.from_dict(reset_data)
+                    except Exception:
+                        pass
+
+                    current_actions = self.game_config.get('current_actions', [])
+                    agent_config = {
+                        'risk_tolerance': self.game_config.get('risk_tolerance', 0.5),
+                        'abstraction_threshold': self.game_config.get('abstraction_threshold', 0.7)
+                    }
+
+                    sequence_actions, stage_used, metadata = self.matching_pipeline.get_sequence_with_fallback(
+                        game_id=game_id,
+                        level_number=1,
+                        current_actions=current_actions,
+                        agent_config=agent_config
+                    )
+
+                    if sequence_actions and stage_used != 'random':
+                        logger.info(
+                            f"[MULTI-STAGE] {stage_used.upper()} match found: {len(sequence_actions)} actions, "
+                            f"confidence {metadata.get('confidence', 0):.2f}"
+                        )
+                        result.multi_stage_sequence = {
+                            'actions': sequence_actions,
+                            'stage': stage_used,
+                            'confidence': metadata.get('confidence', 0)
+                        }
+                    else:
+                        logger.info("[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+
+                except Exception as e:
+                    logger.debug(f"Multi-stage pipeline error: {e}")
+
+            if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                try:
+                    game_type = game_id.split('-')[0] if '-' in game_id else game_id
+
+                    should_use, template = self.abstraction_engine.should_use_template(
+                        game_type,
+                        level_number=1
+                    )  # type: ignore[attr-defined]
+
+                    if should_use and template:
+                        template_actions = self.abstraction_engine.get_template_for_replay(
+                            game_type,
+                            level_number=1
+                        )  # type: ignore[attr-defined]
+
+                        if template_actions:
+                            logger.info(
+                                f"[TEMPLATE] Using abstract template: {len(template_actions)} actions, "
+                                f"confidence {template.confidence:.0%}, {len(template.invariant_actions)} invariants"
+                            )
+                            result.multi_stage_sequence = {
+                                'actions': template_actions,
+                                'stage': 'abstract_template',
+                                'confidence': template.confidence,
+                                'template': template
+                            }
+                except Exception as e:
+                    logger.debug(f"Abstract template error: {e}")
+
+            if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                try:
+                    game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                    result.abstraction_guidance = self.abstraction_engine.get_conceptual_hints(game_type)  # type: ignore[attr-defined]
+                    if result.abstraction_guidance:
+                        logger.info(
+                            f"[ABSTRACTION] Using conceptual hints: {result.abstraction_guidance.get('hints', [])[:3]}"
+                        )
+                except Exception as e:
+                    logger.debug(f"Abstraction guidance error: {e}")
+
+            return result
+                            if replay_result and replay_result.get('game_state'):
+                                result.game_state = replay_result['game_state']
+                                failure_reason = f"reached_score_{result.game_state.score}_not_target"
+                            self._flag_sequence_failure(sequence_id, failure_reason)
+                            logger.warning(
+                                f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}"
+                            )
+
+                        if replay_result and replay_result.get('game_state'):
+                            result.game_state = replay_result['game_state']
+
+                        if try_num < min(3, len(ranked_sequences)):
+                            try:
+                                logger.info(f"[3-TRY] Resetting GAME for attempt {try_num + 1}...")
+                                reset_data = await self.session_manager.reset_game()
+                                result.game_state = GameState.from_dict(reset_data)
+                                logger.info(
+                                    f"[3-TRY] Game reset complete. New guid, Score: {result.game_state.score}"
+                                )
+                            except Exception as reset_error:
+                                logger.warning(
+                                    f"[3-TRY] Game reset failed: {reset_error} - continuing anyway"
+                                )
+
+                    except ValueError as e:
+                        if "frame corruption" in str(e).lower():
+                            self._flag_sequence_failure(sequence_id, "frame_corruption")
+                            logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
+
+                            if try_num < min(3, len(ranked_sequences)):
+                                try:
+                                    reset_data = await self.session_manager.reset_game()
+                                    result.game_state = GameState.from_dict(reset_data)
+                                except Exception:
+                                    pass
+                            continue
+                        raise
+                    except Exception as e:
+                        self._flag_sequence_failure(sequence_id, f"exception: {str(e)[:50]}")
+                        logger.error(f"[3-TRY] Exception on attempt {try_num}: {e}")
+
+                        if try_num < min(3, len(ranked_sequences)):
+                            try:
+                                reset_data = await self.session_manager.reset_game()
+                                result.game_state = GameState.from_dict(reset_data)
+                            except Exception:
+                                pass
+                        continue
+
+                result.all_failed = True
+                logger.warning(f"[3-TRY] All {min(3, len(ranked_sequences))} ranked sequence attempts failed")
+
+                if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
+                    try:
+                        logger.info("[MULTI-STAGE] Trying multi-stage matching pipeline...")
+
+                        try:
+                            reset_data = await self.session_manager.reset_level()
+                            result.game_state = GameState.from_dict(reset_data)
+                        except Exception:
+                            pass
+
+                        current_actions = self.game_config.get('current_actions', [])
+                        agent_config = {
+                            'risk_tolerance': self.game_config.get('risk_tolerance', 0.5),
+                            'abstraction_threshold': self.game_config.get('abstraction_threshold', 0.7)
+                        }
+
+                        sequence_actions, stage_used, metadata = self.matching_pipeline.get_sequence_with_fallback(
+                            game_id=game_id,
+                            level_number=1,
+                            current_actions=current_actions,
+                            agent_config=agent_config
+                        )
+
+                        if sequence_actions and stage_used != 'random':
+                            logger.info(
+                                f"[MULTI-STAGE] {stage_used.upper()} match found: {len(sequence_actions)} actions, "
+                                f"confidence {metadata.get('confidence', 0):.2f}"
+                            )
+                            result.multi_stage_sequence = {
+                                'actions': sequence_actions,
+                                'stage': stage_used,
+                                'confidence': metadata.get('confidence', 0)
+                            }
+                        else:
+                            logger.info("[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+
+                    except Exception as e:
+                        logger.debug(f"Multi-stage pipeline error: {e}")
+
+                if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                    try:
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+
+                        should_use, template = self.abstraction_engine.should_use_template(
+                            game_type,
+                            level_number=1
+                        )  # type: ignore[attr-defined]
+
+                        if should_use and template:
+                            template_actions = self.abstraction_engine.get_template_for_replay(
+                                game_type,
+                                level_number=1
+                            )  # type: ignore[attr-defined]
+
+                            if template_actions:
+                                logger.info(
+                                    f"[TEMPLATE] Using abstract template: {len(template_actions)} actions, "
+                                    f"confidence {template.confidence:.0%}, {len(template.invariant_actions)} invariants"
+                                )
+                                result.multi_stage_sequence = {
+                                    'actions': template_actions,
+                                    'stage': 'abstract_template',
+                                    'confidence': template.confidence,
+                                    'template': template
+                                }
+                    except Exception as e:
+                        logger.debug(f"Abstract template error: {e}")
+
+                if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                    try:
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                        result.abstraction_guidance = self.abstraction_engine.get_conceptual_hints(game_type)  # type: ignore[attr-defined]
+                        if result.abstraction_guidance:
+                            logger.info(
+                                f"[ABSTRACTION] Using conceptual hints: {result.abstraction_guidance.get('hints', [])[:3]}"
+                            )
+                    except Exception as e:
+                        logger.debug(f"Abstraction guidance error: {e}")
+
+                return result
+                            reset_data = await self.session_manager.reset_game()
+                            result.game_state = GameState.from_dict(reset_data)
+                            logger.info(
+                                f"[3-TRY] Game reset complete. New guid, Score: {result.game_state.score}"
+                            )
+                        except Exception as reset_error:
+                            logger.warning(
+                                f"[3-TRY] Game reset failed: {reset_error} - continuing anyway"
+                            )
+
+                except ValueError as e:
+                    if "frame corruption" in str(e).lower():
+                        self._flag_sequence_failure(sequence_id, "frame_corruption")
+                        logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
+
+                        if try_num < min(3, len(ranked_sequences)):
+                            try:
+                                reset_data = await self.session_manager.reset_game()
+                                result.game_state = GameState.from_dict(reset_data)
+                            except Exception:
+                                pass
+                        continue
+                    raise
+                except Exception as e:
+                    self._flag_sequence_failure(sequence_id, f"exception: {str(e)[:50]}")
+                    logger.error(f"[3-TRY] Exception on attempt {try_num}: {e}")
+
+                    if try_num < min(3, len(ranked_sequences)):
+                        try:
+                            reset_data = await self.session_manager.reset_game()
+                            result.game_state = GameState.from_dict(reset_data)
+                        except Exception:
+                            pass
+                    continue
+
+            result.all_failed = True
+            logger.warning(f"[3-TRY] All {min(3, len(ranked_sequences))} ranked sequence attempts failed")
+
+            if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
+                try:
+                    logger.info("[MULTI-STAGE] Trying multi-stage matching pipeline...")
+
+                    try:
+                        reset_data = await self.session_manager.reset_level()
+                        result.game_state = GameState.from_dict(reset_data)
+                    except Exception:
+                        pass
+
+                    current_actions = self.game_config.get('current_actions', [])
+                    agent_config = {
+                        'risk_tolerance': self.game_config.get('risk_tolerance', 0.5),
+                        'abstraction_threshold': self.game_config.get('abstraction_threshold', 0.7)
+                    }
+
+                    sequence_actions, stage_used, metadata = self.matching_pipeline.get_sequence_with_fallback(
+                        game_id=game_id,
+                        level_number=1,
+                        current_actions=current_actions,
+                        agent_config=agent_config
+                    )
+
+                    if sequence_actions and stage_used != 'random':
+                        logger.info(
+                            f"[MULTI-STAGE] {stage_used.upper()} match found: {len(sequence_actions)} actions, "
+                            f"confidence {metadata.get('confidence', 0):.2f}"
+                        )
+                        result.multi_stage_sequence = {
+                            'actions': sequence_actions,
+                            'stage': stage_used,
+                            'confidence': metadata.get('confidence', 0)
+                        }
+                    else:
+                        logger.info("[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+
+                except Exception as e:
+                    logger.debug(f"Multi-stage pipeline error: {e}")
+
+            if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                try:
+                    game_type = game_id.split('-')[0] if '-' in game_id else game_id
+
+                    should_use, template = self.abstraction_engine.should_use_template(
+                        game_type,
+                        level_number=1
+                    )  # type: ignore[attr-defined]
+
+                    if should_use and template:
+                        template_actions = self.abstraction_engine.get_template_for_replay(
+                            game_type,
+                            level_number=1
+                        )  # type: ignore[attr-defined]
+
+                        if template_actions:
+                            logger.info(
+                                f"[TEMPLATE] Using abstract template: {len(template_actions)} actions, "
+                                f"confidence {template.confidence:.0%}, {len(template.invariant_actions)} invariants"
+                            )
+                            result.multi_stage_sequence = {
+                                'actions': template_actions,
+                                'stage': 'abstract_template',
+                                'confidence': template.confidence,
+                                'template': template
+                            }
+                except Exception as e:
+                    logger.debug(f"Abstract template error: {e}")
+
+            if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                try:
+                    game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                    result.abstraction_guidance = self.abstraction_engine.get_conceptual_hints(game_type)  # type: ignore[attr-defined]
+                    if result.abstraction_guidance:
+                        logger.info(
+                            f"[ABSTRACTION] Using conceptual hints: {result.abstraction_guidance.get('hints', [])[:3]}"
+                        )
+                except Exception as e:
+                    logger.debug(f"Abstraction guidance error: {e}")
+
+            return result
                 'has_changes': bool(changes),
                 'has_motion': bool(motion)
             }
@@ -3614,99 +4148,224 @@ class GameplayEngine:
                 try:
                     session_id = self.session_manager.current_session_id
                     current_game_id = self.session_manager.current_game_id
-                    current_level = game_state.score + 1  # Estimate level from score
-                    
-                    if session_id and current_game_id:
-                        game_type = current_game_id.split('-')[0] if '-' in current_game_id else current_game_id
-                        
-                        # Check what's currently selected
-                        current_selection = self.agent_self_model.get_current_selection(
-                            session_id, current_game_id, current_level
-                        )
-                        
-                        # Query known selectable objects for this game/level
-                        selectable_objects = self.agent_self_model.get_selectable_objects(
-                            game_type=game_type,
-                            level=current_level,
-                            min_confidence=0.6
-                        )
-                        
-                        if selectable_objects and not current_selection:
-                            # Network knows about selectable objects, but nothing is selected!
-                            # Recommend selecting an object before trying to move
-                            best_selectable = selectable_objects[0]
-                            
-                            # Parse coordinates to get click target
-                            coords_str = best_selectable.get('coordinates', '')
-                            if coords_str and '(' in coords_str:
+                """Execute the 3-try sequence fallback system.
+
+                Try up to 3 sequences in priority order. If one fails:
+                1. Flag it as failing
+                2. Reset the entire game (sequences may target different levels)
+                3. Try the next sequence from level 1
+                4. After 3 failures, use multi-stage matching pipeline
+                5. If pipeline fails, get abstraction guidance for exploration
+                """
+
+                result = SequenceFallbackResult()
+                result.game_state = game_state
+
+                if not ranked_sequences:
+                    result.all_failed = True
+                    return result
+
+                for try_num, candidate_sequence in enumerate(ranked_sequences[:3], start=1):
+                    sequence_id = candidate_sequence['sequence_id']
+                    logger.info(
+                        f"[3-TRY] Attempt {try_num}/3: Trying sequence {sequence_id[:12]} "
+                        f"(score {candidate_sequence['total_score']}, {candidate_sequence['total_actions']} actions)"
+                    )
+
+                    validation_check = self.db.execute_query(
+                        """
+                        SELECT successful_validations, total_validation_attempts,
+                               CAST(successful_validations AS FLOAT) / NULLIF(total_validation_attempts, 0) as success_rate
+                        FROM sequence_reputation
+                        WHERE sequence_id = ?
+                        """,
+                        (sequence_id,)
+                    )
+
+                    if validation_check and validation_check[0]['total_validation_attempts'] >= 3:
+                        sr = validation_check[0]['success_rate'] or 0.0
+                        if sr > 0.5:
+                            logger.info(f"  [PROVEN] {sr:.1%} success rate")
+                        elif sr < 0.3:
+                            logger.warning(f"  [WARN] Low success rate: {sr:.1%}")
+
+                    should_try = True
+                    if agent_mode in ['optimizer', 'exploiter']:
+                        current_network_level = self._get_network_max_level(game_id)
+                        sequence_level = int(candidate_sequence.get('total_score', 0))
+                        if sequence_level >= current_network_level:
+                            pariah_worth = self._analyze_pariah_worthiness(candidate_sequence, game_id)
+                            if not pariah_worth['worth_challenging']:
+                                logger.info(f"  [SKIP] Pariah not worth challenging: {pariah_worth['reason']}")
+                                should_try = False
+
+                    if not should_try:
+                        continue
+
+                    try:
+                        assert result.game_state is not None, "game_state must be set before replay"
+
+                        replay_result = await self._replay_sequence_inline(result.game_state, candidate_sequence)
+
+                        if replay_result and replay_result.get('success'):
+                            result.success = True
+                            result.successful_sequence = candidate_sequence
+                            result.game_state = replay_result['game_state']
+
+                            if replay_result.get('reached_frontier'):
+                                frontier_level = replay_result.get('frontier_level', 'unknown')
+                                logger.info(
+                                    f"[3-TRY] SUCCESS: {sequence_id[:12]} brought us to frontier Level {frontier_level}!"
+                                )
+                                result.reached_frontier = True
+                                result.frontier_level = frontier_level
+                            else:
+                                logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
+
+                            self.db.execute_query(
+                                """UPDATE winning_sequences SET consecutive_failures = 0 WHERE sequence_id = ?""",
+                                (sequence_id,)
+                            )
+                            return result
+
+                        if replay_result and replay_result.get('reset_detected'):
+                            logger.info(
+                                f"[3-TRY] Reset detected on attempt {try_num}: {sequence_id[:12]} - NOT penalized"
+                            )
+                        else:
+                            failure_reason = f"replay_failed_attempt_{try_num}"
+                            if replay_result and replay_result.get('game_state'):
+                                result.game_state = replay_result['game_state']
+                                failure_reason = f"reached_score_{result.game_state.score}_not_target"
+                            self._flag_sequence_failure(sequence_id, failure_reason)
+                            logger.warning(
+                                f"[3-TRY] FAILED attempt {try_num}: {sequence_id[:12]} - {failure_reason}"
+                            )
+
+                        if replay_result and replay_result.get('game_state'):
+                            result.game_state = replay_result['game_state']
+
+                        if try_num < min(3, len(ranked_sequences)):
+                            try:
+                                logger.info(f"[3-TRY] Resetting GAME for attempt {try_num + 1}...")
+                                reset_data = await self.session_manager.reset_game()
+                                result.game_state = GameState.from_dict(reset_data)
+                                logger.info(
+                                    f"[3-TRY] Game reset complete. New guid, Score: {result.game_state.score}"
+                                )
+                            except Exception as reset_error:
+                                logger.warning(
+                                    f"[3-TRY] Game reset failed: {reset_error} - continuing anyway"
+                                )
+
+                    except ValueError as e:
+                        if "frame corruption" in str(e).lower():
+                            self._flag_sequence_failure(sequence_id, "frame_corruption")
+                            logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
+
+                            if try_num < min(3, len(ranked_sequences)):
                                 try:
-                                    # Parse "(x,y)" format
-                                    coords_str = coords_str.strip('()')
-                                    x_str, y_str = coords_str.split(',')
-                                    target_x, target_y = int(x_str), int(y_str)
-                                    
-                                    # VALIDATE: Check coordinates against CURRENT frame bounds
-                                    # API can return incomplete frames - don't use stale network coords
-                                    frame = game_state.frame
-                                    if frame and len(frame) > 0 and len(frame[0]) > 0:
-                                        frame_height = len(frame)
-                                        frame_width = len(frame[0])
-                                        if target_y >= frame_height or target_x >= frame_width:
-                                            logger.warning(
-                                                f"[SELECTION] Network coords ({target_x},{target_y}) invalid for "
-                                                f"frame {frame_height}x{frame_width} - skipping stale knowledge"
-                                            )
-                                            # Don't use invalid coordinates - fall through to other logic
-                                        else:
-                                            # Coordinates valid - use them
-                                            self._selection_target = {
-                                                'x': target_x,
-                                                'y': target_y,
-                                                'object_color': best_selectable['object_color']
-                                            }
-                                            
-                                            reasoning = (
-                                                f"Selection required: Clicking on selectable object "
-                                                f"(color {best_selectable['object_color']}) at ({target_x},{target_y}) "
-                                                f"before movement"
-                                            )
-                                            logger.info(f"[SELECTION] {reasoning}")
-                                            return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')
-                                except (ValueError, IndexError):
-                                    pass  # Could not parse coordinates
-                        
-                        # ===================================================================
-                        # SHAPE-BASED FRONTIER EXPLORATION (Added 2025-12-27)
-                        # ===================================================================
-                        # On frontier levels, use shape generalization:
-                        # If we know "horizontal bars are selectable" from previous levels,
-                        # enumerate ALL horizontal bars on this level and try clicking each.
-                        # ===================================================================
-                        is_frontier = self._is_frontier_level(current_game_id, current_level)
-                        
-                        if is_frontier and not current_selection:
-                            # Get tried colors this session (to avoid re-clicking same objects)
-                            tried_colors = getattr(self, '_frontier_tried_colors', {}).get(
-                                f"{current_game_id}_{current_level}", []
+                                    reset_data = await self.session_manager.reset_game()
+                                    result.game_state = GameState.from_dict(reset_data)
+                                except Exception:
+                                    pass
+                            continue
+                        raise
+                    except Exception as e:
+                        self._flag_sequence_failure(sequence_id, f"exception: {str(e)[:50]}")
+                        logger.error(f"[3-TRY] Exception on attempt {try_num}: {e}")
+
+                        if try_num < min(3, len(ranked_sequences)):
+                            try:
+                                reset_data = await self.session_manager.reset_game()
+                                result.game_state = GameState.from_dict(reset_data)
+                            except Exception:
+                                pass
+                        continue
+
+                result.all_failed = True
+                logger.warning(f"[3-TRY] All {min(3, len(ranked_sequences))} ranked sequence attempts failed")
+
+                if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
+                    try:
+                        logger.info("[MULTI-STAGE] Trying multi-stage matching pipeline...")
+
+                        try:
+                            reset_data = await self.session_manager.reset_level()
+                            result.game_state = GameState.from_dict(reset_data)
+                        except Exception:
+                            pass
+
+                        current_actions = self.game_config.get('current_actions', [])
+                        agent_config = {
+                            'risk_tolerance': self.game_config.get('risk_tolerance', 0.5),
+                            'abstraction_threshold': self.game_config.get('abstraction_threshold', 0.7)
+                        }
+
+                        sequence_actions, stage_used, metadata = self.matching_pipeline.get_sequence_with_fallback(
+                            game_id=game_id,
+                            level_number=1,
+                            current_actions=current_actions,
+                            agent_config=agent_config
+                        )
+
+                        if sequence_actions and stage_used != 'random':
+                            logger.info(
+                                f"[MULTI-STAGE] {stage_used.upper()} match found: {len(sequence_actions)} actions, "
+                                f"confidence {metadata.get('confidence', 0):.2f}"
                             )
-                            
-                            # Query shape-based objects to try
-                            objects_to_try = self.agent_self_model.get_untried_objects_for_frontier(
-                                game_type=game_type,
-                                level=current_level,
-                                frame=game_state.frame,
-                                tried_colors=tried_colors
+                            result.multi_stage_sequence = {
+                                'actions': sequence_actions,
+                                'stage': stage_used,
+                                'confidence': metadata.get('confidence', 0)
+                            }
+                        else:
+                            logger.info("[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+
+                    except Exception as e:
+                        logger.debug(f"Multi-stage pipeline error: {e}")
+
+                if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                    try:
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+
+                        should_use, template = self.abstraction_engine.should_use_template(
+                            game_type,
+                            level_number=1
+                        )  # type: ignore[attr-defined]
+
+                        if should_use and template:
+                            template_actions = self.abstraction_engine.get_template_for_replay(
+                                game_type,
+                                level_number=1
+                            )  # type: ignore[attr-defined]
+
+                            if template_actions:
+                                logger.info(
+                                    f"[TEMPLATE] Using abstract template: {len(template_actions)} actions, "
+                                    f"confidence {template.confidence:.0%}, {len(template.invariant_actions)} invariants"
+                                )
+                                result.multi_stage_sequence = {
+                                    'actions': template_actions,
+                                    'stage': 'abstract_template',
+                                    'confidence': template.confidence,
+                                    'template': template
+                                }
+                    except Exception as e:
+                        logger.debug(f"Abstract template error: {e}")
+
+                if not result.multi_stage_sequence and hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                    try:
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                        result.abstraction_guidance = self.abstraction_engine.get_conceptual_hints(game_type)  # type: ignore[attr-defined]
+                        if result.abstraction_guidance:
+                            logger.info(
+                                f"[ABSTRACTION] Using conceptual hints: {result.abstraction_guidance.get('hints', [])[:3]}"
                             )
-                            
-                            if objects_to_try:
-                                # Pick the first untried object
-                                next_object = objects_to_try[0]
-                                target_x, target_y = next_object['center']
-                                
-                                # Track that we're trying this color
-                                if not hasattr(self, '_frontier_tried_colors'):
-                                    self._frontier_tried_colors = {}
-                                key = f"{current_game_id}_{current_level}"
+                    except Exception as e:
+                        logger.debug(f"Abstraction guidance error: {e}")
+
+                return result
                                 if key not in self._frontier_tried_colors:
                                     self._frontier_tried_colors[key] = []
                                 self._frontier_tried_colors[key].append(next_object['color'])
