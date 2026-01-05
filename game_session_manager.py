@@ -499,7 +499,18 @@ class GameSessionManager:
                     'action': action,
                     'state': game_state.state,
                     'available_actions': game_state.available_actions
-                }
+                },
+                # Optional imagination/telemetry (passed through kwargs when available)
+                'budget_total': kwargs.get('budget_total'),
+                'budget_spend': kwargs.get('budget_spend'),
+                'context_mode': kwargs.get('context_mode'),
+                'grounding_score': kwargs.get('grounding_score'),
+                'question_tier': kwargs.get('question_tier'),
+                'persona_proposal_count': kwargs.get('persona_proposal_count'),
+                'counterfactual_rollouts_used': kwargs.get('counterfactual_rollouts_used'),
+                'synthesis_enabled': kwargs.get('synthesis_enabled'),
+                'existential_mode_active': kwargs.get('existential_mode_active'),
+                'imagination_unlock_event': kwargs.get('imagination_unlock_event'),
             })
 
             # Save score

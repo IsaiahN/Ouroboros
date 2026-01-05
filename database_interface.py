@@ -930,7 +930,21 @@ class DatabaseInterface:
             except Exception:
                 pass
 
+        # Imagination telemetry (optional fields, used if columns are present)
+        budget_total = trace_data.get('budget_total')
+        budget_spend = trace_data.get('budget_spend')
+        context_mode = trace_data.get('context_mode')
+        grounding_score = trace_data.get('grounding_score')
+        question_tier = trace_data.get('question_tier')
+        persona_proposal_count = trace_data.get('persona_proposal_count')
+        counterfactual_rollouts_used = trace_data.get('counterfactual_rollouts_used')
+        synthesis_enabled = trace_data.get('synthesis_enabled')
+        existential_mode_active = trace_data.get('existential_mode_active')
+        imagination_unlock_event = trace_data.get('imagination_unlock_event')
+
         with self._get_connection() as conn:
+            # Ensure new telemetry columns exist before inserting
+            self._ensure_action_trace_columns(conn)
             # Try with frame_hash column (new schema)
             try:
                 conn.execute("""
@@ -938,8 +952,11 @@ class DatabaseInterface:
                         session_id, game_id, action_number, coordinates,
                         timestamp, frame_before, frame_after, frame_changed,
                         score_before, score_after, score_change, response_data,
-                        level_number, resulted_in_game_over, frame_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        level_number, resulted_in_game_over, frame_hash,
+                        budget_total, budget_spend, context_mode, grounding_score,
+                        question_tier, persona_proposal_count, counterfactual_rollouts_used,
+                        synthesis_enabled, existential_mode_active, imagination_unlock_event
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     trace_data['session_id'],
                     trace_data['game_id'],
@@ -955,19 +972,33 @@ class DatabaseInterface:
                     json.dumps(trace_data.get('response_data')) if trace_data.get('response_data') else None,
                     trace_data.get('level_number', 1),  # Default to level 1 if not specified
                     trace_data.get('resulted_in_game_over', False),  # Q5: terminal failure tracking
-                    frame_hash  # State signature for context-aware queries
+                    frame_hash,  # State signature for context-aware queries
+                    budget_total,
+                    budget_spend,
+                    context_mode,
+                    grounding_score,
+                    question_tier,
+                    persona_proposal_count,
+                    counterfactual_rollouts_used,
+                    synthesis_enabled,
+                    existential_mode_active,
+                    imagination_unlock_event
                 ))
             except sqlite3.OperationalError:
                 # Column doesn't exist yet - add it and retry
                 try:
                     conn.execute("ALTER TABLE action_traces ADD COLUMN frame_hash TEXT")
+                    self._ensure_action_trace_columns(conn)
                     conn.execute("""
                         INSERT INTO action_traces (
                             session_id, game_id, action_number, coordinates,
                             timestamp, frame_before, frame_after, frame_changed,
                             score_before, score_after, score_change, response_data,
-                            level_number, resulted_in_game_over, frame_hash
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            level_number, resulted_in_game_over, frame_hash,
+                            budget_total, budget_spend, context_mode, grounding_score,
+                            question_tier, persona_proposal_count, counterfactual_rollouts_used,
+                            synthesis_enabled, existential_mode_active, imagination_unlock_event
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         trace_data['session_id'],
                         trace_data['game_id'],
@@ -983,7 +1014,17 @@ class DatabaseInterface:
                         json.dumps(trace_data.get('response_data')) if trace_data.get('response_data') else None,
                         trace_data.get('level_number', 1),
                         trace_data.get('resulted_in_game_over', False),
-                        frame_hash
+                        frame_hash,
+                        budget_total,
+                        budget_spend,
+                        context_mode,
+                        grounding_score,
+                        question_tier,
+                        persona_proposal_count,
+                        counterfactual_rollouts_used,
+                        synthesis_enabled,
+                        existential_mode_active,
+                        imagination_unlock_event
                     ))
                 except Exception:
                     # Fall back to old schema without frame_hash
@@ -1011,6 +1052,34 @@ class DatabaseInterface:
                         trace_data.get('resulted_in_game_over', False)
                     ))
             conn.commit()
+
+    def _ensure_action_trace_columns(self, conn: sqlite3.Connection) -> None:
+        """Ensure action_traces has imagination telemetry columns."""
+        try:
+            cursor = conn.execute("PRAGMA table_info(action_traces)")
+            existing = {row[1] for row in cursor.fetchall()}
+            columns = [
+                ("budget_total", "REAL"),
+                ("budget_spend", "REAL"),
+                ("context_mode", "TEXT"),
+                ("grounding_score", "REAL"),
+                ("question_tier", "TEXT"),
+                ("persona_proposal_count", "INTEGER"),
+                ("counterfactual_rollouts_used", "INTEGER"),
+                ("synthesis_enabled", "BOOLEAN"),
+                ("existential_mode_active", "BOOLEAN"),
+                ("imagination_unlock_event", "TEXT"),
+            ]
+            for name, ddl_type in columns:
+                if name not in existing:
+                    try:
+                        conn.execute(f"ALTER TABLE action_traces ADD COLUMN {name} {ddl_type}")
+                    except Exception:
+                        # Ignore if concurrent migration added it or if locked; best-effort
+                        pass
+        except Exception:
+            # If pragma fails, do nothing to avoid raising during logging
+            pass
 
     def get_action_traces(self, session_id: Optional[str] = None, game_id: Optional[str] = None,
                          limit: int = 1000) -> List[Dict[str, Any]]:

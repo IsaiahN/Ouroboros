@@ -1651,6 +1651,29 @@ class AgentSelfModel:
             'level': level,
             'game_id': game_id,
         }
+
+    def compute_grounding_score(
+        self,
+        control_confidence: Optional[float] = None,
+        selection_verification_rate: Optional[float] = None
+    ) -> float:
+        """Compute a lightweight grounding score for imagination budgets.
+
+        Uses available control/selection signals when present, otherwise
+        returns a neutral score of 1.0. Clamped to avoid runaway multipliers.
+        """
+
+        scores: List[float] = []
+        if control_confidence is not None:
+            scores.append(float(control_confidence))
+        if selection_verification_rate is not None:
+            scores.append(float(selection_verification_rate))
+
+        if not scores:
+            return 1.0
+
+        avg_score = sum(scores) / len(scores)
+        return max(0.3, min(avg_score, 1.5))
     
     # ========================================================================
     # SYSTEMATIC OBJECT CONTROL DISCOVERY

@@ -27,6 +27,7 @@ import logging
 import json
 import uuid
 import random
+import math
 
 # Local types
 from run_context import RunContext, BudgetState
@@ -57,6 +58,7 @@ from agent_self_model import (
     AgentHypothesisSystem,
     MetacognitiveReasoningEngine,
 )
+from imagination_budget import compute_mental_modeling_budget
 from persona_runtime import PersonaManager
 from counterfactual_analyzer import CounterfactualAnalyzer
 from object_detector import ObjectDetector
@@ -470,7 +472,6 @@ class SpineEmitter:
                 w_A,
                 w_B,
                 w_R,
-                scorecard_id,
             ),
         )
 
@@ -716,6 +717,11 @@ class GameplayEngine:
         # Metacognitive Reasoning: Scientific hypothesis testing and theory revision
         # Implements: assumptions, predictions, theory revision, failure analysis, elimination
         self.metacognitive_engine = MetacognitiveReasoningEngine(self.db)
+
+        # Imagination/mental-modeling context (per-step telemetry cache)
+        self._imagination_ctx: Dict[str, Any] = {}
+        self._imagination_budget_remaining: Optional[float] = None
+        self._imagination_budget_start: Optional[float] = None
 
         # Reflex-level action viability cache (pre-concept gate)
         self._action_viability_stats: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
@@ -2757,6 +2763,11 @@ class GameplayEngine:
             Game results dictionary
         """
         logger.info(f"Starting game: {game_id}" + (f" (agent: {agent_id})" if agent_id else ""))
+
+        # Reset per-game imagination context cache
+        self._imagination_ctx = {}
+        self._imagination_budget_remaining = None
+        self._imagination_budget_start = None
 
         # REPLAY VALIDATION: consume replay_index pointer instead of live play
         mode_for_spine = self.game_config.get('mode', 'LIVE')
@@ -6301,6 +6312,113 @@ class GameplayEngine:
             logger.debug("Observer flag computation failed (non-critical)")
         return flags
 
+    def _estimate_imagination_spend(
+        self,
+        *,
+        budget_total: Optional[float],
+        persona_count: Optional[int],
+        cf_rollouts: Optional[int],
+        synthesis_enabled: Optional[bool],
+    ) -> Optional[float]:
+        """Lightweight heuristic for how much imagination budget was actually consumed."""
+        spend = 0.0
+        try:
+            if persona_count:
+                spend += 0.05 * float(persona_count)
+            if cf_rollouts:
+                spend += 0.02 * float(cf_rollouts)
+            if synthesis_enabled:
+                spend += 0.1
+            if budget_total is not None and math.isfinite(budget_total):
+                spend = min(budget_total, spend)
+        except Exception:
+            logger.debug("Imagination spend estimation failed (non-critical)")
+        return spend if spend > 0 else None
+
+    def _allow_imagination(self, amount: float) -> bool:
+        """Check if local budget allows a spend without central coordination."""
+        if amount <= 0:
+            return True
+        if self._imagination_budget_remaining is None:
+            return True
+        return self._imagination_budget_remaining >= amount
+
+    def _consume_imagination(self, amount: float) -> None:
+        """Consume from local imagination budget if finite."""
+        if amount <= 0:
+            return
+        if self._imagination_budget_remaining is None:
+            return
+        self._imagination_budget_remaining = max(0.0, self._imagination_budget_remaining - amount)
+
+    def _imagination_budget_used(self) -> Optional[float]:
+        """Return how much budget has been spent this step."""
+        if self._imagination_budget_start is None or self._imagination_budget_remaining is None:
+            return None
+        return max(0.0, self._imagination_budget_start - self._imagination_budget_remaining)
+
+    def _compute_imagination_context(self, game_state: GameState, current_level: int) -> Dict[str, Any]:
+        """Derive per-step imagination/mental-modeling context and cache for reasoning payloads."""
+        context_mode = 'exploration'
+        is_frontier_level = False
+        try:
+            current_game_id = getattr(self.session_manager, 'current_game_id', None)
+            if current_game_id:
+                is_frontier_level = self._is_frontier_level(current_game_id, current_level)
+        except Exception:
+            is_frontier_level = False
+        if not is_frontier_level and not getattr(self, '_is_stuck', False):
+            context_mode = 'exploitation'
+
+        generation = self.game_config.get('generation', 0)
+        performance_percentile = self.game_config.get('performance_percentile', 0.0)
+        stage_val = getattr(self, '_current_stage', 1) or 1
+        question_tier = getattr(self, '_last_question_tier', None)
+        grounding_score = None
+        if hasattr(self, 'agent_self_model') and self.agent_self_model:
+            try:
+                grounding_score = self.agent_self_model.compute_grounding_score()
+            except Exception:
+                grounding_score = None
+
+        budget_components = compute_mental_modeling_budget(
+            generation=generation,
+            performance_percentile=performance_percentile,
+            stage=stage_val,
+            context_mode=context_mode,
+            question_tier=question_tier,
+            grounding_score=grounding_score,
+        )
+
+        budget_total_raw = budget_components.get('budget_total')
+        budget_total = budget_total_raw if (budget_total_raw is not None and math.isfinite(budget_total_raw)) else None
+
+        # Initialize local per-step budget trackers (decentralized guard)
+        self._imagination_budget_start = budget_total
+        self._imagination_budget_remaining = budget_total
+
+        budget_spend = self._estimate_imagination_spend(
+            budget_total=budget_total,
+            persona_count=getattr(self, '_last_persona_proposal_count', None),
+            cf_rollouts=getattr(self, '_last_counterfactual_rollouts_used', None),
+            synthesis_enabled=getattr(self, '_last_synthesis_enabled', None),
+        )
+
+        self._imagination_ctx = {
+            'budget_total': budget_total,
+            'context_mode': context_mode,
+            'grounding_score': grounding_score,
+            'question_tier': question_tier,
+        }
+
+        return {
+            'budget_total': budget_total,
+            'budget_spend': budget_spend,
+            'context_mode': context_mode,
+            'grounding_score': grounding_score,
+            'question_tier': question_tier,
+        }
+
     # ================================================================
     # PERSONA SUBMODELING HELPERS
     # ================================================================
@@ -6367,6 +6485,22 @@ class GameplayEngine:
         if not self.persona_manager:
             return
         try:
+            self._last_synthesis_enabled = bool(enable_synthesis)
+
+            max_proposals = None
+            try:
+                if self._imagination_budget_remaining is not None:
+                    proposal_unit_cost = 0.05
+                    synthesis_cost = 0.1 if enable_synthesis else 0.0
+                    remaining_after_synthesis = max(0.0, self._imagination_budget_remaining - synthesis_cost)
+                    if proposal_unit_cost > 0:
+                        derived_limit = int(remaining_after_synthesis // proposal_unit_cost)
+                        if derived_limit <= 0:
+                            derived_limit = 1
+                        max_proposals = derived_limit
+            except Exception:
+                max_proposals = None
+
             decision = self.persona_manager.record_from_ladder(
                 ladder_trace,
                 chosen_action=chosen_action,
@@ -6379,7 +6513,31 @@ class GameplayEngine:
                 problem_signature=persona_context.get('problem_signature'),
                 self_identity_snapshot=persona_context.get('self_identity_snapshot'),
                 enable_synthesis=enable_synthesis,
+                max_proposals=max_proposals,
             )
+
+            try:
+                proposal_count = None
+                if isinstance(decision, dict):
+                    proposal_count = decision.get('proposal_count')
+                    proposals_logged = decision.get('logged')
+                else:
+                    proposals_logged = None
+                self._last_persona_proposal_count = proposal_count if proposal_count is not None else (len(proposals_logged) if proposals_logged else len(ladder_trace))
+            except Exception:
+                self._last_persona_proposal_count = None
+
+            try:
+                spend = 0.0
+                if self._last_persona_proposal_count:
+                    spend += 0.05 * float(self._last_persona_proposal_count)
+                if enable_synthesis:
+                    spend += 0.1
+                if spend:
+                    self._consume_imagination(spend)
+            except Exception:
+                logger.debug("Persona budget consumption failed (non-critical)")
+
             self._last_persona_decision = decision
         except Exception as exc:
             logger.debug(f"Persona dialogue log failed (non-critical): {exc}")
@@ -6475,6 +6633,9 @@ class GameplayEngine:
         self._last_theory_hint = {}
         self._last_cods_confidence = None
         self._last_cods_operator = None
+        self._last_persona_proposal_count = None
+        self._last_counterfactual_rollouts_used = None
+        self._last_synthesis_enabled = None
         self._last_micro_cf_proposals = []
         try:
             if hasattr(self, 'cognitive_stage_system') and self.cognitive_stage_system and self.game_config.get('agent_id'):
@@ -6485,6 +6646,7 @@ class GameplayEngine:
             self._current_stage = None
         allow_observers = (self._current_stage or 0) >= 2
         allow_synthesis = (self._current_stage or 0) >= 3
+        self._last_synthesis_enabled = allow_synthesis
         if allow_synthesis:
             ladder_trace['synthesis'] = {'status': 'pending', 'reason': 'synthesis candidate', 'persona_type': 'synthesis'}
         if hasattr(self, 'science_engine') and self.science_engine:
@@ -6629,6 +6791,14 @@ class GameplayEngine:
                 flags = self._compute_observer_flags(game_state, loop_state_obj) if observer_personas_active and loop_state_obj else {}
                 self._last_observer_flags = flags or {}
                 local_enable_synthesis = allow_synthesis and not (self._last_observer_flags.get('veto_unsafe') or False)
+                try:
+                    synth_cost = 0.1
+                    if self._imagination_budget_remaining is not None and self._imagination_budget_remaining < synth_cost:
+                        local_enable_synthesis = False
+                        if 'synthesis' in ladder_trace:
+                            ladder_trace['synthesis'].update({'status': 'skipped', 'reason': 'synthesis budget exhausted'})
+                except Exception:
+                    pass
                 budget_pressure = 0.0
                 try:
                     if hasattr(self, 'loop_state') and getattr(self.loop_state, 'action_count', None):
@@ -6748,7 +6918,7 @@ class GameplayEngine:
                         ladder_trace[rk]['score'] = scores[rk]
                 # Optional synthesis scoring over top two rungs (non-noop)
                 try:
-                    if allow_synthesis and not (self._last_observer_flags.get('veto_unsafe') or False):
+                    if allow_synthesis and local_enable_synthesis and not (self._last_observer_flags.get('veto_unsafe') or False):
                         scored_non_noop = [(n, s) for n, s in scores.items() if n not in ('noop', 'synthesis')]
                         top_two = sorted(scored_non_noop, key=lambda t: t[1], reverse=True)[:2]
                         if len(top_two) == 2:
@@ -7004,11 +7174,27 @@ class GameplayEngine:
 
         if persona_stage_ok and hasattr(self, 'counterfactual_analyzer') and self.counterfactual_analyzer and game_state.frame:
             try:
+                cf_unit_cost = 0.02
+                max_rollouts = None
+                try:
+                    if self._imagination_budget_remaining is not None and cf_unit_cost > 0:
+                        derived_limit = int(self._imagination_budget_remaining // cf_unit_cost)
+                        if derived_limit <= 0:
+                            derived_limit = 1
+                        max_rollouts = derived_limit
+                except Exception:
+                    max_rollouts = None
+
                 cf_proposals = self.counterfactual_analyzer.generate_micro_rollouts(
                     frame_before=getattr(self, '_previous_frame', None),
                     frame_after=game_state.frame,
                     available_actions=getattr(game_state, 'available_actions', None),
                 )
+
+                if max_rollouts is not None and max_rollouts > 0 and cf_proposals and len(cf_proposals) > max_rollouts:
+                    cf_proposals = cf_proposals[:max_rollouts]
+
+                self._last_counterfactual_rollouts_used = len(cf_proposals) if cf_proposals else 0
                 if cf_proposals:
                     best_cf = cf_proposals[0]
                     try:
@@ -7021,6 +7207,14 @@ class GameplayEngine:
                     except Exception:
                         pass
                     self._last_micro_cf_proposals = cf_proposals
+
+                    try:
+                        spend = cf_unit_cost * float(len(cf_proposals))
+                        if spend:
+                            self._consume_imagination(spend)
+                    except Exception:
+                        logger.debug("Micro-CF budget consumption failed (non-critical)")
+
                     action = best_cf.get('action')
                     reason = best_cf.get('reason', 'micro counterfactual heuristic')
                     logger.info(f"[MICRO-CF] {reason}")
@@ -7028,6 +7222,7 @@ class GameplayEngine:
                     return _finalize_ladder_and_return(action, reason, 'micro_cf')
             except Exception as e:
                 logger.debug(f"Micro counterfactual generation failed: {e}")
+                self._last_counterfactual_rollouts_used = None
         
         # ===================================================================
         # AUTOBIOGRAPHY-BASED STRATEGY SELECTION
@@ -8929,6 +9124,13 @@ class GameplayEngine:
                 reasoning_parts.append(f"{agent_mode.upper()} mode")
             reasoning_parts.append(f"Score: {score}")
             reasoning = " | ".join(reasoning_parts) if reasoning_parts else f"Exploring with {action}"
+
+        imagination_context = self._compute_imagination_context(game_state, current_level)
+        budget_total = imagination_context.get('budget_total')
+        budget_spend = imagination_context.get('budget_spend')
+        context_mode = imagination_context.get('context_mode') or 'exploration'
+        grounding_score = imagination_context.get('grounding_score')
+        question_tier = imagination_context.get('question_tier')
         
         # Format reasoning as JSON object (≤16 KB) for ARC API
         reasoning_json = self._format_reasoning_for_api(
@@ -8937,6 +9139,15 @@ class GameplayEngine:
             game_state=game_state,
             current_level=current_level
         )
+
+        if reasoning_json is not None and imagination_context:
+            reasoning_json['imagination'] = {
+                'budget_total': budget_total,
+                'budget_spend': budget_spend,
+                'context_mode': context_mode,
+                'grounding_score': grounding_score,
+                'question_tier': question_tier,
+            }
         
         # ================================================================
         # REASONING LOG CAPTURE - For Oracle automated bug detection
@@ -9034,7 +9245,13 @@ class GameplayEngine:
                 logger.debug(f"Click color tracking failed: {e}")
             
             # Send ACTION6 with reasoning JSON
-            new_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=reasoning_json, level_number=current_level)
+            new_state = await self.action_handler.send_action_6(
+                x,
+                y,
+                game_state.frame,
+                reasoning=reasoning_json,
+                level_number=current_level,
+            )
             
             # ================================================================
             # SELECTION TRACKING (Added 2025-12-08)
@@ -9223,7 +9440,20 @@ class GameplayEngine:
                 frame_before = game_state.frame
                 
                 # Pass reasoning JSON and level_number to action handler
-                new_state = await method(reasoning=reasoning_json, level_number=current_level)
+                new_state = await method(
+                    reasoning=reasoning_json,
+                    level_number=current_level,
+                    budget_total=budget_total,
+                    budget_spend=budget_spend,
+                    context_mode=context_mode,
+                    grounding_score=grounding_score,
+                    question_tier=question_tier,
+                    persona_proposal_count=getattr(self, '_last_persona_proposal_count', None),
+                    counterfactual_rollouts_used=getattr(self, '_last_counterfactual_rollouts_used', None),
+                    synthesis_enabled=getattr(self, '_last_synthesis_enabled', None),
+                    existential_mode_active=getattr(self, '_last_existential_mode_active', None),
+                    imagination_unlock_event=getattr(self, '_last_imagination_unlock_event', None),
+                )
                 
                 # ================================================================
                 # DISCOVERY PHASE OBSERVATION-BASED VALIDATION (Added 2025-12-28)
@@ -12678,6 +12908,16 @@ class GameplayEngine:
             'is_frontier': is_frontier,
             'frontier_status': self._null_status(451) if is_frontier else "explored"
         }
+
+        # Imagination/mental modeling context (Tier 5.5)
+        imagination_ctx = getattr(self, '_imagination_ctx', {}) or {}
+        if imagination_ctx:
+            context['imagination'] = {
+                'budget_total': imagination_ctx.get('budget_total'),
+                'context_mode': imagination_ctx.get('context_mode'),
+                'grounding_score': imagination_ctx.get('grounding_score'),
+                'question_tier': imagination_ctx.get('question_tier'),
+            }
         
         # Add self-directed mode context
         if getattr(self, '_self_directed_mode', False):

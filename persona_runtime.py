@@ -308,6 +308,7 @@ class PersonaManager:
         problem_signature: Optional[str],
         self_identity_snapshot: Optional[Dict[str, Any]],
         enable_synthesis: bool = True,
+        max_proposals: Optional[int] = None,
     ) -> Dict[str, Any]:
         proposals: List[Dict[str, Any]] = []
         # Represent each rung as a persona proposal; mark the chosen rung
@@ -329,6 +330,7 @@ class PersonaManager:
                 'scorer_score': info.get('score') if isinstance(info, dict) else None,
                 'chosen': is_chosen,
             })
+
         # Simple interpolation synthesis: aggregate top two scores if multiple rungs present
         if enable_synthesis and len(proposals) >= 2:
             sorted_props = sorted(proposals, key=lambda p: p.get('scorer_score') or 0, reverse=True)
@@ -358,6 +360,21 @@ class PersonaManager:
                 'scorer_score': max(top.get('scorer_score') or 0, second.get('scorer_score') or 0),
                 'chosen': False,
             })
+
+        # Optional budget-aware trimming: keep chosen rung and top-scoring others
+        if max_proposals is not None and max_proposals > 0 and len(proposals) > max_proposals:
+            chosen_list = [p for p in proposals if p.get('chosen')]
+            others = [p for p in proposals if not p.get('chosen')]
+            others_sorted = sorted(others, key=lambda p: p.get('scorer_score') or 0, reverse=True)
+            trimmed: List[Dict[str, Any]] = []
+            if chosen_list:
+                trimmed.append(chosen_list[0])
+            for p in others_sorted:
+                if len(trimmed) >= max_proposals:
+                    break
+                trimmed.append(p)
+            proposals = trimmed[:max_proposals]
+
         decision = self._log_proposals(
             proposals,
             game_id=game_id,
@@ -372,7 +389,7 @@ class PersonaManager:
             for p in proposals:
                 if 'persona_id' in p:
                     logged.append({'persona_id': p['persona_id'], 'chosen': p.get('chosen', False), 'proposal_id': p.get('proposal_id')})
-        return {'decision': decision, 'logged': logged}
+        return {'decision': decision, 'logged': logged, 'proposal_count': len(proposals)}
 
     def record_outcome(
         self,
