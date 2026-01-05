@@ -1452,8 +1452,31 @@ class GameplayEngine:
                     logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED")
                     game_state.state = "NOT_FINISHED"
                 
+                # Frontier mode: boost budgets and mark exploration continuation
                 mode_name = (agent_mode or 'generalist').upper()
+                self.game_config['frontier_mode'] = True
+                self.game_config['frontier_level'] = frontier_level
+                # Give extra room so runs do not end early at frontier
+                per_level_boost = max(self.game_config.get('max_actions_per_level', 0), 600)
+                total_boost = max(self.game_config.get('max_total_actions', 0), per_level_boost * 4)
+                self.game_config['max_actions_per_level'] = per_level_boost
+                self.game_config['max_total_actions'] = total_boost
+                logger.info(f" [FRONTIER BUDGET] Boosted to {per_level_boost}/lvl and {total_boost} total for exploration")
                 logger.info(f" {mode_name}: At frontier (Level {frontier_level}), exploring until action budget exhausted")
+
+        # Frontier reached even if replay did not fully succeed (e.g., stuck/no-op) -> force exploration
+        elif fallback_result.reached_frontier:
+            frontier_level = fallback_result.frontier_level or (int(game_state.score) + 1 if game_state else 'unknown')
+            if game_state:
+                game_state.state = "NOT_FINISHED"
+            self.game_config['frontier_mode'] = True
+            self.game_config['frontier_level'] = frontier_level
+            per_level_boost = max(self.game_config.get('max_actions_per_level', 0), 600)
+            total_boost = max(self.game_config.get('max_total_actions', 0), per_level_boost * 4)
+            self.game_config['max_actions_per_level'] = per_level_boost
+            self.game_config['max_total_actions'] = total_boost
+            logger.info(f" [FRONTIER BUDGET] Boosted to {per_level_boost}/lvl and {total_boost} total for frontier exploration")
+            logger.info(f" Frontier reached (Level {frontier_level}); abandoning replay and continuing exploration")
                 
         elif fallback_result.all_failed:
             # All sequences failed - set up fallback options
@@ -8101,6 +8124,41 @@ class GameplayEngine:
                         bias_summary = ', '.join([f"A{a}:{b:+.2f}" for a, b in sorted_biases])
                         logger.debug(f"[HYPOTHESIS] Action biases: {bias_summary}")
                         hypothesis_reasoning = f"Network hypotheses ({len(failure_hypotheses)} insights, {validated_count} validated)"
+
+                # Frontier fallback: if still no hypothesis guidance, pull agent hypotheses to seed exploration
+                if not hypothesis_biases:
+                    try:
+                        at_frontier_level = self._is_frontier_level(current_game_id, current_level)
+                    except Exception:
+                        at_frontier_level = False
+                    if at_frontier_level and hasattr(self, 'agent_hypothesis_system') and self.agent_hypothesis_system:
+                        try:
+                            game_type = current_game_id.split('-')[0] if current_game_id and '-' in current_game_id else current_game_id
+                            frontier_hyps = self.agent_hypothesis_system.get_agent_hypotheses(
+                                agent_id=agent_id,
+                                game_type=game_type,
+                                status='active'
+                            ) or []
+                            if frontier_hyps:
+                                top_hyp = frontier_hyps[0]
+                                hyp_text = (top_hyp.get('hypothesis_text') or '').lower()
+                                confidence = top_hyp.get('confidence', 0.5)
+                                # Simple parsing to bias toward suggested direction/interaction
+                                if 'up' in hyp_text:
+                                    hypothesis_biases[1] = hypothesis_biases.get(1, 0) + 0.25 * confidence
+                                if 'down' in hyp_text:
+                                    hypothesis_biases[2] = hypothesis_biases.get(2, 0) + 0.25 * confidence
+                                if 'left' in hyp_text:
+                                    hypothesis_biases[3] = hypothesis_biases.get(3, 0) + 0.25 * confidence
+                                if 'right' in hyp_text:
+                                    hypothesis_biases[4] = hypothesis_biases.get(4, 0) + 0.25 * confidence
+                                if any(word in hyp_text for word in ['click', 'press', 'activate', 'toggle']):
+                                    hypothesis_biases[6] = hypothesis_biases.get(6, 0) + 0.25 * confidence
+                                if hypothesis_biases:
+                                    hypothesis_reasoning = f"Frontier hypothesis seed: {top_hyp.get('hypothesis_text', '')[:60]}"
+                                    logger.info(f"[HYPOTHESIS] Frontier seed applied at L{current_level}: {hypothesis_reasoning}")
+                        except Exception as e:
+                            logger.debug(f"Frontier hypothesis seeding failed: {e}")
                         
             except Exception as e:
                 logger.debug(f"Failure hypothesis query error: {e}")
@@ -13205,8 +13263,15 @@ class GameplayEngine:
             # Calculate novelty from current state
             pattern_novelty = getattr(self, '_current_pattern_novelty', 0.0)
             is_stuck = getattr(self, '_is_stuck', False)
-            
-            if not should_query_resonance(agent_mode or 'generalist', pattern_novelty, is_stuck):
+            try:
+                is_frontier_level = self._is_frontier_level(game_id, level_number)
+            except Exception:
+                is_frontier_level = False
+
+            # On frontier levels, bypass probability gates and force resonance queries
+            if is_frontier_level:
+                pattern_novelty = max(pattern_novelty, 1.0)
+            elif not should_query_resonance(agent_mode or 'generalist', pattern_novelty, is_stuck):
                 # Don't query this action - return status code
                 return {
                     'queried': False,
@@ -15746,6 +15811,22 @@ class GameplayEngine:
                         is_truly_stuck = (actions_since_progress >= stuck_threshold and 
                                          (low_novelty or actions_since_progress >= stuck_threshold + 5))
                         
+                        # If we're on a frontier level and truly stuck, abandon replay and switch to exploration
+                        try:
+                            at_frontier_level = self._is_frontier_level(game_id_for_frontier, actual_level)
+                        except Exception:
+                            at_frontier_level = False
+                        if is_truly_stuck and at_frontier_level:
+                            logger.info(f"[FRONTIER-REPLAY] Stuck after {actions_since_progress} actions at frontier L{actual_level} - handing control to exploration")
+                            return {
+                                'game_state': game_state,
+                                'success': False,
+                                'reached_frontier': True,
+                                'frontier_level': actual_level,
+                                'actions_replayed': action_count,
+                                'sequence_id': sequence_id
+                            }
+
                         if is_truly_stuck and variation_attempts < max_variations:
                             variation_attempts += 1
                             logger.info(f"[ADAPTIVE] STUCK: {actions_since_progress} actions, novelty={frame_novelty:.1%} - trying variation {variation_attempts}/{max_variations}")
