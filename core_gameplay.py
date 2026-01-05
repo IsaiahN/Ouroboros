@@ -472,6 +472,7 @@ class SpineEmitter:
                 w_A,
                 w_B,
                 w_R,
+                scorecard_id,
             ),
         )
 
@@ -1440,7 +1441,7 @@ class GameplayEngine:
                 else:
                     raise ValueError(f"Invalid action callback result: {action_result}")
             else:
-                action, reasoning = await self._select_action(game_state)
+                action, reasoning = await self._select_action(game_state, loop_state)
                 
                 # ================================================================
                 # METACOGNITIVE: PREDICTION BEFORE ACTION
@@ -6586,7 +6587,7 @@ class GameplayEngine:
             logger.debug(f"Failed to persist hook failure event: {e}")
 
     @no_type_check
-    async def _select_action(self, game_state: GameState) -> tuple[str, str]:  # pyright: ignore[reportGeneralTypeIssues]
+    async def _select_action(self, game_state: GameState, loop_state: Optional[GameLoopState] = None) -> tuple[str, str]:  # pyright: ignore[reportGeneralTypeIssues]
         """Select the next action to take with reasoning.
         
         Uses:
