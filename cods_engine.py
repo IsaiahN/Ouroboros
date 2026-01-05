@@ -3753,14 +3753,25 @@ class CODSEngine:
                     
             elif hypothesis.target_primitive:
                 # Unlock the suggested primitive
+                sample_size = hypothesis.sample_size()
+                success_rate = max(0.0, min(1.0, hypothesis.posterior))
+                cross_game_rate = max(0.0, min(1.0, sample_size / 5.0))
+
                 success = self.unlock_manager.attempt_unlock(
                     primitive_name=hypothesis.target_primitive,
-                    unlock_reason=f"Bayesian confirmation: {hypothesis.description}",
-                    supporting_evidence={
+                    pattern={
+                        'source': 'bayesian_hypothesis',
                         'posterior': hypothesis.posterior,
                         'evidence_for': hypothesis.evidence_for,
-                        'evidence_against': hypothesis.evidence_against
-                    }
+                        'evidence_against': hypothesis.evidence_against,
+                        'suggested_composition': hypothesis.suggested_composition,
+                        'description': hypothesis.description
+                    },
+                    success_rate=success_rate,
+                    cross_game_success_rate=cross_game_rate,
+                    unlock_reason=f"Bayesian confirmation: {hypothesis.description}",
+                    agent_id=self._context.agent_id if self._context else None,
+                    generation=generation
                 )
                 if success:
                     operator_id = hypothesis.target_primitive

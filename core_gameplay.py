@@ -885,6 +885,32 @@ class GameplayEngine:
             **config: Configuration parameters to update
         """
         self.game_config.update(config)
+
+        # Coerce numeric configs that may arrive as strings from env/DB
+        numeric_int_keys = [
+            'max_actions_per_level',
+            'max_total_actions',
+            'hypothesis_warmup_actions',
+            'max_repeats_per_game',
+            'optimizer_target_level',
+            'coordinate_retry_limit',
+        ]
+        numeric_float_keys = ['action_timeout']
+
+        for k in numeric_int_keys:
+            if k in self.game_config:
+                try:
+                    self.game_config[k] = int(float(self.game_config[k]))
+                except Exception:
+                    # Leave as-is if non-coercible; downstream guards will catch
+                    pass
+
+        for k in numeric_float_keys:
+            if k in self.game_config:
+                try:
+                    self.game_config[k] = float(self.game_config[k])
+                except Exception:
+                    pass
         
         # Store generation in game_config AND session_manager for scorecard tags
         # This ensures generation is available when ARCClient is created later
@@ -902,6 +928,20 @@ class GameplayEngine:
                 logger.debug("Persona manager agent binding skipped")
         
         logger.info(f"Updated game config: {config}")
+
+    def _normalize_game_state(self, game_state: Optional[GameState]) -> Optional[GameState]:
+        """Coerce score fields to floats to avoid str/int comparison errors."""
+        if game_state is None:
+            return None
+        try:
+            game_state.score = float(game_state.score) if game_state.score is not None else 0.0
+        except (TypeError, ValueError):
+            game_state.score = 0.0
+        try:
+            game_state.win_score = float(game_state.win_score) if game_state.win_score is not None else 0.0
+        except (TypeError, ValueError):
+            game_state.win_score = 0.0
+        return game_state
 
     def _maybe_prompt_games_as_teacher(
         self,
@@ -1339,7 +1379,7 @@ class GameplayEngine:
         Returns:
             Dict with game results if game is done, None if should continue to loop
         """
-        game_state = fallback_result.game_state
+        game_state = self._normalize_game_state(fallback_result.game_state)
         known_sequence = fallback_result.successful_sequence
         
         if fallback_result.success and known_sequence:
@@ -2916,7 +2956,7 @@ class GameplayEngine:
         except Exception as exc:
             logger.error(f"[GAME_START] Failed to create game {game_id} (agent_id={agent_id}, mode={agent_mode}): {exc}", exc_info=True)
             raise
-        game_state = GameState.from_dict(game_data)
+        game_state = self._normalize_game_state(GameState.from_dict(game_data))
 
         # Track scorecard linkage for attempts/replays
         if game_data.get('scorecard_id'):
@@ -3812,6 +3852,8 @@ class GameplayEngine:
                 if run_context:
                     run_context.next_step()
 
+                game_state = self._normalize_game_state(game_state)
+
                 live_level = int(game_state.score) + 1 if game_state else current_level
                 if self._struggle_guard_state.get('level') != live_level:
                     self._reset_struggle_guard_state(level=live_level, clear_fired=True)
@@ -4033,10 +4075,12 @@ class GameplayEngine:
                         if action_callback:
                             action_result = await action_callback(game_state, self.action_handler)
                             if isinstance(action_result, GameState):
-                                game_state = action_result
+                                game_state = self._normalize_game_state(action_result)
                             elif isinstance(action_result, str):
                                 # BUGFIX: Pass current_level to ensure action traces are logged with correct level
-                                game_state = await self._execute_action(action_result, game_state, "", current_level)
+                                game_state = self._normalize_game_state(
+                                    await self._execute_action(action_result, game_state, "", current_level)
+                                )
                             else:
                                 raise ValueError(f"Invalid action callback result: {action_result}")
                         else:
@@ -4216,7 +4260,9 @@ class GameplayEngine:
                             ambiguity_metrics = self._compute_ambiguity_metrics(pre_action_available, None, None)
 
                             pre_score = game_state.score if hasattr(game_state, 'score') else None
-                            game_state = await self._execute_action(action, game_state, reasoning, current_level)
+                            game_state = self._normalize_game_state(
+                                await self._execute_action(action, game_state, reasoning, current_level)
+                            )
 
                             score_delta_for_action = None
                             if pre_score is not None and hasattr(game_state, 'score'):
@@ -5374,7 +5420,7 @@ class GameplayEngine:
                                     replay_result = await self._replay_sequence_inline(game_state, seq)
                                     
                                     if replay_result and replay_result.get('success'):
-                                        game_state = replay_result['game_state']
+                                        game_state = self._normalize_game_state(replay_result['game_state'])
                                         
                                         # Check if we reached frontier
                                         if replay_result.get('reached_frontier'):
@@ -5468,6 +5514,10 @@ class GameplayEngine:
                         break
                     # Log other errors but don't show full traceback during shutdown
                     logger.error(f"Error in action {action_count}: {e}")
+                    # Emit traceback once to pinpoint the failing comparison
+                    if not getattr(self, '_logged_action_error', False):
+                        logger.exception("Action loop error traceback (first occurrence)")
+                        self._logged_action_error = True
 
             # Calculate results
             end_time = datetime.now()
@@ -6645,8 +6695,12 @@ class GameplayEngine:
                 self._current_stage = None
         except Exception:
             self._current_stage = None
-        allow_observers = (self._current_stage or 0) >= 2
-        allow_synthesis = (self._current_stage or 0) >= 3
+        try:
+            stage_numeric = int(self._current_stage) if self._current_stage is not None else 0
+        except Exception:
+            stage_numeric = 0
+        allow_observers = stage_numeric >= 2
+        allow_synthesis = stage_numeric >= 3
         self._last_synthesis_enabled = allow_synthesis
         if allow_synthesis:
             ladder_trace['synthesis'] = {'status': 'pending', 'reason': 'synthesis candidate', 'persona_type': 'synthesis'}

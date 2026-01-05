@@ -410,7 +410,7 @@ class ActionHandler:
 
         return changes > 0, changes
 
-    async def send_action_1(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1) -> GameState:
+    async def send_action_1(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1, **kwargs) -> GameState:
         """Send ACTION1 to the game.
 
         Args:
@@ -420,9 +420,9 @@ class ActionHandler:
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION1", reasoning=reasoning, level_number=level_number)
+        return await self._send_action_with_context("ACTION1", reasoning=reasoning, level_number=level_number, **kwargs)
 
-    async def send_action_2(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1) -> GameState:
+    async def send_action_2(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1, **kwargs) -> GameState:
         """Send ACTION2 to the game.
 
         Args:
@@ -432,9 +432,9 @@ class ActionHandler:
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION2", reasoning=reasoning, level_number=level_number)
+        return await self._send_action_with_context("ACTION2", reasoning=reasoning, level_number=level_number, **kwargs)
 
-    async def send_action_3(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1) -> GameState:
+    async def send_action_3(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1, **kwargs) -> GameState:
         """Send ACTION3 to the game.
 
         Args:
@@ -444,9 +444,9 @@ class ActionHandler:
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION3", reasoning=reasoning, level_number=level_number)
+        return await self._send_action_with_context("ACTION3", reasoning=reasoning, level_number=level_number, **kwargs)
 
-    async def send_action_4(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1) -> GameState:
+    async def send_action_4(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1, **kwargs) -> GameState:
         """Send ACTION4 to the game.
 
         Args:
@@ -456,9 +456,9 @@ class ActionHandler:
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION4", reasoning=reasoning, level_number=level_number)
+        return await self._send_action_with_context("ACTION4", reasoning=reasoning, level_number=level_number, **kwargs)
 
-    async def send_action_5(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1) -> GameState:
+    async def send_action_5(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1, **kwargs) -> GameState:
         """Send ACTION5 to the game.
 
         Args:
@@ -468,7 +468,7 @@ class ActionHandler:
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION5", reasoning=reasoning, level_number=level_number)
+        return await self._send_action_with_context("ACTION5", reasoning=reasoning, level_number=level_number, **kwargs)
 
     async def send_action_6(self, x: int, y: int, frame: Optional[List[List[int]]] = None, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1) -> GameState:
         """Send ACTION6 (coordinate-based action) to the game.
@@ -517,7 +517,7 @@ class ActionHandler:
             kwargs['reasoning'] = reasoning
         return await self._send_action_with_context("ACTION6", **kwargs)
 
-    async def send_action_7(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1) -> GameState:
+    async def send_action_7(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1, **kwargs) -> GameState:
         """Send ACTION7 to the game.
 
         Args:
@@ -527,7 +527,7 @@ class ActionHandler:
         Returns:
             New game state
         """
-        return await self._send_action_with_context("ACTION7", reasoning=reasoning, level_number=level_number)
+        return await self._send_action_with_context("ACTION7", reasoning=reasoning, level_number=level_number, **kwargs)
 
     async def _send_action_with_context(self, action: str, **kwargs) -> GameState:
         """Send action with context tracking.
