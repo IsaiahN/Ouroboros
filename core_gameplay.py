@@ -941,7 +941,34 @@ class GameplayEngine:
             game_state.win_score = float(game_state.win_score) if game_state.win_score is not None else 0.0
         except (TypeError, ValueError):
             game_state.win_score = 0.0
+        try:
+            if hasattr(game_state, 'frame') and isinstance(game_state.frame, list):
+                game_state.frame = self._coerce_frame_to_int(game_state.frame)
+        except Exception:
+            # If coercion fails, keep existing frame and let downstream sanity check catch it
+            pass
         return game_state
+
+    def _coerce_frame_to_int(self, frame: list) -> list:
+        """Coerce all frame cells to clamped ints within [0, 255]."""
+        coerced: list = []
+        for row in frame:
+            if not isinstance(row, list):
+                raise RuntimeError("FRAME_SANITY_FAIL: ragged frame")
+            new_row = []
+            for cell in row:
+                try:
+                    val = int(float(cell))
+                except Exception:
+                    val = 0
+                if val < 0:
+                    val = 0
+                if val > 255:
+                    val = 255
+                new_row.append(val)
+            coerced.append(new_row)
+        # Preserve original shape; ragged lists still caught by _assert_frame_sanity
+        return coerced
 
     def _maybe_prompt_games_as_teacher(
         self,
@@ -3416,6 +3443,9 @@ class GameplayEngine:
         
         if self.game_config.get('enable_pattern_learning', True):
             learning_mode = self.game_config.get('learning_mode', 'smart_exploration')
+            current_level = int(game_state.score) + 1
+            network_max_level = self._get_network_max_level(game_id)
+            pioneer_at_frontier = agent_mode == 'pioneer' and current_level > max(network_max_level, 0)
             
             # OPTIMIZER: Always gets sequence (to try improving it)
             # GENERALIST: Gets sequence (follows it exactly)
@@ -3428,6 +3458,16 @@ class GameplayEngine:
                     # 3-TRY FALLBACK SYSTEM: Get top 3 sequences ranked by priority
                     # Try each in order, flag failures, fall back to exploration if all fail
                     ranked_sequences = self._get_ranked_cumulative_sequences(game_id, limit=3)
+
+                    if pioneer_at_frontier:
+                        frontier_level = current_level
+                        usable = [seq for seq in ranked_sequences if int(seq.get('total_score', 0)) >= frontier_level]
+                        if not usable:
+                            logger.info(
+                                f"[PIONEER FRONTIER GUARD] Frontier L{frontier_level} > network L{network_max_level}: "
+                                "skipping cumulative replay (no frontier-targeted sequence)."
+                            )
+                        ranked_sequences = usable
                     
                     if ranked_sequences:
                         logger.info(f"[3-TRY SYSTEM] Found {len(ranked_sequences)} candidate sequences for {game_id}")
@@ -9120,22 +9160,22 @@ class GameplayEngine:
                                                    f"ACTION{safe_dir}")
                                         base_action = f"ACTION{safe_dir}"
                                         final_reasoning = f"DANGER-OBJ: {obj_danger.get('reason', 'Avoided lethal object')} | {final_reasoning}"
-            except Exception as e:
-                logger.debug(f"Terminal foresight check failed: {e}")
-
-        # ACTION6 preference ordering + salience justification
-        if (
-            (isinstance(base_action, str) and base_action.upper() == 'ACTION6')
-            or (isinstance(base_action, int) and base_action == 6)
-        ):
-            target = self._prepare_action6_target(game_state, run_context=self.game_config.get('run_context'))
-            if not target:
-                fallback_action = self._prefer_non_action6(getattr(game_state, 'available_actions', None))
-                if fallback_action:
-                    self._pending_action6_target = None
-                    self._pending_action6_reason = None
-                    return _finalize_ladder_and_return(
-                        fallback_action,
+                                    else:
+                                        # No safe alternative suggested and we are near the end of the sequence.
+                                        # Hand off to exploration instead of marching into a known fatal pattern.
+                                        logger.info(
+                                            f"[FORESIGHT-HANDOFF] Stopping replay to explore: ACTION{action_to_check} "
+                                            f"is lethal at L{current_replay_level} (seq progress {sequence_progress:.2f})."
+                                        )
+                                        return {
+                                            'game_state': game_state,
+                                            'success': True,
+                                            'reached_frontier': True,
+                                            'frontier_level': current_replay_level,
+                                            'actions_replayed': action_count,
+                                            'sequence_id': sequence_id,
+                                            'handoff_reason': 'terminal_danger'
+                                        }
                         f"Prefer movement over blind ACTION6 | {final_reasoning}",
                         'heuristic'
                     )
