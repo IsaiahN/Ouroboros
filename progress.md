@@ -363,3 +363,263 @@ failed_action = f"ACTION{action_num}" if not action_num.startswith('ACTION') els
 | 9 | `_previous_frame` lifecycle | LOW | VERIFIED OK |
 
 **All core_gameplay.py syntax verified with `python -m py_compile core_gameplay.py`**
+
+---
+
+## Session: January 5, 2026 - Consciousness Synthesis Complete Implementation
+
+---
+
+### Approach: Complete All Remaining Features from agent_consciousness_synthesis.md
+
+**Timestamp**: 3:14:35 PM  
+**Status**: COMPLETE
+
+---
+
+### Context
+
+Previous session (January 4, 2026) implemented Phase 0-5 of the consciousness architecture:
+- Phase 0: Theory-Gated Scoring + world_model_update wiring
+- Phase 1: QuestioningEngineWithTeeth (questions with real impact)
+- Phase 2: PersonaBudgetManager (hard persona limits)
+- Phase 3: `consciousness_step()` integration in core loop
+- Phase 4: Database tables (5 consciousness tables created)
+- Phase 5: Wiring validation
+
+This session identified and implemented the **7 remaining gaps** from the architecture document.
+
+---
+
+### Gaps Identified
+
+| # | Gap | Description |
+|---|-----|-------------|
+| 1 | Active Belief Graph | WorldModel predictions, surprise measurement, belief decay |
+| 2 | Self-Model → World-Model Wiring | Wire discoveries from agent_self_model to world model |
+| 3 | Persona-Theory Binding | Personas die when their bound theories are contradicted |
+| 4 | CODS-World Integration | New operators update world model |
+| 5 | Games-as-Teachers Activation | Extract lessons from wins, test transfer |
+| 6 | abstraction_quality Table | Missing table for transfer quality metrics |
+| 7 | Imagination Budget Enhancements | Performance-based budget adjustment |
+
+---
+
+### Phase 1: Active Belief Graph in WorldModel (COMPLETE)
+
+**File**: [symbolic_reasoning_engine.py](symbolic_reasoning_engine.py)
+
+**Added**:
+- `BeliefNode` dataclass: `concept`, `confidence`, `last_tested`, `surprise_count`, `competing_beliefs`
+- `Prediction` dataclass: `predicted_state`, `actual_state`, `surprise_magnitude`, `action_taken`
+- `predict_before_action()`: Store prediction BEFORE action for later comparison
+- `observe_after_action()`: Measure surprise by comparing predicted vs actual frame
+- `decay_unused_beliefs()`: Reduce confidence of untested beliefs over time
+- `_spawn_competing_belief()`: Create alternative beliefs when surprise is high
+
+**Purpose**: The belief graph tracks what the agent EXPECTS to happen, measures surprise when reality differs, and spawns competing theories when surprised too often.
+
+---
+
+### Phase 2: Self-Model → World-Model Wiring (COMPLETE)
+
+**File**: [symbolic_reasoning_engine.py](symbolic_reasoning_engine.py)
+
+**Added**:
+- `set_object_type()`: Wire discovered object types (player/enemy/goal/obstacle)
+- `add_physics_rule()`: Wire discovered physics (momentum, rebound, etc.)
+- `add_trigger_rule()`: Wire discovered triggers (touch→score, proximity→effect)
+- `integrate_self_discoveries()`: Bulk import discoveries from agent_self_model
+- `add_concept()`: Add new concepts with relations to belief graph
+
+**Purpose**: When agent_self_model discovers "I am the blue square" or "touching red = death", these discoveries are wired into the world model for planning.
+
+---
+
+### Phase 3: Persona-Theory Binding (COMPLETE)
+
+**File**: [persona_runtime.py](persona_runtime.py)
+
+**Added**:
+- `bind_persona_to_theory()`: Link persona's survival to a theory
+- `unbind_personas_for_theory()`: Kill all personas bound to a theory
+- `prune_theory_orphans()`: Cleanup personas whose theories are dead
+- `allocate_attention()`: Distribute attention budget across personas by theory reliability
+
+**Purpose**: Personas are now "invested" in theories. When a theory is contradicted, bound personas die. This creates evolutionary pressure for good theories.
+
+---
+
+### Phase 4: CODS-World Integration (COMPLETE)
+
+**File**: [cods_engine.py](cods_engine.py)
+
+**Added**:
+- `_latest_discovery`: Track most recent operator discovery
+- `_pending_discoveries`: Queue of discoveries not yet integrated
+- `has_new_discovery()`: Check if new operators available
+- `get_latest_discovery()`: Get most recent discovery
+- `get_all_pending_discoveries()`: Get all unprocessed discoveries
+- `record_discovery()`: Manually record a discovery for world model
+- `get_operators_for_game()`: Query operators relevant to current game
+
+**Purpose**: When CODS discovers a new cognitive operator (e.g., "rotate_90_degrees"), the world model is updated to include this capability in planning.
+
+---
+
+### Phase 5: Games-as-Teachers Activation (COMPLETE)
+
+**File**: [scientific_method_engine.py](scientific_method_engine.py)
+
+**Added**: `GamesAsTeachersEngine` class with:
+- `extract_lesson()`: Extract concept learned from winning a game
+- `_infer_concept()`: Infer what concept the game taught
+- `test_transfer()`: Test if lesson applies to other games
+- `_store_transfer_quality()`: Record transfer success/failure
+- `find_applicable_lessons()`: Query lessons relevant to current game
+- `update_interpretation()`: Adjust lesson interpretation based on outcomes
+- `get_lesson_stats()`: Get statistics about lesson effectiveness
+
+**Purpose**: When agent wins a game, extract what was learned (lesson). Test if that lesson transfers to similar games. Build genuine understanding vs game-specific memorization.
+
+---
+
+### Phase 6: Database Migration (COMPLETE)
+
+**File**: [migrations/add_consciousness_tables_v2.py](migrations/add_consciousness_tables_v2.py) (NEW)
+
+**Tables Created**:
+
+1. **abstraction_quality**:
+   - `quality_id`, `source_game`, `target_game`, `concept`, `transfer_success`
+   - `source_score`, `target_score`, `abstraction_level`, `timestamp`
+   - Tracks how well concepts transfer between games
+
+2. **persona_theory_bindings**:
+   - `binding_id`, `persona_id`, `theory_id`, `bound_at`, `is_active`
+   - Links personas to theories for mortality binding
+
+**Indexes Created** (6 total):
+- `idx_abstraction_source_game`
+- `idx_abstraction_target_game`
+- `idx_abstraction_concept`
+- `idx_persona_theory_persona`
+- `idx_persona_theory_theory`
+- `idx_persona_theory_active`
+
+**Migration Executed**: Success
+
+---
+
+### Phase 7: Imagination Budget Enhancements (COMPLETE)
+
+**File**: [imagination_budget.py](imagination_budget.py)
+
+**Added**: `ImaginationBudgetManager` class with:
+- `update_from_outcome()`: Adjust budget based on game outcome (win/loss/score)
+- `get_persona_allowance()`: How many personas this agent can spawn
+- `can_speculate()`: Whether agent has budget for speculation
+- `can_spawn_investigator()`: Whether agent can spawn investigation personas
+- `get_synthesis_depth()`: How deep to run theory synthesis
+- `reset_budget()`: Reset to baseline
+- `get_stats()`: Get current budget statistics
+
+**Budget Logic**:
+- **Win**: +15% exploration budget, reset penalties
+- **Good score (>50%)**: +5% budget
+- **Poor score (<20%)**: -10% budget, speculation disabled
+- **Zero score**: -20% budget, minimal personas only
+
+**Purpose**: Agents that perform well get more cognitive freedom. Struggling agents conserve resources.
+
+---
+
+### Phase 8: Wire All Features into core_gameplay.py (COMPLETE)
+
+**File**: [core_gameplay.py](core_gameplay.py)
+
+**Imports Added**:
+```python
+from imagination_budget import ImaginationBudgetManager
+from symbolic_reasoning_engine import SymbolicWorldModel
+from scientific_method_engine import GamesAsTeachersEngine
+```
+
+**Initialization Added** (in `__init__`):
+```python
+self.teacher_engine = GamesAsTeachersEngine(self.db)
+self.imagination_budget_manager = ImaginationBudgetManager()
+```
+
+**consciousness_step Enhanced**:
+1. Active Belief Graph observation after action
+2. Self-Model → World-Model integration
+3. CODS → World-Model integration for new operators
+
+**New Integration Points**:
+1. **Before action**: `self._world_model.predict_before_action(action_int)` - store prediction
+2. **On WIN**: `self.teacher_engine.extract_lesson(game_type, action_history, score_history)` - learn from success
+3. **On game end**: `self.imagination_budget_manager.update_from_outcome(...)` - adjust cognitive budget
+
+---
+
+### Files Modified This Session
+
+| File | Lines Added | Key Changes |
+|------|-------------|-------------|
+| [symbolic_reasoning_engine.py](symbolic_reasoning_engine.py) | ~300 | BeliefNode, Prediction, Active Belief Graph methods, Self→World wiring |
+| [persona_runtime.py](persona_runtime.py) | ~160 | Theory binding, attention allocation, orphan pruning |
+| [cods_engine.py](cods_engine.py) | ~110 | Discovery tracking, pending queue, integration methods |
+| [scientific_method_engine.py](scientific_method_engine.py) | ~350 | GamesAsTeachersEngine class with full lesson lifecycle |
+| [imagination_budget.py](imagination_budget.py) | ~140 | ImaginationBudgetManager class with performance-based adjustment |
+| [core_gameplay.py](core_gameplay.py) | ~50 | Imports, initialization, consciousness_step, prediction, lesson extraction |
+| [migrations/add_consciousness_tables_v2.py](migrations/add_consciousness_tables_v2.py) | ~80 | New migration file |
+
+---
+
+### Syntax Verification
+
+All 6 modified files pass syntax check:
+```
+python -m py_compile core_gameplay.py symbolic_reasoning_engine.py persona_runtime.py scientific_method_engine.py imagination_budget.py cods_engine.py
+# Output: (no output = success)
+```
+
+---
+
+### Current Status: NO FAILURES
+
+All 8 implementation phases completed successfully. The consciousness synthesis architecture from `agent_consciousness_synthesis.md` is now fully implemented.
+
+---
+
+### Implementation Summary
+
+The Ouroboros system now has:
+
+1. **Active Belief Graph**: Agents make predictions, measure surprise, spawn competing theories
+2. **Self-World Integration**: Discoveries wire into world model for planning
+3. **Persona Mortality**: Personas die with their theories
+4. **CODS Integration**: New operators update planning capabilities
+5. **Games-as-Teachers**: Extract lessons from wins, test transfer
+6. **Quality Tracking**: abstraction_quality table records transfer success
+7. **Adaptive Budgets**: Performance adjusts cognitive freedom
+
+---
+
+### Next Steps (for future sessions)
+
+1. **Test with evolution run** (1-2 generations) to verify:
+   - Beliefs being created and decayed
+   - Lessons being extracted on wins
+   - Persona-theory bindings working
+   - Budget adjustments happening
+
+2. **Monitor database** for new rows in:
+   - `abstraction_quality`
+   - `persona_theory_bindings`
+
+3. **Consider adding**:
+   - Database persistence for `consciousness_logs` entries
+   - Integration tests for transfer testing
+   - Metrics dashboard for belief graph health

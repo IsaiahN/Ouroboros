@@ -58,7 +58,7 @@ from agent_self_model import (
     AgentHypothesisSystem,
     MetacognitiveReasoningEngine,
 )
-from imagination_budget import compute_mental_modeling_budget
+from imagination_budget import compute_mental_modeling_budget, ImaginationBudgetManager
 from persona_runtime import PersonaManager
 from counterfactual_analyzer import CounterfactualAnalyzer
 from object_detector import ObjectDetector
@@ -81,11 +81,20 @@ except ImportError:
     RuleInductionEngine = None
 
 try:
-    from symbolic_reasoning_engine import SymbolicReasoningEngine
+    from symbolic_reasoning_engine import SymbolicReasoningEngine, WorldModel as SymbolicWorldModel
     SYMBOLIC_REASONING_AVAILABLE = True
 except ImportError:
     SYMBOLIC_REASONING_AVAILABLE = False
     SymbolicReasoningEngine = None
+    SymbolicWorldModel = None
+
+# Games-as-Teachers import
+try:
+    from scientific_method_engine import GamesAsTeachersEngine
+    GAMES_AS_TEACHERS_AVAILABLE = True
+except ImportError:
+    GAMES_AS_TEACHERS_AVAILABLE = False
+    GamesAsTeachersEngine = None
 
 # Abstraction engine imports
 try:
@@ -126,11 +135,12 @@ except ImportError:
 
 # Scientific Method Engine - theory formation/testing
 try:
-    from scientific_method_engine import ScientificMethodEngine
+    from scientific_method_engine import ScientificMethodEngine, QuestioningEngineWithTeeth
     SCIENTIFIC_METHOD_AVAILABLE = True
 except ImportError:
     SCIENTIFIC_METHOD_AVAILABLE = False
     ScientificMethodEngine = None
+    QuestioningEngineWithTeeth = None
 
 # Reasoning Log Capture - For Oracle to detect reasoning bugs
 try:
@@ -805,6 +815,19 @@ class GameplayEngine:
         else:
             self.science_engine = None
         
+        # QUESTIONING ENGINE WITH TEETH - Critical questions that BLOCK action selection
+        # Part of consciousness synthesis: forces agents to think, not just log
+        # Q4 and Q9 can prevent normal proposals until resolved
+        if SCIENTIFIC_METHOD_AVAILABLE and QuestioningEngineWithTeeth is not None:
+            try:
+                self.questioning_engine = QuestioningEngineWithTeeth(self.db)
+                logger.info("Questioning engine initialized (critical question blocking)")
+            except Exception as e:
+                self.questioning_engine = None
+                logger.debug(f"Questioning engine init failed: {e}")
+        else:
+            self.questioning_engine = None
+        
         # NETWORK KNOWLEDGE SYNTHESIS - Agent-accessible collective intelligence
         # NOT a central controller - agents query this when THEY decide they're stuck
         # Returns synthesized death zones, theories, untested experiments, etc.
@@ -828,6 +851,28 @@ class GameplayEngine:
         except Exception as e:
             self.network_contributor = None
             logger.debug(f"Network contributor init failed: {e}")
+        
+        # GAMES-AS-TEACHERS ENGINE - Lesson extraction and transfer testing
+        # Each level is a lesson to interpret, success = understanding demonstrated via transfer
+        if GAMES_AS_TEACHERS_AVAILABLE and GamesAsTeachersEngine is not None:
+            try:
+                self.teacher_engine = GamesAsTeachersEngine(self.db)
+                logger.info("Games-as-Teachers engine initialized (lesson extraction)")
+            except Exception as e:
+                self.teacher_engine = None
+                logger.debug(f"Teacher engine init failed: {e}")
+        else:
+            self.teacher_engine = None
+        
+        # IMAGINATION BUDGET MANAGER - Performance-based cognitive allowance
+        # Budget decreases on poor performance (fewer personas/speculation)
+        # Budget increases on wins (more cognitive exploration)
+        try:
+            self.imagination_budget_manager = ImaginationBudgetManager(initial_budget=1.0)
+            logger.info("Imagination budget manager initialized (adaptive cognitive limits)")
+        except Exception as e:
+            self.imagination_budget_manager = None
+            logger.debug(f"Imagination budget manager init failed: {e}")
         
         # NEW: Breakthrough systems initialization
         try:
@@ -1491,6 +1536,158 @@ class GameplayEngine:
         
         return None  # Continue to game loop
 
+    def _consciousness_step(
+        self,
+        game_state: 'GameState',
+        loop_state: GameLoopState,
+        agent_id: Optional[str],
+        action: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Per-action consciousness integration step.
+        
+        From agent_consciousness_synthesis.md: This coordinates all consciousness
+        subsystems into a unified step that runs EVERY FRAME.
+        
+        Key integrations:
+        1. Self-model: Get identity snapshot and controlled objects
+        2. World-model: Update from frame with self-model discoveries
+        3. Working Theory: Check theory stage and apply gating
+        4. Questions: Generate active questions (Q1-Q9)
+        5. Surprise: Detect when predictions were wrong
+        
+        Args:
+            game_state: Current game state
+            loop_state: Current loop state
+            agent_id: Agent ID
+            action: Last action taken (if any)
+            
+        Returns:
+            Consciousness state dict with all subsystem outputs
+        """
+        consciousness_state = {
+            'self_identity': {},
+            'world_model_update': None,
+            'working_theory': {},
+            'active_questions': [],
+            'surprise_level': 0.0,
+            'observer_flags': {}
+        }
+        
+        try:
+            # 1. SELF-MODEL: Who am I? What do I control?
+            if hasattr(self, 'agent_self_model') and self.agent_self_model and agent_id:
+                try:
+                    consciousness_state['self_identity'] = self.agent_self_model.get_self_identity_snapshot(agent_id) or {}
+                except Exception:
+                    pass
+            
+            # 2. WORKING THEORY: What's my current understanding?
+            if hasattr(self, 'science_engine') and self.science_engine:
+                try:
+                    get_theory_fn = getattr(self.science_engine, 'get_working_theory', None)
+                    if callable(get_theory_fn):
+                        game_type = None
+                        level = 1
+                        if hasattr(self, 'session_manager') and self.session_manager:
+                            gid = getattr(self.session_manager, 'current_game_id', None)
+                            if gid:
+                                game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                        if loop_state:
+                            level = getattr(loop_state, 'current_level', 1) or 1
+                        consciousness_state['working_theory'] = get_theory_fn(game_type, level) or {}
+                except Exception:
+                    pass
+            
+            # 3. ACTIVE QUESTIONS: What critical questions need answering?
+            if hasattr(self, 'questioning_engine') and self.questioning_engine:
+                try:
+                    action_count = getattr(loop_state, 'action_count', 0) if loop_state else 0
+                    questions = self.questioning_engine.generate_questions(
+                        self_identity=consciousness_state['self_identity'],
+                        working_theory=consciousness_state['working_theory'],
+                        observer_flags=consciousness_state.get('observer_flags', {}),
+                        action_count=action_count
+                    )
+                    consciousness_state['active_questions'] = questions
+                    
+                    # Check if any blocking questions exist
+                    blocking = [q for q in questions if q.get('blocks_action')]
+                    if blocking:
+                        consciousness_state['is_blocked'] = True
+                        consciousness_state['blocking_questions'] = [q['question'] for q in blocking]
+                except Exception:
+                    pass
+            
+            # 4. ACTIVE BELIEF GRAPH: Observation after action
+            # From agent_consciousness_synthesis.md - compare prediction to reality
+            if action and hasattr(self, '_previous_frame') and game_state.frame:
+                try:
+                    import numpy as np
+                    prev_arr = np.array(self._previous_frame) if self._previous_frame else None
+                    curr_arr = np.array(game_state.frame) if game_state.frame else None
+                    
+                    # Use WorldModel's observe_after_action if available
+                    if hasattr(self, '_world_model') and self._world_model:
+                        try:
+                            action_int = int(action.replace('ACTION', '')) if isinstance(action, str) else int(action)
+                            observation = self._world_model.observe_after_action(
+                                action=action_int,
+                                frame_before=self._previous_frame,
+                                frame_after=game_state.frame
+                            )
+                            consciousness_state['surprise_level'] = observation.get('surprise', 0.0)
+                            consciousness_state['prediction_accuracy'] = observation.get('prediction_accuracy', 0.0)
+                            
+                            # Spawn competing beliefs on high surprise
+                            if observation.get('surprise', 0) > 0.5:
+                                consciousness_state['belief_conflict'] = True
+                        except Exception:
+                            pass
+                    
+                    # Fallback: Simple frame comparison
+                    if prev_arr is not None and curr_arr is not None and prev_arr.shape == curr_arr.shape:
+                        if not np.array_equal(prev_arr, curr_arr):
+                            # Frame changed = some level of surprise
+                            if consciousness_state.get('surprise_level', 0) == 0:
+                                consciousness_state['surprise_level'] = 0.3
+                except Exception:
+                    pass
+            
+            # 5. SELF-MODEL -> WORLD-MODEL WIRING
+            # Feed self-model discoveries into world model understanding
+            if hasattr(self, '_world_model') and self._world_model and consciousness_state.get('self_identity'):
+                try:
+                    self._world_model.integrate_self_discoveries(consciousness_state['self_identity'])
+                except Exception:
+                    pass
+            
+            # 6. CODS -> WORLD-MODEL INTEGRATION
+            # Feed CODS discoveries into world understanding
+            if hasattr(self, 'cods_engine') and self.cods_engine:
+                try:
+                    if hasattr(self.cods_engine, 'has_new_discovery') and self.cods_engine.has_new_discovery():
+                        discovery = self.cods_engine.get_latest_discovery()
+                        if discovery and hasattr(self, '_world_model') and self._world_model:
+                            self._world_model.add_concept(
+                                discovery.get('operator_name', 'unknown'),
+                                discovery.get('explanation', '')
+                            )
+                            consciousness_state['cods_discovery'] = discovery.get('operator_name')
+                except Exception:
+                    pass
+            
+            # 7. OBSERVER FLAGS: Computed for persona/ladder
+            if hasattr(self, '_last_observer_flags'):
+                consciousness_state['observer_flags'] = self._last_observer_flags or {}
+            
+        except Exception as e:
+            logger.debug(f"Consciousness step error: {e}")
+        
+        # Cache for other systems
+        self._last_consciousness_state = consciousness_state
+        return consciousness_state
+
     async def _run_single_action(
         self,
         game_state: 'GameState',
@@ -1570,10 +1767,48 @@ class GameplayEngine:
                     except Exception as e:
                         logger.debug(f"Metacognitive prediction failed (non-critical): {e}")
                 
+                # ================================================================
+                # ACTIVE BELIEF GRAPH: PREDICTION BEFORE ACTION
+                # ================================================================
+                # From agent_consciousness_synthesis.md: Predict BEFORE executing
+                # so we can measure surprise afterward (the learning signal).
+                # ================================================================
+                if hasattr(self, '_world_model') and self._world_model:
+                    try:
+                        action_int = int(action.replace('ACTION', '')) if isinstance(action, str) else int(action or 0)
+                        self._world_model.predict_before_action(action_int)
+                    except Exception:
+                        pass
+                
+                # Save frame for observation comparison
+                self._previous_frame = game_state.frame
+                
                 game_state = await self._execute_action(action, game_state, reasoning, loop_state.current_level)
             
             loop_state.consecutive_api_errors = 0
             action_succeeded = True
+            
+            # ================================================================
+            # CONSCIOUSNESS STEP: Integrate all subsystems post-action
+            # ================================================================
+            # From agent_consciousness_synthesis.md: This runs EVERY FRAME.
+            # It coordinates self-model, world-model, questions, and theory.
+            # ================================================================
+            try:
+                consciousness_state = self._consciousness_step(
+                    game_state=game_state,
+                    loop_state=loop_state,
+                    agent_id=agent_id,
+                    action=action
+                )
+                # Log significant consciousness events
+                if consciousness_state.get('is_blocked'):
+                    blocking = consciousness_state.get('blocking_questions', [])
+                    logger.info(f"[CONSCIOUSNESS] Action blocked by: {blocking}")
+                if consciousness_state.get('surprise_level', 0) > 0.5:
+                    logger.info(f"[CONSCIOUSNESS] High surprise: {consciousness_state.get('surprise_level'):.2f}")
+            except Exception as cs_err:
+                logger.debug(f"Consciousness step failed: {cs_err}")
             
             # ================================================================
             # AUTOBIOGRAPHY RUNTIME UPDATE
@@ -1749,6 +1984,45 @@ class GameplayEngine:
                                     
                 except Exception as e:
                     logger.debug(f"Metacognitive evaluation failed: {e}")
+
+            # ================================================================
+            # THEORY-GATED SCORING: RECORD OUTCOME TO DRIVE THEORY LIFECYCLE
+            # ================================================================
+            # Phase 0: After each action, record whether the theory's prediction
+            # was correct. This accumulates evidence that drives theory transitions:
+            # speculating -> exploring -> hypothesis_formed -> confident -> transferred
+            # ================================================================
+            if hasattr(self, 'science_engine') and self.science_engine:
+                try:
+                    record_fn = getattr(self.science_engine, 'record_theory_outcome', None)
+                    if callable(record_fn):
+                        _th_game_type = None
+                        _th_level = 1
+                        try:
+                            if hasattr(self, 'session_manager') and self.session_manager:
+                                gid = getattr(self.session_manager, 'current_game_id', None)
+                                if gid:
+                                    _th_game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                            if hasattr(self, 'loop_state') and self.loop_state:
+                                _th_level = getattr(self.loop_state, 'current_level', 1) or 1
+                        except Exception:
+                            pass
+                        
+                        # Determine outcome: score change indicates success
+                        _th_score_before = getattr(loop_state, 'previous_score', 0)
+                        _th_score_after = game_state.score
+                        _th_outcome_positive = _th_score_after > _th_score_before
+                        _th_is_win = game_state.state == 'WIN'
+                        
+                        record_fn(
+                            _th_game_type,
+                            _th_level,
+                            action,
+                            outcome_positive=_th_outcome_positive,
+                            is_full_win=_th_is_win
+                        )
+                except Exception as e:
+                    logger.debug(f"Theory outcome recording failed: {e}")
 
             # ================================================================
             # PERSONA OUTCOME LOGGING (proposal -> outcome bridge)
@@ -2015,6 +2289,42 @@ class GameplayEngine:
                 logger.debug(f"[BREAKTHROUGH] Reported level {loop_state.current_level} completion to network")
             except Exception as e:
                 logger.debug(f"Breakthrough report failed (non-critical): {e}")
+        
+        # ================================================================
+        # GAMES-AS-TEACHERS: Lesson Extraction on WIN
+        # ================================================================
+        # From agent_consciousness_synthesis.md: Each level is a lesson.
+        # Extract WHAT was learned, not just HOW to win.
+        # This enables transfer testing and generalization.
+        # ================================================================
+        if mode_for_spine == 'LIVE' and hasattr(self, 'teacher_engine') and self.teacher_engine:
+            try:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                
+                # Get action history for this level
+                action_history = list(loop_state.level_actions) if hasattr(loop_state, 'level_actions') else []
+                
+                # Get working theory if available
+                working_theory = None
+                if hasattr(self, '_last_consciousness_state') and self._last_consciousness_state:
+                    working_theory = self._last_consciousness_state.get('working_theory')
+                
+                # Extract the lesson
+                lesson = self.teacher_engine.extract_lesson(
+                    game_type=game_type,
+                    level_number=loop_state.current_level,
+                    winning_sequence=action_history,
+                    frame_history=None,  # Could add frame history tracking
+                    working_theory=working_theory
+                )
+                
+                if lesson:
+                    logger.info(f"[TEACHER] Extracted lesson: {lesson.get('concept_demonstrated', 'unknown')} from L{loop_state.current_level}")
+                    
+                    # Store for transfer testing on next levels
+                    self._last_lesson = lesson
+            except Exception as e:
+                logger.debug(f"Lesson extraction failed (non-critical): {e}")
         
         # CODS - Update context for new level
         # Advance CODS to track operator usage per level
@@ -2309,6 +2619,27 @@ class GameplayEngine:
             'start_time': loop_state.start_time,
             'end_time': end_time
         }
+
+        # ================================================================
+        # IMAGINATION BUDGET UPDATE: Performance-based adjustment
+        # ================================================================
+        # From agent_consciousness_synthesis.md: Budget decreases on poor
+        # performance (fewer personas), increases on wins (more exploration)
+        # ================================================================
+        if hasattr(self, 'imagination_budget_manager') and self.imagination_budget_manager:
+            try:
+                is_win = game_state.state == "WIN"
+                final_score = int(game_state.score) if game_state.score else 0
+                new_budget = self.imagination_budget_manager.update_from_outcome(
+                    score=final_score,
+                    is_win=is_win
+                )
+                if is_win:
+                    logger.debug(f"[BUDGET] Win! Budget increased to {new_budget:.2f}")
+                elif final_score == 0:
+                    logger.debug(f"[BUDGET] Zero score. Budget adjusted to {new_budget:.2f}")
+            except Exception as e:
+                logger.debug(f"Imagination budget update failed (non-critical): {e}")
 
         attempt_id = self.game_config.get('attempt_id')
         mode_for_spine = self.game_config.get('mode', 'LIVE')
@@ -6892,6 +7223,83 @@ class GameplayEngine:
                 merged = dict(existing) if isinstance(existing, dict) else {}
                 merged.update({'status': status, 'reason': why})
                 ladder_trace[name] = merged
+            
+            # ===============================================================
+            # QUESTIONING ENGINE WITH TEETH: Check for blocking questions
+            # Critical questions (Q4, Q9, META) can BLOCK normal proposals
+            # and force specific exploration/revision actions instead.
+            # ===============================================================
+            if hasattr(self, 'questioning_engine') and self.questioning_engine:
+                try:
+                    # Get self-identity and working theory for question generation
+                    _qe_self_id = {}
+                    _qe_theory = {}
+                    _qe_obs_flags = getattr(self, '_last_observer_flags', {}) or {}
+                    _qe_action_count = getattr(self.loop_state, 'action_count', 0) if hasattr(self, 'loop_state') and self.loop_state else 0
+                    
+                    if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                        try:
+                            agent_id = self.game_config.get('agent_id')
+                            if agent_id:
+                                _qe_self_id = self.agent_self_model.get_self_identity_snapshot(agent_id) or {}
+                        except Exception:
+                            pass
+                    
+                    if hasattr(self, 'science_engine') and self.science_engine:
+                        try:
+                            _wt_fn = getattr(self.science_engine, 'get_working_theory', None)
+                            if callable(_wt_fn):
+                                _qe_game_type = None
+                                _qe_level = 1
+                                if hasattr(self, 'session_manager') and self.session_manager:
+                                    gid = getattr(self.session_manager, 'current_game_id', None)
+                                    if gid:
+                                        _qe_game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                                if hasattr(self, 'loop_state') and self.loop_state:
+                                    _qe_level = getattr(self.loop_state, 'current_level', 1) or 1
+                                _qe_theory = _wt_fn(_qe_game_type, _qe_level) or {}
+                        except Exception:
+                            pass
+                    
+                    # Generate questions based on current state
+                    questions = self.questioning_engine.generate_questions(
+                        self_identity=_qe_self_id,
+                        working_theory=_qe_theory,
+                        observer_flags=_qe_obs_flags,
+                        action_count=_qe_action_count
+                    )
+                    
+                    if questions:
+                        # Check if action is blocked
+                        blocking_info = self.questioning_engine.get_blocking_info()
+                        if blocking_info and blocking_info.get('is_blocked'):
+                            # The action may be blocked - check if it's in allowed_actions
+                            allowed = blocking_info.get('allowed_actions', [])
+                            
+                            # Check if current action is allowed
+                            is_allowed = (
+                                action in allowed or 
+                                rung in ('exploration', 'discovery') or
+                                (action in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4') and 'exploration' in allowed)
+                            )
+                            
+                            if not is_allowed:
+                                # ACTION IS BLOCKED - substitute with exploration action
+                                blocking_qs = [q['question'] for q in questions if q.get('blocks_action')]
+                                original_action = action
+                                original_reason = reason
+                                
+                                # Default to random movement for exploration
+                                import random
+                                exploration_action = f"ACTION{random.choice([1, 2, 3, 4])}"
+                                action = exploration_action
+                                reason = f"BLOCKED by {blocking_qs}: {original_reason[:50]}... -> forced exploration"
+                                rung = 'heuristic'
+                                
+                                logger.info(f"[QUESTIONING] {original_action} blocked by {blocking_qs}, substituting {action}")
+                except Exception as qe_err:
+                    logger.debug(f"Questioning engine check failed: {qe_err}")
+            
             # Observer veto: if flagged unsafe and choice is not noop, prefer noop fallback
             try:
                 if observer_personas_active and self._last_observer_flags.get('veto_unsafe') and rung != 'noop':
@@ -7009,7 +7417,23 @@ class GameplayEngine:
                         if name in ('sequence', 'cods') and hasattr(self, 'science_engine') and self.science_engine:
                             theory_score_fn = getattr(self.science_engine, 'score_action_with_theory', None)
                             if callable(theory_score_fn):
-                                theory_score = theory_score_fn(info.get('action')) if isinstance(info, dict) else theory_score_fn(None)
+                                # Phase 0: Theory-Gated Scoring - provide game context for theory lookup
+                                _theory_game_type = None
+                                _theory_level = 1
+                                try:
+                                    if hasattr(self, 'session_manager') and self.session_manager:
+                                        gid = getattr(self.session_manager, 'current_game_id', None)
+                                        if gid:
+                                            _theory_game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                                    if hasattr(self, 'loop_state') and self.loop_state:
+                                        _theory_level = getattr(self.loop_state, 'current_level', 1) or 1
+                                except Exception:
+                                    pass
+                                theory_score = theory_score_fn(
+                                    info.get('action') if isinstance(info, dict) else None,
+                                    _theory_game_type,
+                                    _theory_level
+                                )
                                 if isinstance(theory_score, (int, float)):
                                     theory_bonus += min(0.2, max(-0.2, float(theory_score)))
                     except Exception:
@@ -12909,6 +13333,41 @@ class GameplayEngine:
             if curr_controlled != prev_controlled:
                 delta['self_model_update'] = f"Now control: {list(curr_controlled)}"
                 self._previous_controlled_objects = curr_controlled
+        
+        # ===================================================================
+        # WORLD MODEL UPDATE: Get working theory from ScientificMethodEngine
+        # ===================================================================
+        # Phase 1: Wire the world_model_update field to actual working theory.
+        # This replaces "NULL - 425 Too Early" with the current theory stage.
+        # ===================================================================
+        if hasattr(self, 'science_engine') and self.science_engine:
+            try:
+                get_theory_fn = getattr(self.science_engine, 'get_working_theory', None)
+                if callable(get_theory_fn):
+                    _wm_game_type = None
+                    _wm_level = 1
+                    try:
+                        if hasattr(self, 'session_manager') and self.session_manager:
+                            gid = getattr(self.session_manager, 'current_game_id', None)
+                            if gid:
+                                _wm_game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                        if hasattr(self, 'loop_state') and self.loop_state:
+                            _wm_level = getattr(self.loop_state, 'current_level', 1) or 1
+                    except Exception:
+                        pass
+                    
+                    working_theory = get_theory_fn(_wm_game_type, _wm_level)
+                    if working_theory and working_theory.get('stage') != 'speculating':
+                        # We have a real theory - format for display
+                        stage = working_theory.get('stage', 'unknown')
+                        description = working_theory.get('description', '')[:80]
+                        confidence = working_theory.get('confidence', 0)
+                        delta['world_model_update'] = f"[{stage}] {description} (conf={confidence:.2f})"
+                    elif working_theory and working_theory.get('stage') == 'speculating':
+                        # Early exploration - show what we're looking for
+                        delta['world_model_update'] = "SPECULATING: No confirmed pattern yet - exploring mechanics"
+            except Exception as e:
+                logger.debug(f"World model theory update failed: {e}")
         
         # ===================================================================
         # FRAME_CHANGES -> SELF_MODEL LEARNING (Added 2025-01-XX)

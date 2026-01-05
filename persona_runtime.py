@@ -6,6 +6,17 @@ from typing import Any, Dict, List, Optional
 from database_interface import DatabaseInterface
 
 
+# =============================================================================
+# PERSONA BUDGET MANAGER CONSTANTS (from agent_consciousness_synthesis.md)
+# =============================================================================
+# Hard limits to prevent persona explosion while maintaining diversity.
+# These are non-negotiable caps that apply globally.
+# =============================================================================
+MAX_ACTIVE_PERSONAS = 12          # Absolute maximum personas per agent
+MAX_TEMPORARY_PERSONAS = 5        # Investigators, adapters, etc.
+MAX_OBJECT_FOCUSED_PERSONAS = 3   # Even if controlling 10 objects
+
+
 @dataclass
 class PersonaDecision:
     persona_id: str
@@ -19,7 +30,13 @@ class PersonaDecision:
 
 
 class PersonaManager:
-    """Lightweight persona runtime for proposal/outcome logging and reliability updates."""
+    """Lightweight persona runtime for proposal/outcome logging and reliability updates.
+    
+    Includes PersonaBudgetManager functionality from agent_consciousness_synthesis.md:
+    - Hard limits on total personas (MAX_ACTIVE_PERSONAS = 12)
+    - Hard limits on temporary personas (MAX_TEMPORARY_PERSONAS = 5)
+    - Budget-aware spawning via can_spawn_persona()
+    """
 
     def __init__(self, db: DatabaseInterface, agent_id: Optional[str] = None):
         self.db = db
@@ -28,6 +45,264 @@ class PersonaManager:
 
     def set_agent(self, agent_id: Optional[str]) -> None:
         self.agent_id = agent_id
+
+    def can_spawn_persona(self, persona_type: str = 'experimental', imagination_remaining: float = 1.0) -> tuple[bool, str]:
+        """
+        Check if spawning a new persona is allowed within budget.
+        
+        Part of PersonaBudgetManager functionality.
+        
+        Args:
+            persona_type: Type of persona ('core', 'experimental', 'temporary')
+            imagination_remaining: Remaining imagination budget (0.0-1.0)
+            
+        Returns:
+            Tuple of (allowed: bool, reason: str)
+        """
+        if not self.agent_id:
+            return False, 'no_agent_id'
+        
+        # Query current persona count
+        try:
+            rows = self.db.execute_query(
+                "SELECT persona_id, persistence_class, persona_type FROM persona_profiles WHERE agent_id=?",
+                (self.agent_id,),
+            )
+            personas = rows or []
+        except Exception:
+            return True, 'db_error_allowing'
+        
+        current_count = len(personas)
+        temp_count = sum(1 for p in personas if (p.get('persistence_class') or '').lower() == 'temporary')
+        
+        # Check against hard limits
+        if current_count >= MAX_ACTIVE_PERSONAS:
+            return False, 'at_hard_limit'
+        
+        if persona_type.lower() == 'temporary' and temp_count >= MAX_TEMPORARY_PERSONAS:
+            return False, 'temporary_limit'
+        
+        # Check imagination budget
+        if imagination_remaining < 0.1:
+            return False, 'imagination_exhausted'
+        
+        return True, 'allowed'
+
+    def spawn_temporary_persona(self, spec: Dict[str, Any]) -> Optional[str]:
+        """
+        Spawn a temporary investigating persona if budget allows.
+        
+        Used by QuestioningEngineWithTeeth to spawn investigators.
+        
+        Args:
+            spec: Persona specification with type, investigating, query, etc.
+            
+        Returns:
+            Persona ID if spawned, None if blocked by budget
+        """
+        allowed, reason = self.can_spawn_persona('temporary')
+        if not allowed:
+            return None
+        
+        persona_id = f"persona_tmp_{spec.get('investigating', 'unknown')}_{uuid.uuid4().hex[:6]}"
+        
+        try:
+            self.ensure_persona(
+                persona_id,
+                persona_type=spec.get('type', 'investigator'),
+                persistence_class='temporary',
+                role=spec.get('investigating'),
+            )
+            return persona_id
+        except Exception:
+            return None
+
+    # =========================================================================
+    # PERSONA-THEORY BINDING (from agent_consciousness_synthesis.md)
+    # Personas bound to theories die when theories are contradicted
+    # =========================================================================
+    
+    def bind_persona_to_theory(self, persona_id: str, theory: Dict[str, Any]) -> bool:
+        """
+        Bind a persona to a specific theory.
+        
+        When the theory is contradicted, the persona dies with it.
+        This prevents zombie personas advocating for dead theories.
+        
+        Args:
+            persona_id: The persona to bind
+            theory: The theory dict with at least 'theory_id' and 'formed_at_action'
+            
+        Returns:
+            True if binding succeeded
+        """
+        if not persona_id or not theory:
+            return False
+        
+        theory_id = theory.get('theory_id') or theory.get('hypothesis')
+        formed_at = theory.get('formed_at_action') or theory.get('formed_at', 0)
+        
+        # Store binding in database
+        try:
+            self.db.execute_query(
+                """INSERT OR REPLACE INTO persona_theory_bindings 
+                   (persona_id, theory_id, bound_at_action, agent_id, created_at)
+                   VALUES (?, ?, ?, ?, datetime('now'))""",
+                (persona_id, str(theory_id), formed_at, self.agent_id)
+            )
+            return True
+        except Exception:
+            # Table might not exist - that's okay, binding is optional
+            return False
+    
+    def unbind_personas_for_theory(self, theory_id: str) -> int:
+        """
+        When a theory is contradicted, unbind and optionally prune its personas.
+        
+        Returns count of personas unbound.
+        """
+        if not theory_id:
+            return 0
+        
+        try:
+            rows = self.db.execute_query(
+                "SELECT persona_id FROM persona_theory_bindings WHERE theory_id=? AND agent_id=?",
+                (str(theory_id), self.agent_id)
+            )
+            if not rows:
+                return 0
+            
+            count = 0
+            for row in rows:
+                pid = row.get('persona_id')
+                if pid:
+                    # Mark persona as unbound (could also delete it)
+                    self.db.execute_query(
+                        "DELETE FROM persona_theory_bindings WHERE persona_id=? AND agent_id=?",
+                        (pid, self.agent_id)
+                    )
+                    count += 1
+            
+            return count
+        except Exception:
+            return 0
+    
+    def prune_theory_orphans(self, working_theory: Optional[Dict[str, Any]] = None) -> int:
+        """
+        Aggressive pruning of personas not bound to current theory.
+        
+        Called when theory changes significantly.
+        
+        Args:
+            working_theory: Current active theory (personas not bound to this die)
+            
+        Returns:
+            Number of personas pruned
+        """
+        if not self.agent_id:
+            return 0
+        
+        pruned = 0
+        current_theory_id = None
+        if working_theory:
+            current_theory_id = str(working_theory.get('theory_id') or working_theory.get('hypothesis', ''))
+        
+        try:
+            # Get all bound personas
+            rows = self.db.execute_query(
+                "SELECT persona_id, theory_id FROM persona_theory_bindings WHERE agent_id=?",
+                (self.agent_id,)
+            )
+            
+            if rows:
+                for row in rows:
+                    bound_theory = row.get('theory_id')
+                    pid = row.get('persona_id')
+                    
+                    # If bound to a different theory and not core, consider pruning
+                    if bound_theory and bound_theory != current_theory_id and pid:
+                        # Check if persona is temporary
+                        persona_rows = self.db.execute_query(
+                            "SELECT persistence_class FROM persona_profiles WHERE persona_id=?",
+                            (pid,)
+                        )
+                        if persona_rows:
+                            cls = (persona_rows[0].get('persistence_class') or '').lower()
+                            if cls in ('temporary', 'experimental'):
+                                # Delete the persona
+                                self.db.execute_query(
+                                    "DELETE FROM persona_profiles WHERE persona_id=?",
+                                    (pid,)
+                                )
+                                self.db.execute_query(
+                                    "DELETE FROM persona_theory_bindings WHERE persona_id=?",
+                                    (pid,)
+                                )
+                                pruned += 1
+            
+            return pruned
+        except Exception:
+            return 0
+    
+    def allocate_attention(self) -> Dict[str, float]:
+        """
+        Allocate attention budget across active personas.
+        
+        More personas = less attention each.
+        This prevents cognitive explosion.
+        
+        Returns:
+            Dict mapping persona_id to attention weight (0.0-1.0)
+        """
+        if not self.agent_id:
+            return {}
+        
+        try:
+            rows = self.db.execute_query(
+                """SELECT persona_id, persistence_class, reliability_global 
+                   FROM persona_profiles WHERE agent_id=?""",
+                (self.agent_id,)
+            )
+            if not rows:
+                return {}
+            
+            personas = list(rows)
+            total_count = len(personas)
+            
+            if total_count == 0:
+                return {}
+            
+            # Base attention per persona (inversely proportional to count)
+            base_attention = 1.0 / total_count
+            
+            # Weight by persistence class and reliability
+            attention = {}
+            total_weight = 0.0
+            
+            for p in personas:
+                pid = p.get('persona_id')
+                cls = (p.get('persistence_class') or 'experimental').lower()
+                rel = p.get('reliability_global') or 0.5
+                
+                # Core personas get more attention
+                class_weight = 1.5 if cls == 'core' else (0.7 if cls == 'temporary' else 1.0)
+                
+                # Reliable personas get more attention
+                rel_weight = 0.5 + rel
+                
+                weight = class_weight * rel_weight
+                attention[pid] = weight
+                total_weight += weight
+            
+            # Normalize to sum to 1.0
+            if total_weight > 0:
+                for pid in attention:
+                    attention[pid] /= total_weight
+            
+            return attention
+            
+        except Exception:
+            return {}
 
     def ensure_persona(
         self,
@@ -697,6 +972,11 @@ class PersonaManager:
     ) -> None:
         """Lightweight lifecycle maintenance: prune weak, enforce minimum ensemble, spawn on stall.
 
+        Includes PersonaBudgetManager hard limits from agent_consciousness_synthesis.md:
+        - MAX_ACTIVE_PERSONAS = 12 (absolute cap)
+        - MAX_TEMPORARY_PERSONAS = 5
+        - Aggressive pruning if over limit
+        
         Stage gating: no-op below stage 3 unless stalled.
         """
         if not self.agent_id:
@@ -711,6 +991,47 @@ class PersonaManager:
         except Exception:
             return
         personas = rows or []
+
+        # ===================================================================
+        # HARD LIMIT ENFORCEMENT: Prune if over MAX_ACTIVE_PERSONAS
+        # ===================================================================
+        if len(personas) > MAX_ACTIVE_PERSONAS:
+            # Sort by reliability, prune lowest-reliability non-core personas
+            sorted_by_rel = sorted(personas, key=lambda p: (
+                0 if (p.get('persistence_class') or '').lower() == 'core' else 1,  # Core last
+                p.get('reliability_global') or 0.0  # Low reliability first
+            ))
+            
+            pruned_count = 0
+            for p in sorted_by_rel:
+                if len(personas) - pruned_count <= MAX_ACTIVE_PERSONAS:
+                    break
+                if (p.get('persistence_class') or '').lower() == 'core':
+                    continue  # Never prune core
+                try:
+                    self.db.execute_query(
+                        "DELETE FROM persona_profiles WHERE persona_id=? AND agent_id=?",
+                        (p.get('persona_id'), self.agent_id),
+                    )
+                    pruned_count += 1
+                except Exception:
+                    pass
+
+        # ===================================================================
+        # TEMPORARY LIMIT ENFORCEMENT: Prune temporary if over limit
+        # ===================================================================
+        temp_personas = [p for p in personas if (p.get('persistence_class') or '').lower() == 'temporary']
+        if len(temp_personas) > MAX_TEMPORARY_PERSONAS:
+            # Prune oldest temporary personas
+            sorted_temp = sorted(temp_personas, key=lambda p: p.get('lifetime_exposures') or 0, reverse=True)
+            for p in sorted_temp[MAX_TEMPORARY_PERSONAS:]:
+                try:
+                    self.db.execute_query(
+                        "DELETE FROM persona_profiles WHERE persona_id=? AND agent_id=?",
+                        (p.get('persona_id'), self.agent_id),
+                    )
+                except Exception:
+                    pass
 
         # Prune weak experimental personas with sufficient exposure
         try:
@@ -739,9 +1060,12 @@ class PersonaManager:
         except Exception:
             pass
 
-        # Ensure minimum ensemble size
+        # Ensure minimum ensemble size (respecting hard limits)
         try:
-            while len(personas) < min_personas:
+            while len(personas) < min_personas and len(personas) < MAX_ACTIVE_PERSONAS:
+                allowed, reason = self.can_spawn_persona('experimental')
+                if not allowed:
+                    break
                 pid = f"persona_auto_{uuid.uuid4().hex[:8]}"
                 novelty_bias = 0.5 + 0.1 * (len(personas) % 2)
                 bias_risk = 0.3 + 0.1 * (len(personas) % 3)
@@ -756,11 +1080,12 @@ class PersonaManager:
         except Exception:
             pass
 
-        # Spawn extra experimental when stalled and below cap
+        # Spawn extra experimental when stalled and below cap (respecting hard limits)
         try:
             if stalled and (stage or 0) >= 3:
                 exp_count = sum(1 for p in personas if (p.get('persistence_class') or 'experimental').lower() == 'experimental')
-                if exp_count < max_experimental:
+                allowed, reason = self.can_spawn_persona('experimental')
+                if exp_count < max_experimental and allowed and len(personas) < MAX_ACTIVE_PERSONAS:
                     pid = f"persona_auto_{uuid.uuid4().hex[:8]}"
                     self.ensure_persona(
                         pid,

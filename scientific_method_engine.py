@@ -1049,3 +1049,995 @@ class ScientificMethodEngine:
                     after_colors.add(cell)
         
         return before_colors - after_colors
+
+    # =========================================================================
+    # PHASE 8: THEORY-GATED SCORING - The consciousness integration point
+    # =========================================================================
+    # These methods fulfill the "Single Most Important Constraint" from
+    # agent_consciousness_synthesis.md - every proposal must be scored
+    # against the current working theory.
+    # =========================================================================
+
+    def get_working_theory(self, game_type: str, level_number: int) -> Optional[Dict[str, Any]]:
+        """
+        Get the current working theory for this game/level.
+        
+        Returns a structured theory with stage information for scoring.
+        The theory STAGES are critical:
+        - 'speculating': Low-confidence guess, being wrong is okay
+        - 'exploring': Actively gathering observations
+        - 'hypothesis_formed': Have a guess, testing it
+        - 'partial_confirmation': Some evidence supports
+        - 'contradicted': Evidence against, need revision
+        - 'confident': Strong evidence, using it
+        - 'transferred': Applied successfully to variation
+        
+        Returns:
+            Dict with 'theory', 'stage', 'confidence', 'evidence_for', 'evidence_against'
+            or None if no theory exists
+        """
+        # First check active theories in memory
+        for theory_id, theory in self._active_theories.items():
+            if theory.game_type == game_type and (theory.level_number == level_number or theory.level_number == -1):
+                return self._theory_to_working_theory(theory)
+        
+        # Then check database for confirmed theories
+        theories = self._get_theories_for_level(game_type, level_number)
+        if theories:
+            # Get highest confidence theory
+            best = max(theories, key=lambda t: t.confidence)
+            return self._theory_to_working_theory(best)
+        
+        # No theory - return speculating stage (not NULL)
+        return {
+            'theory': None,
+            'stage': 'speculating',
+            'confidence': 0.0,
+            'evidence_for': 0,
+            'evidence_against': 0,
+            'description': 'Speculating - forming initial hypotheses',
+            'hypothesis_type': None
+        }
+    
+    def _theory_to_working_theory(self, theory: Theory) -> Dict[str, Any]:
+        """Convert internal Theory to working theory dict for scoring."""
+        # Map status to stage
+        stage_map = {
+            TheoryStatus.PROPOSED: 'exploring' if theory.tests_conducted > 0 else 'speculating',
+            TheoryStatus.TESTING: 'hypothesis_formed',
+            TheoryStatus.SUPPORTED: 'confident',
+            TheoryStatus.REFUTED: 'contradicted',
+            TheoryStatus.GENERALIZED: 'transferred'
+        }
+        
+        # Refine stage based on evidence
+        stage = stage_map.get(theory.status, 'exploring')
+        if theory.confidence >= 0.5 and theory.tests_conducted >= 1 and stage == 'exploring':
+            stage = 'hypothesis_formed'
+        if theory.confidence >= 0.7 and theory.tests_conducted >= 2:
+            stage = 'partial_confirmation'
+        if len(theory.contradicting_observations) > len(theory.supporting_observations):
+            stage = 'contradicted'
+        
+        return {
+            'theory': theory.to_dict(),
+            'stage': stage,
+            'confidence': theory.confidence,
+            'evidence_for': len(theory.supporting_observations),
+            'evidence_against': len(theory.contradicting_observations),
+            'description': theory.description,
+            'hypothesis_type': theory.theory_type.value,
+            'theory_id': theory.theory_id
+        }
+    
+    def get_active_theory_hint(self) -> Optional[Dict[str, Any]]:
+        """
+        Get hints from current theory for action selection.
+        
+        Called by core_gameplay._select_action() to influence rung scoring.
+        
+        Returns:
+            Dict with:
+            - preferred_rung: Which ladder rung to prefer based on theory
+            - weight: How strongly to prefer it (0.0-0.3)
+            - rung_weights: Dict of rung-specific weights
+            - prediction: What the theory predicts
+            - reason: Why this hint is given
+        """
+        if not self._active_theories:
+            return None
+        
+        # Get the most relevant active theory
+        best_theory = None
+        best_confidence = 0.0
+        
+        for theory in self._active_theories.values():
+            if theory.confidence > best_confidence:
+                best_confidence = theory.confidence
+                best_theory = theory
+        
+        if not best_theory:
+            return None
+        
+        # Build hint based on theory type and status
+        hint = {
+            'preferred_rung': None,
+            'weight': 0.0,
+            'rung_weights': {},
+            'prediction': None,
+            'reason': best_theory.description,
+            'theory_stage': TheoryStatus(best_theory.status).value if best_theory.status else 'proposed'
+        }
+        
+        # Adjust based on theory status
+        if best_theory.status == TheoryStatus.SUPPORTED:
+            # Confident theory - prefer exploitation
+            hint['preferred_rung'] = 'sequence'
+            hint['weight'] = min(0.2, best_theory.confidence * 0.25)
+            hint['rung_weights'] = {'sequence': 0.15, 'cods': 0.1, 'micro_cf': 0.05}
+        elif best_theory.status == TheoryStatus.PROPOSED:
+            # Untested theory - prefer experimentation
+            hint['preferred_rung'] = 'heuristic'
+            hint['weight'] = 0.1
+            hint['rung_weights'] = {'heuristic': 0.15, 'micro_cf': 0.1}
+        elif best_theory.status == TheoryStatus.REFUTED:
+            # Contradicted theory - need revision
+            hint['preferred_rung'] = 'heuristic'
+            hint['weight'] = 0.15
+            hint['rung_weights'] = {'heuristic': 0.2, 'micro_cf': 0.15, 'sequence': -0.1}
+        
+        # Add prediction if available
+        if best_theory.predictions:
+            hint['prediction'] = best_theory.predictions[0]
+        
+        return hint
+    
+    def score_action_with_theory(self, action: Optional[str], 
+                                  game_type: str = None, 
+                                  level_number: int = None) -> float:
+        """
+        Score an action against the current working theory.
+        
+        THE SINGLE MOST IMPORTANT CONSTRAINT from agent_consciousness_synthesis.md:
+        Every proposal must be scored against the current working theory.
+        
+        Args:
+            action: The action being considered (e.g., "ACTION1", "ACTION6")
+            game_type: Current game type
+            level_number: Current level
+            
+        Returns:
+            Score modifier (-0.3 to +0.3):
+            - Positive: Action supports/tests/exploits current theory
+            - Negative: Action ignores or contradicts theory
+            - Zero: No strong relationship
+        """
+        # Get working theory
+        working_theory = None
+        if game_type and level_number:
+            working_theory = self.get_working_theory(game_type, level_number)
+        elif self._active_theories:
+            # Use most recent active theory
+            best = max(self._active_theories.values(), key=lambda t: t.confidence)
+            working_theory = self._theory_to_working_theory(best)
+        
+        if not working_theory or not working_theory.get('theory'):
+            # NO THEORY EXISTS: Exploration/discovery actions score higher
+            # This implements "If no theory exists, only theory-forming actions score highly"
+            if action in ('ACTION6', 'NOOP'):  # Click/wait for observation
+                return 0.1  # Slight boost for exploratory actions
+            return 0.0  # Neutral for other actions
+        
+        stage = working_theory.get('stage', 'exploring')
+        confidence = working_theory.get('confidence', 0.5)
+        theory_data = working_theory.get('theory', {})
+        
+        # Get the formal statement to check if action is relevant
+        formal_stmt = theory_data.get('formal_statement', {}) if theory_data else {}
+        theory_action = formal_stmt.get('action', '')
+        
+        # STAGE-BASED SCORING
+        if stage == 'speculating' or stage == 'exploring':
+            # NO CONFIRMED THEORY: Only theory-forming actions score highly
+            if action == theory_action:
+                return 0.15  # Testing a speculated action
+            elif action == 'ACTION6':  # Click = observation
+                return 0.1
+            else:
+                return -0.05  # Slight penalty for non-exploratory
+        
+        elif stage == 'hypothesis_formed':
+            # THEORY UNDER TEST: Reward testing, penalize ignoring
+            if action == theory_action:
+                return 0.2  # Testing the hypothesis
+            else:
+                return -0.1  # Not testing when we should be
+        
+        elif stage == 'partial_confirmation' or stage == 'confident':
+            # THEORY CONFIRMED: Reward exploitation
+            if action == theory_action:
+                return 0.25 * confidence  # Use confirmed knowledge
+            elif action == 'ACTION6':
+                return -0.05  # Why explore when we know?
+            else:
+                return 0.0  # Neutral
+        
+        elif stage == 'contradicted':
+            # THEORY BROKEN: Only theory-revision actions score highly
+            if action == theory_action:
+                return -0.2  # Don't repeat what failed
+            elif action == 'ACTION6' or action == 'NOOP':
+                return 0.15  # Need to observe/revise
+            else:
+                return 0.1  # Try something different
+        
+        return 0.0
+    
+    def record_theory_outcome(self, action: str, outcome: Dict[str, Any],
+                               game_type: str, level_number: int,
+                               frame_before: List[List[int]] = None,
+                               frame_after: List[List[int]] = None):
+        """
+        Record action outcome and update theory evidence.
+        
+        Called after every action to accumulate evidence for theories.
+        This drives the theory lifecycle: speculating -> hypothesis_formed -> confident
+        
+        Args:
+            action: What action was taken
+            outcome: Dict with score_change, game_state, etc.
+            game_type: Current game
+            level_number: Current level
+            frame_before: Frame before action (optional)
+            frame_after: Frame after action (optional)
+        """
+        # Create observation record
+        observation = {
+            'action': action,
+            'game_type': game_type,
+            'level_number': level_number,
+            'score_before': outcome.get('score_before', 0),
+            'score_after': outcome.get('score_after', 0),
+            'game_state': outcome.get('game_state', 'NOT_FINISHED'),
+            'frame_before': frame_before,
+            'frame_after': frame_after,
+            'frame_changed': frame_before != frame_after if frame_before and frame_after else False,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Record for pattern detection
+        self.record_observation(observation)
+        
+        # Update active theories based on this outcome
+        for theory_id, theory in list(self._active_theories.items()):
+            if theory.game_type != game_type:
+                continue
+            if theory.level_number != level_number and theory.level_number != -1:
+                continue
+            
+            # Check if this action relates to the theory
+            formal_stmt = theory.formal_statement
+            if formal_stmt.get('action') == action:
+                # This action tests this theory
+                expected = formal_stmt.get('consequence') or formal_stmt.get('effect') or formal_stmt.get('result')
+                actual = outcome.get('game_state')
+                score_change = outcome.get('score_after', 0) - outcome.get('score_before', 0)
+                
+                # Determine if prediction matched
+                matched = False
+                if expected == 'GAME_OVER' and actual == 'GAME_OVER':
+                    matched = True
+                elif expected == 'score_increase' and score_change > 0:
+                    matched = True
+                elif expected == 'progress' and score_change > 0:
+                    matched = True
+                elif expected in ('state_change', 'no_effect') and outcome.get('frame_changed', False):
+                    matched = True
+                
+                # Update theory
+                theory.tests_conducted += 1
+                theory.last_tested_at = datetime.now().isoformat()
+                
+                if matched:
+                    theory.tests_successful += 1
+                    theory.supporting_observations.append(
+                        f"Action {action} at level {level_number}: prediction matched"
+                    )
+                    theory.confidence = min(0.95, theory.confidence + 0.08)
+                    logger.debug(f"[SCIENCE] Theory evidence FOR: {theory.description[:50]}... (conf: {theory.confidence:.2f})")
+                else:
+                    theory.contradicting_observations.append(
+                        f"Action {action} at level {level_number}: expected {expected}, got {actual}"
+                    )
+                    theory.confidence = max(0.1, theory.confidence - 0.12)
+                    logger.debug(f"[SCIENCE] Theory evidence AGAINST: {theory.description[:50]}... (conf: {theory.confidence:.2f})")
+                
+                # Update status based on evidence
+                if theory.confidence >= 0.7 and theory.tests_conducted >= 3:
+                    theory.status = TheoryStatus.SUPPORTED
+                elif theory.confidence <= 0.3:
+                    theory.status = TheoryStatus.REFUTED
+                elif theory.tests_conducted >= 1:
+                    theory.status = TheoryStatus.TESTING
+                
+                self._save_theory(theory)
+
+
+# =============================================================================
+# QUESTIONING ENGINE WITH TEETH
+# =============================================================================
+# Questions that FORCE the agent to think, not just log.
+# Based on Games-as-Teachers Q1-Q9 framework.
+# Key insight: Critical questions BLOCK normal action selection until resolved.
+# =============================================================================
+
+class QuestioningEngineWithTeeth:
+    """
+    Questions that FORCE the agent to think, not just log.
+    
+    Based on agent_consciousness_synthesis.md architecture:
+    - Q1-Q9 are active questions with real consequences
+    - BLOCKING questions prevent normal action selection
+    - Questions can spawn investigating personas
+    - Questions modify proposal scores directly
+    """
+    
+    # Core questions from Games-as-Teachers framework
+    CORE_QUESTIONS = [
+        # Observation
+        ("Q1", "What is the teacher showing me?", "lesson_content"),
+        ("Q2", "What changed between examples?", "pattern_detection"),
+        
+        # Self-Model
+        ("Q3", "What lessons have I learned before?", "prior_understanding"),
+        ("Q4", "What am I being asked to manipulate?", "lesson_subject"),
+        
+        # Goal/Value
+        ("Q5", "What demonstrates understanding?", "success_criteria"),
+        
+        # Network Wisdom
+        ("Q6", "What have my peers understood?", "study_group_notes"),
+        
+        # CODS Vocabulary
+        ("Q7", "What conceptual tools do I have?", "vocabulary"),
+        
+        # Metacognition
+        ("Q8", "What do I think this lesson is about?", "interpretation"),
+        
+        # Self-Test
+        ("Q9", "Does my interpretation explain all examples?", "self_test"),
+    ]
+    
+    # Questions that BLOCK normal action selection
+    BLOCKING_QUESTIONS = {'Q4', 'Q9', 'META'}
+    
+    # Questions that spawn investigating personas
+    PERSONA_SPAWNING_QUESTIONS = {'Q1', 'Q2', 'Q8'}
+    
+    def __init__(self, db_connection=None):
+        """Initialize with optional database connection."""
+        self._db = db_connection
+        self._active_questions: List[Dict[str, Any]] = []
+        self._last_blocked_action: Optional[str] = None
+        self._blocking_reason: Optional[str] = None
+    
+    def generate_questions(
+        self,
+        self_identity: Optional[Dict[str, Any]] = None,
+        working_theory: Optional[Dict[str, Any]] = None,
+        observer_flags: Optional[Dict[str, Any]] = None,
+        action_count: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate active questions based on current state.
+        
+        Args:
+            self_identity: Self-model with controlled_objects etc
+            working_theory: Current working theory from ScientificMethodEngine
+            observer_flags: Observer flags including stuckness
+            action_count: Number of actions taken in current game
+            
+        Returns:
+            List of active questions with blocking/scoring info
+        """
+        questions = []
+        self_identity = self_identity or {}
+        working_theory = working_theory or {}
+        observer_flags = observer_flags or {}
+        
+        controlled_objects = self_identity.get('controlled_objects', [])
+        theory_stage = working_theory.get('stage', 'speculating')
+        stuckness = observer_flags.get('stuckness', 0)
+        
+        # Q1: What is happening? (Always active early game)
+        if action_count < 20:
+            questions.append({
+                'question': 'Q1',
+                'query': 'What objects exist and which are stable?',
+                'urgency': 'high' if not controlled_objects else 'low',
+                'blocks_action': False,
+                'spawns_persona': True,
+                'score_modifier': 0.85  # Slightly reduce confidence in all proposals
+            })
+        
+        # Q4: What do I control? (BLOCKING if unknown after 20 actions)
+        if not controlled_objects and action_count > 20:
+            questions.append({
+                'question': 'Q4',
+                'query': 'I have not identified what I control yet after 20+ actions',
+                'urgency': 'critical',
+                'blocks_action': True,  # CANNOT execute normal proposals
+                'spawns_persona': True,
+                'allowed_actions': ['exploration', 'discovery', 'ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'],
+                'score_modifier': 0.3  # Severely penalize non-discovery actions
+            })
+        
+        # Q9: Self-test - theory is contradicted (BLOCKING)
+        if theory_stage == 'contradicted':
+            contradiction_count = working_theory.get('contradictions', 1)
+            questions.append({
+                'question': 'Q9',
+                'query': f'My interpretation has {contradiction_count} contradictions',
+                'urgency': 'critical',
+                'blocks_action': True,  # MUST address contradictions
+                'spawns_persona': False,
+                'forces_theory_revision': True,
+                'allowed_actions': ['revise_theory', 'test_alternative', 'ACTION5', 'ACTION6', 'ACTION7'],
+                'score_modifier': 0.2  # Only theory-revision actions score well
+            })
+        
+        # META: Why am I stuck? (BLOCKING if high stuckness)
+        if stuckness > 0.7:
+            questions.append({
+                'question': 'META',
+                'query': 'Why am I stuck? What assumption is wrong?',
+                'urgency': 'critical',
+                'blocks_action': True,
+                'spawns_persona': True,
+                'forces_theory_revision': True,
+                'allowed_actions': ['random', 'test_alternative', 'exploration', 'noop'],
+                'score_modifier': 0.15
+            })
+        
+        self._active_questions = questions
+        return questions
+    
+    def apply_question_constraints(
+        self,
+        proposals: List[Dict[str, Any]],
+        questions: Optional[List[Dict[str, Any]]] = None
+    ) -> Tuple[List[Dict[str, Any]], bool]:
+        """
+        Apply question constraints to proposals.
+        
+        Questions modify scoring and can BLOCK proposals entirely.
+        
+        Args:
+            proposals: List of action proposals with 'action', 'score', 'intent' keys
+            questions: Active questions (uses cached if not provided)
+            
+        Returns:
+            Tuple of (modified_proposals, is_blocked)
+        """
+        questions = questions or self._active_questions
+        
+        if not questions:
+            return proposals, False
+        
+        blocked = any(q.get('blocks_action') for q in questions)
+        blocking_questions = [q for q in questions if q.get('blocks_action')]
+        
+        modified_proposals = []
+        for proposal in proposals:
+            original_score = proposal.get('score', 0.5)
+            action = proposal.get('action', '')
+            intent = proposal.get('intent', '')
+            
+            # Calculate score modifier from all active questions
+            total_modifier = 1.0
+            for q in questions:
+                total_modifier *= q.get('score_modifier', 1.0)
+            
+            # If blocking questions exist, check if proposal is allowed
+            if blocked:
+                allowed = False
+                for bq in blocking_questions:
+                    allowed_actions = bq.get('allowed_actions', [])
+                    
+                    # Check if action or intent is in allowed list
+                    if action in allowed_actions or intent in allowed_actions:
+                        allowed = True
+                        total_modifier *= 1.5  # BOOST allowed actions when blocked
+                        break
+                    
+                    # Also check if it's a movement action (ACTION1-4)
+                    if 'exploration' in allowed_actions and action in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'):
+                        allowed = True
+                        total_modifier *= 1.3
+                        break
+                
+                if not allowed:
+                    # This proposal is BLOCKED by a critical question
+                    proposal = proposal.copy()
+                    proposal['blocked'] = True
+                    proposal['blocked_by'] = [bq['question'] for bq in blocking_questions]
+                    proposal['score'] = 0.0  # Zero score for blocked proposals
+                    self._last_blocked_action = action
+                    self._blocking_reason = f"Blocked by {proposal['blocked_by']}"
+                    modified_proposals.append(proposal)
+                    continue
+            
+            # Apply modifier to score
+            proposal = proposal.copy()
+            proposal['score'] = max(0.0, min(1.0, original_score * total_modifier))
+            proposal['question_modifier'] = total_modifier
+            modified_proposals.append(proposal)
+        
+        return modified_proposals, blocked
+    
+    def get_blocking_info(self) -> Optional[Dict[str, Any]]:
+        """Get information about why actions are being blocked."""
+        blocking_qs = [q for q in self._active_questions if q.get('blocks_action')]
+        if not blocking_qs:
+            return None
+        return {
+            'is_blocked': True,
+            'blocking_questions': blocking_qs,
+            'allowed_actions': list(set(
+                action 
+                for q in blocking_qs 
+                for action in q.get('allowed_actions', [])
+            )),
+            'total_score_penalty': 0.0 if blocking_qs else 1.0
+        }
+    
+    def spawn_investigating_personas(
+        self,
+        questions: Optional[List[Dict[str, Any]]] = None,
+        persona_manager: Optional[Any] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Questions can spawn specialized investigating personas.
+        
+        Returns list of persona specs to spawn.
+        """
+        questions = questions or self._active_questions
+        spawned = []
+        
+        for q in questions:
+            if q.get('spawns_persona') and q['urgency'] in ['high', 'critical']:
+                persona_spec = {
+                    'type': 'investigator',
+                    'investigating': q['question'],
+                    'query': q['query'],
+                    'lifecycle': 'temporary',  # Dies when question resolved
+                    'focus': q['question'],
+                    'persistence': 'experimental'
+                }
+                
+                if persona_manager is not None:
+                    try:
+                        spawn_fn = getattr(persona_manager, 'spawn_temporary_persona', None)
+                        if callable(spawn_fn):
+                            spawn_fn(persona_spec)
+                    except Exception:
+                        pass
+                
+                spawned.append(persona_spec)
+        
+        return spawned
+    
+    def resolve_question(self, question_id: str, resolution: str = 'resolved') -> bool:
+        """
+        Mark a question as resolved, removing its blocking status.
+        
+        Args:
+            question_id: The question to resolve (Q1, Q4, Q9, META, etc)
+            resolution: How it was resolved
+            
+        Returns:
+            True if question was found and resolved
+        """
+        for i, q in enumerate(self._active_questions):
+            if q['question'] == question_id:
+                self._active_questions.pop(i)
+                logger.info(f"[QUESTIONS] Resolved {question_id}: {resolution}")
+                return True
+        return False
+
+
+# =============================================================================
+# GAMES-AS-TEACHERS FRAMEWORK (from agent_consciousness_synthesis.md)
+# =============================================================================
+# Games are teachers - each level is a lesson to interpret.
+# Success = demonstrating understanding through transfer, not just replay.
+# =============================================================================
+
+class GamesAsTeachersEngine:
+    """
+    Implements the Games-as-Teachers paradigm.
+    
+    Core Reframing:
+    - "What objects exist?" -> "What is the teacher showing me?"
+    - "What can I do?" -> "What am I supposed to understand?"
+    - "I died" -> "I misunderstood the lesson"
+    - "I won" -> "I demonstrated understanding"
+    
+    Key Features:
+    1. Lesson extraction on WIN
+    2. Interpretation coverage tracking
+    3. Transfer testing to validate understanding
+    """
+    
+    def __init__(self, db: Optional[Any] = None):
+        self.db = db
+        self._current_lesson: Optional[Dict[str, Any]] = None
+        self._interpretation_attempts: List[Dict[str, Any]] = []
+        self._transfer_history: List[Dict[str, Any]] = []
+    
+    def extract_lesson(
+        self,
+        game_type: str,
+        level_number: int,
+        winning_sequence: List[int],
+        frame_history: Optional[List[Any]] = None,
+        working_theory: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Extract a lesson from a WIN.
+        
+        Called when agent successfully completes a level.
+        The lesson captures WHAT was learned, not just HOW to win.
+        
+        Returns:
+            Lesson dict with concept, interpretation, and evidence
+        """
+        lesson_id = f"lesson_{game_type}_{level_number}_{uuid.uuid4().hex[:8]}"
+        
+        # Analyze the winning sequence for patterns
+        action_counts = {}
+        for action in winning_sequence:
+            action_counts[action] = action_counts.get(action, 0) + 1
+        
+        dominant_action = max(action_counts.items(), key=lambda x: x[1])[0] if action_counts else None
+        sequence_length = len(winning_sequence)
+        
+        # Infer the concept demonstrated
+        concept = self._infer_concept(
+            game_type=game_type,
+            level_number=level_number,
+            winning_sequence=winning_sequence,
+            working_theory=working_theory
+        )
+        
+        # Build the interpretation
+        interpretation = {
+            'sequence_length': sequence_length,
+            'dominant_action': dominant_action,
+            'action_diversity': len(action_counts),
+            'theory_used': working_theory.get('hypothesis') if working_theory else None,
+            'theory_stage': working_theory.get('stage') if working_theory else None
+        }
+        
+        lesson = {
+            'lesson_id': lesson_id,
+            'game_type': game_type,
+            'level_number': level_number,
+            'concept_demonstrated': concept,
+            'interpretation': json.dumps(interpretation),
+            'explains_examples': json.dumps([f"{game_type}_L{level_number}"]),
+            'fails_to_explain': json.dumps([]),
+            'coverage_ratio': 1.0,
+            'validated_by_transfer': False,
+            'transfer_success_count': 0,
+            'transfer_fail_count': 0,
+            'abstraction_level': 'specific',
+            'abstraction_score': 0.0,
+            'created_at': datetime.now().isoformat()
+        }
+        
+        self._current_lesson = lesson
+        
+        # Store in database if available
+        self._store_lesson(lesson)
+        
+        logger.info(f"[TEACHER] Extracted lesson: {concept} from {game_type} L{level_number}")
+        
+        return lesson
+    
+    def _infer_concept(
+        self,
+        game_type: str,
+        level_number: int,
+        winning_sequence: List[int],
+        working_theory: Optional[Dict[str, Any]]
+    ) -> str:
+        """Infer what concept the level was teaching."""
+        # Use theory if available
+        if working_theory:
+            theory_type = working_theory.get('type') or working_theory.get('hypothesis_type', '')
+            if 'symmetry' in str(theory_type).lower():
+                return 'symmetry'
+            if 'containment' in str(theory_type).lower() or 'flood' in str(theory_type).lower():
+                return 'containment'
+            if 'gravity' in str(theory_type).lower():
+                return 'directional_flow'
+            if 'pattern' in str(theory_type).lower():
+                return 'pattern_completion'
+        
+        # Infer from sequence characteristics
+        if len(winning_sequence) < 10:
+            return 'direct_path'
+        
+        # Check for repetitive patterns
+        if len(set(winning_sequence)) == 1:
+            return 'single_action_repeat'
+        
+        # Check for alternating patterns
+        if len(winning_sequence) >= 4:
+            pairs = [(winning_sequence[i], winning_sequence[i+1]) 
+                     for i in range(0, len(winning_sequence)-1, 2)]
+            if len(set(pairs)) == 1:
+                return 'alternating_pattern'
+        
+        return 'exploration_required'
+    
+    def _store_lesson(self, lesson: Dict[str, Any]) -> bool:
+        """Store lesson in database."""
+        if not self.db:
+            return False
+        
+        try:
+            self.db.execute_query(
+                """INSERT OR REPLACE INTO lesson_interpretations
+                   (lesson_id, game_type, level_number, concept_demonstrated,
+                    interpretation, explains_examples, fails_to_explain,
+                    coverage_ratio, validated_by_transfer, transfer_success_count,
+                    transfer_fail_count, abstraction_level, abstraction_score,
+                    created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (lesson['lesson_id'], lesson['game_type'], lesson['level_number'],
+                 lesson['concept_demonstrated'], lesson['interpretation'],
+                 lesson['explains_examples'], lesson['fails_to_explain'],
+                 lesson['coverage_ratio'], lesson['validated_by_transfer'],
+                 lesson['transfer_success_count'], lesson['transfer_fail_count'],
+                 lesson['abstraction_level'], lesson['abstraction_score'],
+                 lesson['created_at'])
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"[TEACHER] Failed to store lesson: {e}")
+            return False
+    
+    def test_transfer(
+        self,
+        lesson_id: str,
+        target_game_type: str,
+        target_level: int,
+        transfer_succeeded: bool,
+        actions_to_success: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Test if a lesson transfers to a new context.
+        
+        This is the critical validation - can understanding be applied elsewhere?
+        
+        Args:
+            lesson_id: The lesson being tested
+            target_game_type: Game type we're testing on
+            target_level: Level we're testing on
+            transfer_succeeded: Did applying the lesson work?
+            actions_to_success: How many actions needed (lower = better generalization)
+            
+        Returns:
+            Transfer test result
+        """
+        result = {
+            'lesson_id': lesson_id,
+            'target_game_type': target_game_type,
+            'target_level': target_level,
+            'transfer_succeeded': transfer_succeeded,
+            'actions_to_success': actions_to_success,
+            'tested_at': datetime.now().isoformat()
+        }
+        
+        self._transfer_history.append(result)
+        
+        # Update lesson statistics
+        if self.db:
+            try:
+                if transfer_succeeded:
+                    self.db.execute_query(
+                        """UPDATE lesson_interpretations 
+                           SET transfer_success_count = transfer_success_count + 1,
+                               validated_by_transfer = TRUE,
+                               abstraction_score = CAST(transfer_success_count + 1 AS REAL) / 
+                                   CAST(transfer_success_count + transfer_fail_count + 1 AS REAL)
+                           WHERE lesson_id = ?""",
+                        (lesson_id,)
+                    )
+                else:
+                    self.db.execute_query(
+                        """UPDATE lesson_interpretations 
+                           SET transfer_fail_count = transfer_fail_count + 1,
+                               abstraction_score = CAST(transfer_success_count AS REAL) / 
+                                   CAST(transfer_success_count + transfer_fail_count + 1 AS REAL)
+                           WHERE lesson_id = ?""",
+                        (lesson_id,)
+                    )
+                
+                # Also store in abstraction_quality if table exists
+                self._store_transfer_quality(result)
+                
+            except Exception as e:
+                logger.debug(f"[TEACHER] Failed to update transfer stats: {e}")
+        
+        logger.info(f"[TEACHER] Transfer test: {lesson_id} -> {target_game_type} L{target_level}: {'SUCCESS' if transfer_succeeded else 'FAIL'}")
+        
+        return result
+    
+    def _store_transfer_quality(self, result: Dict[str, Any]) -> bool:
+        """Store transfer quality metrics."""
+        if not self.db:
+            return False
+        
+        try:
+            self.db.execute_query(
+                """INSERT INTO abstraction_quality
+                   (lesson_id, source_game_type, target_game_type, target_level,
+                    transfer_succeeded, actions_to_success, is_memorization,
+                    is_abstraction, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                (result['lesson_id'], 
+                 result.get('source_game_type', 'unknown'),
+                 result['target_game_type'],
+                 result['target_level'],
+                 result['transfer_succeeded'],
+                 result.get('actions_to_success'),
+                 False,  # is_memorization - determined later
+                 result['transfer_succeeded'])  # is_abstraction if it transferred
+            )
+            return True
+        except Exception:
+            return False
+    
+    def get_coverage_ratio(self, lesson_id: str) -> float:
+        """
+        Get how much of the game space this lesson explains.
+        
+        Higher coverage = more general understanding.
+        """
+        if not self.db:
+            return 0.0
+        
+        try:
+            rows = self.db.execute_query(
+                "SELECT coverage_ratio FROM lesson_interpretations WHERE lesson_id = ?",
+                (lesson_id,)
+            )
+            if rows:
+                return float(rows[0].get('coverage_ratio', 0.0))
+        except Exception:
+            pass
+        
+        return 0.0
+    
+    def find_applicable_lessons(
+        self,
+        game_type: str,
+        level_number: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Find lessons that might apply to current context.
+        
+        Used to bootstrap understanding on new levels.
+        """
+        if not self.db:
+            return []
+        
+        try:
+            # First check for exact game type matches with successful transfer
+            rows = self.db.execute_query(
+                """SELECT * FROM lesson_interpretations 
+                   WHERE game_type = ? AND validated_by_transfer = TRUE
+                   ORDER BY abstraction_score DESC
+                   LIMIT 5""",
+                (game_type,)
+            )
+            
+            if rows:
+                return list(rows)
+            
+            # If no validated lessons, return highest coverage ones
+            rows = self.db.execute_query(
+                """SELECT * FROM lesson_interpretations 
+                   WHERE game_type = ?
+                   ORDER BY coverage_ratio DESC
+                   LIMIT 5""",
+                (game_type,)
+            )
+            
+            return list(rows) if rows else []
+            
+        except Exception:
+            return []
+    
+    def update_interpretation(
+        self,
+        lesson_id: str,
+        explains_level: Optional[str] = None,
+        fails_level: Optional[str] = None
+    ) -> bool:
+        """
+        Update interpretation coverage when we find new examples.
+        
+        Args:
+            lesson_id: Lesson to update
+            explains_level: New level this lesson explains (add to list)
+            fails_level: New level this lesson fails to explain (add to list)
+        """
+        if not self.db:
+            return False
+        
+        try:
+            # Get current values
+            rows = self.db.execute_query(
+                "SELECT explains_examples, fails_to_explain FROM lesson_interpretations WHERE lesson_id = ?",
+                (lesson_id,)
+            )
+            
+            if not rows:
+                return False
+            
+            explains = json.loads(rows[0].get('explains_examples', '[]'))
+            fails = json.loads(rows[0].get('fails_to_explain', '[]'))
+            
+            if explains_level and explains_level not in explains:
+                explains.append(explains_level)
+            
+            if fails_level and fails_level not in fails:
+                fails.append(fails_level)
+            
+            # Calculate new coverage ratio
+            total = len(explains) + len(fails)
+            coverage = len(explains) / total if total > 0 else 0.0
+            
+            # Update
+            self.db.execute_query(
+                """UPDATE lesson_interpretations 
+                   SET explains_examples = ?, fails_to_explain = ?, coverage_ratio = ?
+                   WHERE lesson_id = ?""",
+                (json.dumps(explains), json.dumps(fails), coverage, lesson_id)
+            )
+            
+            return True
+            
+        except Exception:
+            return False
+    
+    def get_lesson_stats(self) -> Dict[str, Any]:
+        """Get overall statistics about lessons learned."""
+        if not self.db:
+            return {'total_lessons': 0, 'validated_lessons': 0, 'avg_coverage': 0.0}
+        
+        try:
+            rows = self.db.execute_query(
+                """SELECT 
+                       COUNT(*) as total,
+                       SUM(CASE WHEN validated_by_transfer THEN 1 ELSE 0 END) as validated,
+                       AVG(coverage_ratio) as avg_coverage,
+                       AVG(abstraction_score) as avg_abstraction
+                   FROM lesson_interpretations"""
+            )
+            
+            if rows:
+                return {
+                    'total_lessons': rows[0].get('total', 0),
+                    'validated_lessons': rows[0].get('validated', 0),
+                    'avg_coverage': rows[0].get('avg_coverage', 0.0),
+                    'avg_abstraction': rows[0].get('avg_abstraction', 0.0)
+                }
+        except Exception:
+            pass
+        
+        return {'total_lessons': 0, 'validated_lessons': 0, 'avg_coverage': 0.0}

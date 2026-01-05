@@ -207,6 +207,13 @@ class CODSEngine:
         # Operator execution stats
         self._execution_stats: Dict[str, Dict] = {}
         
+        # =====================================================================
+        # WORLD-MODEL INTEGRATION (from agent_consciousness_synthesis.md)
+        # Track discoveries for world-model updates
+        # =====================================================================
+        self._latest_discovery: Optional[Dict[str, Any]] = None
+        self._pending_discoveries: List[Dict[str, Any]] = []
+        
         # Ensure failure-driven learning tables exist
         self._ensure_failure_tables()
         
@@ -1271,6 +1278,109 @@ class CODSEngine:
     def get_locked_primitives(self) -> List[Dict[str, Any]]:
         """Get all locked primitives awaiting discovery."""
         return self.unlock_manager.list_locked()
+    
+    # ======================================================================
+    # WORLD-MODEL INTEGRATION (from agent_consciousness_synthesis.md)
+    # Feed discoveries into world understanding
+    # ======================================================================
+    
+    def has_new_discovery(self) -> bool:
+        """
+        Check if there's a pending discovery for world-model integration.
+        
+        Called by consciousness_step to check if CODS found something.
+        """
+        return self._latest_discovery is not None or len(self._pending_discoveries) > 0
+    
+    def get_latest_discovery(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent discovery for world-model update.
+        
+        Returns discovery with:
+        - operator_name: str
+        - explanation: str  
+        - discovery_type: 'operator', 'primitive', 'pattern'
+        - evidence: dict
+        
+        Clears the discovery after retrieval.
+        """
+        if self._latest_discovery:
+            discovery = self._latest_discovery
+            self._latest_discovery = None
+            return discovery
+        
+        if self._pending_discoveries:
+            return self._pending_discoveries.pop(0)
+        
+        return None
+    
+    def get_all_pending_discoveries(self) -> List[Dict[str, Any]]:
+        """Get all pending discoveries and clear the queue."""
+        discoveries = list(self._pending_discoveries)
+        self._pending_discoveries.clear()
+        if self._latest_discovery:
+            discoveries.insert(0, self._latest_discovery)
+            self._latest_discovery = None
+        return discoveries
+    
+    def record_discovery(
+        self,
+        operator_name: str,
+        explanation: str,
+        discovery_type: str = 'operator',
+        evidence: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Record a new discovery for world-model integration.
+        
+        Called when CODS validates a new operator or unlocks a primitive.
+        """
+        discovery = {
+            'operator_name': operator_name,
+            'explanation': explanation,
+            'discovery_type': discovery_type,
+            'evidence': evidence or {},
+            'discovered_at_step': self._context.step_idx if self._context else 0,
+            'game_type': self._context.game_id.split('-')[0] if self._context and self._context.game_id else 'unknown'
+        }
+        
+        self._latest_discovery = discovery
+        self._pending_discoveries.append(discovery)
+        
+        # Keep pending list bounded
+        if len(self._pending_discoveries) > 20:
+            self._pending_discoveries = self._pending_discoveries[-10:]
+        
+        logger.info(f"[CODS] Recorded discovery: {operator_name} ({discovery_type})")
+    
+    def get_operators_for_game(self, game_type: str) -> List[str]:
+        """
+        Get operators that have worked well for a specific game type.
+        
+        Uses problem-signature to operator mapping.
+        """
+        operators = []
+        
+        try:
+            # Query operator success by game type
+            rows = self.db.execute_query(
+                """SELECT operator_name, success_count, failure_count
+                   FROM operator_game_stats
+                   WHERE game_type = ?
+                   ORDER BY success_count DESC
+                   LIMIT 10""",
+                (game_type,)
+            )
+            if rows:
+                for row in rows:
+                    if row.get('success_count', 0) > row.get('failure_count', 0):
+                        operators.append(row['operator_name'])
+        except Exception:
+            # Table might not exist - return available operators
+            available = self.get_available_operators()
+            operators = available.get('seed', [])[:5]
+        
+        return operators
     
     # ======================================================================
     # FAILURE-DRIVEN LEARNING (Post-Game Analysis)

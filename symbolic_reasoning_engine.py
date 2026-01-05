@@ -497,12 +497,42 @@ class AgentIdentifier:
         return None
 
 
+@dataclass
+class BeliefNode:
+    """A single belief about the world that can be tested and decay."""
+    belief_id: str
+    belief_type: str  # 'physics', 'trigger', 'control', 'object_type'
+    content: Dict[str, Any]
+    confidence: float = 0.5
+    last_tested_step: int = 0
+    test_count: int = 0
+    success_count: int = 0
+    created_step: int = 0
+
+
+@dataclass
+class Prediction:
+    """A prediction made before an action, to be compared after."""
+    action: int
+    expected_agent_position: Optional[Tuple[int, int]] = None
+    expected_score_change: int = 0
+    expected_object_changes: Dict[str, Any] = field(default_factory=dict)
+    expected_collisions: List[str] = field(default_factory=list)
+    timestamp: float = 0.0
+
+
 class WorldModel:
     """
     Maintains and updates world state based on actions.
     
     The key insight: Instead of just seeing pixels, we simulate
     what happens when actions are taken, building a mental model.
+    
+    Enhanced with Active Belief Graph (from agent_consciousness_synthesis.md):
+    - Predictions before actions (mandatory)
+    - Surprise scoring after actions
+    - Competing beliefs that can be wrong
+    - Belief decay for unused rules
     """
     
     def __init__(self, initial_state: WorldState, agent_id: Optional[str] = None):
@@ -525,6 +555,28 @@ class WorldModel:
         self.collision_types: Set[ObjectType] = {ObjectType.OBSTACLE}
         self.collectible_types: Set[ObjectType] = {ObjectType.COLLECTIBLE, ObjectType.KEY}
         self.interactive_types: Set[ObjectType] = {ObjectType.BUTTON, ObjectType.PORTAL, ObjectType.DOOR}
+        
+        # =====================================================================
+        # ACTIVE BELIEF GRAPH (from agent_consciousness_synthesis.md)
+        # =====================================================================
+        self.beliefs: Dict[str, BeliefNode] = {}
+        self.last_prediction: Optional[Prediction] = None
+        self.prediction_history: List[Dict[str, Any]] = []
+        self.surprise_history: List[float] = []
+        self.total_predictions: int = 0
+        self.correct_predictions: int = 0
+        
+        # Object type classifications (fed from self-model)
+        self.object_type_beliefs: Dict[str, ObjectType] = {}  # object_id -> type
+        
+        # Physics rules (fed from self-model collision effects)
+        self.physics_rules: List[Dict[str, Any]] = []
+        
+        # Trigger rules (fed from self-model interaction triggers)
+        self.trigger_rules: List[Dict[str, Any]] = []
+        
+        # Concepts from CODS discoveries
+        self.concepts: Dict[str, Dict[str, Any]] = {}
     
     def _auto_detect_agent(self) -> Optional[str]:
         """Auto-detect agent from initial state."""
@@ -667,6 +719,314 @@ class WorldModel:
                 break
         
         return reachable
+
+    # =========================================================================
+    # ACTIVE BELIEF GRAPH METHODS (from agent_consciousness_synthesis.md)
+    # These enable the WorldModel to PREDICT and BE WRONG - the learning signal
+    # =========================================================================
+    
+    def predict_before_action(self, action: int) -> Prediction:
+        """
+        MUST be called BEFORE action execution.
+        
+        Creates a prediction about what will happen, so we can
+        measure surprise afterward. This is mandatory for learning.
+        """
+        import time
+        
+        agent = self.state.get_agent()
+        prediction = Prediction(
+            action=action,
+            timestamp=time.time()
+        )
+        
+        if agent:
+            # Predict agent movement based on action effects
+            effect = self.action_effects.get(action)
+            if effect:
+                new_row = agent.position[0] + effect.delta[0]
+                new_col = agent.position[1] + effect.delta[1]
+                
+                # Check if movement would be blocked
+                if self.state.is_valid_position((new_row, new_col)):
+                    if not self._is_blocked(self.state, (new_row, new_col)):
+                        prediction.expected_agent_position = (new_row, new_col)
+                    else:
+                        prediction.expected_agent_position = agent.position
+                        prediction.expected_collisions.append('obstacle')
+                else:
+                    prediction.expected_agent_position = agent.position
+                    prediction.expected_collisions.append('boundary')
+            else:
+                prediction.expected_agent_position = agent.position
+            
+            # Predict collectible pickups
+            for obj_id, obj in self.state.objects.items():
+                if obj.object_type in self.collectible_types:
+                    if prediction.expected_agent_position == obj.position:
+                        prediction.expected_score_change += 1
+                        prediction.expected_object_changes[obj_id] = 'collected'
+        
+        self.last_prediction = prediction
+        self.total_predictions += 1
+        return prediction
+    
+    def observe_after_action(self, action: int, frame_before: Any, frame_after: Any) -> Dict[str, Any]:
+        """
+        MUST be called AFTER action execution.
+        
+        Compares prediction to reality and computes surprise.
+        This is where the model learns by being wrong.
+        """
+        if self.last_prediction is None:
+            return {'surprise': 0.0, 'prediction_made': False}
+        
+        prediction = self.last_prediction
+        surprise = 0.0
+        diffs = []
+        
+        # Get actual agent position from current state
+        agent = self.state.get_agent()
+        actual_position = agent.position if agent else None
+        
+        # Compare predicted vs actual position
+        if prediction.expected_agent_position and actual_position:
+            if prediction.expected_agent_position != actual_position:
+                surprise += 0.5
+                diffs.append({
+                    'type': 'position',
+                    'expected': prediction.expected_agent_position,
+                    'actual': actual_position
+                })
+                # Spawn competing belief - our physics model was wrong
+                self._spawn_competing_belief(action, 'position_mismatch', {
+                    'expected': prediction.expected_agent_position,
+                    'actual': actual_position
+                })
+        
+        # Compare predicted vs actual score change
+        actual_score = self.state.score
+        previous_score = self.history[-2].score if len(self.history) >= 2 else 0
+        actual_score_change = actual_score - previous_score
+        
+        if prediction.expected_score_change != actual_score_change:
+            surprise += 0.3
+            diffs.append({
+                'type': 'score',
+                'expected': prediction.expected_score_change,
+                'actual': actual_score_change
+            })
+        
+        # Check for unexpected object changes
+        if frame_before is not None and frame_after is not None:
+            try:
+                before_arr = np.array(frame_before) if not isinstance(frame_before, np.ndarray) else frame_before
+                after_arr = np.array(frame_after) if not isinstance(frame_after, np.ndarray) else frame_after
+                if before_arr.shape == after_arr.shape:
+                    changed_pixels = np.sum(before_arr != after_arr)
+                    total_pixels = before_arr.size
+                    change_ratio = changed_pixels / max(total_pixels, 1)
+                    
+                    # High change with low expectation = surprise
+                    if change_ratio > 0.1 and not prediction.expected_object_changes:
+                        surprise += 0.2 * change_ratio
+                        diffs.append({
+                            'type': 'unexpected_changes',
+                            'change_ratio': change_ratio
+                        })
+            except Exception:
+                pass
+        
+        # Normalize surprise to 0-1
+        surprise = min(surprise, 1.0)
+        
+        # Track prediction accuracy
+        if surprise < 0.2:
+            self.correct_predictions += 1
+        
+        # Store in history
+        result = {
+            'surprise': surprise,
+            'prediction_made': True,
+            'diffs': diffs,
+            'prediction_accuracy': self.correct_predictions / max(self.total_predictions, 1)
+        }
+        self.prediction_history.append(result)
+        self.surprise_history.append(surprise)
+        
+        # Keep history bounded
+        if len(self.prediction_history) > 1000:
+            self.prediction_history = self.prediction_history[-500:]
+        if len(self.surprise_history) > 1000:
+            self.surprise_history = self.surprise_history[-500:]
+        
+        return result
+    
+    def compute_surprise(self, prediction: Prediction, current_frame: Any) -> float:
+        """Compute surprise score between prediction and current reality."""
+        if not self.surprise_history:
+            return 0.0
+        return self.surprise_history[-1] if self.surprise_history else 0.0
+    
+    def decay_unused_beliefs(self, current_step: int, decay_threshold: int = 50) -> int:
+        """
+        Beliefs that aren't tested decay over time.
+        
+        This prevents stale knowledge from persisting.
+        Returns number of beliefs decayed.
+        """
+        decayed = 0
+        to_remove = []
+        
+        for belief_id, belief in self.beliefs.items():
+            steps_since_test = current_step - belief.last_tested_step
+            if steps_since_test > decay_threshold:
+                # Apply confidence decay
+                decay_factor = 0.95 ** (steps_since_test / decay_threshold)
+                old_confidence = belief.confidence
+                belief.confidence *= decay_factor
+                
+                if belief.confidence < 0.1:
+                    to_remove.append(belief_id)
+                elif belief.confidence < old_confidence:
+                    decayed += 1
+        
+        for belief_id in to_remove:
+            del self.beliefs[belief_id]
+        
+        return decayed
+    
+    def _spawn_competing_belief(self, action: int, mismatch_type: str, evidence: Dict[str, Any]) -> None:
+        """
+        When prediction fails, create a competing explanation.
+        
+        TWO BELIEFS NOW COMPETE - the model must choose.
+        """
+        belief_id = f"belief_{mismatch_type}_{len(self.beliefs)}"
+        
+        # Create alternative hypothesis
+        new_belief = BeliefNode(
+            belief_id=belief_id,
+            belief_type='physics_correction',
+            content={
+                'trigger_action': action,
+                'mismatch_type': mismatch_type,
+                'evidence': evidence,
+                'hypothesis': f"Action {action} does not work as expected"
+            },
+            confidence=0.3,  # Start with low confidence
+            created_step=self.state.step
+        )
+        
+        self.beliefs[belief_id] = new_belief
+        
+        # Limit total beliefs to prevent explosion
+        if len(self.beliefs) > 100:
+            # Remove lowest confidence beliefs
+            sorted_beliefs = sorted(self.beliefs.items(), key=lambda x: x[1].confidence)
+            for belief_id, _ in sorted_beliefs[:20]:
+                del self.beliefs[belief_id]
+    
+    # =========================================================================
+    # SELF-MODEL INTEGRATION METHODS (from agent_consciousness_synthesis.md)
+    # Feed discoveries from agent_self_model into world understanding
+    # =========================================================================
+    
+    def set_object_type(self, object_id: str, object_type: str) -> None:
+        """
+        Tell world model what type an object is.
+        
+        Called by self-model when it discovers:
+        - "I control this object" -> set as AGENT
+        - "This object moves autonomously" -> set as ENEMY/NPC
+        """
+        try:
+            obj_type = ObjectType(object_type.lower())
+        except ValueError:
+            obj_type = ObjectType.UNKNOWN
+        
+        self.object_type_beliefs[object_id] = obj_type
+        
+        # Update actual object if it exists in state
+        if object_id in self.state.objects:
+            self.state.objects[object_id].object_type = obj_type
+    
+    def add_physics_rule(self, rule: Dict[str, Any]) -> None:
+        """
+        Add a physics rule discovered by self-model collision effects.
+        
+        Example: {'type': 'collision', 'object_a': 'player', 'object_b': 'wall', 'effect': 'blocked'}
+        """
+        # Avoid duplicates
+        for existing in self.physics_rules:
+            if existing.get('type') == rule.get('type') and \
+               existing.get('object_a') == rule.get('object_a') and \
+               existing.get('object_b') == rule.get('object_b'):
+                return
+        
+        self.physics_rules.append(rule)
+    
+    def add_trigger_rule(self, trigger: Dict[str, Any]) -> None:
+        """
+        Add an interaction trigger discovered by self-model.
+        
+        Example: {'trigger_position': (3,4), 'effect': 'wall_opens', 'target_position': (5,6)}
+        """
+        # Avoid duplicates
+        for existing in self.trigger_rules:
+            if existing.get('trigger_position') == trigger.get('trigger_position'):
+                return
+        
+        self.trigger_rules.append(trigger)
+    
+    def integrate_self_discoveries(self, self_identity: Dict[str, Any]) -> None:
+        """
+        Integrate all discoveries from self-model into world understanding.
+        
+        Called after self_identity_snapshot is obtained.
+        """
+        # Mark controlled objects as AGENT type
+        for obj in self_identity.get('controlled_objects', []):
+            obj_id = obj.get('id') or obj.get('object_id')
+            if obj_id:
+                self.set_object_type(obj_id, 'AGENT')
+        
+        # Mark autonomous objects as NPC/ENEMY
+        for obj in self_identity.get('autonomous_objects', []):
+            obj_id = obj.get('id') or obj.get('object_id')
+            if obj_id:
+                self.set_object_type(obj_id, 'ENEMY')
+        
+        # Add collision effects as physics rules
+        for effect in self_identity.get('collision_effects', []):
+            self.add_physics_rule(effect)
+        
+        # Add interaction triggers
+        for trigger in self_identity.get('interaction_triggers', []):
+            self.add_trigger_rule(trigger)
+    
+    # =========================================================================
+    # CODS INTEGRATION METHODS (from agent_consciousness_synthesis.md)
+    # Feed operator discoveries into conceptual understanding
+    # =========================================================================
+    
+    def add_concept(self, operator_name: str, explanation: str, evidence: Optional[Dict] = None) -> None:
+        """
+        Add a concept discovered by CODS engine.
+        
+        Example: add_concept('detect_symmetry', 'Level has vertical symmetry')
+        """
+        self.concepts[operator_name] = {
+            'name': operator_name,
+            'explanation': explanation,
+            'evidence': evidence or {},
+            'discovered_step': self.state.step,
+            'usage_count': 0
+        }
+    
+    def get_applicable_concepts(self) -> List[str]:
+        """Get concepts that might apply to current state."""
+        return list(self.concepts.keys())
 
 
 class GoalEvaluator:
