@@ -9176,16 +9176,14 @@ class GameplayEngine:
                                             'sequence_id': sequence_id,
                                             'handoff_reason': 'terminal_danger'
                                         }
-                        f"Prefer movement over blind ACTION6 | {final_reasoning}",
-                        'heuristic'
-                    )
-                # Guard: never issue ACTION6 without a salience-derived coordinate
-                raise RuntimeError("ACTION6 blocked: no salience target available and no safe fallback")
-            else:
-                if self._pending_action6_reason:
-                    final_reasoning = f"{final_reasoning} | {self._pending_action6_reason}"
-                else:
-                    final_reasoning = f"{final_reasoning} | ACTION6 salience target"
+            except Exception as e:
+                logger.debug(f"Terminal foresight check failed: {e}")
+
+        # Add pending salience reason after foresight checks
+        if self._pending_action6_reason:
+            final_reasoning = f"{final_reasoning} | {self._pending_action6_reason}"
+        else:
+            final_reasoning = f"{final_reasoning} | ACTION6 salience target"
         if not base_action:
             empty_reason = "ACTION_SOURCE_EMPTY - no heuristic action available"
             return _finalize_ladder_and_return("ACTION7", empty_reason, 'noop')
