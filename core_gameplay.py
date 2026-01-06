@@ -2032,12 +2032,19 @@ class GameplayEngine:
                         _th_outcome_positive = _th_score_after > _th_score_before
                         _th_is_win = game_state.state == 'WIN'
                         
+                        # Build outcome dict matching record_theory_outcome signature
+                        _th_outcome = {
+                            'score_before': _th_score_before,
+                            'score_after': _th_score_after,
+                            'game_state': game_state.state,
+                            'frame_changed': True  # Will be compared with frame tracking
+                        }
+                        
                         record_fn(
-                            _th_game_type,
-                            _th_level,
-                            action,
-                            outcome_positive=_th_outcome_positive,
-                            is_full_win=_th_is_win
+                            action=action,
+                            outcome=_th_outcome,
+                            game_type=_th_game_type,
+                            level_number=_th_level
                         )
                 except Exception as e:
                     logger.debug(f"Theory outcome recording failed: {e}")
@@ -5302,10 +5309,29 @@ class GameplayEngine:
                         if frame_changed and self.game_config.get('stage_recordings'):
                             self._recording_delta_count = self._recording_delta_count + 1
 
-                        if frame_changed or score_increase > 0:
+                        if frame_changed:
+                            # Frame changed = not stuck, reset struggle guard and stuck counter
                             self._reset_struggle_guard_state(level=current_level)
-                        
-                        if not frame_changed and score_increase == 0:
+                            consecutive_no_frame_change = 0
+                            
+                            # If we were in escape mode and frame changed, escape worked!
+                            if in_escape_mode:
+                                logger.info(f"[ESCAPE] Escape successful! Frame changed.")
+                                logger.info(f"[ESCAPE] Entering SELF-DIRECTED exploration mode (off-script)")
+                                in_escape_mode = False
+                                escape_attempts = 0
+                                if hasattr(self, '_forced_escape_action'):
+                                    del self._forced_escape_action
+                                
+                                # Set self-directed mode flag - this tells action selection
+                                # to trust the agent's own judgment more than network wisdom
+                                self._self_directed_mode = True
+                                self._self_directed_start_action = action_count
+                        else:
+                            # No frame change = potentially stuck
+                            # NOTE: Stuck is defined by frame changes ONLY, not score.
+                            # A frame change includes: shape, color, size, positioning changes.
+                            # Score increase without frame change does NOT reset stuck counter.
                             consecutive_no_frame_change += 1
                             
                             # ADAPTIVE THRESHOLD: Lower threshold at frontier (30) vs non-frontier (100)
@@ -5376,6 +5402,24 @@ class GameplayEngine:
                                         f"   Current score: {game_state.score:.1f}, Actions taken: {action_count}, "
                                         f"Level {current_level} actions: {level_action_count}"
                                     )
+                                    
+                                    # Fix #4: Spawn stuckness_detector persona when stuck for 30+ frames
+                                    # Checklist Phase 6 requires persona spawning on stuckness
+                                    if hasattr(self, 'persona_manager') and self.persona_manager:
+                                        try:
+                                            stuckness_spec = {
+                                                'type': 'stuckness_detector',
+                                                'focus': f'level_{current_level}_stuck',
+                                                'game_type': game_id.split('-')[0] if '-' in game_id else game_id[:4],
+                                                'level': current_level,
+                                                'trigger_action': action_count,
+                                                'consecutive_stuck': consecutive_no_frame_change
+                                            }
+                                            persona_id = self.persona_manager.spawn_temporary_persona(stuckness_spec)
+                                            if persona_id:
+                                                logger.info(f"[PERSONA] Spawned stuckness_detector: {persona_id[:16]} for level {current_level}")
+                                        except Exception as e:
+                                            logger.debug(f"Persona spawn failed: {e}")
                                 
                                 if escape_attempts < ESCAPE_ATTEMPTS_MAX:
                                     # INTELLIGENT ESCAPE: Use agent's knowledge systems
@@ -5400,6 +5444,65 @@ class GameplayEngine:
                                         escape_attempt=escape_attempts,
                                         recent_actions=recent_actions
                                     )
+                                    
+                                    # Fix #1: Smart "truly stuck" detection for ACTION6-available games
+                                    # For games with ACTION6 (clicking), there may be multiple pseudo-buttons
+                                    # that could unstick us. Only declare truly stuck when:
+                                    # 1. All distinct click targets have been tried with no frame change, OR
+                                    # 2. Non-click actions exhausted AND click targets exhausted
+                                    available_actions = game_state.available_actions if game_state and game_state.available_actions else []
+                                    available_nums = set()
+                                    for a in available_actions:
+                                        if isinstance(a, str) and a.upper().startswith('ACTION'):
+                                            try:
+                                                available_nums.add(int(a.upper().replace('ACTION', '')))
+                                            except ValueError:
+                                                pass
+                                        elif isinstance(a, int):
+                                            available_nums.add(a)
+                                    
+                                    # Check if ACTION6 is available - need smarter stuck detection
+                                    if 6 in available_nums and hasattr(self, 'action_handler') and self.action_handler:
+                                        try:
+                                            # Get all potential click targets from current frame
+                                            visual_analyzer = getattr(self.action_handler, 'visual_analyzer', None)
+                                            if visual_analyzer and game_state.frame:
+                                                analysis = visual_analyzer.analyze_frame(game_state.frame)
+                                                all_targets = analysis.get('targets', [])
+                                                clicked_coords = visual_analyzer.clicked_coordinates
+                                                
+                                                # Count how many distinct targets exist vs how many we've tried
+                                                target_coords = set()
+                                                for t in all_targets:
+                                                    tx, ty = t.get('x', 0), t.get('y', 0)
+                                                    target_coords.add((tx, ty))
+                                                
+                                                untried_targets = target_coords - clicked_coords
+                                                
+                                                if len(untried_targets) > 0:
+                                                    # Still have untried click targets - not truly stuck yet
+                                                    logger.info(
+                                                        f"[ESCAPE] ACTION6 available: {len(untried_targets)} untried targets remain "
+                                                        f"(tried {len(clicked_coords)}, total {len(target_coords)})"
+                                                    )
+                                                elif len(target_coords) > 0 and len(untried_targets) == 0:
+                                                    # All click targets exhausted with no frame change
+                                                    if len(available_nums) == 1:
+                                                        # Only ACTION6 available AND all targets tried
+                                                        logger.warning(
+                                                            f"[ESCAPE] TRULY STUCK: All {len(target_coords)} click targets tried, "
+                                                            f"none caused frame change. Skipping remaining escape attempts."
+                                                        )
+                                                        escape_attempts = ESCAPE_ATTEMPTS_MAX
+                                                        continue
+                                                    else:
+                                                        # Other actions available - let escape continue with those
+                                                        logger.info(
+                                                            f"[ESCAPE] All {len(target_coords)} click targets exhausted, "
+                                                            f"but {len(available_nums) - 1} other action types available"
+                                                        )
+                                        except Exception as e:
+                                            logger.debug(f"Smart stuck detection failed: {e}")
                                     
                                     logger.info(f"[ESCAPE] Attempt {escape_attempts}/{ESCAPE_ATTEMPTS_MAX}: {escape_reasoning}")
                                     
@@ -5471,24 +5574,9 @@ class GameplayEngine:
                                         in_escape_mode = False
                                         escape_attempts = 0
                                         consecutive_no_frame_change = 0  # Full reset
-                        else:
-                            # Reset counter if we had a frame change or score increase
-                            consecutive_no_frame_change = 0
-                            if in_escape_mode:
-                                # Escape worked! Exit escape mode and enter SELF-DIRECTED mode
-                                # The agent is now "off-script" - any sequence it was following is invalid
-                                # It needs to explore on its own, trusting its own judgment
-                                logger.info(f"[ESCAPE] Escape successful! Frame changed or score increased.")
-                                logger.info(f"[ESCAPE] Entering SELF-DIRECTED exploration mode (off-script)")
-                                in_escape_mode = False
-                                escape_attempts = 0
-                                if hasattr(self, '_forced_escape_action'):
-                                    del self._forced_escape_action
-                                
-                                # Set self-directed mode flag - this tells action selection
-                                # to trust the agent's own judgment more than network wisdom
-                                self._self_directed_mode = True
-                                self._self_directed_start_action = action_count
+                        # NOTE: The "else" for frame_changed is now handled at the top of this block
+                        # (line ~5315) where consecutive_no_frame_change = 0 when frame changes.
+                        # The escape mode exit on frame change is handled inside the escape block itself.
                                 
                                 # Temporarily boost self-trust for this session
                                 # The agent broke out on its own - it should explore on its own
@@ -7293,6 +7381,92 @@ class GameplayEngine:
                 merged = dict(existing) if isinstance(existing, dict) else {}
                 merged.update({'status': status, 'reason': why})
                 ladder_trace[name] = merged
+            
+            # ===============================================================
+            # PHASE 0: THEORY-GATED SCORING (CRITICAL - MUST RUN FIRST)
+            # From unified_self_model_reasoning_checklist.md:
+            # "Every proposal MUST be scored against the current working theory"
+            # This is the SINGLE MOST IMPORTANT constraint.
+            # 
+            # When theory is contradicted: ONLY revision actions allowed
+            # When theory is speculating: Boost exploration, penalize exploitation
+            # When theory is confident: Boost actions that use the theory
+            # ===============================================================
+            theory_gated_action = action
+            theory_gated_reason = reason
+            try:
+                if hasattr(self, 'science_engine') and self.science_engine:
+                    # Get working theory
+                    _tg_game_type = None
+                    _tg_level = 1
+                    try:
+                        if hasattr(self, 'session_manager') and self.session_manager:
+                            gid = getattr(self.session_manager, 'current_game_id', None)
+                            if gid:
+                                _tg_game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                        if hasattr(self, 'loop_state') and self.loop_state:
+                            _tg_level = getattr(self.loop_state, 'current_level', 1) or 1
+                    except Exception:
+                        pass
+                    
+                    _wt_fn = getattr(self.science_engine, 'get_working_theory', None)
+                    working_theory = _wt_fn(_tg_game_type, _tg_level) if callable(_wt_fn) else None
+                    
+                    if working_theory:
+                        stage = working_theory.get('stage', 'exploring')
+                        theory_hypothesis = working_theory.get('theory', {})
+                        
+                        # CONTRADICTED STAGE: ONLY allow theory-revision or exploration
+                        if stage == 'contradicted':
+                            # Check if current action is exploration/revision
+                            is_exploration = action in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'NOOP')
+                            is_click_explore = action == 'ACTION6'
+                            
+                            if not is_exploration and not is_click_explore:
+                                # BLOCK exploitation actions when theory contradicted
+                                import random
+                                revision_action = f"ACTION{random.choice([1, 2, 3, 4])}"
+                                theory_gated_action = revision_action
+                                theory_gated_reason = f"[THEORY-GATED] Theory CONTRADICTED - forced exploration | original: {reason[:60]}"
+                                logger.info(f"[THEORY-GATE] Stage=contradicted, blocked {action} -> {revision_action}")
+                        
+                        # SPECULATING/EXPLORING STAGE: Boost exploration, slight penalty for exploitation
+                        elif stage in ('speculating', 'exploring'):
+                            # Score the proposed action
+                            score_fn = getattr(self.science_engine, 'score_action_with_theory', None)
+                            if callable(score_fn):
+                                theory_score = score_fn(action, _tg_game_type, _tg_level)
+                                if isinstance(theory_score, (int, float)) and theory_score < -0.1:
+                                    # Action conflicts with current speculation - note in reasoning
+                                    theory_gated_reason = f"[theory-score:{theory_score:+.2f}] {reason}"
+                        
+                        # CONFIDENT STAGE: Actions should use theory
+                        elif stage == 'confident':
+                            score_fn = getattr(self.science_engine, 'score_action_with_theory', None)
+                            if callable(score_fn):
+                                theory_score = score_fn(action, _tg_game_type, _tg_level)
+                                if isinstance(theory_score, (int, float)):
+                                    theory_gated_reason = f"[theory:{stage},score:{theory_score:+.2f}] {reason}"
+                                    
+                                    # If score is very negative, we're ignoring a confident theory
+                                    if theory_score < -0.15:
+                                        # Get the theory's preferred action if available
+                                        formal_stmt = theory_hypothesis.get('formal_statement', {}) if theory_hypothesis else {}
+                                        theory_action = formal_stmt.get('action', '')
+                                        if theory_action and theory_action != action and 'ACTION' in theory_action:
+                                            logger.info(f"[THEORY-GATE] Confident theory prefers {theory_action}, "
+                                                       f"switching from {action} (score={theory_score:+.2f})")
+                                            theory_gated_action = theory_action
+                                            theory_gated_reason = f"[THEORY-GATED] Confident theory suggests {theory_action} | {reason[:50]}"
+                        
+                        # Log theory stage for debugging
+                        if stage not in ('exploring', None):
+                            logger.debug(f"[THEORY-GATE] Stage={stage}, action={action}, result={theory_gated_action}")
+                    
+                    action = theory_gated_action
+                    reason = theory_gated_reason
+            except Exception as tg_err:
+                logger.debug(f"Theory-gated scoring failed: {tg_err}")
             
             # ===============================================================
             # QUESTIONING ENGINE WITH TEETH: Check for blocking questions
@@ -11275,6 +11449,39 @@ class GameplayEngine:
                         penalty = 0.4 * (1.0 - i * 0.15)  # 0.4, 0.34, 0.28, 0.22, 0.16
                         action_scores[action] -= penalty
                 reasoning_parts.append(f"Avoiding recent: {recent_actions[:3]}")
+            
+            # === 1.5 METACOG ELIMINATIONS: Respect learned failure patterns ===
+            # Fix #2: METACOG identifies "Stop using ACTIONX" but escape mode never queried it
+            # Now we query metacognitive_eliminations and heavily penalize eliminated actions
+            try:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                eliminations = self.db.execute_query("""
+                    SELECT eliminated_action, test_count, reason FROM metacognitive_eliminations
+                    WHERE game_type = ? AND level_number = ?
+                    AND test_count >= 2
+                    ORDER BY test_count DESC
+                    LIMIT 10
+                """, (game_type, level))
+                
+                if eliminations:
+                    eliminated_actions = []
+                    for elim in eliminations:
+                        action_str = elim.get('eliminated_action', '')
+                        test_count = elim.get('test_count', 0)
+                        if 'ACTION' in action_str.upper():
+                            try:
+                                action_num = int(action_str.upper().replace('ACTION', ''))
+                                if action_num in action_scores:
+                                    # Heavy penalty scaled by test count (more tests = more certain)
+                                    penalty = min(0.9, 0.5 + 0.1 * test_count)
+                                    action_scores[action_num] -= penalty
+                                    eliminated_actions.append(action_num)
+                            except ValueError:
+                                pass
+                    if eliminated_actions:
+                        reasoning_parts.append(f"METACOG eliminated: {eliminated_actions}")
+            except Exception as e:
+                logger.debug(f"METACOG eliminations query failed: {e}")
             
             # === 2. NETWORK FAILURE HYPOTHESES ===
             try:

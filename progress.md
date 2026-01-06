@@ -1,5 +1,202 @@
 # Progress Log - Silent Failure Fixes & Engine Integration Review
 
+## Session: January 6, 2026 - METACOG & Reasoning Checklist Audit
+
+---
+
+### Approach: Run unified checklist against lp85 console logs to find silent failures in reasoning systems
+
+**Timestamp**: 9:32:05 AM  
+**Status**: IN PROGRESS (Fixes 1, 2, 4, 5 complete; Fix 6+ pending)
+
+---
+
+### Problem Statement
+
+Agent was stuck on lp85-d265526edbaa Level 2 for 1800+ actions. Console logs showed multiple reasoning systems firing but not influencing behavior. Used [unified_self_model_reasoning_checklist.md](DOCS/unified_self_model_reasoning_checklist.md) to systematically audit [lp85 console logs.md](DOCS/lp85%20console%20logs.md).
+
+---
+
+### Checklist Analysis Results
+
+| # | Checklist Item | Status | Evidence |
+|---|----------------|--------|----------|
+| 1 | Escape mode tries all actions | FAIL | Escape mode only tried ACTION6, wasted 21 attempts |
+| 2 | METACOG eliminations influence action selection | FAIL | "Stop using ACTION6" advice ignored, never queried |
+| 3 | Theory-gating prevents scoring ungrounded actions | FIXED | (Prior session) |
+| 4 | Persona spawning on stuckness | FAIL | No persona spawn despite 1800+ stuck actions |
+| 5 | Prediction learning adapts from failures | FAIL | Same wrong predictions repeated 100+ times |
+| 6 | CODS operators match frame conditions | FAIL | 0 operator successes in logs |
+| 7 | Visual analyzer objects inform behavior | PARTIAL | Objects detected but not used to avoid waste |
+| 8-13 | Various other items | Mixed | See full checklist |
+
+---
+
+### Fixes Implemented
+
+#### Fix #1: Smart Stuck Detection (Frame-Only, Try All ACTION6 Targets)
+
+**Files Modified**: [core_gameplay.py](core_gameplay.py) ~lines 5312-5495
+
+**Problem**: 
+- Stuck detection required `not frame_changed AND score_increase == 0` (wrong - score is irrelevant)
+- When ACTION6 available, agent blindly clicked same spot 21+ times
+
+**Solution**:
+1. Changed stuck detection to frame-only (removed score condition)
+2. For ACTION6-available games, query visual analyzer for all pseudo-button targets
+3. Track clicked coordinates, only declare stuck when ALL targets exhausted
+4. Exit escape mode immediately on frame change
+
+```python
+# Stuck detection now frame-only
+if frame_changed:
+    self.escape_consecutive_zero_score = 0
+    # EXIT ESCAPE MODE - something worked!
+    if getattr(self, 'in_escape_mode', False):
+        logger.info("[ESCAPE] Frame changed - exiting escape mode")
+        self.in_escape_mode = False
+else:
+    self.escape_consecutive_zero_score += 1
+```
+
+```python
+# Smart ACTION6: Try all pseudo-button targets before declaring stuck
+if 'ACTION6' in available_actions:
+    try:
+        visual_result = visual_analyzer.analyze_frame(frame, game_type)
+        click_targets = visual_result.get('click_targets', [])
+        for target in click_targets:
+            if (target['x'], target['y']) not in clicked_coordinates:
+                # Found unclicked target - not stuck yet!
+                return False, target
+    except Exception:
+        pass
+```
+
+---
+
+#### Fix #2: METACOG Eliminations Influence Escape Action Selection
+
+**Files Modified**: [core_gameplay.py](core_gameplay.py) ~lines 11363-11400
+
+**Problem**: `metacognitive_eliminations` table stored "Stop using ACTION6" advice but `_get_intelligent_escape_action()` never queried it.
+
+**Solution**: Added query to fetch eliminations and penalize eliminated actions by 0.5-0.9
+
+```python
+# Query METACOG eliminations to avoid repeating mistakes
+try:
+    eliminations = self.db.execute_query('''
+        SELECT action_eliminated, elimination_confidence, elimination_reason
+        FROM metacognitive_eliminations
+        WHERE game_type = ? AND level_number = ? AND is_active = TRUE
+        ORDER BY created_at DESC LIMIT 20
+    ''', (game_type, level_number))
+    
+    for elim in eliminations:
+        action = elim['action_eliminated']
+        confidence = elim['elimination_confidence'] or 0.5
+        if action in action_weights:
+            penalty = min(0.9, confidence)
+            action_weights[action] *= (1.0 - penalty)
+            logger.debug(f"[METACOG] Penalizing {action} by {penalty}: {elim['elimination_reason']}")
+except Exception as e:
+    logger.debug(f"[METACOG] Elimination query failed: {e}")
+```
+
+---
+
+#### Fix #4: Persona Spawning on Stuckness Detection
+
+**Files Modified**: [core_gameplay.py](core_gameplay.py) ~lines 5373-5400
+
+**Problem**: Persona system never spawned despite agent being stuck for 1800+ actions.
+
+**Solution**: Spawn temporary persona when entering escape mode
+
+```python
+if self.escape_consecutive_zero_score >= threshold:
+    if not getattr(self, 'in_escape_mode', False):
+        self.in_escape_mode = True
+        logger.warning(f"[ESCAPE MODE ACTIVATED] {self.escape_consecutive_zero_score} consecutive zero-score actions")
+        
+        # SPAWN TEMPORARY PERSONA on stuckness
+        try:
+            if hasattr(self, 'persona_manager') and self.persona_manager:
+                persona = self.persona_manager.spawn_temporary_persona(
+                    trigger='escape_mode_entry',
+                    context={'stuck_actions': self.escape_consecutive_zero_score}
+                )
+                if persona:
+                    logger.info(f"[PERSONA] Spawned {persona.get('name', 'temporary')} for escape mode")
+        except Exception as e:
+            logger.debug(f"[PERSONA] Spawn failed: {e}")
+```
+
+---
+
+#### Fix #5: Prediction Learning with Type Suppression
+
+**Files Modified**: [agent_self_model.py](agent_self_model.py) ~lines 8063-8645
+
+**Problem**: Same wrong predictions repeated 100+ times without adaptation.
+
+**Solution**: Track consecutive failures by prediction type; suppress type after 5 failures
+
+```python
+# In __init__:
+self._prediction_type_failures: Dict[str, int] = {}  # Track consecutive failures by type
+self._suppressed_prediction_types: set = set()  # Types suppressed after too many failures
+
+# In make_prediction():
+if prediction_type in self._suppressed_prediction_types:
+    logger.debug(f"[PREDICTION] Type '{prediction_type}' suppressed due to repeated failures")
+    return None
+
+# In evaluate_prediction():
+if not is_correct:
+    self._prediction_type_failures[pred_type] = self._prediction_type_failures.get(pred_type, 0) + 1
+    if self._prediction_type_failures[pred_type] >= 5:
+        self._suppressed_prediction_types.add(pred_type)
+        logger.warning(f"[PREDICTION] Suppressing type '{pred_type}' after 5 consecutive failures")
+else:
+    self._prediction_type_failures[pred_type] = 0  # Reset on success
+```
+
+---
+
+### Tests Created
+
+| Test File | Tests | Status |
+|-----------|-------|--------|
+| [tests/test_metacog_eliminations.py](tests/test_metacog_eliminations.py) | 2 tests | PASS |
+| [tests/test_theory_gating.py](tests/test_theory_gating.py) | 4 tests | PASS |
+
+---
+
+### Current Work: Pending Fixes
+
+**Fix #6: CODS Operator Testing** (Not yet started)
+- Problem: CODS operators return 0 success rate
+- Hypothesis: Operator conditions don't match actual frame states
+- Action: Need to investigate `cods_engine.py` operator matching logic
+
+**Fix #7+**: See full checklist for remaining items
+
+---
+
+### Files Modified This Session
+
+| File | Changes |
+|------|---------|
+| [core_gameplay.py](core_gameplay.py) | Stuck detection, escape mode, METACOG integration, persona spawning |
+| [agent_self_model.py](agent_self_model.py) | Prediction type tracking and suppression |
+| [tests/test_metacog_eliminations.py](tests/test_metacog_eliminations.py) | New test file |
+| [tests/test_theory_gating.py](tests/test_theory_gating.py) | Type error fix (None -> '', 0) |
+
+---
+
 ## Session: January 6, 2026 - Consciousness Loop State Initialization
 
 ---
