@@ -17,6 +17,7 @@ Manual usage:
 import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 import logging
+import subprocess
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,21 @@ SKIP_DIRS = {
 
 # Note: __pycache__ is NOT in SKIP_DIRS because we want to DELETE those folders entirely
 
+
+def _load_tracked_files(repo_root: Path) -> set[str]:
+    """Return git-tracked file paths relative to repo root."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    except Exception:
+        return set()
+
 def should_delete(filepath: Path) -> bool:
     """
     Determine if file should be deleted.
@@ -210,7 +226,12 @@ def should_delete(filepath: Path) -> bool:
     
     return False
 
-def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
+def cleanup_temp_files(
+    workspace_root: str = ".",
+    allow_tracked: bool = False,
+    git_rm: bool = False,
+    tracked_files: set[str] | None = None,
+) -> tuple[int, int]:
     """
     Clean up temporary files and __pycache__ folders from workspace.
     
@@ -218,6 +239,7 @@ def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
         (files_deleted, bytes_freed)
     """
     workspace_path = Path(workspace_root)
+    tracked_files = tracked_files if tracked_files is not None else _load_tracked_files(workspace_path)
     files_deleted = 0
     bytes_freed = 0
     pycache_folders_deleted = 0
@@ -268,13 +290,32 @@ def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
             if "DOCS" in filepath.parts and filename_lower.endswith(".py"):
                 continue
             
+            rel_path = filepath.relative_to(workspace_path)
+            rel_posix = rel_path.as_posix()
+            is_tracked = rel_posix in tracked_files
+
+            if is_tracked and not (allow_tracked or git_rm):
+                print(f"  [SKIP] tracked file protected: {rel_path}")
+                continue
+
             if should_delete(filepath):
                 try:
                     file_size = filepath.stat().st_size
-                    filepath.unlink()
+                    if git_rm and is_tracked:
+                        result = subprocess.run(
+                            ["git", "rm", "--quiet", rel_posix],
+                            cwd=workspace_path,
+                            capture_output=True,
+                        )
+                        if result.returncode != 0:
+                            logger.warning(f"git rm failed for {rel_path}: {result.stderr}")
+                            continue
+                    else:
+                        filepath.unlink()
                     files_deleted += 1
                     bytes_freed += file_size
-                    print(f"  [DEL] {filepath.relative_to(workspace_path)}")
+                    prefix = "[GIT RM]" if git_rm and is_tracked else "[DEL]"
+                    print(f"  {prefix} {rel_path}")
                 except Exception as e:
                     logger.warning(f"Failed to delete {filepath}: {e}")
     
@@ -286,12 +327,17 @@ def cleanup_temp_files(workspace_root: str = ".") -> tuple[int, int]:
     
     return files_deleted, bytes_freed
 
-def list_temp_files(workspace_root: str = ".") -> list[Path]:
+def list_temp_files(
+    workspace_root: str = ".",
+    tracked_files: set[str] | None = None,
+    allow_tracked: bool = False,
+) -> list[Path]:
     """
     List temporary files without deleting them.
     Useful for dry-run before cleanup.
     """
     workspace_path = Path(workspace_root)
+    tracked_files = tracked_files if tracked_files is not None else _load_tracked_files(workspace_path)
     temp_files = []
     
     for root, dirs, files in os.walk(workspace_path):
@@ -309,6 +355,11 @@ def list_temp_files(workspace_root: str = ".") -> list[Path]:
             if "DOCS" in filepath.parts and filename_lower.endswith(".py"):
                 continue
             
+            rel_posix = filepath.relative_to(workspace_path).as_posix()
+            is_tracked = rel_posix in tracked_files
+            if is_tracked and not allow_tracked:
+                continue
+
             if should_delete(filepath):
                 temp_files.append(filepath)
     
@@ -319,14 +370,21 @@ if __name__ == "__main__":
     
     # Parse arguments
     dry_run = "--dry-run" in sys.argv or "-n" in sys.argv
+    allow_tracked = "--allow-tracked" in sys.argv
+    git_rm = "--git-rm" in sys.argv
+
+    if git_rm:
+        allow_tracked = True
+
+    tracked_files = _load_tracked_files(Path("."))
     
     if dry_run:
         print("\n[DRY RUN] Files that would be deleted:")
         print("=" * 80)
-        temp_files = list_temp_files()
+        temp_files = list_temp_files(tracked_files=tracked_files, allow_tracked=allow_tracked)
         for filepath in temp_files:
             print(f"  {filepath}")
         print("=" * 80)
         print(f"Total: {len(temp_files)} files\n")
     else:
-        cleanup_temp_files()
+        cleanup_temp_files(allow_tracked=allow_tracked, git_rm=git_rm, tracked_files=tracked_files)
