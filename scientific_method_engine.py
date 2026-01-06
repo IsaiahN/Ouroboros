@@ -1674,6 +1674,24 @@ class GamesAsTeachersEngine:
         self._current_lesson: Optional[Dict[str, Any]] = None
         self._interpretation_attempts: List[Dict[str, Any]] = []
         self._transfer_history: List[Dict[str, Any]] = []
+
+    # ------------------------------------------------------------------
+    # Table selection helper for compatibility with legacy schema
+    # ------------------------------------------------------------------
+    def _get_lesson_table(self) -> str:
+        """Choose the lesson table based on availability (prefers v2 schema)."""
+        if not self.db:
+            return "lesson_interpretations"
+        try:
+            rows = self.db.execute_query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                ("lesson_interpretations_v2",),
+            )
+            if rows:
+                return "lesson_interpretations_v2"
+        except Exception:
+            pass
+        return "lesson_interpretations"
     
     def extract_lesson(
         self,
@@ -1786,25 +1804,55 @@ class GamesAsTeachersEngine:
         """Store lesson in database."""
         if not self.db:
             return False
-        
+
+        table_name = self._get_lesson_table()
+
         try:
-            self.db.execute_query(
-                """INSERT OR REPLACE INTO lesson_interpretations
-                   (lesson_id, game_type, level_number, concept_demonstrated,
-                    interpretation, explains_examples, fails_to_explain,
-                    coverage_ratio, validated_by_transfer, transfer_success_count,
-                    transfer_fail_count, abstraction_level, abstraction_score,
-                    created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (lesson['lesson_id'], lesson['game_type'], lesson['level_number'],
-                 lesson['concept_demonstrated'], lesson['interpretation'],
-                 lesson['explains_examples'], lesson['fails_to_explain'],
-                 lesson['coverage_ratio'], lesson['validated_by_transfer'],
-                 lesson['transfer_success_count'], lesson['transfer_fail_count'],
-                 lesson['abstraction_level'], lesson['abstraction_score'],
-                 lesson['created_at'])
-            )
-            return True
+            if table_name == "lesson_interpretations_v2":
+                self.db.execute_query(
+                    """INSERT OR REPLACE INTO lesson_interpretations_v2
+                       (lesson_id, game_type, level_number, concept_demonstrated,
+                        interpretation, explains_examples, fails_to_explain,
+                        coverage_ratio, validated_by_transfer, transfer_success_count,
+                        transfer_fail_count, abstraction_level, abstraction_score,
+                        created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (lesson['lesson_id'], lesson['game_type'], lesson['level_number'],
+                     lesson['concept_demonstrated'], lesson['interpretation'],
+                     lesson['explains_examples'], lesson['fails_to_explain'],
+                     lesson['coverage_ratio'], lesson['validated_by_transfer'],
+                     lesson['transfer_success_count'], lesson['transfer_fail_count'],
+                     lesson['abstraction_level'], lesson['abstraction_score'],
+                     lesson['created_at'])
+                )
+                return True
+            else:
+                # Legacy schema (attempt_id NOT NULL, different column names)
+                # Best-effort insert to maintain compatibility
+                self.db.execute_query(
+                    """INSERT OR REPLACE INTO lesson_interpretations
+                       (id, attempt_id, game_id, level, interpretation, explains_examples,
+                        fails_examples, confidence, contradictions, coverage_notes,
+                        resonance_tags, source_mode, reasoning_tags, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        None,
+                        lesson['lesson_id'],
+                        lesson['game_type'],
+                        lesson['level_number'],
+                        lesson['concept_demonstrated'],
+                        len(json.loads(lesson['explains_examples'])),
+                        len(json.loads(lesson['fails_to_explain'])),
+                        0.0,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        lesson['created_at'],
+                    ),
+                )
+                return True
         except Exception as e:
             logger.debug(f"[TEACHER] Failed to store lesson: {e}")
             return False
@@ -1845,27 +1893,32 @@ class GamesAsTeachersEngine:
         
         # Update lesson statistics
         if self.db:
+            table_name = self._get_lesson_table()
             try:
-                if transfer_succeeded:
-                    self.db.execute_query(
-                        """UPDATE lesson_interpretations 
-                           SET transfer_success_count = transfer_success_count + 1,
-                               validated_by_transfer = TRUE,
-                               abstraction_score = CAST(transfer_success_count + 1 AS REAL) / 
-                                   CAST(transfer_success_count + transfer_fail_count + 1 AS REAL)
-                           WHERE lesson_id = ?""",
-                        (lesson_id,)
-                    )
+                if table_name == "lesson_interpretations_v2":
+                    if transfer_succeeded:
+                        self.db.execute_query(
+                            """UPDATE lesson_interpretations_v2 
+                               SET transfer_success_count = transfer_success_count + 1,
+                                   validated_by_transfer = TRUE,
+                                   abstraction_score = CAST(transfer_success_count + 1 AS REAL) / 
+                                       CAST(transfer_success_count + transfer_fail_count + 1 AS REAL)
+                               WHERE lesson_id = ?""",
+                            (lesson_id,)
+                        )
+                    else:
+                        self.db.execute_query(
+                            """UPDATE lesson_interpretations_v2 
+                               SET transfer_fail_count = transfer_fail_count + 1,
+                                   abstraction_score = CAST(transfer_success_count AS REAL) / 
+                                       CAST(transfer_success_count + transfer_fail_count + 1 AS REAL)
+                               WHERE lesson_id = ?""",
+                            (lesson_id,)
+                        )
                 else:
-                    self.db.execute_query(
-                        """UPDATE lesson_interpretations 
-                           SET transfer_fail_count = transfer_fail_count + 1,
-                               abstraction_score = CAST(transfer_success_count AS REAL) / 
-                                   CAST(transfer_success_count + transfer_fail_count + 1 AS REAL)
-                           WHERE lesson_id = ?""",
-                        (lesson_id,)
-                    )
-                
+                    # Legacy table lacks transfer columns; skip update
+                    logger.debug("[TEACHER] Transfer stats skipped due to legacy lesson_interpretations schema")
+
                 # Also store in abstraction_quality if table exists
                 self._store_transfer_quality(result)
                 
@@ -1882,6 +1935,20 @@ class GamesAsTeachersEngine:
             return False
         
         try:
+            source_game = result.get('source_game_type')
+            if not source_game:
+                # Derive from lesson record if available
+                table_name = self._get_lesson_table()
+                try:
+                    rows = self.db.execute_query(
+                        f"SELECT game_type, game_id FROM {table_name} WHERE lesson_id = ?",
+                        (result['lesson_id'],)
+                    )
+                    if rows:
+                        source_game = rows[0].get('game_type') or rows[0].get('game_id') or 'unknown'
+                except Exception:
+                    source_game = None
+
             self.db.execute_query(
                 """INSERT INTO abstraction_quality
                    (lesson_id, source_game_type, target_game_type, target_level,
@@ -1889,7 +1956,7 @@ class GamesAsTeachersEngine:
                     is_abstraction, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (result['lesson_id'], 
-                 result.get('source_game_type', 'unknown'),
+                 source_game or 'unknown',
                  result['target_game_type'],
                  result['target_level'],
                  result['transfer_succeeded'],

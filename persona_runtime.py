@@ -42,11 +42,23 @@ class PersonaManager:
         self.db = db
         self.agent_id = agent_id
         self._persona_cache: Dict[str, Dict[str, Any]] = {}
+        self._persona_allowance: Optional[int] = None
+        self._imagination_remaining: float = 1.0
 
     def set_agent(self, agent_id: Optional[str]) -> None:
         self.agent_id = agent_id
 
-    def can_spawn_persona(self, persona_type: str = 'experimental', imagination_remaining: float = 1.0) -> tuple[bool, str]:
+    def set_imagination_budget(self, allowance: Optional[int] = None, imagination_remaining: Optional[float] = None) -> None:
+        """Update persona spawn limits based on imagination budget signals."""
+        if allowance is not None:
+            self._persona_allowance = max(1, min(int(allowance), MAX_ACTIVE_PERSONAS))
+        if imagination_remaining is not None:
+            try:
+                self._imagination_remaining = float(imagination_remaining)
+            except Exception:
+                self._imagination_remaining = 1.0
+
+    def can_spawn_persona(self, persona_type: str = 'experimental', imagination_remaining: Optional[float] = None) -> tuple[bool, str]:
         """
         Check if spawning a new persona is allowed within budget.
         
@@ -74,16 +86,24 @@ class PersonaManager:
         
         current_count = len(personas)
         temp_count = sum(1 for p in personas if (p.get('persistence_class') or '').lower() == 'temporary')
+
+        # Apply dynamic allowance if provided
+        allowance_cap = self._persona_allowance or MAX_ACTIVE_PERSONAS
+        if current_count >= allowance_cap:
+            return False, 'allowance_limit'
         
         # Check against hard limits
         if current_count >= MAX_ACTIVE_PERSONAS:
             return False, 'at_hard_limit'
-        
+
         if persona_type.lower() == 'temporary' and temp_count >= MAX_TEMPORARY_PERSONAS:
             return False, 'temporary_limit'
         
         # Check imagination budget
-        if imagination_remaining < 0.1:
+        effective_imagination = self._imagination_remaining if imagination_remaining is None else imagination_remaining
+        if effective_imagination is None:
+            effective_imagination = 1.0
+        if effective_imagination < 0.1:
             return False, 'imagination_exhausted'
         
         return True, 'allowed'

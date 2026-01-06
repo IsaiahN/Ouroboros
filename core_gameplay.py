@@ -754,6 +754,7 @@ class GameplayEngine:
         
         # Symbolic Reasoning Engine - World model (lazy init per game)
         self.symbolic_engine = None  # Initialized per game in play_single_game
+        self._world_model = None     # Alias to symbolic_engine.world_model for consciousness loop
         
         # Abstraction engine for pattern-based sequence matching
         if ABSTRACTION_AVAILABLE and is_abstraction_enabled():
@@ -1575,6 +1576,10 @@ class GameplayEngine:
         }
         
         try:
+            # Ensure world model alias is current
+            if (not getattr(self, '_world_model', None)) and getattr(self, 'symbolic_engine', None):
+                self._world_model = getattr(self.symbolic_engine, 'world_model', None)
+
             # 1. SELF-MODEL: Who am I? What do I control?
             if hasattr(self, 'agent_self_model') and self.agent_self_model and agent_id:
                 try:
@@ -3530,9 +3535,12 @@ class GameplayEngine:
                 self.symbolic_engine.initialize(
                     np.array(game_state.frame) if game_state.frame else np.array([])
                 )
+                # Keep consciousness step aligned with the active world model
+                self._world_model = getattr(self.symbolic_engine, "world_model", None)
                 logger.info(f"[WORLD-MODEL] Symbolic engine initialized for {game_type}")
             except Exception as e:
                 self.symbolic_engine = None
+                self._world_model = None
                 logger.debug(f"Symbolic engine init failed (non-critical): {e}")
         
         # CODS - Set game context for operator discovery
@@ -5767,6 +5775,7 @@ class GameplayEngine:
                                 if engine_cls:
                                     self.symbolic_engine = engine_cls(game_type, level=current_level)
                                     self.symbolic_engine.initialize(np.array(game_state.frame))
+                                    self._world_model = getattr(self.symbolic_engine, "world_model", None)
                                 logger.info(f"[WORLD-MODEL] Reinitialized for level {current_level}")
                             except Exception as e:
                                 logger.debug(f"World model reinit for level {current_level} failed: {e}")
@@ -6848,6 +6857,20 @@ class GameplayEngine:
             cf_rollouts=getattr(self, '_last_counterfactual_rollouts_used', None),
             synthesis_enabled=getattr(self, '_last_synthesis_enabled', None),
         )
+
+        # Push allowance and remaining budget into persona manager so spawning respects limits
+        try:
+            allowance = None
+            if hasattr(self, 'imagination_budget_manager') and self.imagination_budget_manager:
+                allowance = self.imagination_budget_manager.get_persona_allowance()
+            if hasattr(self, 'persona_manager') and self.persona_manager:
+                remaining_signal = budget_total if budget_total is not None else self._imagination_budget_remaining
+                self.persona_manager.set_imagination_budget(
+                    allowance=allowance,
+                    imagination_remaining=remaining_signal if remaining_signal is not None else 1.0,
+                )
+        except Exception:
+            pass
 
         self._imagination_ctx = {
             'budget_total': budget_total,

@@ -76,6 +76,31 @@ def run_migration():
     except Exception as e:
         print(f"[SKIP] persona_theory_bindings: {e}")
     
+    # Table 3: lesson_interpretations_v2 - Schema-aligned lessons table
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS lesson_interpretations_v2 (
+                lesson_id TEXT PRIMARY KEY,
+                game_type TEXT,
+                level_number INTEGER,
+                concept_demonstrated TEXT,
+                interpretation TEXT,
+                explains_examples TEXT,
+                fails_to_explain TEXT,
+                coverage_ratio REAL,
+                validated_by_transfer BOOLEAN,
+                transfer_success_count INTEGER,
+                transfer_fail_count INTEGER,
+                abstraction_level TEXT,
+                abstraction_score REAL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        tables_created += 1
+        print("[OK] Created table: lesson_interpretations_v2")
+    except Exception as e:
+        print(f"[SKIP] lesson_interpretations_v2: {e}")
+
     # Create indexes
     index_definitions = [
         ("idx_abstraction_quality_lesson", "abstraction_quality", "lesson_id"),
@@ -84,6 +109,7 @@ def run_migration():
         ("idx_persona_bindings_persona", "persona_theory_bindings", "persona_id"),
         ("idx_persona_bindings_theory", "persona_theory_bindings", "theory_id"),
         ("idx_persona_bindings_agent", "persona_theory_bindings", "agent_id"),
+        ("idx_lesson_v2_game_level", "lesson_interpretations_v2", "game_type, level_number"),
     ]
     
     for idx_name, table, column in index_definitions:
