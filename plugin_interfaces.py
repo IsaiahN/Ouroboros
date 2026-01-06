@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be early
+
 """Plugin interface scaffolding for event-first runtime.
 
 Each plugin registers for EventType values and receives payloads from the bus.

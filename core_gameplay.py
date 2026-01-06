@@ -1660,6 +1660,17 @@ class GameplayEngine:
                             # Spawn competing beliefs on high surprise
                             if observation.get('surprise', 0) > 0.5:
                                 consciousness_state['belief_conflict'] = True
+                                # ===================================================================
+                                # FIX: LOG COMPETING BELIEFS FOR VISIBILITY
+                                # ===================================================================
+                                # Surface the belief competition in logs so it's visible that
+                                # world model is actively comparing predictions vs reality
+                                # ===================================================================
+                                belief_count = len(self._world_model.beliefs) if hasattr(self._world_model, 'beliefs') else 0
+                                logger.info(
+                                    f"[BELIEF CONFLICT] Surprise={observation.get('surprise', 0):.2f}, "
+                                    f"Active beliefs={belief_count}, Prediction failed - spawning competing hypothesis"
+                                )
                         except Exception:
                             pass
                     
@@ -2070,6 +2081,40 @@ class GameplayEngine:
                             game_type=_th_game_type,
                             level_number=_th_level
                         )
+                    
+                    # ================================================================
+                    # THEORY FORMATION: Record observation to trigger theory generation
+                    # ================================================================
+                    # This feeds the scientific method engine with evidence to form
+                    # theories about: object identity, action effects, spatial rules,
+                    # goal hypotheses, etc. Theories are about WORLD MODEL, not actions.
+                    # ================================================================
+                    obs_fn = getattr(self.science_engine, 'record_observation', None)
+                    if callable(obs_fn):
+                        _th_controlled = []
+                        try:
+                            if hasattr(self, 'self_model') and self.self_model:
+                                _th_controlled = getattr(self.self_model, 'objects_agent_controls', []) or []
+                        except Exception:
+                            pass
+                        
+                        _th_frame_before = getattr(self, '_previous_frame', None)
+                        _th_frame_after = game_state.frame if game_state else None
+                        _th_level_changed = getattr(loop_state, 'current_level', 1) != getattr(loop_state, 'previous_level', 1)
+                        
+                        observation = {
+                            'action': action,
+                            'frame_before': _th_frame_before,
+                            'frame_after': _th_frame_after,
+                            'score_before': _th_score_before,
+                            'score_after': _th_score_after,
+                            'game_state': game_state.state if game_state else 'UNKNOWN',
+                            'controlled_objects': _th_controlled,
+                            'level_changed': _th_level_changed,
+                            'timestamp': datetime.now().isoformat() if 'datetime' in dir() else None
+                        }
+                        obs_fn(observation)
+                        
                 except Exception as e:
                     logger.debug(f"Theory outcome recording failed: {e}")
 
@@ -3135,6 +3180,30 @@ class GameplayEngine:
                     logger.debug(f"[SEMANTIC] Formed impressions for {len(self._last_perceived_objects[:5])} objects after {outcome}")
             except Exception as e:
                 logger.debug(f"Semantic impression formation failed (non-critical): {e}")
+
+        # ===================================================================
+        # FIX #13: COUNTERFACTUAL ANALYSIS FOR FAILURES
+        # ===================================================================
+        # Run "what if?" analysis on failed games to learn alternative strategies.
+        # This enables structured learning beyond trial and error.
+        # ===================================================================
+        if mode_for_spine == 'LIVE' and not results['win'] and hasattr(self, 'counterfactual_analyzer') and self.counterfactual_analyzer:
+            try:
+                cf_scenarios = self.counterfactual_analyzer.analyze_failure(
+                    agent_id=agent_id or 'unknown',
+                    game_id=game_id,
+                    session_id=self.session_manager.current_session_id if self.session_manager else 'unknown',
+                    final_score=float(game_state.score),
+                    generation=self.game_config.get('generation', 0)
+                )
+                
+                if cf_scenarios:
+                    results['counterfactual_scenarios'] = cf_scenarios
+                    logger.info(
+                        f"[COUNTERFACTUAL] Generated {len(cf_scenarios)} 'what if' scenarios for failed game {game_id[:12]}"
+                    )
+            except Exception as e:
+                logger.debug(f"Counterfactual analysis failed (non-critical): {e}")
 
         logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
                    f"Actions: {loop_state.action_count}, Levels Completed: {loop_state.level_completions}/{loop_state.current_level}")
@@ -11440,6 +11509,136 @@ class GameplayEngine:
         
         return action_map
     
+    def _apply_theory_gate(
+        self,
+        action_scores: Dict[int, float],
+        working_theory: Optional[Dict],
+        agent_id: Optional[str] = None
+    ) -> Dict[int, float]:
+        """
+        Apply theory-gated scoring to action proposals.
+        
+        This is the SINGLE MOST IMPORTANT CONSTRAINT from architecture docs:
+        Every proposal must be scored against the current working theory.
+        
+        Theory stages and their effect on action scoring:
+        - None/exploring: Only exploration/discovery actions score highly
+        - hypothesis_formed: Testing actions get boost, ignoring theory is penalized
+        - confident: Exploitation actions get boost
+        - contradicted: ONLY revision/exploration actions score well
+        
+        Returns modified action_scores dict.
+        """
+        if not working_theory:
+            # NO THEORY EXISTS: Boost exploratory actions, penalize exploitation
+            # Exploration = try diverse actions, discover mechanics
+            # Exploitation = repeat what worked (but we don't know what works!)
+            for action in [1, 2, 3, 4]:  # Directional actions = exploration
+                if action in action_scores and action_scores[action] > -900:
+                    action_scores[action] *= 1.3
+            # ACTION5 (wait) and ACTION6 (interact) are also exploratory
+            if 5 in action_scores and action_scores[5] > -900:
+                action_scores[5] *= 1.2
+            if 6 in action_scores and action_scores[6] > -900:
+                action_scores[6] *= 1.2
+            # ACTION7 (submit) should be rare without theory
+            if 7 in action_scores and action_scores[7] > -900:
+                action_scores[7] *= 0.3
+            logger.debug(f"[THEORY-GATE] No theory - boosting exploration")
+            return action_scores
+        
+        stage = working_theory.get('stage', 'exploring')
+        theory_content = working_theory.get('theory', {})
+        
+        if stage == 'exploring':
+            # Still exploring - similar to no theory
+            for action in [1, 2, 3, 4, 5, 6]:
+                if action in action_scores and action_scores[action] > -900:
+                    action_scores[action] *= 1.1
+            logger.debug(f"[THEORY-GATE] Exploring stage - slight exploration boost")
+            
+        elif stage == 'hypothesis_formed':
+            # We have a hypothesis - reward testing it
+            # Testing = actions that would confirm OR refute the theory
+            predicted_effects = theory_content.get('predicted_effects', [])
+            test_actions = theory_content.get('test_actions', [])
+            
+            # Boost actions that test the hypothesis
+            for action in test_actions:
+                if action in action_scores and action_scores[action] > -900:
+                    action_scores[action] *= 1.4
+                    logger.debug(f"[THEORY-GATE] Boosting test action {action}")
+            
+            # If no specific test actions, any action that could reveal info is good
+            if not test_actions:
+                for action in [1, 2, 3, 4, 6]:  # Movement and interaction
+                    if action in action_scores and action_scores[action] > -900:
+                        action_scores[action] *= 1.1
+            
+            # Penalize ignoring the theory (random actions with no purpose)
+            if 7 in action_scores and action_scores[7] > -900:
+                action_scores[7] *= 0.5  # Don't submit without confidence
+                
+        elif stage == 'confident':
+            # Theory is confirmed - reward exploitation
+            # Exploitation = use confirmed knowledge to make progress
+            known_good_actions = theory_content.get('successful_actions', [])
+            goal_actions = theory_content.get('goal_actions', [])
+            
+            # Boost known successful actions
+            for action in known_good_actions:
+                if action in action_scores and action_scores[action] > -900:
+                    action_scores[action] *= 1.3
+            
+            # Boost goal-directed actions
+            for action in goal_actions:
+                if action in action_scores and action_scores[action] > -900:
+                    action_scores[action] *= 1.4
+            
+            # ACTION7 (submit) is valid when confident
+            if 7 in action_scores and action_scores[7] > -900:
+                action_scores[7] *= 1.5
+            
+            # Penalize pure exploration when we should exploit
+            if not known_good_actions and not goal_actions:
+                # No specific actions known - mild exploration still OK
+                pass
+            else:
+                # We know what works - don't waste actions exploring
+                for action in [1, 2, 3, 4]:
+                    if action not in known_good_actions and action not in goal_actions:
+                        if action in action_scores and action_scores[action] > -900:
+                            action_scores[action] *= 0.8
+            
+            logger.debug(f"[THEORY-GATE] Confident stage - boosting exploitation")
+            
+        elif stage in ('contradicted', 'refuted', 'failed'):
+            # Theory is BROKEN - only revision/exploration actions score well
+            # Agent must NOT keep using broken theory!
+            
+            # Heavily boost exploration to find new theory
+            for action in [1, 2, 3, 4]:
+                if action in action_scores and action_scores[action] > -900:
+                    action_scores[action] *= 1.5
+            
+            # Boost interaction to discover new mechanics
+            if 6 in action_scores and action_scores[6] > -900:
+                action_scores[6] *= 1.3
+            
+            # Heavily penalize submission with broken theory
+            if 7 in action_scores and action_scores[7] > -900:
+                action_scores[7] *= 0.1
+            
+            # Penalize actions that the broken theory suggested
+            failed_actions = theory_content.get('failed_actions', [])
+            for action in failed_actions:
+                if action in action_scores and action_scores[action] > -900:
+                    action_scores[action] *= 0.4
+            
+            logger.info(f"[THEORY-GATE] Contradicted stage - forcing exploration for new theory")
+        
+        return action_scores
+    
     def _get_intelligent_escape_action(
         self, 
         agent_id: Optional[str], 
@@ -11589,6 +11788,47 @@ class GameplayEngine:
                     if 6 in action_scores:
                         action_scores[6] += 0.2
                     reasoning_parts.append("Q1: No data, boosting A5/A6")
+            
+            # ===================================================================
+            # Q2 INSIGHTS: REWARD/PUNISHMENT AVOIDANCE
+            # ===================================================================
+            # Q2 knows what objects reward vs punish. Use this to:
+            # - Boost actions toward rewarding objects
+            # - Penalize actions toward dangerous objects  
+            # ===================================================================
+            q2_data = emergent.get('q2_reward_punishment', {})
+            rewarding = q2_data.get('rewarding_objects', [])
+            dangerous = q2_data.get('dangerous_objects', [])
+            
+            if rewarding:
+                # Boost ACTION6 (click/interact) if we have rewarding objects identified
+                if 6 in action_scores:
+                    action_scores[6] += 0.2
+                    reasoning_parts.append(f"Q2: {len(rewarding)} rewarding objects - boosting interact")
+            
+            if dangerous:
+                # If dangerous objects exist, boost directional actions to move away
+                # (simplified: we can't know WHICH direction, but movement helps)
+                for act in [1, 2, 3, 4]:  # Directional actions
+                    if act in action_scores:
+                        action_scores[act] += 0.15
+                reasoning_parts.append(f"Q2: {len(dangerous)} dangerous objects - boosting movement")
+            
+            # ===================================================================
+            # Q3 INSIGHTS: SALIENT TARGET FOCUS  
+            # ===================================================================
+            # Q3 identifies the most important/salient things in the frame.
+            # If we have salient targets, boost ACTION6 (interact) since clicking
+            # on salient things is often the right move.
+            # ===================================================================
+            q3_data = emergent.get('q3_salient_target', {})
+            salient = q3_data.get('top_salient', [])
+            
+            if salient and len(salient) > 0:
+                # Salient targets exist - boost interaction and targeted movement
+                if 6 in action_scores:
+                    action_scores[6] += 0.25
+                    reasoning_parts.append(f"Q3: {len(salient)} salient targets - boosting interact")
             
             # === 1. PENALIZE RECENT ACTIONS (avoid oscillation) ===
             if recent_actions:
@@ -11970,6 +12210,28 @@ class GameplayEngine:
                     if action_num not in recent_actions[-3:]:
                         action_scores[action_num] += 0.15
                 reasoning_parts.append("Desperate: try all untried")
+            
+            # ===================================================================
+            # THEORY-GATED SCORING: Apply theory constraints BEFORE final selection
+            # This is the SINGLE MOST IMPORTANT CONSTRAINT from architecture docs
+            # ===================================================================
+            try:
+                game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                working_theory = None
+                if hasattr(self, 'science_engine') and self.science_engine:
+                    _wt_fn = getattr(self.science_engine, 'get_working_theory', None)
+                    if callable(_wt_fn):
+                        working_theory = _wt_fn(game_type, level)
+                
+                action_scores = self._apply_theory_gate(action_scores, working_theory, agent_id)
+                
+                if working_theory:
+                    stage = working_theory.get('stage', 'exploring')
+                    reasoning_parts.append(f"Theory:{stage}")
+                else:
+                    reasoning_parts.append("NoTheory:explore")
+            except Exception as e:
+                logger.debug(f"Theory gating failed: {e}")
             
             # === SELECT BEST ACTION (MUST BE AVAILABLE) ===
             # Filter to only available actions, then sort by score
@@ -12381,13 +12643,41 @@ class GameplayEngine:
             'goals': [],
             'inferred_goals': [],    # Task 4: Goals inferred from rare colors
             'agent_position': None,
-            'network_hypotheses': []
+            'network_hypotheses': [],
+            'active_beliefs': [],    # Phase 2: Competing beliefs from ActiveBeliefGraph
+            'belief_conflict_count': 0  # How many competing hypotheses
         }
         
         # Get world state from SymbolicReasoningEngine (if initialized)
         if self.symbolic_engine and hasattr(self.symbolic_engine, 'world_model') and self.symbolic_engine.world_model:
             try:
                 state = self.symbolic_engine.world_model.state
+                wm = self.symbolic_engine.world_model
+                
+                # ===================================================================
+                # FIX: PHASE 2 WORLD-MODEL - Surface competing beliefs
+                # ===================================================================
+                # Extract active beliefs from the ActiveBeliefGraph for visibility
+                # in reasoning payloads. Shows what the agent "thinks" about the world.
+                # ===================================================================
+                if hasattr(wm, 'beliefs') and wm.beliefs:
+                    # Get top 5 beliefs by confidence
+                    sorted_beliefs = sorted(
+                        wm.beliefs.values(),
+                        key=lambda b: b.confidence if hasattr(b, 'confidence') else 0,
+                        reverse=True
+                    )[:5]
+                    
+                    context['active_beliefs'] = [
+                        {
+                            'id': b.belief_id if hasattr(b, 'belief_id') else str(i),
+                            'type': b.belief_type if hasattr(b, 'belief_type') else 'unknown',
+                            'confidence': round(b.confidence, 2) if hasattr(b, 'confidence') else 0.5,
+                            'content': str(b.content)[:100] if hasattr(b, 'content') else 'none'
+                        }
+                        for i, b in enumerate(sorted_beliefs)
+                    ]
+                    context['belief_conflict_count'] = len(wm.beliefs)
                 
                 # Get obstacles (limit to 5 for JSON size)
                 obstacles = state.get_obstacles()
@@ -14608,6 +14898,21 @@ class GameplayEngine:
             
             # Detect conflict
             conflict_detected = abs(private_memory_strength - network_recommendation_strength) > 0.3
+            
+            # ===================================================================
+            # FIX #12: STREAM A/B CONFLICT LOGGING
+            # ===================================================================
+            # Log when private theory (Stream A) conflicts with network wisdom (Stream B)
+            # This enables visibility into agent's internal debate before decisions
+            # ===================================================================
+            if conflict_detected:
+                logger.info(
+                    f"[STREAM CONFLICT] Agent {agent_id[:12] if agent_id else 'unknown'}: "
+                    f"Stream A (private) = {private_memory_strength:.2f}, "
+                    f"Stream B (network) = {network_recommendation_strength:.2f}, "
+                    f"bias alpha = {alpha:.2f}, "
+                    f"decision follows {'Stream A' if alpha > 0.5 else 'Stream B'}"
+                )
             
             # Build emotion label from actual emotional_input value
             if emotional_input < 0.25:

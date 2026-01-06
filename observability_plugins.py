@@ -1,5 +1,7 @@
-import logging
 import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST
+
+import logging
 import json
 import hashlib
 from typing import Iterable, List, Optional

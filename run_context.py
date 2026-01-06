@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be early
+
 """RunContext scaffold for behavior-parity loop split.
 
 Fields align with architecture/runtime/README.md and events.md. This is a holder for
