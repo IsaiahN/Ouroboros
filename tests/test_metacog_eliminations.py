@@ -1,3 +1,8 @@
+import os
+import sys
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: No pycache
+sys.dont_write_bytecode = True
+
 """
 Test METACOG eliminations integration in escape mode.
 
@@ -5,8 +10,6 @@ Verifies that:
 1. Eliminated actions are penalized in escape action selection
 2. Prediction type suppression works after repeated failures
 """
-import sys
-import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database_interface import DatabaseInterface

@@ -1,3 +1,8 @@
+import os
+import sys
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: No pycache
+sys.dont_write_bytecode = True
+
 """
 Test Theory-Gated Scoring Implementation
 
@@ -6,8 +11,6 @@ is working correctly - every action should be scored against the working theory.
 """
 
 import sqlite3
-import sys
-import os
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
