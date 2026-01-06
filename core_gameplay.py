@@ -738,6 +738,9 @@ class GameplayEngine:
         self._imagination_budget_remaining: Optional[float] = None
         self._imagination_budget_start: Optional[float] = None
 
+        # Frontier replay suppression per run (once frontier reached, skip further replays)
+        self._frontier_replay_blocklist: Set[str] = set()
+
         # Reflex-level action viability cache (pre-concept gate)
         self._action_viability_stats: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
         self._action_viability_enabled = bool(int(os.getenv('ACTION_VIABILITY_ENABLED', '0')))
@@ -1293,6 +1296,8 @@ class GameplayEngine:
                     if replay_result.get('reached_frontier'):
                         frontier_level = replay_result.get('frontier_level', 'unknown')
                         logger.info(f"[3-TRY] SUCCESS: {sequence_id[:12]} brought us to frontier Level {frontier_level}!")
+                        self._frontier_replay_blocklist.add(game_id)
+                        logger.info(f"[FRONTIER-LOCK] Disabled further sequence replays for {game_id} in this run")
                         # Mark for exploration mode continuation
                         result.reached_frontier = True
                         result.frontier_level = frontier_level
@@ -1513,6 +1518,8 @@ class GameplayEngine:
                 self.game_config['max_total_actions'] = total_boost
                 logger.info(f" [FRONTIER BUDGET] Boosted to {per_level_boost}/lvl and {total_boost} total for exploration")
                 logger.info(f" {mode_name}: At frontier (Level {frontier_level}), exploring until action budget exhausted")
+                self._frontier_replay_blocklist.add(game_id)
+                logger.info(f"[FRONTIER-LOCK] Disabled further sequence replays for {game_id} in this run")
 
         # Frontier reached even if replay did not fully succeed (e.g., stuck/no-op) -> force exploration
         elif fallback_result.reached_frontier:
@@ -1527,6 +1534,8 @@ class GameplayEngine:
             self.game_config['max_total_actions'] = total_boost
             logger.info(f" [FRONTIER BUDGET] Boosted to {per_level_boost}/lvl and {total_boost} total for frontier exploration")
             logger.info(f" Frontier reached (Level {frontier_level}); abandoning replay and continuing exploration")
+            self._frontier_replay_blocklist.add(game_id)
+            logger.info(f"[FRONTIER-LOCK] Disabled further sequence replays for {game_id} in this run")
                 
         elif fallback_result.all_failed:
             # All sequences failed - set up fallback options
@@ -3810,6 +3819,7 @@ class GameplayEngine:
         # Check AFTER game creation so we have the initial frame
         # MODE-AWARE: Behavior depends on agent operating mode
         known_sequence = None
+        ranked_sequences: List[Dict[str, Any]] = []
         
         if self.game_config.get('enable_pattern_learning', True):
             learning_mode = self.game_config.get('learning_mode', 'smart_exploration')
@@ -3822,75 +3832,80 @@ class GameplayEngine:
             # PIONEER: Gets sequence (uses it to reach frontier, then explores)
             # EXPLOITER: REQUIRES sequence (fails if no sequence found)
             if learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist', 'pioneer', 'exploiter']:
-                try:
-                    logger.info(f"[SEQUENCE REPLAY DEBUG] Checking for sequences for game {game_id}, agent_mode={agent_mode}")
-                    
-                    # 3-TRY FALLBACK SYSTEM: Get top 3 sequences ranked by priority
-                    # Try each in order, flag failures, fall back to exploration if all fail
-                    ranked_sequences = self._get_ranked_cumulative_sequences(game_id, limit=3)
+                if game_id in self._frontier_replay_blocklist:
+                    logger.info(f"[FRONTIER-LOCK] Skipping sequence replay/validation for {game_id}; exploration-only for this run")
+                    ranked_sequences = []
+                    known_sequence = None
+                else:
+                    try:
+                        logger.info(f"[SEQUENCE REPLAY DEBUG] Checking for sequences for game {game_id}, agent_mode={agent_mode}")
+                        
+                        # 3-TRY FALLBACK SYSTEM: Get top 3 sequences ranked by priority
+                        # Try each in order, flag failures, fall back to exploration if all fail
+                        ranked_sequences = self._get_ranked_cumulative_sequences(game_id, limit=3)
 
-                    if pioneer_at_frontier:
-                        frontier_level = current_level
-                        usable = [seq for seq in ranked_sequences if int(seq.get('total_score', 0)) >= frontier_level]
-                        if not usable:
-                            logger.info(
-                                f"[PIONEER FRONTIER GUARD] Frontier L{frontier_level} > network L{network_max_level}: "
-                                "skipping cumulative replay (no frontier-targeted sequence)."
-                            )
-                        ranked_sequences = usable
-                    
-                    if ranked_sequences:
-                        logger.info(f"[3-TRY SYSTEM] Found {len(ranked_sequences)} candidate sequences for {game_id}")
-                    else:
-                        logger.warning(f"[SEQUENCE REPLAY DEBUG] No sequences found for game {game_id}")
-                        if agent_mode == 'exploiter':
-                            logger.error(f"[EXPLOITER FAILURE] Agent in exploiter mode but no sequences available for {game_id} - cannot proceed")
-                    
-                    # Try to use the best available sequence (will be set by 3-try loop below)
-                    known_sequence = ranked_sequences[0] if ranked_sequences else None
-                    
-                    if known_sequence:
-                        levels_completed_by_seq = int(known_sequence['total_score'])
-                        if agent_mode == 'exploiter':
-                            logger.info(f" EXPLOITER mode: Found {known_sequence['total_actions']}-action sequence "
-                                      f"(completes {levels_completed_by_seq} levels), will replay to harvest proven results")
-                        elif agent_mode == 'optimizer':
-                            logger.info(f" OPTIMIZER mode: Found {known_sequence['total_actions']}-action sequence "
-                                      f"(completes {levels_completed_by_seq} levels), will try to beat it")
-                        elif agent_mode == 'pioneer':
-                            logger.info(f" PIONEER mode: Found {known_sequence['total_actions']}-action sequence "
-                                      f"(completes {levels_completed_by_seq} levels), will replay to frontier then explore")
+                        if pioneer_at_frontier:
+                            frontier_level = current_level
+                            usable = [seq for seq in ranked_sequences if int(seq.get('total_score', 0)) >= frontier_level]
+                            if not usable:
+                                logger.info(
+                                    f"[PIONEER FRONTIER GUARD] Frontier L{frontier_level} > network L{network_max_level}: "
+                                    "skipping cumulative replay (no frontier-targeted sequence)."
+                                )
+                            ranked_sequences = usable
+                        
+                        if ranked_sequences:
+                            logger.info(f"[3-TRY SYSTEM] Found {len(ranked_sequences)} candidate sequences for {game_id}")
                         else:
-                            logger.info(f" GENERALIST mode: Found {known_sequence['total_actions']}-action sequence "
-                                      f"(completes {levels_completed_by_seq} levels), will replay exactly")
-                    else:
-                        # No sequence available - exploiter/optimizer mode cannot proceed
-                        if agent_mode == 'exploiter':
-                            logger.error(f" EXPLOITER ABORT: No sequences available for {game_id} - exploiters only use proven sequences")
-                            return {
-                                'game_id': game_id,
-                                'final_state': 'NO_SEQUENCE_AVAILABLE',
-                                'final_score': 0.0,
-                                'actions_taken': 0,
-                                'win': False,
-                                'method': 'exploiter_abort_no_sequence',
-                                'error': 'Exploiter mode requires proven sequences but none available'
-                            }
-                        elif agent_mode == 'optimizer':
-                            # RULE FIX: Optimizers ONLY work on levels WITH sequences
-                            # Per Master Ruleset: "Work on beaten games ONLY" 
-                            logger.error(f" OPTIMIZER ABORT: No sequences available for {game_id} - optimizers require sequences to improve")
-                            return {
-                                'game_id': game_id,
-                                'final_state': 'NO_SEQUENCE_AVAILABLE',
-                                'final_score': 0.0,
-                                'actions_taken': 0,
-                                'win': False,
-                                'method': 'optimizer_abort_no_sequence',
-                                'error': 'Optimizer mode requires existing sequences to optimize but none available'
-                            }
-                except Exception as e:
-                    logger.debug(f"Pattern learning lookup error: {e}")
+                            logger.warning(f"[SEQUENCE REPLAY DEBUG] No sequences found for {game_id}")
+                            if agent_mode == 'exploiter':
+                                logger.error(f"[EXPLOITER FAILURE] Agent in exploiter mode but no sequences available for {game_id} - cannot proceed")
+                        
+                        # Try to use the best available sequence (will be set by 3-try loop below)
+                        known_sequence = ranked_sequences[0] if ranked_sequences else None
+                        
+                        if known_sequence:
+                            levels_completed_by_seq = int(known_sequence['total_score'])
+                            if agent_mode == 'exploiter':
+                                logger.info(f" EXPLOITER mode: Found {known_sequence['total_actions']}-action sequence "
+                                          f"(completes {levels_completed_by_seq} levels), will replay to harvest proven results")
+                            elif agent_mode == 'optimizer':
+                                logger.info(f" OPTIMIZER mode: Found {known_sequence['total_actions']}-action sequence "
+                                          f"(completes {levels_completed_by_seq} levels), will try to beat it")
+                            elif agent_mode == 'pioneer':
+                                logger.info(f" PIONEER mode: Found {known_sequence['total_actions']}-action sequence "
+                                          f"(completes {levels_completed_by_seq} levels), will replay to frontier then explore")
+                            else:
+                                logger.info(f" GENERALIST mode: Found {known_sequence['total_actions']}-action sequence "
+                                          f"(completes {levels_completed_by_seq} levels), will replay exactly")
+                        else:
+                            # No sequence available - exploiter/optimizer mode cannot proceed
+                            if agent_mode == 'exploiter':
+                                logger.error(f" EXPLOITER ABORT: No sequences available for {game_id} - exploiters only use proven sequences")
+                                return {
+                                    'game_id': game_id,
+                                    'final_state': 'NO_SEQUENCE_AVAILABLE',
+                                    'final_score': 0.0,
+                                    'actions_taken': 0,
+                                    'win': False,
+                                    'method': 'exploiter_abort_no_sequence',
+                                    'error': 'Exploiter mode requires proven sequences but none available'
+                                }
+                            elif agent_mode == 'optimizer':
+                                # RULE FIX: Optimizers ONLY work on levels WITH sequences
+                                # Per Master Ruleset: "Work on beaten games ONLY" 
+                                logger.error(f" OPTIMIZER ABORT: No sequences available for {game_id} - optimizers require sequences to improve")
+                                return {
+                                    'game_id': game_id,
+                                    'final_state': 'NO_SEQUENCE_AVAILABLE',
+                                    'final_score': 0.0,
+                                    'actions_taken': 0,
+                                    'win': False,
+                                    'method': 'optimizer_abort_no_sequence',
+                                    'error': 'Optimizer mode requires existing sequences to optimize but none available'
+                                }
+                    except Exception as e:
+                        logger.debug(f"Pattern learning lookup error: {e}")
         
         try:
             # MODE-SPECIFIC SEQUENCE HANDLING
@@ -3976,6 +3991,8 @@ class GameplayEngine:
                             if replay_result.get('reached_frontier'):
                                 frontier_level = replay_result.get('frontier_level', 'unknown')
                                 logger.info(f"[3-TRY] SUCCESS: {sequence_id[:12]} brought us to frontier Level {frontier_level}!")
+                                self._frontier_replay_blocklist.add(game_id)
+                                logger.info(f"[FRONTIER-LOCK] Disabled further sequence replays for {game_id} in this run")
                             else:
                                 logger.info(f"[3-TRY] SUCCESS on attempt {try_num}: {sequence_id[:12]} worked!")
                             
@@ -9842,12 +9859,55 @@ class GameplayEngine:
                 full_reasoning = f"{reasoning} | Visual: {reason}"
                 logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
 
+            # Frame integrity check before enforcing bounds
+            frame_valid = self.action_handler._validate_frame_dimensions(
+                game_state.frame,
+                context="in gameplay loop ACTION6"
+            )
+            if not frame_valid:
+                # Staged recovery: 5 attempts, pause, 10 attempts, pause, up to 20 attempts
+                stage_pauses = [(5, 0.5), (10, 0.5)]
+                recovery_state = await self.action_handler._attempt_frame_recovery(
+                    level_number=current_level,
+                    max_attempts=20,
+                    stage_pauses=stage_pauses
+                )
+                if recovery_state:
+                    game_state = self._normalize_game_state(recovery_state)
+                    logger.info("[RECOVER] Frame recovered for ACTION6; continuing exploration")
+                else:
+                    frontier_mode = bool(self.game_config.get('frontier_mode'))
+                    if frontier_mode:
+                        try:
+                            reset_state = await self.session_manager.reset_level()
+                            game_state = GameState.from_dict(reset_state)
+                            logger.warning("[FRONTIER-RECOVER] Frame still corrupt after staged attempts; level reset to preserve frontier data")
+                        except Exception as recovery_err:
+                            logger.error(f"[FAIL] Frontier level reset failed after frame corruption: {recovery_err}")
+                            raise RuntimeError("Frame corruption recovery failed after staged attempts at frontier")
+                    else:
+                        logger.error("[FAIL] Frame corruption persisted after staged recovery attempts; flagging for investigation")
+                        raise RuntimeError("Frame corruption recovery failed after staged attempts")
+
+            frame_for_action = game_state.frame
+
             # Guard: ensure coordinates are valid before sending ACTION6
-            if game_state.frame is None:
+            if frame_for_action is None:
                 raise RuntimeError("ACTION6 requires frame for coordinate selection")
             if x is None or y is None:
                 raise RuntimeError("ACTION6 missing coordinates")
-            if not (0 <= y < len(game_state.frame)) or not (0 <= x < len(game_state.frame[0])):
+            if frame_for_action and frame_for_action[0]:
+                height = len(frame_for_action)
+                width = len(frame_for_action[0])
+                if not (0 <= y < height) or not (0 <= x < width):
+                    original_coords = (x, y)
+                    x = min(max(x, 0), width - 1)
+                    y = min(max(y, 0), height - 1)
+                    reason = f"{reason} | clamped from {original_coords}"
+                    logger.warning(
+                        f"[WARN] ACTION6 coordinates clamped from {original_coords} to ({x}, {y}) for frame {height}x{width}"
+                    )
+            if not (0 <= y < len(frame_for_action)) or not (0 <= x < len(frame_for_action[0])):
                 raise RuntimeError(f"ACTION6 coordinates out of bounds: ({x},{y})")
             
             # Update reasoning JSON with coordinate info

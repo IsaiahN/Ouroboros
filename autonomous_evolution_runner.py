@@ -1603,7 +1603,10 @@ class AutonomousEvolutionRunner:
                 except Exception as mix_err:
                     print(f"  [WARN] Domain interleave failed: {mix_err}")
 
-                semaphore = asyncio.Semaphore(min(8, len(swarm_slots)))
+                game_ids_for_slots = {slot.get('game_id') for slot in swarm_slots if slot.get('game_id')}
+                target_single_game = bool(self.target_game) and len(game_ids_for_slots) == 1
+                concurrency_limit = 1 if target_single_game else min(8, len(swarm_slots))
+                semaphore = asyncio.Semaphore(concurrency_limit)
 
                 async def run_swarm_slot(slot):
                     nonlocal rules_learned

@@ -452,6 +452,23 @@ class GameSessionManager:
             # Send action via API
             game_state = await self.client.send_action(action, **kwargs)
 
+        except ARCError as api_err:
+            # Transient transport errors: recreate client session once and retry after a short backoff
+            err_msg = str(api_err)
+            if "Failed to complete request" in err_msg:
+                logger.warning(f"Transient ARC error on {action}: {err_msg} - retrying once after session refresh")
+                try:
+                    await asyncio.sleep(0.5)
+                    if self.client:
+                        await self.client.__aenter__()
+                    game_state = await self.client.send_action(action, **kwargs)
+                except Exception as retry_err:
+                    logger.error(f"Retry failed for {action}: {retry_err}")
+                    raise
+            else:
+                raise
+
+        try:
             # Update session statistics
             self.session_stats['total_actions'] += 1
 

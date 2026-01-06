@@ -243,6 +243,7 @@ def cleanup_temp_files(
     files_deleted = 0
     bytes_freed = 0
     pycache_folders_deleted = 0
+    skip_tracked_count = 0
     
     print("\n[CLEANUP] Removing temporary files and __pycache__ folders...")
     print("=" * 80)
@@ -295,7 +296,7 @@ def cleanup_temp_files(
             is_tracked = rel_posix in tracked_files
 
             if is_tracked and not (allow_tracked or git_rm):
-                print(f"  [SKIP] tracked file protected: {rel_path}")
+                skip_tracked_count += 1
                 continue
 
             if should_delete(filepath):
@@ -324,6 +325,9 @@ def cleanup_temp_files(
         print(f"[OK] Deleted {files_deleted} files + {pycache_folders_deleted} __pycache__ folders ({bytes_freed / 1024:.1f} KB freed)\n")
     else:
         print(f"[OK] Deleted {files_deleted} files ({bytes_freed / 1024:.1f} KB freed)\n")
+
+    if skip_tracked_count > 0:
+        print(f"[SKIP] {skip_tracked_count} tracked file(s) protected (suppressed detail)")
     
     return files_deleted, bytes_freed
 

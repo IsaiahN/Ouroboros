@@ -30,8 +30,9 @@ For games with 0 level completions (sp80, ls20, etc.):
 """
 
 import logging
-from typing import Dict, Any, Optional, List, Tuple
 import random
+import asyncio
+from typing import Dict, Any, Optional, List, Tuple
 
 from arc_api_client import GameState
 from visual_analyzer import VisualAnalyzer
@@ -175,45 +176,62 @@ class ActionHandler:
 
         return 0 <= y < len(frame) and 0 <= x < len(frame[0])
 
-    async def _attempt_frame_recovery(self, level_number: int = 1, max_attempts: int = 5) -> Optional['GameState']:
+    async def _attempt_frame_recovery(
+        self,
+        level_number: int = 1,
+        max_attempts: int = 5,
+        stage_pauses: Optional[List[Tuple[int, float]]] = None
+    ) -> Optional['GameState']:
         """Attempt to recover from a corrupt frame by sending random simple actions.
-        
+
         When we receive a corrupt frame (like 2x64 instead of 64x64), this is likely
-        a transient API error or level transition glitch. We try to "flush" the bad 
-        state by sending random directional actions (ACTION1-5) which don't require 
+        a transient API error or level transition glitch. We try to "flush" the bad
+        state by sending random directional actions (ACTION1-5) which don't require
         coordinates.
-        
+
         Args:
             level_number: Current level for logging
             max_attempts: Maximum number of recovery actions to try (default 5)
-            
+            stage_pauses: Optional list of (attempt_count, pause_seconds) to wait
+                after specific attempt counts to allow the API to stabilize.
+
         Returns:
             New GameState if recovery successful, None otherwise
         """
-        import random
-        
-        for attempt in range(max_attempts):
+
+        pause_after = {count: delay for count, delay in (stage_pauses or []) if count > 0 and delay > 0}
+
+        for attempt in range(1, max_attempts + 1):
             # Try a random directional action (1-5) to flush the bad frame
             # These don't require coordinates so they should work even with corrupt frame
             recovery_action = random.choice([1, 2, 3, 4, 5])
-            logger.info(f"[SYNC] FRAME RECOVERY [{attempt+1}/{max_attempts}]: Sending ACTION{recovery_action} to flush corrupt frame")
-            
+            logger.info(f"[SYNC] FRAME RECOVERY [{attempt}/{max_attempts}]: Sending ACTION{recovery_action} to flush corrupt frame")
+
             try:
                 # Send the recovery action through session_manager.client (the API client)
                 # NOTE: send_action() already returns a GameState object, NOT a dict
                 new_state = await self.session_manager.client.send_action(f"ACTION{recovery_action}")
                 if new_state:
                     frame = new_state.frame
-                    
+
                     if frame and len(frame) >= 10 and frame[0] and len(frame[0]) >= 10:
-                        logger.info(f"[OK] FRAME RECOVERY SUCCESS after {attempt+1} attempts! Frame: {len(frame)}x{len(frame[0])}")
+                        logger.info(f"[OK] FRAME RECOVERY SUCCESS after {attempt} attempts! Frame: {len(frame)}x{len(frame[0])}")
                         return new_state
                     else:
                         frame_size = f"{len(frame)}x{len(frame[0])}" if frame and frame[0] else "None"
-                        logger.warning(f"[SYNC] FRAME RECOVERY [{attempt+1}]: Frame still corrupt ({frame_size}), trying again...")
+                        logger.warning(f"[SYNC] FRAME RECOVERY [{attempt}]: Frame still corrupt ({frame_size}), trying again...")
             except Exception as e:
-                logger.warning(f"[SYNC] FRAME RECOVERY [{attempt+1}] error: {e}")
-        
+                logger.warning(f"[SYNC] FRAME RECOVERY [{attempt}] error: {e}")
+
+            # Stage pause hooks allow the API to settle before more attempts
+            if attempt in pause_after:
+                delay = pause_after[attempt]
+                logger.info(f"[SYNC] FRAME RECOVERY pause after attempt {attempt} for {delay:.2f}s")
+                try:
+                    await asyncio.sleep(delay)
+                except Exception:
+                    pass
+
         logger.error(f"[FAIL] FRAME RECOVERY FAILED after {max_attempts} attempts")
         return None
 
