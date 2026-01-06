@@ -1,4 +1,8 @@
 import os
+import sys
+
+# Enforce no bytecode before any imports (Rule 1)
+sys.dont_write_bytecode = True
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
@@ -3354,6 +3358,10 @@ class GameplayEngine:
         self.game_config['current_game_id'] = game_id
         self.game_config['role_for_spine'] = role_for_spine
         self.game_config['attempt_mode'] = mode_for_spine
+        
+        # Initialize theory_validation_state for consciousness loop
+        # Default to 'UNTESTED' at game start (will be updated by science_engine)
+        self.game_config['theory_validation_state'] = 'UNTESTED'
 
         # Spine: record attempt start
         attempt_id = f"att_{uuid.uuid4().hex[:16]}"
@@ -4203,6 +4211,21 @@ class GameplayEngine:
             
             if level_completions > 0:
                 logger.info(f"[INIT] Starting game loop with {level_completions} levels already completed (score={previous_score})")
+                
+                # Reinitialize symbolic engine for the current level after replay
+                if SYMBOLIC_REASONING_AVAILABLE and game_state and game_state.frame:
+                    try:
+                        game_type = game_id[:4] if game_id else "unknown"
+                        # Reinitialize for the actual current level (not level 1)
+                        self.symbolic_engine = SymbolicReasoningEngine(game_type, level=current_level)  # type: ignore[misc]
+                        self.symbolic_engine.initialize(
+                            np.array(game_state.frame) if game_state.frame else np.array([])
+                        )
+                        # Keep consciousness step aligned
+                        self._world_model = getattr(self.symbolic_engine, "world_model", None)
+                        logger.debug(f"[WORLD-MODEL] Reinitialized symbolic engine for level {current_level} after replay")
+                    except Exception as e:
+                        logger.debug(f"Symbolic engine reinit failed (non-critical): {e}")
             
             # API RESET tracking (NEW - hybrid approach)
             level_api_resets = 0  # Track resets used on current level
@@ -4461,6 +4484,10 @@ class GameplayEngine:
                         level_action_count = 0  # Reset level counter
                         level_start_action = action_count
                         consecutive_no_frame_change = 0
+                        
+                        # Reinitialize consciousness state for new level
+                        self.game_config['theory_validation_state'] = 'UNTESTED'
+                        logger.debug(f"[CONSCIOUSNESS] Reset theory_validation_state for level {current_level}")
                     
                     # Optimizer-specific: Save more efficient sequences when found
                     # (This happens naturally through normal gameplay and sequence capture)
@@ -4500,7 +4527,10 @@ class GameplayEngine:
                                     raise RuntimeError("Missing role_compliance in LIVE mode")
                                 theory_state = self.game_config.get('theory_validation_state')
                                 if theory_state is None:
-                                    raise RuntimeError("Missing theory_validation_state in LIVE mode")
+                                    # FALLBACK: Initialize if missing (shouldn't happen, but defend against it)
+                                    logger.warning("[CONSCIOUSNESS] theory_validation_state missing, initializing to UNTESTED")
+                                    self.game_config['theory_validation_state'] = 'UNTESTED'
+                                    theory_state = 'UNTESTED'
 
                             # Reflex: reroute if action is dead (no effect) and alternatives exist
                             suppressed_by_reflex = False

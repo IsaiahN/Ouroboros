@@ -14,6 +14,11 @@ from pathlib import Path
 def scan_for_pycache(root: Path) -> list[Path]:
     found = []
     for dirpath, dirnames, _ in os.walk(root):
+        # Skip virtual envs and VCS metadata
+        parts = Path(dirpath).parts
+        if any(part in {'.git', '.venv', 'env', 'node_modules'} for part in parts):
+            dirnames[:] = []
+            continue
         for d in dirnames:
             if d == "__pycache__":
                 found.append(Path(dirpath) / d)

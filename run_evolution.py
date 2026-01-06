@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 import os
+import sys
+
+# Enforce no bytecode before any imports
+sys.dont_write_bytecode = True
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """

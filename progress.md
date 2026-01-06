@@ -1,5 +1,60 @@
 # Progress Log - Silent Failure Fixes & Engine Integration Review
 
+## Session: January 6, 2026 - Consciousness Loop State Initialization
+
+---
+
+### Approach: Fix missing theory_validation_state causing games to stop after sequence replay
+
+**Timestamp**: 6:45 AM  
+**Status**: COMPLETE
+
+**Problem**: Games were stopping immediately after sequence replay when entering exploration mode on new levels. The consciousness loop was throwing `RuntimeError: Missing theory_validation_state in LIVE mode` which was being caught but left the game in a broken state.
+
+**Root Cause**: `theory_validation_state` was never initialized in `game_config`, but the consciousness step required it for LIVE mode validation.
+
+**Evidence**: [lp85 reasoning log](DOCS/[LOG] lp85 reasoning log-sample.md) showed:
+- Sequence replay completed successfully (53 actions, reached Level 2)
+- Frontier detected correctly
+- Exploration mode started
+- `RuntimeError: Missing theory_validation_state in LIVE mode` on first exploration action
+- Game continued sending actions but stopped accepting them
+
+**Fixes Applied**:
+
+1. **Initialize at game start** ([core_gameplay.py](core_gameplay.py) ~line 3358):
+   ```python
+   # Initialize theory_validation_state for consciousness loop
+   # Default to 'UNTESTED' at game start (will be updated by science_engine)
+   self.game_config['theory_validation_state'] = 'UNTESTED'
+   ```
+
+2. **Reinitialize on level transitions** ([core_gameplay.py](core_gameplay.py) ~line 4470):
+   ```python
+   # Reinitialize consciousness state for new level
+   self.game_config['theory_validation_state'] = 'UNTESTED'
+   logger.debug(f"[CONSCIOUSNESS] Reset theory_validation_state for level {current_level}")
+   ```
+
+3. **Fallback initialization if missing** ([core_gameplay.py](core_gameplay.py) ~line 4510):
+   ```python
+   if theory_state is None:
+       # FALLBACK: Initialize if missing (shouldn't happen, but defend against it)
+       logger.warning("[CONSCIOUSNESS] theory_validation_state missing, initializing to UNTESTED")
+       self.game_config['theory_validation_state'] = 'UNTESTED'
+       theory_state = 'UNTESTED'
+   ```
+
+4. **Reinitialize symbolic engine after replay** ([core_gameplay.py](core_gameplay.py) ~line 4211):
+   - When starting at level > 1 after sequence replay, reinitialize symbolic engine with correct level
+   - Ensures `_world_model` is aligned with current level state
+
+**Impact**: Games should now properly transition from sequence replay to exploration mode without stopping. Consciousness loop will have required state at all times.
+
+**Testing Needed**: Run short evolution to confirm games complete exploration after replay instead of stopping.
+
+---
+
 ## Session: January 1, 2026 - Intrinsic Milestones Scaffold
 
 ---
