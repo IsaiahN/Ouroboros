@@ -8188,6 +8188,8 @@ class MetacognitiveReasoningEngine:
         """)
         
         # Track eliminated possibilities
+        # NOTE: This table is for directional actions (ACTION1-5, ACTION7) only
+        # ACTION6 (click) uses eliminated_click_coordinates table instead
         self.db.execute_query("""
             CREATE TABLE IF NOT EXISTS metacognitive_eliminations (
                 elimination_id TEXT PRIMARY KEY,
@@ -8196,7 +8198,7 @@ class MetacognitiveReasoningEngine:
                 level_number INTEGER NOT NULL,
                 
                 -- What was eliminated
-                eliminated_action TEXT NOT NULL,  -- "ACTION1", "ACTION2", etc.
+                eliminated_action TEXT NOT NULL,  -- "ACTION1", "ACTION2", etc. (NOT ACTION6)
                 reason TEXT NOT NULL,
                 confidence REAL DEFAULT 0.8,
                 
@@ -8213,6 +8215,38 @@ class MetacognitiveReasoningEngine:
                 consensus REAL DEFAULT 0.0,
                 
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Track eliminated CLICK COORDINATES for ACTION6 specifically
+        # ACTION6 should never be eliminated as an action type - only specific coordinates
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS eliminated_click_coordinates (
+                elimination_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- The coordinate that failed
+                click_x INTEGER NOT NULL,
+                click_y INTEGER NOT NULL,
+                
+                -- Evidence
+                reason TEXT NOT NULL,
+                test_count INTEGER DEFAULT 1,
+                consistent_failure BOOLEAN DEFAULT TRUE,
+                
+                -- Provenance/decay
+                source_attempt_id TEXT,
+                source_mode TEXT,
+                last_observed_generation INTEGER DEFAULT 0,
+                decay_score REAL DEFAULT 0.0,
+                reliability REAL DEFAULT 0.5,
+                consensus REAL DEFAULT 0.0,
+                
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, click_x, click_y)
             )
         """)
         
@@ -8841,8 +8875,12 @@ class MetacognitiveReasoningEngine:
     ) -> str:
         """Generate an insight from failure pattern."""
         if 'ACTION:' in common_factor:
-            action = common_factor.replace('ACTION: ', '')
-            return f"Stop using {action} - it consistently fails in this context"
+            action = common_factor.replace('ACTION: ', '').replace('ACTION:', '').strip()
+            # ACTION6 special case: don't suggest eliminating it entirely
+            # Instead suggest trying different coordinates
+            if action == '6' or action.upper() == 'ACTION6':
+                return "Click locations are failing - try clicking different objects or coordinates"
+            return f"Stop using ACTION{action} - it consistently fails in this context"
         elif 'color' in common_factor.lower():
             return f"Avoid interaction with {common_factor.split(':')[1]} - it leads to failure"
         elif 'position' in common_factor.lower():
@@ -8862,7 +8900,8 @@ class MetacognitiveReasoningEngine:
         game_type: str,
         level_number: int,
         action: str,
-        reason: str
+        reason: str,
+        click_coords: Optional[Tuple[int, int]] = None
     ) -> None:
         """
         Mark an action as eliminated (proven not to work).
@@ -8873,8 +8912,31 @@ class MetacognitiveReasoningEngine:
             level_number: Current level
             action: The action to eliminate (e.g., "ACTION1")
             reason: Why it's being eliminated
+            click_coords: For ACTION6 only - the (x, y) coordinates that failed
+        
+        NOTE: ACTION6 (click) should NOT be eliminated as an action type!
+              Instead, use eliminate_click_coordinate() with specific coordinates.
+              If ACTION6 is passed, it will be rejected unless click_coords is provided.
         """
-        # Add to session set
+        # ACTION6 special handling: eliminate coordinates, not the action type
+        action_upper = action.upper()
+        if 'ACTION6' in action_upper or action == '6':
+            if click_coords:
+                # Redirect to coordinate-based elimination
+                self.eliminate_click_coordinate(
+                    agent_id=agent_id,
+                    game_type=game_type,
+                    level_number=level_number,
+                    click_x=click_coords[0],
+                    click_y=click_coords[1],
+                    reason=reason
+                )
+            else:
+                # Reject ACTION6 elimination without coordinates
+                logger.debug(f"[METACOG] REJECTED: Cannot eliminate ACTION6 as type - use eliminate_click_coordinate with specific coords")
+            return
+        
+        # Add to session set (only for non-ACTION6)
         self._eliminated_actions.add(action)
         
         # Check if already eliminated in DB
@@ -8920,6 +8982,103 @@ class MetacognitiveReasoningEngine:
         
         logger.debug(f"[METACOG] ELIMINATED: {action} - {reason}")
     
+    def eliminate_click_coordinate(
+        self,
+        agent_id: str,
+        game_type: str,
+        level_number: int,
+        click_x: int,
+        click_y: int,
+        reason: str
+    ) -> None:
+        """
+        Mark a specific click coordinate as eliminated for ACTION6.
+        
+        Unlike eliminate_action() which eliminates an action type entirely,
+        this method only eliminates a specific (x, y) coordinate for clicking.
+        The agent can still use ACTION6 at other coordinates.
+        
+        Args:
+            agent_id: Agent eliminating the coordinate
+            game_type: Current game type
+            level_number: Current level
+            click_x: X coordinate that failed
+            click_y: Y coordinate that failed
+            reason: Why it's being eliminated
+        """
+        # Check if already eliminated in DB
+        existing = self.db.execute_query("""
+            SELECT elimination_id, test_count FROM eliminated_click_coordinates
+            WHERE game_type = ? AND level_number = ? AND click_x = ? AND click_y = ?
+        """, (game_type, level_number, click_x, click_y))
+        
+        if existing:
+            # Increment test count
+            self.db.execute_query("""
+                UPDATE eliminated_click_coordinates 
+                SET test_count = test_count + 1,
+                    last_observed_generation = COALESCE(?, last_observed_generation, 0),
+                    decay_score = COALESCE(decay_score, 0.0)
+                WHERE elimination_id = ?
+            """, (
+                self._session_provenance.get('generation'),
+                existing[0]['elimination_id'],
+            ))
+        else:
+            # Insert new elimination
+            elimination_id = f"click_elim_{uuid.uuid4().hex[:12]}"
+            self.db.execute_query("""
+                INSERT INTO eliminated_click_coordinates
+                (elimination_id, agent_id, game_type, level_number, click_x, click_y, reason,
+                 source_attempt_id, source_mode, last_observed_generation, decay_score, reliability, consensus)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                elimination_id,
+                agent_id,
+                game_type,
+                level_number,
+                click_x,
+                click_y,
+                reason,
+                self._session_provenance.get('attempt_id'),
+                self._session_provenance.get('mode'),
+                self._session_provenance.get('generation') or 0,
+                0.0,
+                0.5,
+                0.0,
+            ))
+        
+        logger.debug(f"[METACOG] ELIMINATED CLICK: ({click_x}, {click_y}) - {reason}")
+    
+    def get_eliminated_click_coordinates(
+        self,
+        game_type: str,
+        level_number: int,
+        min_test_count: int = 2
+    ) -> List[Tuple[int, int]]:
+        """
+        Get list of click coordinates that have been eliminated for this level.
+        
+        Args:
+            game_type: Current game type  
+            level_number: Current level
+            min_test_count: Minimum test count to consider eliminated
+            
+        Returns:
+            List of (x, y) tuples that should be avoided for clicking
+        """
+        result = self.db.execute_query("""
+            SELECT click_x, click_y FROM eliminated_click_coordinates
+            WHERE game_type = ? AND level_number = ? 
+              AND test_count >= ? AND consistent_failure = TRUE
+            ORDER BY test_count DESC
+        """, (game_type, level_number, min_test_count))
+        
+        if not result:
+            return []
+        
+        return [(r['click_x'], r['click_y']) for r in result]
+
     def get_eliminated_actions(
         self,
         game_type: str,

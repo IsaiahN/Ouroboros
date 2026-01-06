@@ -1070,11 +1070,16 @@ class CODSEngine:
                     op_id
                 ))
                 
-                logger.debug(f"[CODS] Tested {op_name}: {'SUCCESS' if success else 'FAIL'}")
+                logger.debug(f"[CODS] Tested {op_name}: {'SUCCESS' if success else 'FAIL'}" + 
+                             (f" (error: {result.error})" if not success and result.error else ""))
                 
             except Exception as e:
                 results[op_name] = False
-                logger.debug(f"[CODS] Operator {op_name} test failed: {e}")
+                logger.warning(f"[CODS] Operator {op_name} test threw exception: {e}")
+        
+        # FIX #6: Log warning when ALL operators fail - helps diagnose systemic issues
+        if results and not any(results.values()):
+            logger.warning(f"[CODS] All {len(results)} operators failed! Check operator composition or context setup")
         
         return results
     
@@ -1189,11 +1194,15 @@ class CODSEngine:
                                 'action': action,
                                 'confidence': best_op['relevance'],
                                 'operator': operator_id,
+                                'operators': [operator_id, suggested_concept.name],  # FIX #25: Track all operators consulted
                                 'concept': suggested_concept.name
                             }
         
         # Analyze frame with available operators
         analysis = self.analyze_frame(frame)
+        
+        # FIX #25: Track all operators that were consulted for diversity logging
+        operators_consulted = list(analysis.keys()) if analysis else []
         
         # Simple heuristic based on analysis
         # (This would be replaced by learned action selection)
@@ -1201,18 +1210,22 @@ class CODSEngine:
         if 'detect_symmetry' in analysis:
             symmetry = analysis['detect_symmetry']
             if symmetry.get('horizontal'):
-                return {'action': 1, 'confidence': 0.3, 'operator': 'detect_symmetry', 'concept': None}
+                return {'action': 1, 'confidence': 0.3, 'operator': 'detect_symmetry', 
+                        'operators': operators_consulted, 'concept': None}
             if symmetry.get('vertical'):
-                return {'action': 3, 'confidence': 0.3, 'operator': 'detect_symmetry', 'concept': None}
+                return {'action': 3, 'confidence': 0.3, 'operator': 'detect_symmetry', 
+                        'operators': operators_consulted, 'concept': None}
         
         if 'detect_shapes' in analysis:
             shapes = analysis['detect_shapes']
             if shapes:
                 # Move toward first detected shape
-                return {'action': 1, 'confidence': 0.2, 'operator': 'detect_shapes', 'concept': None}
+                return {'action': 1, 'confidence': 0.2, 'operator': 'detect_shapes', 
+                        'operators': operators_consulted, 'concept': None}
         
-        # Default to random action
-        return {'action': self.seeds.call('rand_int', 1, 7), 'confidence': 0.1, 'operator': 'random', 'concept': None}
+        # Default to random action - still log operators consulted
+        return {'action': self.seeds.call('rand_int', 1, 7), 'confidence': 0.1, 'operator': 'random', 
+                'operators': operators_consulted if operators_consulted else ['random'], 'concept': None}
     
     def _extract_action_from_output(self, output: Any) -> Optional[int]:
         """Extract an action number from operator output."""

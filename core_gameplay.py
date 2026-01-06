@@ -1768,6 +1768,23 @@ class GameplayEngine:
                         elif 'optimal' in reasoning.lower() or 'sequence' in reasoning.lower():
                             expected_outcome = 'score_increase'
                         
+                        # FIX #9: Check if prediction type is suppressed; try alternatives
+                        # Available prediction types (in priority order for fallback)
+                        prediction_types = ['score_increase', 'discover_pattern', 'frame_change', 'avoid_failure', 'object_control']
+                        suppressed = getattr(self.metacognitive_engine, '_suppressed_prediction_types', set())
+                        
+                        # If default type is suppressed, find an alternative
+                        if expected_outcome in suppressed:
+                            alternatives = [pt for pt in prediction_types if pt not in suppressed]
+                            if alternatives:
+                                expected_outcome = alternatives[0]
+                                logger.debug(f"[METACOG] Using alternative prediction type: {expected_outcome}")
+                            else:
+                                # All types suppressed - reset suppression to allow fresh start
+                                logger.warning("[METACOG] All prediction types suppressed - resetting suppression")
+                                self.metacognitive_engine._suppressed_prediction_types = set()
+                                expected_outcome = 'frame_change'  # Neutral fallback
+                        
                         # Current theory from autobiography
                         theory_source = getattr(self, '_last_action_source', 'intuition')
                         
@@ -1992,12 +2009,19 @@ class GameplayEngine:
                                     # Extract action and format as 'ACTION#' for eliminate_action
                                     action_num = common.replace('ACTION: ', '').replace('ACTION:', '').strip()
                                     failed_action = f"ACTION{action_num}" if not action_num.startswith('ACTION') else action_num
+                                    
+                                    # For ACTION6, pass click coordinates (don't eliminate action type)
+                                    click_coords = None
+                                    if action_num in ('6', 'ACTION6') or failed_action == 'ACTION6':
+                                        click_coords = getattr(self, '_last_click_coords', None)
+                                    
                                     self.metacognitive_engine.eliminate_action(
                                         agent_id=agent_id,
                                         game_type=game_type,
                                         level_number=current_level,
                                         action=failed_action,
-                                        reason=pattern.get('insight', 'Consistent failure')
+                                        reason=pattern.get('insight', 'Consistent failure'),
+                                        click_coords=click_coords
                                     )
                                     
                 except Exception as e:
@@ -4222,6 +4246,7 @@ class GameplayEngine:
 
             action_count = 0
             level_action_count = 0  # Track actions per level
+            self._frame_count = 0  # Track frame count for reasoning payload (Fix #4)
             start_time = datetime.now()
             
             # CRITICAL FIX (2025-12-07): Initialize level tracking from current game state
@@ -4682,6 +4707,18 @@ class GameplayEngine:
                                     expected_outcome = 'score_increase'
                                     if 'explore' in reasoning.lower() or 'test' in reasoning.lower():
                                         expected_outcome = 'discover_pattern'
+                                    
+                                    # FIX #9: Check if prediction type is suppressed; try alternatives
+                                    prediction_types = ['score_increase', 'discover_pattern', 'frame_change', 'avoid_failure', 'object_control']
+                                    suppressed = getattr(self.metacognitive_engine, '_suppressed_prediction_types', set())
+                                    if expected_outcome in suppressed:
+                                        alternatives = [pt for pt in prediction_types if pt not in suppressed]
+                                        if alternatives:
+                                            expected_outcome = alternatives[0]
+                                        else:
+                                            self.metacognitive_engine._suppressed_prediction_types = set()
+                                            expected_outcome = 'frame_change'
+                                    
                                     theory_source = getattr(self, '_last_action_source', 'intuition')
                                     self.metacognitive_engine.make_prediction(
                                         agent_id=agent_id,
@@ -4860,6 +4897,11 @@ class GameplayEngine:
                     if action_succeeded:
                         action_count += 1
                         level_action_count += 1
+                        # ===================================================================
+                        # FIX #4 SUPPORT: Cache action count for reasoning payload access
+                        # Used by _build_delta_section to resolve "425 Too Early" after 20 frames
+                        # ===================================================================
+                        self._frame_count = action_count
                         if run_context:
                             budget_ok_before = run_context.guards.budget_ok
                             run_context.decrement_actions()
@@ -5020,12 +5062,19 @@ class GameplayEngine:
                                     metacog_stall_counters[action_key] = metacog_stall_counters.get(action_key, 0) + 1
                                     if metacog_stall_counters[action_key] >= 3:
                                         try:
+                                            # For ACTION6, pass the click coordinates so we eliminate
+                                            # the specific coordinate, not the action type
+                                            click_coords = None
+                                            if action_key in ('6', 'ACTION6'):
+                                                click_coords = getattr(self, '_last_click_coords', None)
+                                            
                                             self.metacognitive_engine.eliminate_action(
                                                 agent_id=agent_id or 'unknown',
                                                 game_type=game_id.split('-')[0] if game_id else 'unknown',
                                                 level_number=current_level,
                                                 action=action_key,
-                                                reason="No score/frame change after repeated attempts"
+                                                reason="No score/frame change after repeated attempts",
+                                                click_coords=click_coords
                                             )
                                         except Exception:
                                             logger.debug("Metacog elimination log failed (non-critical)")
@@ -5409,6 +5458,7 @@ class GameplayEngine:
                                         try:
                                             stuckness_spec = {
                                                 'type': 'stuckness_detector',
+                                                'investigating': 'stuck_state',  # Required by spawn_temporary_persona
                                                 'focus': f'level_{current_level}_stuck',
                                                 'game_type': game_id.split('-')[0] if '-' in game_id else game_id[:4],
                                                 'level': current_level,
@@ -5418,6 +5468,10 @@ class GameplayEngine:
                                             persona_id = self.persona_manager.spawn_temporary_persona(stuckness_spec)
                                             if persona_id:
                                                 logger.info(f"[PERSONA] Spawned stuckness_detector: {persona_id[:16]} for level {current_level}")
+                                            else:
+                                                # Log why spawn was blocked
+                                                allowed, reason = self.persona_manager.can_spawn_persona('temporary')
+                                                logger.debug(f"[PERSONA] Spawn blocked: {reason}")
                                         except Exception as e:
                                             logger.debug(f"Persona spawn failed: {e}")
                                 
@@ -5471,27 +5525,48 @@ class GameplayEngine:
                                                 all_targets = analysis.get('targets', [])
                                                 clicked_coords = visual_analyzer.clicked_coordinates
                                                 
+                                                # Also get METACOG-eliminated click coordinates
+                                                # (coordinates marked as failures by the learning system)
+                                                eliminated_click_coords = set()
+                                                try:
+                                                    if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                                                        game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                                                        elim_coords = self.metacognitive_engine.get_eliminated_click_coordinates(
+                                                            game_type=game_type,
+                                                            level_number=current_level,
+                                                            min_test_count=2
+                                                        )
+                                                        eliminated_click_coords = set(elim_coords)
+                                                        if eliminated_click_coords:
+                                                            logger.debug(f"[ESCAPE] METACOG eliminated {len(eliminated_click_coords)} click coords")
+                                                except Exception:
+                                                    pass
+                                                
                                                 # Count how many distinct targets exist vs how many we've tried
                                                 target_coords = set()
                                                 for t in all_targets:
                                                     tx, ty = t.get('x', 0), t.get('y', 0)
                                                     target_coords.add((tx, ty))
                                                 
-                                                untried_targets = target_coords - clicked_coords
+                                                # Combine tried coords + METACOG-eliminated coords
+                                                coords_to_avoid = clicked_coords | eliminated_click_coords
+                                                untried_targets = target_coords - coords_to_avoid
                                                 
                                                 if len(untried_targets) > 0:
                                                     # Still have untried click targets - not truly stuck yet
+                                                    elim_str = f", METACOG eliminated {len(eliminated_click_coords)}" if eliminated_click_coords else ""
                                                     logger.info(
                                                         f"[ESCAPE] ACTION6 available: {len(untried_targets)} untried targets remain "
-                                                        f"(tried {len(clicked_coords)}, total {len(target_coords)})"
+                                                        f"(tried {len(clicked_coords)}{elim_str}, total {len(target_coords)})"
                                                     )
                                                 elif len(target_coords) > 0 and len(untried_targets) == 0:
-                                                    # All click targets exhausted with no frame change
+                                                    # All click targets exhausted (either tried or METACOG-eliminated)
                                                     if len(available_nums) == 1:
-                                                        # Only ACTION6 available AND all targets tried
+                                                        # Only ACTION6 available AND all targets tried/eliminated
+                                                        elim_str = f", {len(eliminated_click_coords)} METACOG-eliminated" if eliminated_click_coords else ""
                                                         logger.warning(
-                                                            f"[ESCAPE] TRULY STUCK: All {len(target_coords)} click targets tried, "
-                                                            f"none caused frame change. Skipping remaining escape attempts."
+                                                            f"[ESCAPE] TRULY STUCK: All {len(target_coords)} click targets exhausted "
+                                                            f"({len(clicked_coords)} tried{elim_str}). Skipping remaining escape attempts."
                                                         )
                                                         escape_attempts = ESCAPE_ATTEMPTS_MAX
                                                         continue
@@ -6887,8 +6962,18 @@ class GameplayEngine:
             # Simple confidence trend heuristic: stable unless score dropping with control loss
             confidence_trend = 'falling' if control_loss else ('rising' if score_after > score_before else 'stable')
             suggested_approach = 'cautious' if control_loss else ('radical_change' if stuckness else 'standard')
+            
+            # FIX #7: Include cumulative stuckness for QuestioningEngineWithTeeth
+            # The META question needs cumulative stuckness, not just single-frame
+            consecutive_stuck = getattr(loop_state, 'consecutive_no_frame_change', 0)
+            tracker = getattr(self, '_meta_pattern_tracker', {})
+            no_progress = tracker.get('no_progress_count', 0) if tracker else 0
+            # Normalize to 0-1 range: 0.8 = stuck for 25+ frames, 1.0 = stuck for 50+ frames
+            cumulative_stuckness = min(1.0, max(consecutive_stuck, no_progress) / 30.0)
+            
             flags = {
-                'stuckness': stuckness,
+                'stuckness': max(stuckness, cumulative_stuckness),  # Use max of instant and cumulative
+                'cumulative_stuckness': cumulative_stuckness,
                 'control_loss': control_loss,
                 'confidence_trend': confidence_trend,
                 'pattern_tag': None,
@@ -6896,6 +6981,7 @@ class GameplayEngine:
                 'veto_unsafe': bool(control_loss),
                 'score_delta': score_after - score_before,
                 'frame_changed': frame_changed,
+                'consecutive_stuck_frames': consecutive_stuck,
             }
         except Exception:
             logger.debug("Observer flag computation failed (non-critical)")
@@ -6980,7 +7066,14 @@ class GameplayEngine:
         )
 
         budget_total_raw = budget_components.get('budget_total')
-        budget_total = budget_total_raw if (budget_total_raw is not None and math.isfinite(budget_total_raw)) else None
+        # FIX #24: Use large finite value instead of None for infinity case
+        # This ensures imagination.budget is always populated in reasoning JSON
+        if budget_total_raw is None:
+            budget_total = 1000.0  # Unlimited mode fallback
+        elif not math.isfinite(budget_total_raw):
+            budget_total = 1000.0  # Infinity -> use large finite value (early generations)
+        else:
+            budget_total = budget_total_raw
 
         # Initialize local per-step budget trackers (decentralized guard)
         self._imagination_budget_start = budget_total
@@ -9303,21 +9396,27 @@ class GameplayEngine:
                                         self._pattern_action_queue = []
                                     self._pattern_action_queue = actions[1:]  # Queue remaining actions
                                     
+                                    # FIX #10: Store FIRST action in queue so coordinates are available
+                                    # The ACTION6 handler at line ~10061 reads from queue, so include first action
+                                    self._pattern_action_queue = actions  # Include first action for coord retrieval
+                                    
                                     reasoning = f"Meta-learned {pattern_result['pattern_type']} pattern (confidence: {pattern_result['confidence']:.2f})"
-                                    return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')  # Will be executed with stored coordinates
+                                    return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')  # Coords from queue
                             
             except Exception as e:
                 logger.debug(f"Meta-learning error (falling back to default): {e}")
         
         # Check if we have queued pattern actions
+        # FIX #10: Don't pop here - pop happens at ACTION6 coordinate retrieval (line ~10066)
+        # This block just signals that we WANT to continue the pattern
         if hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
-            next_action = self._pattern_action_queue.pop(0)
-            if next_action['type'] == 'ACTION6':
+            next_action = self._pattern_action_queue[0]  # Peek, don't pop
+            if isinstance(next_action, dict) and next_action.get('type') == 'ACTION6':
                 # Track application count
                 if hasattr(self, '_meta_pattern_tracker'):
                     self._meta_pattern_tracker['applications'] += 1
-                reasoning = f"Continuing meta-learned pattern: {next_action['reason']}"
-                logger.info(f" {reasoning}: ACTION6 at {next_action['coordinate']}")
+                reasoning = f"Continuing meta-learned pattern: {next_action.get('reason', 'pattern action')}"
+                logger.info(f" {reasoning}: ACTION6 at {next_action.get('coordinate', 'TBD')}")
                 return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')
         elif hasattr(self, '_meta_pattern_tracker') and self._meta_pattern_tracker.get('current_pattern_id'):
             # Queue is empty but pattern was active - pattern completed naturally
@@ -10002,7 +10101,7 @@ class GameplayEngine:
                 del self._selection_target  # Clear after use
             # Priority 2: Check if we have meta-learned coordinates to use
             elif hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
-                next_action = self._pattern_action_queue[0]  # Peek at next action
+                next_action = self._pattern_action_queue.pop(0)  # Pop (consume) action after using coords
                 if isinstance(next_action, dict) and next_action.get('type') == 'ACTION6':
                     coord = next_action.get('coordinate') or (0, 0)
                     x, y = coord if isinstance(coord, (list, tuple)) and len(coord) == 2 else (0, 0)
@@ -11392,6 +11491,24 @@ class GameplayEngine:
         if not available_nums:
             available_nums = {1, 2, 3, 4, 5, 6}  # Default fallback
         
+        # ===================================================================
+        # FIX #2: ESCAPE MODE MUST TRY ALL ACTION TYPES
+        # ===================================================================
+        # Problem: Some games report only ACTION6 as available, but directional
+        # actions (1-4) may still work. In ESCAPE MODE, we should try ALL actions
+        # since the API's "available" list may be too restrictive.
+        # ===================================================================
+        api_available = available_nums.copy()  # Keep track of what API said
+        if len(available_nums) == 1 and 6 in available_nums:
+            # Only ACTION6 reported available - try directional actions too!
+            # This is escape mode after all - desperate times call for desperate measures
+            available_nums = {1, 2, 3, 4, 5, 6}  # Try all except submit
+            logger.info(f"[ESCAPE] API only reports ACTION6 - expanding to ALL actions for escape")
+        elif len(available_nums) <= 2:
+            # Very limited options - expand to include directional actions
+            available_nums = available_nums | {1, 2, 3, 4}
+            logger.debug(f"[ESCAPE] Limited actions {api_available} - adding directional actions")
+        
         # Only score available actions (unavailable get score -999)
         action_scores = {i: (1.0 if i in available_nums else -999.0) for i in range(1, 8)}
         reasoning_parts = [f"Available: {sorted(available_nums)}"]
@@ -11436,10 +11553,42 @@ class GameplayEngine:
             # Actions that changed frame state are worth trying
             q1_data = emergent.get('q1_change_vs_fixed', {})
             change_actions = q1_data.get('actions_that_changed_state', [])
-            for action in change_actions:
-                if action in available_nums and action not in recent_actions[-5:]:
-                    action_scores[action] += 0.25
-                    reasoning_parts.append(f"Q1: A{action} changes state")
+            static_actions = q1_data.get('actions_with_no_effect', [])
+            
+            # ===================================================================
+            # FIX #5: Q1 INSIGHTS MUST AFFECT ACTION SELECTION
+            # ===================================================================
+            # Problem: Q1 says "Observed 0 actions that change state" but we do nothing.
+            # Solution: If no actions changed state, try UNEXPLORED actions more.
+            # ===================================================================
+            if change_actions:
+                for action in change_actions:
+                    if action in available_nums and action not in recent_actions[-5:]:
+                        action_scores[action] += 0.25
+                        reasoning_parts.append(f"Q1: A{action} changes state")
+            elif static_actions:
+                # Q1 says some actions have no effect - penalize those!
+                for action in static_actions:
+                    if action in action_scores:
+                        action_scores[action] -= 0.3
+                reasoning_parts.append(f"Q1: Penalizing static actions {static_actions}")
+                
+                # Boost actions NOT in static_actions that haven't been tried
+                all_tried = set(change_actions) | set(static_actions)
+                untried = [a for a in available_nums if a not in all_tried]
+                for action in untried:
+                    action_scores[action] += 0.3
+                if untried:
+                    reasoning_parts.append(f"Q1: Boosting untried {untried}")
+            else:
+                # No Q1 data yet - boost exploration of less-tried actions
+                if escape_attempt >= 3:
+                    # After 3 escape attempts, boost ACTION5 (pass) and ACTION6 (click)
+                    if 5 in action_scores:
+                        action_scores[5] += 0.2
+                    if 6 in action_scores:
+                        action_scores[6] += 0.2
+                    reasoning_parts.append("Q1: No data, boosting A5/A6")
             
             # === 1. PENALIZE RECENT ACTIONS (avoid oscillation) ===
             if recent_actions:
@@ -11453,6 +11602,7 @@ class GameplayEngine:
             # === 1.5 METACOG ELIMINATIONS: Respect learned failure patterns ===
             # Fix #2: METACOG identifies "Stop using ACTIONX" but escape mode never queried it
             # Now we query metacognitive_eliminations and heavily penalize eliminated actions
+            # NOTE: ACTION6 (click) is NOT eliminated as an action type - coordinates are eliminated separately
             try:
                 game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
                 eliminations = self.db.execute_query("""
@@ -11471,6 +11621,11 @@ class GameplayEngine:
                         if 'ACTION' in action_str.upper():
                             try:
                                 action_num = int(action_str.upper().replace('ACTION', ''))
+                                # Skip ACTION6 - click should never be eliminated as an action type
+                                # ACTION6 failures are tracked via eliminated_click_coordinates instead
+                                if action_num == 6:
+                                    logger.debug(f"[METACOG] Ignoring ACTION6 type elimination (use coordinate-based)")
+                                    continue
                                 if action_num in action_scores:
                                     # Heavy penalty scaled by test count (more tests = more certain)
                                     penalty = min(0.9, 0.5 + 0.1 * test_count)
@@ -11492,23 +11647,43 @@ class GameplayEngine:
                         strategy_text = (hyp.get('strategy') or '').lower()
                         confidence = hyp.get('confidence', 0.5)
                         
-                        # Penalize actions mentioned in failures
-                        if 'down' in failure_text or 'bottom' in failure_text or 'fell' in failure_text:
-                            action_scores[2] -= 0.3 * confidence
-                        if 'up' in failure_text or 'top' in failure_text or 'ceiling' in failure_text:
-                            action_scores[1] -= 0.3 * confidence
-                        if 'left' in failure_text:
-                            action_scores[3] -= 0.3 * confidence
-                        if 'right' in failure_text:
-                            action_scores[4] -= 0.3 * confidence
-                        if 'oscillat' in failure_text or 'loop' in failure_text:
-                            action_scores[6] += 0.3 * confidence  # Click might break loop
+                        # ===================================================================
+                        # FIX #20: USE PARSED ACTIONABLE ARRAYS FROM FAILURE_INSIGHTS
+                        # ===================================================================
+                        # Problem: actionable arrays were parsed but never used in scoring
+                        # Solution: Apply avoid_actions penalties and prefer_actions boosts
+                        # ===================================================================
+                        actionable = hyp.get('actionable', {})
                         
-                        # Boost actions mentioned in strategies
-                        if 'click' in strategy_text or 'interact' in strategy_text:
-                            action_scores[6] += 0.25 * confidence
-                        if 'wait' in strategy_text or 'timing' in strategy_text:
-                            action_scores[5] += 0.2 * confidence
+                        # Apply avoid_actions penalties (but NOT for ACTION6 - it uses coordinates)
+                        for action in actionable.get('avoid_actions', []):
+                            if action in action_scores and action != 6:  # Don't penalize ACTION6 type
+                                action_scores[action] -= 0.4 * confidence
+                        
+                        # Apply prefer_actions boosts
+                        for action in actionable.get('prefer_actions', []):
+                            if action in action_scores:
+                                action_scores[action] += 0.3 * confidence
+                        
+                        # Fallback: Parse text directly if no actionable parsed
+                        if not actionable.get('avoid_actions') and not actionable.get('prefer_actions'):
+                            # Penalize actions mentioned in failures
+                            if 'down' in failure_text or 'bottom' in failure_text or 'fell' in failure_text:
+                                action_scores[2] -= 0.3 * confidence
+                            if 'up' in failure_text or 'top' in failure_text or 'ceiling' in failure_text:
+                                action_scores[1] -= 0.3 * confidence
+                            if 'left' in failure_text:
+                                action_scores[3] -= 0.3 * confidence
+                            if 'right' in failure_text:
+                                action_scores[4] -= 0.3 * confidence
+                            if 'oscillat' in failure_text or 'loop' in failure_text:
+                                action_scores[6] += 0.3 * confidence  # Click might break loop
+                            
+                            # Boost actions mentioned in strategies
+                            if 'click' in strategy_text or 'interact' in strategy_text:
+                                action_scores[6] += 0.25 * confidence
+                            if 'wait' in strategy_text or 'timing' in strategy_text:
+                                action_scores[5] += 0.2 * confidence
                     
                     reasoning_parts.append(f"Hypotheses: {len(hypotheses)}")
             except Exception:
@@ -11946,6 +12121,57 @@ class GameplayEngine:
                         'invariants': relations.get('invariants', [])[:5],
                         'variant_regions': relations.get('variant_regions', [])[:3],
                     }
+            
+            # ===================================================================
+            # FIX #15: COMMIT TO HYPOTHESIS AFTER EXTENDED DISCOVERY
+            # ===================================================================
+            # Problem: Discovery phase runs for 152+ frames but never concludes.
+            # After 30 frames with no self-model, commit to best available hypothesis.
+            # ===================================================================
+            frame_count = getattr(self, '_frame_count', 0)
+            if not context.get('objects_agent_controls') and frame_count >= 30:
+                # Discovery has been running too long - force commitment
+                network_hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                    game_id, level, min_reliability=0.3  # Lower threshold for commitment
+                )
+                if network_hypotheses:
+                    # Commit to best available (even with lower reliability)
+                    best = network_hypotheses[0]
+                    network_controlled = best.get('controlled_objects', [])[:10]
+                    if network_controlled:
+                        context['objects_agent_controls'] = network_controlled
+                        context['control_confidence'] = best.get('reliability', 0.3)
+                        context['control_source'] = 'forced_commitment'
+                        logger.info(
+                            f"[SELF-MODEL] Forced commitment to hypothesis after {frame_count} frames: "
+                            f"{len(network_controlled)} objects (reliability={best.get('reliability', 0.3):.2f})"
+                        )
+                elif frame is not None and frame_count >= 50:
+                    # No network hypotheses - make an arbitrary commitment based on frame analysis
+                    # Pick the most prominent non-background color objects
+                    try:
+                        import numpy as np
+                        frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+                        unique, counts = np.unique(frame_arr, return_counts=True)
+                        # Filter out background (most common) and sort by count
+                        non_bg = [(u, c) for u, c in zip(unique, counts) if c < counts.max()]
+                        if non_bg:
+                            # Pick the least common non-background color (likely player)
+                            non_bg_sorted = sorted(non_bg, key=lambda x: x[1])
+                            candidate_color = int(non_bg_sorted[0][0])
+                            # Find center of this color
+                            positions = np.argwhere(frame_arr == candidate_color)
+                            if len(positions) > 0:
+                                center = positions.mean(axis=0).astype(int).tolist()
+                                context['objects_agent_controls'] = [f"color_{candidate_color}_at_{center[1]}_{center[0]}"]
+                                context['control_confidence'] = 0.2
+                                context['control_source'] = 'heuristic_guess'
+                                logger.info(
+                                    f"[SELF-MODEL] Heuristic commitment after {frame_count} frames: "
+                                    f"color_{candidate_color} (least common non-background)"
+                                )
+                    except Exception as e:
+                        logger.debug(f"Heuristic self-model commitment failed: {e}")
             
             # Get network-validated control hypotheses (other agents' discoveries)
             network_hypotheses = self.agent_self_model.get_network_control_hypotheses(
@@ -13145,6 +13371,7 @@ class GameplayEngine:
         - Network failure hypotheses (what patterns failed/succeeded)
         - Learned rules from rule_induction_engine
         - Historical action success rates
+        - FIX #26: Accumulated failure count to detect stuck state
         
         Returns:
             Q4 context dictionary with working theory
@@ -13156,8 +13383,48 @@ class GameplayEngine:
             'evidence_against': 0,
             'transferable': False,
             'action_recommendations': {},
-            'confidence': 0.3
+            'confidence': 0.3,
+            'theory': None  # Final theory string for Q4
         }
+        
+        # ===================================================================
+        # FIX #26: CHECK ACCUMULATED FAILURES TO CHANGE STRATEGY
+        # ===================================================================
+        # Problem: Q4 shows "Exploring to discover rules" for 152 frames
+        # even after 100+ failures. After N failures, strategy must change.
+        # ===================================================================
+        frame_count = getattr(self, '_frame_count', 0)
+        tracker = getattr(self, '_meta_pattern_tracker', {})
+        recent_failures = tracker.get('no_progress_count', 0)
+        is_in_escape = getattr(self, '_escape_mode_active', False)
+        
+        # Detect stuck state
+        if recent_failures >= 50 or (frame_count > 50 and is_in_escape):
+            # We're stuck - exploring is NOT working
+            result['theory'] = f"STUCK: Exploration failed after {recent_failures} attempts - need radical strategy change"
+            result['hypothesis_source'] = 'stuck_detection'
+            result['confidence'] = 0.1  # Very low confidence in current approach
+            result['working_hypothesis'] = "Current approach is failing - try opposite actions"
+            
+            # Recommend actions we HAVEN'T tried recently
+            recent_actions = list(getattr(self, '_recent_actions', []))[-20:]
+            action_counts = {}
+            for a in recent_actions:
+                action_counts[a] = action_counts.get(a, 0) + 1
+            
+            # Recommend least-used actions
+            for action_num in range(1, 7):
+                if action_counts.get(action_num, 0) < 2:
+                    result['action_recommendations'][f'ACTION{action_num}'] = 'try_unexplored'
+                elif action_counts.get(action_num, 0) > 5:
+                    result['action_recommendations'][f'ACTION{action_num}'] = 'overused_avoid'
+            
+            return result
+        elif recent_failures >= 20:
+            # Getting stuck - diversify approach
+            result['theory'] = f"Approaching stuck: {recent_failures} failures - diversifying actions"
+            result['hypothesis_source'] = 'failure_accumulation'
+            result['confidence'] = 0.3
         
         # Generate working hypothesis from hypothesis_biases
         if hypothesis_biases:
@@ -13227,11 +13494,15 @@ class GameplayEngine:
             total_evidence = result['evidence_for'] + result['evidence_against']
             result['confidence'] = round(result['evidence_for'] / max(total_evidence, 1), 2)
         
-        # Generate insight
+        # Generate insight and final theory
         if result['transferable']:
             result['insight'] = f"Theory: {result['working_hypothesis']} (from {result['hypothesis_source']}, confidence: {result['confidence']})"
         else:
             result['insight'] = f"Exploring: {result['working_hypothesis']}"
+        
+        # Set final theory if not already set by stuck detection
+        if not result.get('theory'):
+            result['theory'] = result['working_hypothesis'] or 'Exploring to discover rules'
         
         return result
     
@@ -13341,14 +13612,35 @@ class GameplayEngine:
         Returns:
             Delta section dict with frame changes in natural language
         """
+        # ===================================================================
+        # FIX #4: RESOLVE "425 TOO EARLY" AFTER 20 FRAMES
+        # ===================================================================
+        # Problem: "NULL - 425 Too Early" persists for 100+ frames.
+        # Solution: After 20 frames, force resolution to meaningful status.
+        # ===================================================================
+        frame_count = getattr(self, '_frame_count', 0)
+        past_early_phase = frame_count >= 20
+        
+        # Determine appropriate fallback statuses based on frame count
+        if past_early_phase:
+            # After 20 frames, we should have SOME data - use speculation mode
+            self_update_default = "SPECULATING: Object control not yet confirmed"
+            world_update_default = "EXPLORING: Testing game mechanics"
+            theory_default = "UNVALIDATED: Insufficient correlation data"
+        else:
+            # Still in early phase - 425 Too Early is appropriate
+            self_update_default = self._null_status(425)
+            world_update_default = self._null_status(425)
+            theory_default = self._null_status(425)
+        
         delta = {
             'last_action': last_action,
             'frame_changes': [],
             'score_change': score_change,
             'level_change': level_change,
-            'self_model_update': self._null_status(425),  # Updated by caller if available
-            'world_model_update': self._null_status(425),
-            'theory_validation': self._null_status(425)
+            'self_model_update': self_update_default,  # Updated by caller if available
+            'world_model_update': world_update_default,
+            'theory_validation': theory_default
         }
         
         if current_frame is None or previous_frame is None:
@@ -13572,8 +13864,22 @@ class GameplayEngine:
                 # We identified goals - form goal-seeking theory
                 working_theory = f"Seeking goal objects: {len(goal_objects)} identified"
             elif game_state.score > 0:
-                # We've made progress - form progress-based theory
-                working_theory = f"Current approach works - score {game_state.score} achieved"
+                # We've made progress - BUT check if we're stuck on a NEW level
+                # Fix #3: Don't claim success if we're stuck on current level
+                # Check recent frame history for signs of being stuck
+                recent_frames_identical = False
+                if hasattr(self, '_frame_history') and len(self._frame_history) >= 10:
+                    # If last 10 frames are identical, we're stuck
+                    recent = list(self._frame_history)[-10:]
+                    if all(f == recent[0] for f in recent):
+                        recent_frames_identical = True
+                
+                if recent_frames_identical:
+                    # We're stuck! Don't claim success
+                    working_theory = f"Stuck on level {game_state.level} - previous score {game_state.score} but no progress"
+                else:
+                    # Legitimate progress
+                    working_theory = f"Current approach works - score {game_state.score} achieved on level {game_state.level}"
             else:
                 # Still exploring - at least acknowledge the state
                 working_theory = "Exploring game mechanics - no pattern confirmed yet"
@@ -13581,28 +13887,38 @@ class GameplayEngine:
         # ===================================================================
         # GAP FIX 3: Fetch genome from agents table if not provided
         # ===================================================================
+        # FIX #18: Genome was querying non-existent columns. The 'genome' column
+        # is JSON, and agent_type/specialization are separate columns.
+        # ===================================================================
         if not genome and agent_id:
             try:
                 agent_row = self.db.execute_query("""
-                    SELECT agent_type, exploration_rate, learning_rate, mutation_rate,
-                           feature_weights, species
+                    SELECT agent_type, specialization, genome
                     FROM agents WHERE agent_id = ?
                 """, (agent_id,))
                 if agent_row:
                     a = agent_row[0]
+                    # Parse the JSON genome field
+                    genome_json = a.get('genome', '{}')
+                    try:
+                        parsed_genome = json.loads(genome_json) if isinstance(genome_json, str) else genome_json
+                    except (json.JSONDecodeError, TypeError):
+                        parsed_genome = {}
+                    
                     genome = {
-                        'agent_type': a.get('agent_type', 'generalist'),
-                        'exploration_rate': a.get('exploration_rate', 0.3),
-                        'learning_rate': a.get('learning_rate', 0.1),
-                        'mutation_rate': a.get('mutation_rate', 0.05),
-                        'species': a.get('species', 'unknown')
+                        'agent_type': a.get('agent_type') or parsed_genome.get('agent_type', 'generalist'),
+                        'exploration_rate': parsed_genome.get('exploration_rate', 0.3),
+                        'learning_rate': parsed_genome.get('learning_rate', 0.1),
+                        'mutation_rate': parsed_genome.get('mutation_rate', 0.05),
+                        'species': a.get('specialization') or parsed_genome.get('species', 'unknown')
                     }
-                    # Parse feature_weights if available
-                    if a.get('feature_weights'):
+                    # Include feature_weights if present
+                    if parsed_genome.get('feature_weights'):
                         try:
-                            fw = json.loads(a['feature_weights']) if isinstance(a['feature_weights'], str) else a['feature_weights']
-                            genome['feature_focus'] = sorted(fw.items(), key=lambda x: -x[1])[:3]  # Top 3
-                        except (json.JSONDecodeError, TypeError):
+                            fw = parsed_genome['feature_weights']
+                            if isinstance(fw, dict):
+                                genome['feature_focus'] = sorted(fw.items(), key=lambda x: -x[1])[:3]
+                        except Exception:
                             pass
             except Exception as e:
                 logger.debug(f"Genome fetch failed: {e}")
@@ -13806,16 +14122,47 @@ class GameplayEngine:
         # ===================================================================
         self_reflection = self._build_self_reflection_context(agent_id, agent_mode, action, game_state)
         
-        network_wisdom = {
-            'private_memory': self_reflection.get('private_memory') if self_reflection else self._null_status(425),
-            'network_strength': self_reflection.get('network_wisdom') if self_reflection else (
-                self._null_status(450) if agent_mode == 'pioneer' and is_frontier else self._null_status(425)
-            ),
-            'self_trust_bias': self_reflection.get('self_trust_bias') if self_reflection else self._null_status(425),
-            'decision_weight': self_reflection.get('decision_weight') if self_reflection else self._null_status(425),
-            'conflict_detected': self_reflection.get('conflict', False) if self_reflection else False,
-            'two_streams_narrative': self_reflection.get('narrative') if self_reflection else self._null_status(425)
-        }
+        # ===================================================================
+        # FIX #19: ENSURE NETWORK WISDOM IS ALWAYS INITIALIZED
+        # ===================================================================
+        # Problem: network_strength is always "450 Isolated" because 
+        # self_reflection is None when agent data is missing or query fails.
+        # Solution: Compute fallback values when self_reflection is unavailable.
+        # ===================================================================
+        if self_reflection:
+            network_wisdom = {
+                'private_memory': self_reflection.get('private_memory', 0.3),
+                'network_strength': self_reflection.get('network_wisdom', 0.3),
+                'self_trust_bias': self_reflection.get('self_trust_bias', 0.5),
+                'decision_weight': self_reflection.get('decision_weight', 0.5),
+                'conflict_detected': self_reflection.get('conflict', False),
+                'two_streams_narrative': self_reflection.get('narrative', 'balanced')
+            }
+        else:
+            # Fallback: Compute minimal network wisdom
+            game_id = self.game_config.get('current_game_id', '')
+            current_level_num = int(game_state.score) + 1 if game_state.score else 1
+            
+            # Try to get network recommendation strength directly
+            try:
+                network_strength = self._get_network_recommendation_strength(
+                    game_id, current_level_num, agent_mode or 'generalist'
+                )
+            except Exception:
+                network_strength = 0.3
+            
+            network_wisdom = {
+                'private_memory': 0.3,  # Low - no episodic data
+                'network_strength': network_strength if not (agent_mode == 'pioneer' and is_frontier) else 0.0,
+                'self_trust_bias': 0.5,  # Balanced
+                'decision_weight': 0.5,
+                'conflict_detected': False,
+                'two_streams_narrative': 'No agent data - using defaults'
+            }
+            
+            # Log that we're using fallback
+            if agent_id:
+                logger.debug(f"[NETWORK] Using fallback network_wisdom for agent {agent_id[:8]} (network_strength={network_strength:.2f})")
         
         # ===================================================================
         # TIER 4.5: RESONANCE - Cross-role pattern agreement
@@ -14083,11 +14430,32 @@ class GameplayEngine:
                     'insight': f"Pattern validated by {top_pattern['roles_found']} independently"
                 }
             else:
+                # FIX #23: Compute live resonance from current game state if no historical patterns
+                # Use frame complexity and action entropy as proxy for resonance
+                live_score = 0.0
+                try:
+                    # Check if we have any working theories - existence of theory = some resonance
+                    theory = getattr(self, '_working_theory', None)
+                    if theory and theory not in ('425 Too Early', 'NULL', ''):
+                        live_score += 0.3  # Theory exists
+                    # Check if controlled object identified
+                    if hasattr(self, 'self_model') and self.self_model:
+                        controlled = self.self_model.get_controlled_objects()
+                        if controlled:
+                            live_score += 0.2  # Self-model has identification
+                    # Check if we've made any progress
+                    max_level = getattr(self, '_max_level_reached', 1)
+                    if max_level > 1:
+                        live_score += 0.1 * min(max_level, 5)  # Progress bonus
+                except Exception:
+                    pass  # Fallback to 0.0
+                    
                 return {
                     'queried': True,
-                    'resonance_score': 0.0,
-                    'status': self._null_status(204),  # No Content
-                    'reason': "No resonant patterns found for this game type"
+                    'resonance_score': live_score,
+                    'status': self._null_status(204) if live_score == 0 else None,
+                    'reason': "Live resonance from current game state" if live_score > 0 else "No resonant patterns found for this game type",
+                    'is_live_computed': True
                 }
                 
         except ImportError:
@@ -17065,6 +17433,40 @@ class GameplayEngine:
                 else:
                     logger.warning(f"[FAIL] Inline replay failed for {sequence_id}. "
                                  f"Reached level {current_level} (target: {target_level}), Score: {game_state.score}")
+                    
+                    # FIX #27: Flag sequence as leads_to_stuck if it repeatedly fails on same level
+                    # This helps future agents avoid sequences that lead to stuck states
+                    try:
+                        self.db.execute_query("""
+                            UPDATE winning_sequences
+                            SET consecutive_failures = COALESCE(consecutive_failures, 0) + 1,
+                                flag_reason = COALESCE(flag_reason, '') || 
+                                    CASE WHEN flag_reason IS NULL OR flag_reason = '' 
+                                         THEN ? 
+                                         ELSE '; ' || ? 
+                                    END
+                            WHERE sequence_id = ?
+                        """, (
+                            f"stuck_level_{current_level}",
+                            f"stuck_level_{current_level}",
+                            sequence_id
+                        ))
+                        logger.debug(f"[SEQUENCE] Flagged {sequence_id[:12]} as stuck on level {current_level}")
+                        
+                        # Deactivate sequence after 3 consecutive failures
+                        failures = self.db.execute_query(
+                            "SELECT consecutive_failures FROM winning_sequences WHERE sequence_id = ?",
+                            (sequence_id,)
+                        )
+                        if failures and failures[0].get('consecutive_failures', 0) >= 3:
+                            self.db.execute_query(
+                                "UPDATE winning_sequences SET is_active = 0 WHERE sequence_id = ?",
+                                (sequence_id,)
+                            )
+                            logger.warning(f"[SEQUENCE] Deactivated {sequence_id[:12]} after 3+ failures")
+                    except Exception as e:
+                        logger.debug(f"Failed to flag stuck sequence: {e}")
+                        
             return {'game_state': game_state, 'success': replay_success, 'reset_detected': reset_detected}
 
 
@@ -19225,15 +19627,30 @@ class GameplayEngine:
         tetrahedral_perceptions: List[Dict]
     ) -> Dict[str, float]:
         """
-        Calculate mood vector from tetrahedral perception balance.
+        Calculate mood vector from tetrahedral perception balance + game state.
         
         Uses the PAD model (Pleasure-Arousal-Dominance):
-        - Valence (Pleasure): Net positive vs negative sensations
-        - Arousal: Threat level + goal urgency
+        - Valence (Pleasure): Net positive vs negative sensations + failure rate
+        - Arousal: Threat level + goal urgency + stuck stress
         - Dominance: Control over situation (self objects vs obstacles)
         """
+        # FIX #21: Include game state in mood calculation
+        # 100+ failures should make valence negative and arousal high
+        tracker = getattr(self, '_meta_pattern_tracker', {})
+        no_progress_count = tracker.get('no_progress_count', 0) if tracker else 0
+        
+        # Base mood from game state (even if no tetrahedral perceptions)
+        # Negative valence when stuck, high arousal from frustration
+        stuck_valence_penalty = min(0.5, no_progress_count / 100.0)  # Up to -0.5 at 50+ failures
+        stuck_arousal_boost = min(0.7, no_progress_count / 30.0)  # Stress from being stuck
+        
         if not tetrahedral_perceptions:
-            return {'valence': 0.0, 'arousal': 0.0, 'dominance': 0.0}
+            # Return game-state-based mood when no object perceptions
+            return {
+                'valence': -stuck_valence_penalty,
+                'arousal': stuck_arousal_boost,
+                'dominance': 0.3 if no_progress_count > 20 else 0.5  # Low dominance when stuck
+            }
         
         total_valence = 0.0
         total_arousal = 0.0
@@ -19262,19 +19679,22 @@ class GameplayEngine:
         
         n = len(tetrahedral_perceptions)
         
-        # Normalize
-        valence = total_valence / n
-        arousal = min(1.0, total_arousal / n)
+        # Normalize and apply stuck penalty
+        valence = (total_valence / n) - stuck_valence_penalty
+        arousal = min(1.0, (total_arousal / n) + stuck_arousal_boost)
         
-        # Dominance: ratio of controlled to obstacles
+        # Dominance: ratio of controlled to obstacles, reduced when stuck
         dominance = 0.5  # Neutral default
         if controlled_count > 0 or obstacle_count > 0:
             dominance = controlled_count / max(1, controlled_count + obstacle_count)
+        # Reduce dominance when stuck (agent feels out of control)
+        if no_progress_count > 10:
+            dominance = dominance * 0.7
         
         return {
-            'valence': valence,
-            'arousal': arousal,
-            'dominance': dominance
+            'valence': max(-1.0, min(1.0, valence)),
+            'arousal': max(0.0, min(1.0, arousal)),
+            'dominance': max(0.0, min(1.0, dominance))
         }
     
     def _add_legacy_patterns(
