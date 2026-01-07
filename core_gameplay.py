@@ -5621,24 +5621,54 @@ class GameplayEngine:
                                                 coords_to_avoid = clicked_coords | eliminated_click_coords
                                                 untried_targets = target_coords - coords_to_avoid
                                                 
-                                                if len(untried_targets) > 0:
+                                                # FIX: Also check for grid exploration targets
+                                                # If visual_analyzer has grid targets available, we're not truly stuck
+                                                grid_targets = [t for t in all_targets if t.get('type') == 'grid_exploration']
+                                                grid_coords = {(t['x'], t['y']) for t in grid_targets}
+                                                untried_grid = grid_coords - coords_to_avoid
+                                                
+                                                total_untried = len(untried_targets) + len(untried_grid)
+                                                
+                                                if total_untried > 0:
                                                     # Still have untried click targets - not truly stuck yet
                                                     elim_str = f", METACOG eliminated {len(eliminated_click_coords)}" if eliminated_click_coords else ""
+                                                    grid_str = f", {len(untried_grid)} grid" if untried_grid else ""
                                                     logger.info(
-                                                        f"[ESCAPE] ACTION6 available: {len(untried_targets)} untried targets remain "
-                                                        f"(tried {len(clicked_coords)}{elim_str}, total {len(target_coords)})"
+                                                        f"[ESCAPE] ACTION6 available: {total_untried} untried targets remain "
+                                                        f"(tried {len(clicked_coords)}{elim_str}{grid_str}, total {len(target_coords) + len(grid_coords)})"
                                                     )
-                                                elif len(target_coords) > 0 and len(untried_targets) == 0:
+                                                elif len(target_coords) > 0 and total_untried == 0:
                                                     # All click targets exhausted (either tried or METACOG-eliminated)
                                                     if len(available_nums) == 1:
                                                         # Only ACTION6 available AND all targets tried/eliminated
-                                                        elim_str = f", {len(eliminated_click_coords)} METACOG-eliminated" if eliminated_click_coords else ""
-                                                        logger.warning(
-                                                            f"[ESCAPE] TRULY STUCK: All {len(target_coords)} click targets exhausted "
-                                                            f"({len(clicked_coords)} tried{elim_str}). Skipping remaining escape attempts."
-                                                        )
-                                                        escape_attempts = ESCAPE_ATTEMPTS_MAX
-                                                        continue
+                                                        # BUT: Force grid exploration expansion before giving up
+                                                        if hasattr(visual_analyzer, 'grid_exploration_index'):
+                                                            old_grid_idx = visual_analyzer.grid_exploration_index
+                                                            # Force re-analysis with fresh grid targets
+                                                            visual_analyzer.consecutive_no_change_count = max(15, visual_analyzer.consecutive_no_change_count)
+                                                            new_analysis = visual_analyzer.analyze_frame(game_state.frame)
+                                                            new_targets = new_analysis.get('targets', [])
+                                                            new_coords = {(t['x'], t['y']) for t in new_targets} - coords_to_avoid
+                                                            
+                                                            if new_coords:
+                                                                logger.info(f"[ESCAPE] Grid exploration expanded - {len(new_coords)} new targets generated")
+                                                                # Don't skip - we have new targets to try
+                                                            else:
+                                                                elim_str = f", {len(eliminated_click_coords)} METACOG-eliminated" if eliminated_click_coords else ""
+                                                                logger.warning(
+                                                                    f"[ESCAPE] TRULY STUCK: All {len(target_coords)} click targets exhausted "
+                                                                    f"({len(clicked_coords)} tried{elim_str}). Grid also exhausted. Skipping remaining escape attempts."
+                                                                )
+                                                                escape_attempts = ESCAPE_ATTEMPTS_MAX
+                                                                continue
+                                                        else:
+                                                            elim_str = f", {len(eliminated_click_coords)} METACOG-eliminated" if eliminated_click_coords else ""
+                                                            logger.warning(
+                                                                f"[ESCAPE] TRULY STUCK: All {len(target_coords)} click targets exhausted "
+                                                                f"({len(clicked_coords)} tried{elim_str}). Skipping remaining escape attempts."
+                                                            )
+                                                            escape_attempts = ESCAPE_ATTEMPTS_MAX
+                                                            continue
                                                     else:
                                                         # Other actions available - let escape continue with those
                                                         logger.info(
@@ -9029,7 +9059,7 @@ class GameplayEngine:
                         primitive_recommendation = self.agent_hypothesis_system.get_primitive_based_action(
                             agent_id=agent_id,
                             game_type=game_type,
-                            level_number=game_state.level if game_state else None
+                            level_number=int(game_state.score) + 1 if game_state else None
                         )
                         
                         if primitive_recommendation and primitive_recommendation.get('action'):
@@ -12562,6 +12592,86 @@ class GameplayEngine:
         
         return aggregated
     
+    def _generate_fallback_beliefs(
+        self,
+        game_id: str,
+        level: int,
+        frame: Optional[List],
+        context: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate active beliefs from observations when WorldModel beliefs are empty.
+        
+        Creates competing hypotheses from:
+        - Network control hypotheses
+        - Self-model observations
+        - Frame analysis patterns
+        
+        Returns:
+            List of belief dictionaries
+        """
+        beliefs = []
+        
+        try:
+            agent_id = self.game_config.get('agent_id', '')
+            
+            # Belief 1: From self-model controlled objects
+            if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                controlled = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
+                if controlled:
+                    beliefs.append({
+                        'id': 'self_control',
+                        'type': 'object_control',
+                        'confidence': 0.6,
+                        'content': f'I control {len(controlled)} object(s): {str(controlled[:2])[:50]}'
+                    })
+            
+            # Belief 2: From network hypotheses
+            if context.get('network_hypotheses'):
+                best = context['network_hypotheses'][0]
+                beliefs.append({
+                    'id': 'network_hypo',
+                    'type': 'network_derived',
+                    'confidence': best.get('confidence', 0.5),
+                    'content': f"Network suggests {best.get('type', 'pattern')}: {best.get('rule_id', 'unknown')}"
+                })
+            
+            # Belief 3: From inferred goals
+            if context.get('inferred_goals'):
+                goal = context['inferred_goals'][0]
+                beliefs.append({
+                    'id': 'goal_inference',
+                    'type': 'goal_detection',
+                    'confidence': 0.4,
+                    'content': f"Rare color {goal.get('color')} at {goal.get('position')} may be goal"
+                })
+            
+            # Belief 4: From frame change pattern (if tracked)
+            if hasattr(self, '_no_frame_change_count') and self._no_frame_change_count > 5:
+                beliefs.append({
+                    'id': 'stuck_detection',
+                    'type': 'stuckness',
+                    'confidence': min(0.9, 0.5 + self._no_frame_change_count * 0.05),
+                    'content': f'Actions not causing frame changes for {self._no_frame_change_count} frames'
+                })
+            
+            # Belief 5: Movement pattern belief (if we have action history)
+            if hasattr(self, '_action_history') and len(getattr(self, '_action_history', [])) >= 5:
+                recent = self._action_history[-5:]
+                directional = sum(1 for a in recent if a in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'))
+                if directional >= 3:
+                    beliefs.append({
+                        'id': 'movement_pattern',
+                        'type': 'behavior_pattern',
+                        'confidence': 0.5,
+                        'content': f'Currently using directional movement ({directional}/5 recent actions)'
+                    })
+            
+        except Exception as e:
+            logger.debug(f"Fallback belief generation failed: {e}")
+        
+        return beliefs[:5]  # Limit to 5 beliefs
+
     def _infer_goals_from_frame(self, frame: Optional[List]) -> List[Dict[str, Any]]:
         """
         Task 4: Infer goal objects from frame by detecting rare colors.
@@ -12728,15 +12838,27 @@ class GameplayEngine:
                                             break
                                     if positions:
                                         break
-                            elif isinstance(ctrl, str) and ':' in ctrl:
-                                # Parse "x:N,y:M" format
-                                try:
-                                    parts = ctrl.split(',')
-                                    x = int(parts[0].split(':')[1])
-                                    y = int(parts[1].split(':')[1])
-                                    positions.append((x, y))
-                                except (ValueError, IndexError):
-                                    pass
+                            elif isinstance(ctrl, str):
+                                # FIX: Handle "color_X_at_Y_Z" format (e.g., "color_11_at_31_29")
+                                if '_at_' in ctrl:
+                                    try:
+                                        import re
+                                        match = re.search(r'_at_(\d+)_(\d+)', ctrl)
+                                        if match:
+                                            x = int(match.group(1))
+                                            y = int(match.group(2))
+                                            positions.append((x, y))
+                                    except (ValueError, AttributeError):
+                                        pass
+                                # Also handle "x:N,y:M" format
+                                elif ':' in ctrl:
+                                    try:
+                                        parts = ctrl.split(',')
+                                        x = int(parts[0].split(':')[1])
+                                        y = int(parts[1].split(':')[1])
+                                        positions.append((x, y))
+                                    except (ValueError, IndexError):
+                                        pass
                         
                         if positions:
                             # Calculate centroid
@@ -12807,6 +12929,16 @@ class GameplayEngine:
                     ]
             except Exception as e:
                 logger.debug(f"Control hypothesis fallback failed: {e}")
+        
+        # ===================================================================
+        # CHECKLIST FIX: Generate active_beliefs from observations when 
+        # WorldModel beliefs are empty
+        # ===================================================================
+        if not context['active_beliefs']:
+            context['active_beliefs'] = self._generate_fallback_beliefs(
+                game_id, level, frame, context
+            )
+            context['belief_conflict_count'] = len(context['active_beliefs'])
         
         # Get FAILURE HYPOTHESES from network (what to avoid, what might help)
         try:
@@ -13421,7 +13553,20 @@ class GameplayEngine:
             elif actions_moved:
                 result['insight'] = f"Actions {sorted(actions_moved)} cause state changes"
             else:
-                result['insight'] = "No actions observed to change state yet"
+                # FIX: Evolve Q1 message based on how long we've been stuck
+                no_change_count = getattr(self, '_no_frame_change_count', 0)
+                if no_change_count > 100:
+                    result['insight'] = f"STUCK: {no_change_count} consecutive actions with no frame change - need different approach"
+                    result['stuck_severity'] = 'critical'
+                elif no_change_count > 50:
+                    result['insight'] = f"Stalled: {no_change_count} actions with no effect - exploring alternatives"
+                    result['stuck_severity'] = 'high'
+                elif no_change_count > 20:
+                    result['insight'] = f"No visible progress for {no_change_count} actions - may need to try different targets"
+                    result['stuck_severity'] = 'medium'
+                else:
+                    result['insight'] = "No actions observed to change state yet"
+                    result['stuck_severity'] = 'low' if no_change_count > 5 else 'none'
         
         return result
     
@@ -13878,6 +14023,277 @@ class GameplayEngine:
         meaning = self.NULL_STATUS_CODES.get(code, "Unknown")
         return f"NULL - {code} {meaning}"
     
+    def _classify_theory_stage(
+        self,
+        working_theory: str,
+        self_model: Optional[Dict],
+        game_state: 'GameState'
+    ) -> str:
+        """
+        Classify the current stage of the working theory.
+        
+        Stages:
+        - "speculating": Initial observations, no confirmed patterns
+        - "hypothesis": Pattern identified but not fully validated
+        - "confident": Pattern confirmed through repeated success
+        - "stuck": Theory exists but making no progress
+        
+        Returns:
+            Theory stage string
+        """
+        try:
+            if not working_theory or "NULL" in str(working_theory):
+                return "speculating"
+            
+            theory_lower = working_theory.lower()
+            
+            # Check for stuck indicators
+            if "stuck" in theory_lower or "no progress" in theory_lower:
+                return "stuck"
+            
+            # Check for confident indicators (explicit confirmation)
+            if self_model:
+                ctrl_objects = self_model.get('objects_agent_controls', [])
+                network_hypos = self_model.get('network_control_hypotheses', [])
+                
+                # Confident: Multiple controlled objects AND positive score
+                if ctrl_objects and game_state.score and float(game_state.score) > 0:
+                    return "confident"
+                
+                # Confident: Network hypothesis with >80% reliability
+                if network_hypos:
+                    best = network_hypos[0] if network_hypos else {}
+                    if best.get('reliability', 0) > 0.8:
+                        return "confident"
+            
+            # Check theory text for hypothesis indicators
+            if any(word in theory_lower for word in ["control", "move", "seeking", "approach"]):
+                return "hypothesis"
+            
+            # Still exploring
+            if "exploring" in theory_lower or "pattern" in theory_lower:
+                return "speculating"
+            
+            # Default based on score
+            if game_state.score and float(game_state.score) > 0:
+                return "hypothesis"
+            
+            return "speculating"
+            
+        except Exception:
+            return "speculating"
+
+    def _generate_action_prediction(
+        self,
+        action: str,
+        working_theory: str,
+        self_model: Optional[Dict],
+        game_state: 'GameState'
+    ) -> Dict[str, Any]:
+        """
+        Generate a prediction for what will happen when this action is taken.
+        
+        This enables theory-gated scoring by comparing prediction vs outcome.
+        
+        Returns:
+            Dict with prediction details
+        """
+        try:
+            prediction = {
+                'expected_outcome': 'unknown',
+                'confidence': 0.2,
+                'based_on': 'no_theory'
+            }
+            
+            if not working_theory or "NULL" in str(working_theory):
+                return prediction
+            
+            theory_lower = working_theory.lower()
+            ctrl_objects = []
+            if self_model:
+                ctrl_objects = self_model.get('objects_agent_controls', [])
+            
+            # If we have control theory, predict movement
+            if ctrl_objects and ("control" in theory_lower or "move" in theory_lower):
+                action_map = {
+                    'ACTION1': 'up', 'ACTION2': 'down',
+                    'ACTION3': 'left', 'ACTION4': 'right',
+                    'ACTION5': 'interact', 'ACTION6': 'special1', 'ACTION7': 'special2'
+                }
+                direction = action_map.get(action, 'unknown')
+                prediction = {
+                    'expected_outcome': f'controlled_object_moves_{direction}',
+                    'confidence': 0.6,
+                    'based_on': 'object_control_theory'
+                }
+            # If seeking goals, predict approach
+            elif "seeking" in theory_lower or "goal" in theory_lower:
+                prediction = {
+                    'expected_outcome': 'progress_toward_goal',
+                    'confidence': 0.4,
+                    'based_on': 'goal_seeking_theory'
+                }
+            # If exploring, predict discovery
+            elif "exploring" in theory_lower:
+                prediction = {
+                    'expected_outcome': 'discover_new_pattern',
+                    'confidence': 0.3,
+                    'based_on': 'exploration_mode'
+                }
+            # If stuck, predict break-out
+            elif "stuck" in theory_lower:
+                prediction = {
+                    'expected_outcome': 'break_stuck_state',
+                    'confidence': 0.2,
+                    'based_on': 'desperation_exploration'
+                }
+            
+            return prediction
+            
+        except Exception:
+            return {'expected_outcome': 'unknown', 'confidence': 0.1, 'based_on': 'error'}
+    
+    def _score_action_against_theory(
+        self,
+        action: str,
+        working_theory: str,
+        self_model: Optional[Dict]
+    ) -> Dict[str, Any]:
+        """
+        Score how well this action aligns with the current working theory.
+        
+        Theory-gated scoring: actions that fit the theory get higher alignment.
+        This helps distinguish random exploration from theory-driven testing.
+        
+        Returns:
+            Dict with alignment score and explanation
+        """
+        try:
+            if not working_theory or "NULL" in str(working_theory):
+                return {'score': 0.0, 'explanation': 'No theory to align with'}
+            
+            theory_lower = working_theory.lower()
+            
+            # Check if action fits control theory
+            if "control" in theory_lower or "move" in theory_lower:
+                # Movement actions (1-4) align with control theory
+                if action in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'):
+                    return {'score': 0.8, 'explanation': 'Directional action aligns with movement theory'}
+                else:
+                    return {'score': 0.4, 'explanation': 'Non-directional action during movement theory'}
+            
+            # Check if action fits goal-seeking theory
+            if "goal" in theory_lower or "seeking" in theory_lower:
+                # Any movement toward goal is aligned
+                return {'score': 0.6, 'explanation': 'Action during goal-seeking phase'}
+            
+            # Check if action fits stuck-recovery
+            if "stuck" in theory_lower:
+                # Any action during stuck state is exploratory
+                return {'score': 0.3, 'explanation': 'Exploratory action to break stuck state'}
+            
+            # Default exploration alignment
+            return {'score': 0.5, 'explanation': 'Neutral alignment during exploration'}
+            
+        except Exception:
+            return {'score': 0.0, 'explanation': 'Error computing alignment'}
+    
+    def _get_blocking_questions_summary(self) -> List[Dict[str, Any]]:
+        """
+        Get summary of currently active blocking questions.
+        
+        Blocking questions have "teeth" - they prevent normal actions
+        and force theory revision or exploration.
+        
+        Returns:
+            List of blocking question summaries
+        """
+        try:
+            if not hasattr(self, 'questioning_engine') or not self.questioning_engine:
+                return []
+            
+            # Get active questions from questioning engine
+            if hasattr(self.questioning_engine, '_active_questions'):
+                active_qs = self.questioning_engine._active_questions
+                blocking = []
+                for q in active_qs:
+                    if q.get('blocks_action'):
+                        blocking.append({
+                            'question_id': q.get('id', 'unknown'),
+                            'question_type': q.get('type', 'unknown'),
+                            'reason': q.get('reason', 'Unspecified blocking condition'),
+                            'allowed_actions': q.get('allowed_actions', ['exploration'])
+                        })
+                return blocking
+            
+            return []
+            
+        except Exception:
+            return []
+    
+    def _calculate_surprise_from_prediction(
+        self,
+        score_change: int,
+        level_change: bool
+    ) -> float:
+        """
+        Calculate surprise score by comparing prediction to outcome.
+        
+        Surprise is the learning signal - high surprise means the agent's
+        theory was wrong and needs updating.
+        
+        Returns:
+            Surprise score between 0.0 (expected) and 1.0 (completely unexpected)
+        """
+        try:
+            # Get the last prediction made
+            last_prediction = getattr(self, '_last_action_prediction', None)
+            
+            if not last_prediction:
+                # No prediction was made - moderate surprise
+                return 0.5
+            
+            expected = last_prediction.get('expected_outcome', 'unknown')
+            confidence = last_prediction.get('confidence', 0.3)
+            
+            # Check if outcome matched prediction
+            if level_change:
+                # Level changed - was this expected?
+                if 'progress' in expected or 'goal' in expected:
+                    # Good prediction - low surprise
+                    return max(0.0, 0.3 - confidence * 0.3)
+                else:
+                    # Unexpected level change - moderate surprise
+                    return 0.4
+            
+            if score_change > 0:
+                # Score increased - was this expected?
+                if 'progress' in expected or 'score' in expected:
+                    return max(0.0, 0.2 - confidence * 0.2)
+                else:
+                    return 0.3
+            
+            if score_change == 0:
+                # No score change
+                if 'move' in expected or 'explore' in expected:
+                    # Expected movement without score - low surprise
+                    return 0.2
+                elif 'stuck' in expected or 'break' in expected:
+                    # Expected stuck state - low surprise
+                    return 0.1
+                else:
+                    # Expected progress but got none - moderate surprise
+                    return 0.5
+            
+            # Negative score change
+            if score_change < 0:
+                return 0.8  # Losing progress is usually surprising
+            
+            return 0.3  # Default moderate surprise
+            
+        except Exception:
+            return 0.5  # Error = moderate surprise
+
     def _build_delta_section(
         self,
         current_frame: Optional[List],
@@ -13930,7 +14346,9 @@ class GameplayEngine:
             'level_change': level_change,
             'self_model_update': self_update_default,  # Updated by caller if available
             'world_model_update': world_update_default,
-            'theory_validation': theory_default
+            'theory_validation': theory_default,
+            # CHECKLIST FIX: Add surprise score from prediction comparison
+            'surprise_score': self._calculate_surprise_from_prediction(score_change, level_change)
         }
         
         if current_frame is None or previous_frame is None:
@@ -14166,10 +14584,10 @@ class GameplayEngine:
                 
                 if recent_frames_identical:
                     # We're stuck! Don't claim success
-                    working_theory = f"Stuck on level {game_state.level} - previous score {game_state.score} but no progress"
+                    working_theory = f"Stuck on level {int(game_state.score) + 1} - previous score {game_state.score} but no progress"
                 else:
                     # Legitimate progress
-                    working_theory = f"Current approach works - score {game_state.score} achieved on level {game_state.level}"
+                    working_theory = f"Current approach works - score {game_state.score} achieved on level {int(game_state.score) + 1}"
             else:
                 # Still exploring - at least acknowledge the state
                 working_theory = "Exploring game mechanics - no pattern confirmed yet"
@@ -14218,6 +14636,7 @@ class GameplayEngine:
             'role': agent_mode or self._null_status(425),
             'generation': generation if generation is not None else self._null_status(425),
             'working_theory': working_theory,
+            'theory_stage': self._classify_theory_stage(working_theory, self_model, game_state),
             'self_model': self_model or {'status': self._null_status(425)},
             'genome': {
                 'agent_type': genome.get('agent_type') if genome else self._null_status(404),
@@ -14249,8 +14668,13 @@ class GameplayEngine:
         frame_changes = delta.get('frame_changes', [])
         if frame_changes and not any('NULL' in str(c) for c in frame_changes[:1]):
             self._last_delta_frame_changes = frame_changes
+            # Reset no-frame-change counter on actual frame change
+            self._no_frame_change_count = 0
         else:
             self._last_delta_frame_changes = []
+            # FIX: Track consecutive no-change frames for mood calculation
+            # This is separate from pattern tracker's no_progress_count
+            self._no_frame_change_count = getattr(self, '_no_frame_change_count', 0) + 1
         
         # Update self/world model change status if applicable
         if self_model and 'controlled_objects' in self_model:
@@ -14404,7 +14828,9 @@ class GameplayEngine:
             ),
             'Q3_what_worked_before': emergent_reasoning.get('Q3') if emergent_reasoning else self._null_status(425),
             'Q4_what_should_i_try': emergent_reasoning.get('Q4') if emergent_reasoning else self._null_status(425),
-            'Q5_how_confident': emergent_reasoning.get('confidence', 0.5) if emergent_reasoning else self._null_status(425)
+            'Q5_how_confident': emergent_reasoning.get('confidence', 0.5) if emergent_reasoning else self._null_status(425),
+            # CHECKLIST FIX: Add question teeth status
+            'active_blocking_questions': self._get_blocking_questions_summary()
         }
         
         # ===================================================================
@@ -14539,8 +14965,15 @@ class GameplayEngine:
         action_tier = {
             'action_code': action,
             'reasoning': reasoning_text,
-            'emotional_state': emotional_state
+            'emotional_state': emotional_state,
+            # CHECKLIST FIX: Add prediction field (what agent expects to happen)
+            'prediction': self._generate_action_prediction(action, working_theory, self_model, game_state),
+            # CHECKLIST FIX: Add theory-gated scoring (how this action relates to theory)
+            'theory_alignment': self._score_action_against_theory(action, working_theory, self_model)
         }
+        
+        # Store prediction for next round's surprise calculation
+        self._last_action_prediction = action_tier['prediction']
         
         # ===================================================================
         # TIER 8: PRIMITIVES - What systems contributed to this decision
@@ -15629,6 +16062,38 @@ class GameplayEngine:
                 actionable['avoid_colors'].append(color_int)
             elif 'target' in strategy_lower or 'goal' in strategy_lower:
                 actionable['target_colors'].append(color_int)
+        
+        # ================================================================
+        # FIX: Populate actionable from runtime stuck state
+        # When text parsing fails (generic messages), use actual game state
+        # ================================================================
+        if not any(actionable.values()):
+            # Text parsing returned nothing - use runtime data instead
+            no_change_count = getattr(self, '_no_frame_change_count', 0)
+            if no_change_count > 20:
+                # Stuck state: prefer ACTION6 (click) to break out
+                actionable['prefer_actions'] = [6]  # Click is most likely to break stuck
+                actionable['patterns_detected'] = ['stuck_state']
+                
+                # Get recent actions that didn't work
+                recent_traces = getattr(self, '_recent_action_traces', [])
+                if recent_traces:
+                    # Avoid the most repeated action (likely causing the stuck state)
+                    action_counts = {}
+                    for trace in recent_traces[-20:]:
+                        action = trace.get('action_type', '')
+                        if isinstance(action, str) and action.startswith('ACTION'):
+                            try:
+                                action_num = int(action.replace('ACTION', ''))
+                                action_counts[action_num] = action_counts.get(action_num, 0) + 1
+                            except ValueError:
+                                pass
+                    
+                    # Most repeated action during stuck period = avoid it
+                    if action_counts:
+                        most_repeated = max(action_counts, key=action_counts.get)
+                        if action_counts[most_repeated] >= 5:
+                            actionable['avoid_actions'] = [most_repeated]
         
         # Remove duplicates
         actionable['avoid_actions'] = list(set(actionable['avoid_actions']))
@@ -19941,8 +20406,12 @@ class GameplayEngine:
         """
         # FIX #21: Include game state in mood calculation
         # 100+ failures should make valence negative and arousal high
+        # FIX: Use BOTH pattern tracker AND frame-change tracker
         tracker = getattr(self, '_meta_pattern_tracker', {})
-        no_progress_count = tracker.get('no_progress_count', 0) if tracker else 0
+        pattern_no_progress = tracker.get('no_progress_count', 0) if tracker else 0
+        frame_no_change = getattr(self, '_no_frame_change_count', 0)
+        # Use whichever is higher - agent is stuck if frames not changing OR pattern not progressing
+        no_progress_count = max(pattern_no_progress, frame_no_change)
         
         # Base mood from game state (even if no tetrahedral perceptions)
         # Negative valence when stuck, high arousal from frustration

@@ -27,8 +27,10 @@ class VisualAnalyzer:
         """Initialize visual analyzer."""
         self.previous_frame = None
         self.clicked_coordinates = set()  # Track coordinates we've already tried
+        self.dead_coordinates: Dict[Tuple[int, int], int] = {}  # coord -> failure count (don't retry 50+ times)
         self.last_action_changed_frame = False  # Did last action change the frame?
         self.consecutive_no_change_count = 0  # How many actions with no frame change?
+        self.grid_exploration_index = 0  # For systematic grid walking
         
         # Agent mode tracking (for mode-specific behavior)
         self.current_agent_mode = None  # 'pioneer', 'optimizer', 'generalist', or None
@@ -191,14 +193,27 @@ class VisualAnalyzer:
                 # Reset expansion urgency since we're making progress
                 self._expansion_step = 2
     
-    def mark_coordinate_clicked(self, x: int, y: int):
-        """Mark a coordinate as already clicked.
+    def mark_coordinate_clicked(self, x: int, y: int, frame_changed: bool = False):
+        """Mark a coordinate as already clicked and track failures.
         
         Args:
             x: X coordinate
             y: Y coordinate
+            frame_changed: Whether clicking this coordinate changed the frame
         """
         self.clicked_coordinates.add((x, y))
+        
+        # Track dead coordinates - coords that never produce frame changes
+        coord = (x, y)
+        if not frame_changed:
+            self.dead_coordinates[coord] = self.dead_coordinates.get(coord, 0) + 1
+            if self.dead_coordinates[coord] >= 5:
+                logger.debug(f"[DEAD] Coordinate ({x},{y}) failed {self.dead_coordinates[coord]} times - marked as dead")
+        else:
+            # Success! Remove from dead coordinates
+            if coord in self.dead_coordinates:
+                del self.dead_coordinates[coord]
+                logger.info(f"[REVIVE] Coordinate ({x},{y}) worked! Removed from dead list")
         
         # Track target history for oscillation detection
         self.recent_targets.append((x, y))
@@ -261,7 +276,9 @@ class VisualAnalyzer:
     def reset_clicked_coordinates(self):
         """Reset clicked coordinates (e.g., when starting new game)."""
         self.clicked_coordinates.clear()
-        logger.debug("Cleared clicked coordinates")
+        self.dead_coordinates.clear()
+        self.grid_exploration_index = 0
+        logger.debug("Cleared clicked coordinates and dead coordinates")
 
     def analyze_frame(self, frame: List[List[int]]) -> Dict[str, Any]:
         """Analyze a frame for interesting features.
@@ -319,9 +336,28 @@ class VisualAnalyzer:
             if changed_targets:
                 analysis["targets"].extend(changed_targets)
                 analysis["features"]["changed_regions"] = len(changed_targets)
+        
+        # 4. Add grid-walking targets when stuck (systematic exploration)
+        # This ensures we explore beyond just the 3 rare color targets
+        if self.consecutive_no_change_count >= 10:
+            grid_targets = self._generate_grid_exploration_targets(frame)
+            if grid_targets:
+                analysis["targets"].extend(grid_targets)
+                analysis["features"]["grid_exploration"] = len(grid_targets)
 
         # Deduplicate and sort targets by priority
         analysis["targets"] = self._deduplicate_targets(analysis["targets"])
+        
+        # Filter out dead coordinates that have failed too many times
+        if self.dead_coordinates:
+            original_count = len(analysis["targets"])
+            analysis["targets"] = [
+                t for t in analysis["targets"]
+                if self.dead_coordinates.get((t["x"], t["y"]), 0) < 10  # Allow up to 10 failures
+            ]
+            filtered_count = original_count - len(analysis["targets"])
+            if filtered_count > 0:
+                logger.debug(f"[DEAD] Filtered {filtered_count} dead-coordinate targets")
 
         # Store frame for next comparison
         self.previous_frame = [row[:] for row in frame]  # Deep copy
@@ -397,6 +433,83 @@ class VisualAnalyzer:
                     "reason": f"Rare color {color} ({len(positions)} pixels)"
                 })
 
+        return targets
+    
+    def _generate_grid_exploration_targets(self, frame: List[List[int]], grid_step: int = 8) -> List[Dict[str, Any]]:
+        """Generate systematic grid-walking targets for exploration.
+        
+        When stuck with only 3 rare-color targets that don't work,
+        this generates additional targets by walking a grid across the frame.
+        This ensures the agent tries clicking on different areas, not just
+        the same 3 rare-color centroids.
+        
+        Args:
+            frame: Current frame
+            grid_step: Step size for grid (smaller = more targets)
+            
+        Returns:
+            List of grid exploration targets
+        """
+        targets = []
+        height = len(frame) if frame else 64
+        width = len(frame[0]) if frame and frame[0] else 64
+        
+        # Generate grid points, skipping already-dead coordinates
+        grid_points = []
+        for y in range(grid_step // 2, height, grid_step):
+            for x in range(grid_step // 2, width, grid_step):
+                coord = (x, y)
+                # Skip if this coordinate has failed 5+ times
+                if self.dead_coordinates.get(coord, 0) < 5:
+                    grid_points.append(coord)
+        
+        # Start from where we left off (rotating through grid)
+        num_points = len(grid_points)
+        if num_points == 0:
+            # All grid points are dead - use finer grid
+            for y in range(2, height - 2, 4):
+                for x in range(2, width - 2, 4):
+                    coord = (x, y)
+                    if self.dead_coordinates.get(coord, 0) < 5:
+                        grid_points.append(coord)
+            num_points = len(grid_points)
+        
+        if num_points == 0:
+            return targets  # Truly exhausted
+        
+        # Get next few grid points to try (rotate through them)
+        start_idx = self.grid_exploration_index % num_points
+        points_to_try = []
+        for i in range(min(5, num_points)):  # Add up to 5 grid targets
+            idx = (start_idx + i) % num_points
+            points_to_try.append(grid_points[idx])
+        
+        self.grid_exploration_index += 5  # Advance for next time
+        
+        # Create targets from grid points
+        for x, y in points_to_try:
+            # Skip if already clicked this session
+            if (x, y) in self.clicked_coordinates:
+                continue
+                
+            # Get the color at this grid point for context
+            try:
+                color = frame[y][x] if isinstance(frame[y][x], int) else 0
+            except (IndexError, TypeError):
+                color = 0
+            
+            targets.append({
+                "x": x,
+                "y": y,
+                "type": "grid_exploration",
+                "color": color,
+                "priority": 0.6,  # Lower than rare colors but still useful
+                "reason": f"Grid exploration ({x},{y}) - systematic search"
+            })
+        
+        if targets:
+            logger.info(f"[GRID] Generated {len(targets)} grid exploration targets (index={self.grid_exploration_index})")
+        
         return targets
 
     def _find_color_clusters(self, frame: List[List[int]]) -> List[Dict[str, Any]]:

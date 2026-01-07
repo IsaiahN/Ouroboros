@@ -101,6 +101,8 @@ class OperatorResult:
     success: bool
     output: Any
     execution_time_ms: float
+    error: Optional[str] = None
+    operator_id: Optional[str] = None
 
 
 @dataclass

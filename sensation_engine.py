@@ -1060,7 +1060,13 @@ class SensationEngine:
         elif function['attraction'] > 0.3:
             semantic_role = 'tool'
         else:
-            semantic_role = 'environment'
+            # HEURISTIC GOAL DETECTION for new objects with neutral association
+            # In ARC games, rare-colored objects are often goals or interactive elements
+            inferred_goal = self._infer_goal_heuristically(object_type, structure, function)
+            if inferred_goal:
+                semantic_role = 'goal'
+            else:
+                semantic_role = 'environment'
         
         # Goal relevance from function data
         goal_relevance = function['attraction'] if function['attraction'] > 0 else 0.0
@@ -1095,6 +1101,58 @@ class SensationEngine:
             'personal_meaning': personal_meaning
         }
     
+    def _infer_goal_heuristically(
+        self,
+        object_type: str,
+        structure: dict,
+        function: dict
+    ) -> bool:
+        """
+        Infer whether an object is likely a goal based on heuristics.
+        
+        In ARC games, goals often have these characteristics:
+        - Rare colors (appear infrequently in the grid)
+        - Small, distinct objects (1-4 cells)
+        - Not background colors (0, 1 common backgrounds)
+        
+        Returns True if object appears to be a goal candidate.
+        """
+        try:
+            # Only apply heuristics to objects with neutral/unknown association
+            if function.get('association') not in ('neutral', 'unknown'):
+                return False
+            
+            # Extract color from object_type (e.g., "object_color_3" -> 3)
+            color = 0
+            if 'color_' in object_type:
+                try:
+                    color = int(object_type.split('color_')[-1])
+                except (ValueError, IndexError):
+                    pass
+            
+            # HEURISTIC 1: Rare colors (not common background colors)
+            # Colors 0 (black) and 1 (blue) are often backgrounds
+            # Colors 2-9 when rare are often goals
+            rare_color = color >= 2
+            
+            # HEURISTIC 2: Small, distinct size (goals are usually small targets)
+            size = structure.get('size', (0, 0))
+            if isinstance(size, (list, tuple)) and len(size) >= 2:
+                area = size[0] * size[1]
+            else:
+                area = 10  # Default to non-small if size unknown
+            small_target = area <= 16  # 4x4 or smaller
+            
+            # HEURISTIC 3: Low interaction history (new, unexplored)
+            # If agent hasn't interacted with this type much, it could be goal
+            
+            # Return True if object has rare color AND is small
+            # This bootstraps goal detection for pioneers on new games
+            return rare_color and small_target
+            
+        except Exception:
+            return False
+
     def _get_personal_meaning(self, agent_id: str, object_type: str) -> str:
         """Get agent's personal meaning for an object type."""
         impression = self.query_personal_impression(agent_id, object_type)
