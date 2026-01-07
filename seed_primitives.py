@@ -777,6 +777,18 @@ class SeedPrimitiveRegistry:
             piaget_stage="sensorimotor"
         ))
         
+        # NEW: Find similar objects for symmetry testing
+        self._register(Primitive(
+            name="find_similar_objects",
+            category=PrimitiveCategory.OBJECT_INTERACTION,
+            description="Find all objects similar to reference (by color, shape, size)",
+            func=self._find_similar_objects,
+            input_types=["reference_obj", "frame", "criteria"],
+            output_type="list",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
         # ==================================================================
         # PATTERN MATCHING PRIMITIVES - SEED (Core capability)
         # ==================================================================
@@ -1587,6 +1599,68 @@ class SeedPrimitiveRegistry:
             return None  # Background
         
         return f"obj_{color}"
+    
+    def _find_similar_objects(
+        self,
+        reference_obj: Dict[str, Any],
+        frame: List[List[int]],
+        criteria: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Find all objects in frame similar to reference object.
+        
+        Used for property symmetry testing: If object A has property P,
+        do all similar objects also have property P?
+        
+        Args:
+            reference_obj: Object dict with 'color', 'shape', 'size', etc.
+            frame: Frame to search
+            criteria: Which properties to match (default: ['color'])
+        
+        Returns:
+            List of similar object dicts with positions
+        """
+        if criteria is None:
+            criteria = ['color']  # Default to color matching
+        
+        try:
+            import numpy as np
+            frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+            
+            # Get all distinct objects
+            all_objects = self._find_distinct_objects(frame)
+            
+            ref_color = reference_obj.get('color')
+            ref_shape = reference_obj.get('shape')
+            ref_size = reference_obj.get('size')
+            
+            similar = []
+            for obj in all_objects:
+                is_similar = True
+                
+                if 'color' in criteria and ref_color is not None:
+                    if obj.get('color') != ref_color:
+                        is_similar = False
+                
+                if 'shape' in criteria and ref_shape is not None:
+                    # Shape matching - check aspect ratio similarity
+                    if abs(obj.get('aspect_ratio', 1.0) - ref_shape.get('aspect_ratio', 1.0)) > 0.3:
+                        is_similar = False
+                
+                if 'size' in criteria and ref_size is not None:
+                    # Size within 30% tolerance
+                    obj_size = obj.get('size', 0)
+                    if abs(obj_size - ref_size) / max(ref_size, 1) > 0.3:
+                        is_similar = False
+                
+                if is_similar:
+                    similar.append(obj)
+            
+            return similar
+            
+        except Exception as e:
+            logger.debug(f"find_similar_objects failed: {e}")
+            return []
     
     def _detect_click_effect(
         self,

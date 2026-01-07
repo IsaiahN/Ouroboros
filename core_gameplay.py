@@ -10385,6 +10385,14 @@ class GameplayEngine:
                                 agent_id=agent_id
                             )
                             
+                            # Record symmetry experiment result if this was a symmetry test
+                            if hasattr(selected_action, 'get') and selected_action.get('_symmetry_experiment'):
+                                self.agent_self_model.record_symmetry_experiment_result(
+                                    experiment_id=selected_action['_symmetry_experiment'],
+                                    x=x, y=y,
+                                    discovery_result=discovery_result
+                                )
+                            
                             if discovery_result and discovery_result.get('discovered_control'):
                                 logger.info(
                                     f"[DISCOVERY] ACTION6 at ({x},{y}) triggers {discovery_result['object_id']} "
@@ -14587,11 +14595,18 @@ class GameplayEngine:
         # Build theory from whatever evidence we have.
         # ===================================================================
         elif self_model:
-            # Try to build theory from available evidence
+            # FIX 3: Build theory with historical context and role-based weighting
             ctrl_objects = self_model.get('objects_agent_controls', [])
             network_hypos = self_model.get('network_control_hypotheses', [])
             tetra = self_model.get('tetrahedral_perception', {})
             goal_objects = tetra.get('goal_objects', [])
+            
+            # Get historical theories for this level
+            historical_theories = _get_historical_theories_for_gameplay(self.db, game_id, current_level, agent_id)
+            
+            # Get agent role for weighting (Pioneer vs Optimizer vs Generalist)
+            agent_role = _get_agent_role_for_gameplay(self.db, agent_id)
+            wa_self, wb_network = _get_theory_weights_for_gameplay(agent_role)
             
             if ctrl_objects:
                 # We have controlled objects - build theory with control type info
@@ -14599,12 +14614,53 @@ class GameplayEngine:
                 moveable = [o for o in ctrl_objects if not o.startswith('toggleable_')]
                 toggleable = [o for o in ctrl_objects if o.startswith('toggleable_')]
                 
-                if moveable and toggleable:
-                    working_theory = f"I control {len(moveable)} moveable and {len(toggleable)} toggleable objects"
-                elif toggleable:
-                    working_theory = f"I can toggle {len(toggleable)} objects by clicking"
+                # FIX 3: THEORY MERGING with wa/wb weights
+                current_count = {'moveable': len(moveable), 'toggleable': len(toggleable)}
+                
+                # Get network consensus theory
+                network_theory_counts = _get_network_consensus_theory(
+                    self.db, game_id, current_level
+                )
+                
+                # Merge theories using role-based weights
+                merged_counts = _merge_theories_with_weights(
+                    current_evidence=current_count,
+                    network_consensus=network_theory_counts,
+                    historical=historical_theories[0] if historical_theories else None,
+                    wa_self=wa_self,
+                    wb_network=wb_network
+                )
+                
+                # Check if theory differs significantly from historical
+                if historical_theories:
+                    last_theory = historical_theories[0]
+                    if _theory_differs_significantly_for_gameplay(last_theory, merged_counts):
+                        # Log the discrepancy for debugging
+                        logger.warning(
+                            f"[THEORY] CHANGED: Previous '{last_theory.get('theory_text')}' "
+                            f"vs merged evidence: {merged_counts} "
+                            f"(raw current: {current_count}, network: {network_theory_counts}, "
+                            f"weights: self={wa_self:.1f}, network={wb_network:.1f})"
+                        )
+                
+                # Build theory from merged counts
+                merged_moveable = int(merged_counts.get('moveable', 0))
+                merged_toggleable = int(merged_counts.get('toggleable', 0))
+                
+                if merged_moveable and merged_toggleable:
+                    working_theory = f"I control {merged_moveable} moveable and {merged_toggleable} toggleable objects"
+                elif merged_toggleable:
+                    working_theory = f"I can toggle {merged_toggleable} objects by clicking"
                 else:
-                    working_theory = f"I control {len(ctrl_objects)} objects and move with directional actions"
+                    working_theory = f"I control {merged_moveable} objects and move with directional actions"
+                
+                # Store theory in history
+                _store_working_theory_history_for_gameplay(
+                    self.db,
+                    agent_id, game_id, current_level, working_theory,
+                    confidence=self_model.get('control_confidence', 0.5),
+                    evidence_count=merged_moveable + merged_toggleable
+                )
             elif network_hypos:
                 # Network has hypotheses - form tentative theory
                 best_h = network_hypos[0] if network_hypos else {}
@@ -21145,3 +21201,243 @@ def _get_escape_action(*current_actions) -> str:
     # All actions in loop, suggest random
     import random
     return random.choice(all_actions)
+
+
+# ===================================================================
+# FIX 3: Theory Refinement Helper Methods
+# ===================================================================
+
+def _get_historical_theories_for_gameplay(
+    db,
+    game_id: str, 
+    level: int, 
+    agent_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Get previous working theories for this game/level."""
+    try:
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        query = """
+            SELECT theory_text, confidence, evidence_count, created_at
+            FROM working_theory_history
+            WHERE game_type = ? AND level_number = ? 
+                  AND invalidated_at IS NULL
+        """
+        params = [game_type, level]
+        
+        if agent_id:
+            query += " AND agent_id = ?"
+            params.append(agent_id)
+        
+        query += " ORDER BY created_at DESC LIMIT 5"
+        
+        results = db.execute_query(query, tuple(params))
+        return [dict(r) for r in results] if results else []
+    except Exception as e:
+        logger.debug(f"Historical theory query failed: {e}")
+        return []
+
+def _get_agent_role_for_gameplay(db, agent_id: Optional[str]) -> str:
+    """Get agent's role (PIONEER, OPTIMIZER, GENERALIST)."""
+    if not agent_id:
+        return 'GENERALIST'
+    
+    try:
+        result = db.execute_query(
+            "SELECT role FROM agents WHERE agent_id = ?",
+            (agent_id,)
+        )
+        return result[0]['role'] if result else 'GENERALIST'
+    except Exception:
+        return 'GENERALIST'
+
+def _get_theory_weights_for_gameplay(role: str) -> Tuple[float, float]:
+    """
+    Get wa (self weight) and wb (network weight) based on agent role.
+    
+    Pioneers trust their own discoveries more than network.
+    Optimizers trust network's proven strategies more.
+    Generalists balance both.
+    """
+    if role == 'PIONEER':
+        return (0.7, 0.3)  # Trust self > network
+    elif role == 'OPTIMIZER':
+        return (0.3, 0.7)  # Trust network > self
+    else:  # GENERALIST
+        return (0.5, 0.5)  # Balance
+
+def _theory_differs_significantly_for_gameplay(
+    historical: Dict[str, Any], 
+    current: Dict[str, int]
+) -> bool:
+    """
+    Check if current evidence differs significantly from historical theory.
+    
+    Used to detect when agent's understanding changes drastically.
+    """
+    try:
+        # Extract counts from historical theory text
+        import re
+        theory_text = historical.get('theory_text', '')
+        
+        # Match patterns like "2 moveable and 1 toggleable"
+        moveable_match = re.search(r'(\d+)\s+moveable', theory_text)
+        toggleable_match = re.search(r'(\d+)\s+toggleable', theory_text)
+        
+        hist_moveable = int(moveable_match.group(1)) if moveable_match else 0
+        hist_toggleable = int(toggleable_match.group(1)) if toggleable_match else 0
+        
+        curr_moveable = current.get('moveable', 0)
+        curr_toggleable = current.get('toggleable', 0)
+        
+        # Significant if count changes by 3+ objects
+        return (abs(hist_moveable - curr_moveable) >= 3 or 
+                abs(hist_toggleable - curr_toggleable) >= 3)
+    except Exception:
+        return False
+
+def _store_working_theory_history_for_gameplay(
+    db,
+    agent_id: str,
+    game_id: str,
+    level: int,
+    theory_text: str,
+    confidence: float,
+    evidence_count: int
+) -> None:
+    """Store working theory in history for future refinement."""
+    try:
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        db.execute_query("""
+            INSERT INTO working_theory_history
+            (agent_id, game_type, level_number, theory_text, confidence, evidence_count)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (agent_id, game_type, level, theory_text, confidence, evidence_count))
+    except Exception as e:
+        logger.debug(f"Store theory history failed: {e}")
+
+def _get_network_consensus_theory(
+    db,
+    game_id: str,
+    level: int
+) -> Dict[str, int]:
+    """
+    Get network consensus on object counts for this game/level.
+    
+    Returns average counts from successful agent theories.
+    """
+    try:
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Get recent theories from successful agents (high confidence)
+        results = db.execute_query("""
+            SELECT theory_text FROM working_theory_history
+            WHERE game_type = ? AND level_number = ? 
+                  AND confidence >= 0.6
+                  AND invalidated_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 10
+        """, (game_type, level))
+        
+        if not results:
+            return {'moveable': 0, 'toggleable': 0}
+        
+        # Extract counts from theory texts
+        import re
+        moveable_counts = []
+        toggleable_counts = []
+        
+        for row in results:
+            theory = row['theory_text']
+            
+            moveable_match = re.search(r'(\d+)\s+moveable', theory)
+            if moveable_match:
+                moveable_counts.append(int(moveable_match.group(1)))
+            
+            toggleable_match = re.search(r'(\d+)\s+toggleable', theory)
+            if toggleable_match:
+                toggleable_counts.append(int(toggleable_match.group(1)))
+        
+        # Average the counts (network consensus)
+        avg_moveable = sum(moveable_counts) / len(moveable_counts) if moveable_counts else 0
+        avg_toggleable = sum(toggleable_counts) / len(toggleable_counts) if toggleable_counts else 0
+        
+        return {
+            'moveable': int(round(avg_moveable)),
+            'toggleable': int(round(avg_toggleable))
+        }
+        
+    except Exception as e:
+        logger.debug(f"Network consensus query failed: {e}")
+        return {'moveable': 0, 'toggleable': 0}
+
+def _merge_theories_with_weights(
+    current_evidence: Dict[str, int],
+    network_consensus: Dict[str, int],
+    historical: Optional[Dict[str, Any]],
+    wa_self: float,
+    wb_network: float
+) -> Dict[str, float]:
+    """
+    Merge current evidence with network consensus using role-based weights.
+    
+    FIX 3: Theory Merging Algorithm
+    
+    Formula:
+        merged_count = (current * wa_self) + (network * wb_network) + (historical * 0.2)
+    
+    Args:
+        current_evidence: Agent's current observations
+        network_consensus: Network's average belief
+        historical: Agent's previous theory (optional)
+        wa_self: Weight for current evidence (0.0-1.0)
+        wb_network: Weight for network consensus (0.0-1.0)
+    
+    Returns:
+        Merged theory counts (moveable, toggleable)
+    """
+    # Extract historical counts if available
+    hist_moveable = 0
+    hist_toggleable = 0
+    
+    if historical:
+        import re
+        theory_text = historical.get('theory_text', '')
+        
+        moveable_match = re.search(r'(\d+)\s+moveable', theory_text)
+        if moveable_match:
+            hist_moveable = int(moveable_match.group(1))
+        
+        toggleable_match = re.search(r'(\d+)\s+toggleable', theory_text)
+        if toggleable_match:
+            hist_toggleable = int(toggleable_match.group(1))
+    
+    # Weighted merge
+    # Historical gets 20% weight always (prevents total forgetting)
+    # Remaining 80% split between current and network based on role
+    hist_weight = 0.2
+    remaining = 1.0 - hist_weight
+    
+    # Normalize wa/wb to sum to remaining weight
+    total_weight = wa_self + wb_network
+    if total_weight > 0:
+        norm_wa = (wa_self / total_weight) * remaining
+        norm_wb = (wb_network / total_weight) * remaining
+    else:
+        norm_wa = norm_wb = remaining / 2
+    
+    merged_moveable = (
+        current_evidence.get('moveable', 0) * norm_wa +
+        network_consensus.get('moveable', 0) * norm_wb +
+        hist_moveable * hist_weight
+    )
+    
+    merged_toggleable = (
+        current_evidence.get('toggleable', 0) * norm_wa +
+        network_consensus.get('toggleable', 0) * norm_wb +
+        hist_toggleable * hist_weight
+    )
+    
+    return {
+        'moveable': merged_moveable,
+        'toggleable': merged_toggleable
+    }

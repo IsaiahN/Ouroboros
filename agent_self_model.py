@@ -1918,7 +1918,9 @@ class AgentSelfModel:
                     result['object_id'] = obj_id
                     result['control_type'] = 'direct'
                     result['movement_matches_action'] = True
-                    result['confidence'] = 0.7
+                    # LOWER initial confidence - correlation != causation
+                    # Requires 3+ observations to reach high confidence (0.7+)
+                    result['confidence'] = 0.35  # Single observation only
                     
                     # Store discovery locally
                     if game_type and level:
@@ -2080,6 +2082,11 @@ class AgentSelfModel:
         # For games with many objects (like ft09 with 12 tiles), need more than 20 actions
         # Discovery continues until all objects are tested OR we hit a reasonable limit
         
+        # FIX 1: Check for pending symmetry experiments FIRST
+        symmetry_action = self._get_next_symmetry_experiment_action(game_type, level, frame)
+        if symmetry_action:
+            return symmetry_action
+        
         # Generate plan if we don't have one
         if not hasattr(self, '_current_discovery_plan') or not self._current_discovery_plan:
             self._current_discovery_plan = self.generate_object_discovery_plan(frame, game_type, level)
@@ -2131,6 +2138,109 @@ class AgentSelfModel:
                 'action': action,
                 'reason': f"Testing {step['target']} control with {action}"
             }
+        
+        return None
+    
+    def _get_next_symmetry_experiment_action(
+        self,
+        game_type: str,
+        level: int,
+        frame: List[List[int]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check for pending symmetry experiments and return next action to execute.
+        
+        Symmetry experiments test if all similar objects share a property.
+        Example: If color_12 toggles, test all other color_12 objects.
+        """
+        try:
+            # Get pending experiments
+            pending = self.db.execute_query("""
+                SELECT experiment_id, reference_color, property_type, action, direction, results
+                FROM pending_symmetry_experiments
+                WHERE game_type = ? AND level_number = ? AND completed = FALSE
+                ORDER BY created_at ASC
+                LIMIT 1
+            """, (game_type, level))
+            
+            if not pending:
+                return None
+            
+            exp = pending[0]
+            experiment_id = exp['experiment_id']
+            ref_color = exp['reference_color']
+            property_type = exp['property_type']
+            
+            # Parse existing results
+            results = json.loads(exp['results']) if exp['results'] else []
+            
+            # Find all objects with reference_color that haven't been tested yet
+            from seed_primitives import get_seed_primitives
+            primitives = get_seed_primitives()
+            all_objects = primitives.call('find_distinct_objects', frame)
+            
+            ref_objects = [obj for obj in all_objects if obj.get('color') == ref_color]
+            tested_coords = {(r['x'], r['y']) for r in results}
+            untested = [obj for obj in ref_objects 
+                       if (obj['position'][0], obj['position'][1]) not in tested_coords]
+            
+            if not untested:
+                # All objects tested, mark complete
+                self.db.execute_query("""
+                    UPDATE pending_symmetry_experiments
+                    SET completed = TRUE
+                    WHERE experiment_id = ?
+                """, (experiment_id,))
+                
+                # Report findings to CODS
+                self._report_symmetry_findings_to_cods(
+                    game_type, level, ref_color, property_type, results
+                )
+                
+                logger.info(
+                    f"[SYMMETRY] Experiment {experiment_id} complete: "
+                    f"{len(results)} objects tested for {property_type} property"
+                )
+                return None
+            
+            # Test next object
+            next_obj = untested[0]
+            x, y = next_obj['position']
+            
+            if property_type == 'toggleable':
+                # Click to test toggle
+                return {
+                    'action': 'ACTION6',
+                    'x': x,
+                    'y': y,
+                    'reason': f"Symmetry test: checking if color_{ref_color} at ({x},{y}) is toggleable",
+                    '_symmetry_experiment': experiment_id
+                }
+            elif property_type == 'moveable':
+                # First select, then move
+                if not hasattr(self, '_symmetry_movement_test_stage'):
+                    self._symmetry_movement_test_stage = 'select'
+                
+                if self._symmetry_movement_test_stage == 'select':
+                    self._symmetry_movement_test_stage = 'move'
+                    return {
+                        'action': 'ACTION6',
+                        'x': x,
+                        'y': y,
+                        'reason': f"Symmetry test: selecting color_{ref_color} at ({x},{y})",
+                        '_symmetry_experiment': experiment_id
+                    }
+                else:
+                    self._symmetry_movement_test_stage = 'select'
+                    action = exp['action'] or 'ACTION1'
+                    return {
+                        'action': action,
+                        'reason': f"Symmetry test: testing movement of color_{ref_color}",
+                        '_symmetry_experiment': experiment_id
+                    }
+            
+        except Exception as e:
+            logger.debug(f"Symmetry experiment action failed: {e}")
         
         return None
     
@@ -2998,6 +3108,16 @@ class AgentSelfModel:
                     f"[MOVEMENT] VALIDATED (x{current_attempts + 1}): color_{controlled_color} "
                     f"responds to {action} with {direction} (reliability {new_reliability:.2f})"
                 )
+                # FIX 2: Trigger property symmetry test after validation
+                # If color_X is moveable, test all similar objects
+                try:
+                    self._trigger_symmetry_experiment(
+                        game_type, level, controlled_color, 
+                        property_type='moveable', 
+                        action=action, direction=direction
+                    )
+                except Exception as e:
+                    logger.debug(f"Symmetry experiment trigger failed: {e}")
             else:
                 logger.debug(f"[MOVEMENT] Observation {current_attempts + 1}/3 for color_{controlled_color}")
         else:
@@ -3030,6 +3150,188 @@ class AgentSelfModel:
             )
         except Exception as e:
             logger.debug(f"Personal control map update failed: {e}")
+
+    def _trigger_symmetry_experiment(
+        self,
+        game_type: str,
+        level: int,
+        validated_color: int,
+        property_type: str,  # 'moveable' or 'toggleable'
+        action: Optional[str] = None,
+        direction: Optional[str] = None
+    ) -> None:
+        """
+        Trigger symmetry experiment: test if all similar objects share property.
+        
+        Called when a property is validated for one object - extends test to
+        all objects sharing similar features (color, shape, class).
+        
+        Args:
+            game_type: Game identifier
+            level: Level number
+            validated_color: Color number that was validated
+            property_type: Type of property validated ('moveable', 'toggleable')
+            action: Action that caused movement (for moveable)
+            direction: Direction of movement (for moveable)
+        """
+        # Store symmetry experiment request in database
+        # The discovery phase will pick this up and test similar objects
+        try:
+            experiment_id = f"symmetry_{game_type}_L{level}_{property_type}_{validated_color}_{int(time.time())}"
+            self.db.execute_query("""
+                INSERT OR IGNORE INTO pending_symmetry_experiments
+                (experiment_id, game_type, level_number, reference_color, property_type,
+                 action, direction, created_at, completed, results)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, FALSE, '[]')
+            """, (
+                experiment_id, game_type, level, validated_color,
+                property_type, action, direction
+            ))
+            logger.info(
+                f"[SYMMETRY] Queued experiment: Test if all color_{validated_color} "
+                f"objects are {property_type}"
+            )
+        except Exception as e:
+            logger.debug(f"Symmetry experiment queue failed (non-critical): {e}")
+    
+    def _report_symmetry_findings_to_cods(
+        self,
+        game_type: str,
+        level: int,
+        color: int,
+        property_type: str,
+        results: List[Dict]
+    ) -> None:
+        """
+        Report symmetry experiment findings to CODS for hypothesis generation.
+        
+        FIX 2: CODS Integration
+        When symmetry experiment completes, generate conceptual hypotheses:
+        - "All color_X objects are toggleable"
+        - "Color_X objects are moveable with ACTION1->up"
+        """
+        try:
+            from cods_engine import get_cods_engine
+            cods = get_cods_engine()
+            
+            # Count successes
+            total = len(results)
+            successes = sum(1 for r in results if r.get('property_confirmed', False))
+            
+            if total == 0:
+                return
+            
+            confidence = successes / total
+            
+            # Generate hypothesis text
+            if confidence >= 0.8:
+                # Strong symmetry
+                hypothesis = f"All color_{color} objects are {property_type}"
+                generalization = 'full'
+            elif confidence >= 0.5:
+                # Partial symmetry
+                hypothesis = f"Most color_{color} objects are {property_type}"
+                generalization = 'partial'
+            else:
+                # No symmetry
+                hypothesis = f"color_{color} property varies - no symmetry"
+                generalization = 'none'
+            
+            # Store as conceptual pattern in CODS
+            if hasattr(cods, 'concept_engine') and cods.concept_engine:
+                cods.concept_engine.store_discovered_concept(
+                    concept_type='property_symmetry',
+                    description=hypothesis,
+                    evidence={
+                        'game_type': game_type,
+                        'level': level,
+                        'color': color,
+                        'property': property_type,
+                        'total_tested': total,
+                        'successes': successes,
+                        'confidence': confidence,
+                        'generalization': generalization
+                    },
+                    confidence=confidence
+                )
+                logger.info(
+                    f"[CODS] Symmetry hypothesis: {hypothesis} "
+                    f"(confidence {confidence:.2f}, {successes}/{total} objects)"
+                )
+            else:
+                # Fallback: store in network hypotheses
+                hypothesis_id = f"symmetry_{game_type}_L{level}_color{color}_{property_type}"
+                self.db.execute_query("""
+                    INSERT OR REPLACE INTO network_object_control_hypotheses
+                    (hypothesis_id, game_type, level_number, control_pattern, 
+                     reliability_score, discovery_method, validation_attempts, validation_successes)
+                    VALUES (?, ?, ?, ?, ?, 'symmetry_experiment', ?, ?)
+                """, (
+                    hypothesis_id, game_type, level,
+                    json.dumps({
+                        'type': 'symmetry',
+                        'color': color,
+                        'property': property_type,
+                        'generalization': generalization
+                    }),
+                    confidence, total, successes
+                ))
+                logger.info(f"[SYMMETRY] Stored hypothesis: {hypothesis}")
+                
+        except Exception as e:
+            logger.debug(f"CODS symmetry reporting failed (non-critical): {e}")
+    
+    def record_symmetry_experiment_result(
+        self,
+        experiment_id: str,
+        x: int,
+        y: int,
+        discovery_result: Dict[str, Any]
+    ) -> None:
+        """
+        Record the result of testing one object in a symmetry experiment.
+        
+        Args:
+            experiment_id: The experiment being executed
+            x, y: Coordinates tested
+            discovery_result: Result from execute_object_discovery
+        """
+        try:
+            # Get current results
+            exp = self.db.execute_query("""
+                SELECT results FROM pending_symmetry_experiments
+                WHERE experiment_id = ?
+            """, (experiment_id,))
+            
+            if not exp:
+                return
+            
+            results = json.loads(exp[0]['results']) if exp[0]['results'] else []
+            
+            # Add new result
+            property_confirmed = discovery_result.get('discovered_control', False)
+            results.append({
+                'x': x,
+                'y': y,
+                'property_confirmed': property_confirmed,
+                'confidence': discovery_result.get('confidence', 0.0),
+                'control_type': discovery_result.get('control_type')
+            })
+            
+            # Update database
+            self.db.execute_query("""
+                UPDATE pending_symmetry_experiments
+                SET results = ?
+                WHERE experiment_id = ?
+            """, (json.dumps(results), experiment_id))
+            
+            logger.debug(
+                f"[SYMMETRY] Recorded result for ({x},{y}): "
+                f"property_confirmed={property_confirmed}"
+            )
+            
+        except Exception as e:
+            logger.debug(f"Record symmetry result failed: {e}")
 
     def get_network_control_hypotheses(
         self,
