@@ -1232,3 +1232,220 @@ The Ouroboros system now has:
    - Database persistence for `consciousness_logs` entries
    - Integration tests for transfer testing
    - Metrics dashboard for belief graph health
+
+---
+
+## Session: January 7, 2026 - Expanding Controllable Object Detection for Toggle-Based Games
+
+---
+
+### Approach: Fix gap where agents only detect movement-based control, missing toggleable objects (click-to-change-color)
+
+**Timestamp**: 10:09:01 AM  
+**Status**: IN PROGRESS - Core changes implemented, needs evolution testing
+
+---
+
+### Problem Statement
+
+Reviewed ft09 reasoning log and found critical gaps:
+
+1. **Working theory shows "I control 1 objects"** when the game (ft09) has ~12 distinct clickable tiles that toggle color when clicked
+2. **Control detection only recognizes movement** - Objects that change color/state when clicked are NOT detected as "controllable"
+3. **Discovery phase too short** - Fixed 20 actions not enough to test 12+ objects systematically
+4. **Pattern matching not available** - Core cognitive capability locked behind earn-to-learn system
+
+The ft09 game is a grid of tiles that toggle between orange and blue when clicked - the agents were blind to this interaction type.
+
+---
+
+### Investigation Steps
+
+| Step | What | Finding |
+|------|------|---------|
+| 1 | Reviewed ft09 reasoning log | `working_theory` stuck at "I control 1 objects" for 187 frames |
+| 2 | Checked `execute_object_discovery()` | Only checks `get_object_movement()` for clicks - misses color changes |
+| 3 | Checked `get_controlled_objects()` | Only queries `agent_object_control` table (movement-based) |
+| 4 | Checked discovery phase length | Hard-coded to 20 actions regardless of object count |
+| 5 | Searched for `pattern_matching` primitive | Not defined as seed primitive, only referenced in keyword mapping |
+
+---
+
+### Root Cause
+
+The system equated "controllable" with "moves when I act on it". But in puzzle games like ft09, the primary interaction is clicking tiles to toggle their color - no movement involved. This is equally valid "control" that was being ignored.
+
+---
+
+### Fixes Implemented
+
+#### Fix #1: New `detect_click_effect` Seed Primitive
+
+**File**: [seed_primitives.py](seed_primitives.py#L755-L770) (registration) + [seed_primitives.py](seed_primitives.py#L1630-L1725) (implementation)
+
+Added new primitive that detects ANY frame change from clicking:
+- **Toggle**: Color changed at click position (most common in puzzle games)
+- **Move**: Object moved when clicked
+- **Appear/Disappear**: Object appeared or vanished
+- **Remote**: Click affected something elsewhere in frame
+
+```python
+def _detect_click_effect(self, frame_before, frame_after, x, y) -> Dict:
+    """Detect any frame change caused by clicking at coordinates."""
+    # Returns effect_type: 'toggle'|'move'|'appear'|'disappear'|'remote'|'none'
+```
+
+---
+
+#### Fix #2: Updated `execute_object_discovery()` to Use New Primitive
+
+**File**: [agent_self_model.py](agent_self_model.py#L1885-L1975)
+
+Replaced simple movement check with comprehensive effect detection:
+
+```python
+# Old: Only checked movement
+movement = primitives.call('get_object_movement', clicked_obj, frame_before, frame_after)
+if movement != 'none':
+    result['control_type'] = 'button'
+
+# New: Detects toggles, remote effects, appearance changes
+click_effect = primitives.call('detect_click_effect', frame_before, frame_after, x, y)
+if click_effect.get('effect_detected'):
+    effect_type = click_effect.get('effect_type')  # 'toggle', 'move', 'remote', etc.
+    result['control_type'] = effect_type
+```
+
+Added new helper methods:
+- `_record_toggle_discovery()` - Records toggle objects to database
+- `learn_from_click_effect()` - Shares toggle discoveries to network
+
+---
+
+#### Fix #3: Dynamic Discovery Phase Length
+
+**File**: [agent_self_model.py](agent_self_model.py#L2000-L2030)
+
+Changed from fixed 20 actions to dynamic limit based on object count:
+
+```python
+# Old: Hard 20 action limit
+if actions_taken > 20:
+    return None
+
+# New: Dynamic limit based on object count (min 40, max 100)
+self._discovery_action_limit = min(
+    max(40, len(self._current_discovery_plan) * 2),
+    100
+)
+```
+
+---
+
+#### Fix #4: Improved Discovery Plan - Click ALL Objects First
+
+**File**: [agent_self_model.py](agent_self_model.py#L1700-L1790)
+
+Two-phase discovery:
+1. **Phase 1**: Click on every unknown object (detects toggles/buttons)
+2. **Phase 2**: Test movement actions on subset of objects
+
+```python
+# PHASE 1: Click on every unknown object
+for obj in objects:
+    plan.append({
+        'phase': 'select',
+        'action': 'ACTION6',
+        'coords': (cx, cy),
+        'purpose': f'Click on {obj_id} to test for toggle/button/selection'
+    })
+```
+
+---
+
+#### Fix #5: Pattern Matching Primitives (Seed Level)
+
+**File**: [seed_primitives.py](seed_primitives.py#L780-L815) (registration) + [seed_primitives.py](seed_primitives.py#L1760-L1930) (implementation)
+
+Added three new **always-available** pattern matching primitives:
+
+| Primitive | Purpose |
+|-----------|---------|
+| `pattern_matching` | Find matching patterns (by color, grid, or object properties) |
+| `find_similar_objects` | Find objects similar to a reference (same color/size/shape) |
+| `count_matching_objects` | Count objects of a specific color |
+
+---
+
+#### Fix #6: Expanded `get_controlled_objects()` 
+
+**File**: [agent_self_model.py](agent_self_model.py#L1598-L1667)
+
+Now returns ALL controllable objects, not just movement-based:
+
+```python
+# 1. Get movement-controlled from agent_object_control
+# 2. Get toggleable from object_selection_state (is_button=1)  
+# 3. Get toggle-specific from pseudo_button_behavior (movement_direction='toggle')
+```
+
+---
+
+#### Fix #7: Updated `working_theory` to Show Control Types
+
+**File**: [core_gameplay.py](core_gameplay.py#L14590-L14608)
+
+Now distinguishes between control types in the working theory:
+
+```python
+# Old: "I control 1 objects and move with directional actions"
+
+# New (examples):
+# "I control 3 moveable and 9 toggleable objects"
+# "I can toggle 12 objects by clicking"
+```
+
+---
+
+### Files Modified
+
+| File | Lines Changed | Purpose |
+|------|---------------|---------|
+| [seed_primitives.py](seed_primitives.py) | ~200 | New primitives: `detect_click_effect`, `find_all_interactable_objects`, `pattern_matching`, `find_similar_objects`, `count_matching_objects` |
+| [agent_self_model.py](agent_self_model.py) | ~150 | Toggle detection, dynamic discovery, expanded `get_controlled_objects()`, new recording methods |
+| [core_gameplay.py](core_gameplay.py) | ~15 | Updated working_theory generation |
+
+---
+
+### Syntax Verification
+
+All modified files pass syntax check:
+```
+python -m py_compile agent_self_model.py seed_primitives.py core_gameplay.py
+# Output: (no output = success)
+```
+
+---
+
+### Current Status: NEEDS EVOLUTION TESTING
+
+Core changes implemented. Next steps:
+1. Run 2-3 generation evolution test
+2. Verify toggle discoveries are being recorded in database
+3. Check that `working_theory` now shows correct object counts
+4. Confirm discovery phase properly tests all visible objects
+5. Monitor for any regressions in movement-based games
+
+---
+
+### Expected Behavior After Fix
+
+For ft09 (12-tile toggle puzzle):
+- **Before**: "I control 1 objects and move with directional actions" (wrong)
+- **After**: "I can toggle 12 objects by clicking" (correct)
+
+Discovery should:
+1. Click on all 12 tiles systematically
+2. Detect color toggle effect for each
+3. Record toggle discoveries to database
+4. Share to network for other agents

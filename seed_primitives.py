@@ -752,6 +752,71 @@ class SeedPrimitiveRegistry:
             output_type="object_id"
         ))
         
+        # NEW: Detect ANY frame change at click location (not just movement)
+        # This captures toggleable objects, color changes, state changes, etc.
+        self._register(Primitive(
+            name="detect_click_effect",
+            category=PrimitiveCategory.OBJECT_INTERACTION,
+            description="Detect any frame change caused by clicking at coordinates. Returns effect type and details.",
+            func=self._detect_click_effect,
+            input_types=["frame_before", "frame_after", "x", "y"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        # NEW: Find all potentially controllable objects (for systematic discovery)
+        self._register(Primitive(
+            name="find_all_interactable_objects",
+            category=PrimitiveCategory.OBJECT_INTERACTION,
+            description="Find all objects that might be interactive (clickable, moveable, toggleable)",
+            func=self._find_all_interactable_objects,
+            input_types=["frame"],
+            output_type="list",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        # ==================================================================
+        # PATTERN MATCHING PRIMITIVES - SEED (Core capability)
+        # ==================================================================
+        # Pattern matching is fundamental to intelligence - recognizing
+        # similarities, differences, and regularities. Should always be available.
+        # ==================================================================
+        
+        self._register(Primitive(
+            name="pattern_matching",
+            category=PrimitiveCategory.OBJECT_INTERACTION,
+            description="Find matching patterns between two regions or objects. Returns similarity score and match details.",
+            func=self._pattern_matching,
+            input_types=["pattern", "frame"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="find_similar_objects",
+            category=PrimitiveCategory.OBJECT_INTERACTION,
+            description="Find all objects in frame similar to a reference object (same color, size, or shape).",
+            func=self._find_similar_objects,
+            input_types=["reference_object", "frame"],
+            output_type="list",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="count_matching_objects",
+            category=PrimitiveCategory.OBJECT_INTERACTION,
+            description="Count objects matching a given color or property.",
+            func=self._count_matching_objects,
+            input_types=["frame", "color"],
+            output_type="int",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
         # ==================================================================
         # PHASE 1: ATTENTION PRIMITIVES (5 primitives) - SEED
         # ==================================================================
@@ -1522,6 +1587,358 @@ class SeedPrimitiveRegistry:
             return None  # Background
         
         return f"obj_{color}"
+    
+    def _detect_click_effect(
+        self,
+        frame_before: List[List[int]],
+        frame_after: List[List[int]],
+        x: int,
+        y: int
+    ) -> Dict[str, Any]:
+        """
+        Detect any frame change caused by clicking at coordinates.
+        
+        This captures:
+        - Color toggles (object changes color when clicked)
+        - State changes (object appears/disappears)
+        - Size changes (object grows/shrinks)
+        - Movement (object moves when clicked)
+        - Remote effects (clicking here changes something elsewhere)
+        
+        Returns:
+            {
+                'effect_detected': bool,
+                'effect_type': 'toggle'|'move'|'appear'|'disappear'|'remote'|'none',
+                'clicked_object': str or None,
+                'color_before': int,
+                'color_after': int,
+                'affected_positions': List[Tuple[int, int]],
+                'confidence': float
+            }
+        """
+        result = {
+            'effect_detected': False,
+            'effect_type': 'none',
+            'clicked_object': None,
+            'color_before': 0,
+            'color_after': 0,
+            'affected_positions': [],
+            'confidence': 0.0
+        }
+        
+        if not frame_before or not frame_after:
+            return result
+        
+        height = len(frame_before)
+        width = len(frame_before[0]) if frame_before else 0
+        
+        if y >= height or x >= width:
+            return result
+        
+        # Get color at click position before and after
+        color_before = frame_before[y][x]
+        color_after = frame_after[y][x]
+        
+        result['color_before'] = color_before
+        result['color_after'] = color_after
+        result['clicked_object'] = f"obj_{color_before}" if color_before != 0 else None
+        
+        # Detect all changed positions
+        changed_positions = []
+        for cy in range(height):
+            for cx in range(width):
+                if frame_before[cy][cx] != frame_after[cy][cx]:
+                    changed_positions.append((cx, cy))
+        
+        result['affected_positions'] = changed_positions
+        
+        if not changed_positions:
+            return result
+        
+        result['effect_detected'] = True
+        
+        # Determine effect type
+        if color_before != color_after and color_before != 0 and color_after != 0:
+            # Color changed at click position - this is a TOGGLE!
+            result['effect_type'] = 'toggle'
+            result['confidence'] = 0.9
+        elif color_before != 0 and color_after == 0:
+            # Object disappeared
+            result['effect_type'] = 'disappear'
+            result['confidence'] = 0.8
+        elif color_before == 0 and color_after != 0:
+            # Object appeared
+            result['effect_type'] = 'appear'
+            result['confidence'] = 0.8
+        elif (x, y) not in changed_positions:
+            # Click position didn't change but something else did - remote effect
+            result['effect_type'] = 'remote'
+            result['confidence'] = 0.7
+        else:
+            # Check for movement (same color at click position but object moved)
+            obj_id = f"obj_{color_before}"
+            movement = self._get_object_movement(obj_id, frame_before, frame_after)
+            if movement != 'none':
+                result['effect_type'] = 'move'
+                result['confidence'] = 0.8
+            else:
+                result['effect_type'] = 'unknown'
+                result['confidence'] = 0.5
+        
+        return result
+    
+    def _find_all_interactable_objects(
+        self,
+        frame: List[List[int]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Find all objects that might be interactive in the frame.
+        
+        This is the foundation for systematic object discovery.
+        All non-background objects are potentially interactive until proven otherwise.
+        
+        Returns list of:
+            {
+                'object_id': str,
+                'color': int,
+                'centroid': Tuple[float, float],
+                'positions': List[Tuple[int, int]],
+                'size': int,
+                'bounding_box': (min_x, min_y, max_x, max_y),
+                'tested': False  # Will be updated during discovery
+            }
+        """
+        objects = self._find_distinct_objects(frame)
+        
+        interactables = []
+        for obj in objects:
+            # Calculate bounding box
+            positions = obj.get('positions', [])
+            if not positions:
+                continue
+            
+            xs = [p[0] for p in positions]
+            ys = [p[1] for p in positions]
+            bbox = (min(xs), min(ys), max(xs), max(ys))
+            
+            interactables.append({
+                'object_id': obj['object_id'],
+                'color': obj['color'],
+                'centroid': obj['centroid'],
+                'positions': positions[:20],  # Limit to save memory
+                'size': len(positions),
+                'bounding_box': bbox,
+                'tested': False
+            })
+        
+        return interactables
+    
+    # ======================================================================
+    # PATTERN MATCHING PRIMITIVE IMPLEMENTATIONS
+    # ======================================================================
+    
+    def _pattern_matching(
+        self,
+        pattern: Any,
+        frame: List[List[int]]
+    ) -> Dict[str, Any]:
+        """
+        Find matching patterns in a frame.
+        
+        Pattern can be:
+        - A color (int): Find all occurrences of that color
+        - A small grid (List[List[int]]): Find exact matches
+        - An object dict: Find objects with matching properties
+        
+        Returns:
+            {
+                'matches': List of match locations,
+                'similarity': float (0-1),
+                'match_count': int,
+                'match_type': 'color'|'grid'|'object'
+            }
+        """
+        result = {
+            'matches': [],
+            'similarity': 0.0,
+            'match_count': 0,
+            'match_type': 'unknown'
+        }
+        
+        if not frame:
+            return result
+        
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
+        # Pattern is a color (int)
+        if isinstance(pattern, int):
+            result['match_type'] = 'color'
+            matches = []
+            for y in range(height):
+                for x in range(width):
+                    if frame[y][x] == pattern:
+                        matches.append((x, y))
+            result['matches'] = matches
+            result['match_count'] = len(matches)
+            result['similarity'] = 1.0 if matches else 0.0
+            return result
+        
+        # Pattern is a small grid (exact matching)
+        if isinstance(pattern, list) and pattern and isinstance(pattern[0], list):
+            result['match_type'] = 'grid'
+            p_height = len(pattern)
+            p_width = len(pattern[0]) if pattern else 0
+            
+            matches = []
+            for start_y in range(height - p_height + 1):
+                for start_x in range(width - p_width + 1):
+                    # Check if pattern matches at this position
+                    is_match = True
+                    for py in range(p_height):
+                        for px in range(p_width):
+                            if frame[start_y + py][start_x + px] != pattern[py][px]:
+                                is_match = False
+                                break
+                        if not is_match:
+                            break
+                    if is_match:
+                        matches.append((start_x, start_y))
+            
+            result['matches'] = matches
+            result['match_count'] = len(matches)
+            result['similarity'] = 1.0 if matches else 0.0
+            return result
+        
+        # Pattern is an object dict (match by properties)
+        if isinstance(pattern, dict):
+            result['match_type'] = 'object'
+            target_color = pattern.get('color')
+            target_size = pattern.get('size')
+            
+            objects = self._find_distinct_objects(frame)
+            matches = []
+            
+            for obj in objects:
+                score = 0.0
+                checks = 0
+                
+                if target_color is not None:
+                    checks += 1
+                    if obj['color'] == target_color:
+                        score += 1.0
+                
+                if target_size is not None:
+                    checks += 1
+                    # Allow 20% size variance
+                    size_ratio = min(len(obj.get('positions', [])), target_size) / max(len(obj.get('positions', [])), target_size, 1)
+                    if size_ratio > 0.8:
+                        score += size_ratio
+                
+                if checks > 0 and score / checks > 0.8:
+                    matches.append({
+                        'object_id': obj['object_id'],
+                        'centroid': obj['centroid'],
+                        'similarity': score / checks
+                    })
+            
+            result['matches'] = matches
+            result['match_count'] = len(matches)
+            result['similarity'] = max([m['similarity'] for m in matches]) if matches else 0.0
+            return result
+        
+        return result
+    
+    def _find_similar_objects(
+        self,
+        reference_object: Dict[str, Any],
+        frame: List[List[int]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Find all objects similar to a reference object.
+        
+        Similarity based on color, size, shape approximation.
+        Useful for finding "all objects like this one" for puzzles.
+        
+        Returns list of similar objects with similarity scores.
+        """
+        if not frame or not reference_object:
+            return []
+        
+        ref_color = reference_object.get('color')
+        ref_size = len(reference_object.get('positions', []))
+        
+        objects = self._find_distinct_objects(frame)
+        similar = []
+        
+        for obj in objects:
+            # Skip if same object
+            if obj.get('object_id') == reference_object.get('object_id'):
+                continue
+            
+            similarity = 0.0
+            
+            # Color match (most important)
+            if ref_color is not None and obj['color'] == ref_color:
+                similarity += 0.5
+            
+            # Size similarity
+            if ref_size > 0:
+                obj_size = len(obj.get('positions', []))
+                size_ratio = min(obj_size, ref_size) / max(obj_size, ref_size, 1)
+                similarity += 0.3 * size_ratio
+            
+            # Aspect ratio similarity (shape approximation)
+            ref_positions = reference_object.get('positions', [])
+            obj_positions = obj.get('positions', [])
+            
+            if ref_positions and obj_positions:
+                ref_xs = [p[0] for p in ref_positions]
+                ref_ys = [p[1] for p in ref_positions]
+                obj_xs = [p[0] for p in obj_positions]
+                obj_ys = [p[1] for p in obj_positions]
+                
+                ref_aspect = (max(ref_xs) - min(ref_xs) + 1) / max(max(ref_ys) - min(ref_ys) + 1, 1)
+                obj_aspect = (max(obj_xs) - min(obj_xs) + 1) / max(max(obj_ys) - min(obj_ys) + 1, 1)
+                
+                aspect_ratio = min(ref_aspect, obj_aspect) / max(ref_aspect, obj_aspect, 0.1)
+                similarity += 0.2 * aspect_ratio
+            
+            if similarity > 0.3:
+                similar.append({
+                    'object_id': obj['object_id'],
+                    'color': obj['color'],
+                    'centroid': obj['centroid'],
+                    'size': len(obj.get('positions', [])),
+                    'similarity': similarity
+                })
+        
+        # Sort by similarity
+        similar.sort(key=lambda x: x['similarity'], reverse=True)
+        return similar
+    
+    def _count_matching_objects(
+        self,
+        frame: List[List[int]],
+        color: int
+    ) -> int:
+        """
+        Count distinct objects of a specific color.
+        
+        This is useful for puzzle games where you need to count
+        how many tiles/objects of a certain type exist.
+        """
+        if not frame:
+            return 0
+        
+        objects = self._find_distinct_objects(frame)
+        count = 0
+        
+        for obj in objects:
+            if obj['color'] == color:
+                count += 1
+        
+        return count
     
     # ======================================================================
     # ATTENTION PRIMITIVE IMPLEMENTATIONS

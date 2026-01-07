@@ -1604,14 +1604,21 @@ class AgentSelfModel:
         """
         Retrieve agent's known controlled objects.
         
+        UPDATED: Now includes both movement-controlled AND toggleable objects.
+        Toggleable objects (click to change color) are as "controllable" as
+        movement-controlled objects.
+        
         Args:
             agent_id: Agent identifier
             game_id: Game identifier
             level: Level number
         
         Returns:
-            List of controlled object coordinates, or None if not learned
+            List of controlled object identifiers, or None if not learned
         """
+        controlled_objects = []
+        
+        # 1. Get movement-controlled objects from agent_object_control
         result = self.db.execute_query("""
             SELECT controlled_objects, confidence
             FROM agent_object_control
@@ -1619,9 +1626,48 @@ class AgentSelfModel:
         """, (agent_id, game_id, level))
         
         if result and result[0]['controlled_objects']:
-            return json.loads(result[0]['controlled_objects'])
+            try:
+                controlled_objects.extend(json.loads(result[0]['controlled_objects']))
+            except (json.JSONDecodeError, TypeError):
+                pass
         
-        return None
+        # 2. Get game_type from game_id for querying object_selection_state
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # 3. Get toggleable/button objects from object_selection_state
+        toggle_result = self.db.execute_query("""
+            SELECT object_color, confidence 
+            FROM object_selection_state
+            WHERE game_type = ? AND level_number = ? 
+            AND (is_button = 1 OR is_selectable = 1)
+            AND confidence >= 0.5
+        """, (game_type, level))
+        
+        if toggle_result:
+            for r in toggle_result:
+                obj_id = f"toggleable_color_{r['object_color']}"
+                if obj_id not in controlled_objects:
+                    controlled_objects.append(obj_id)
+        
+        # 4. Get toggle-specific entries from pseudo_button_behavior
+        toggle_behavior = self.db.execute_query("""
+            SELECT DISTINCT affected_objects 
+            FROM pseudo_button_behavior
+            WHERE game_type = ? AND level_number = ? AND movement_direction = 'toggle'
+        """, (game_type, level))
+        
+        if toggle_behavior:
+            for r in toggle_behavior:
+                try:
+                    affected = json.loads(r['affected_objects'])
+                    if isinstance(affected, dict):
+                        obj = affected.get('object')
+                        if obj and obj not in controlled_objects:
+                            controlled_objects.append(obj)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        
+        return controlled_objects if controlled_objects else None
 
     def get_self_identity_snapshot(
         self,
@@ -1697,6 +1743,10 @@ class AgentSelfModel:
         3. See if it responds to control
         4. Remember which ones respond
         
+        UPDATED: Now prioritizes clicking on ALL objects first to detect toggles,
+        before testing movement. This handles puzzle games where objects change
+        color when clicked (like ft09).
+        
         Args:
             frame: Current game frame
             game_type: Game type
@@ -1714,7 +1764,12 @@ class AgentSelfModel:
         from seed_primitives import get_seed_primitives
         primitives = get_seed_primitives()
         
-        objects = primitives.call('find_distinct_objects', frame)
+        # Use the new find_all_interactable_objects primitive if available
+        try:
+            objects = primitives.call('find_all_interactable_objects', frame)
+        except Exception:
+            # Fallback to old method
+            objects = primitives.call('find_distinct_objects', frame)
         
         if not objects:
             return []
@@ -1722,37 +1777,54 @@ class AgentSelfModel:
         # Check what we already know about this game/level
         known_controllable = self._get_known_controllable_objects(game_type, level)
         known_buttons = self._get_known_buttons(game_type, level)
+        known_toggles = self._get_known_toggleable_objects(game_type, level)
         
-        # Generate discovery plan
+        # Generate discovery plan in two phases:
+        # PHASE 1: Click on every unknown object (detects toggles, buttons, selections)
+        # PHASE 2: Test movement for objects that might need selection first
         plan = []
+        objects_to_test_movement = []
         
         for obj in objects:
             obj_id = obj['object_id']
-            color = obj['color']
-            cx, cy = obj['centroid']
+            color = obj.get('color', 0)
+            centroid = obj.get('centroid', (0, 0))
+            cx, cy = int(centroid[0]), int(centroid[1])
             
             # Skip if we already know about this object
-            if obj_id in known_controllable or obj_id in known_buttons:
+            if obj_id in known_controllable or obj_id in known_buttons or obj_id in known_toggles:
                 continue
             
-            # Plan 1: Click on the object (try to select it)
+            # PHASE 1: Click on the object to detect toggles/buttons/selection
             plan.append({
                 'phase': 'select',
                 'action': 'ACTION6',
                 'target': obj_id,
-                'coords': (int(cx), int(cy)),
-                'purpose': f'Click on {obj_id} to see if selectable'
+                'coords': (cx, cy),
+                'purpose': f'Click on {obj_id} (color_{color}) to test for toggle/button/selection'
             })
             
-            # Plan 2: Test movement actions (see if object responds)
+            # Mark for potential movement testing
+            objects_to_test_movement.append(obj)
+        
+        # PHASE 2: Test movement actions on a subset of objects
+        # Only test movement if we have objects that didn't respond to click
+        # This will be refined as discoveries are made
+        for obj in objects_to_test_movement[:5]:  # Limit to 5 objects for movement testing
+            obj_id = obj['object_id']
             plan.append({
                 'phase': 'test_control',
                 'actions': ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'],
                 'target': obj_id,
-                'purpose': f'Test if {obj_id} responds to movement'
+                'purpose': f'Test if {obj_id} responds to directional movement'
             })
         
-        logger.info(f"[DISCOVERY] Generated {len(plan)} discovery actions for {len(objects)} objects")
+        total_objects = len(objects)
+        unknown_objects = len(objects_to_test_movement)
+        logger.info(
+            f"[DISCOVERY] Generated {len(plan)} discovery actions: "
+            f"{unknown_objects} objects to test (of {total_objects} total)"
+        )
         return plan
     
     def execute_object_discovery(
@@ -1883,51 +1955,95 @@ class AgentSelfModel:
                     logger.info(f"[DISCOVERY] Found control: {obj_id} responds to {action_taken}")
                     break
         
-        # For ACTION6 (click), check if we selected something
+        # For ACTION6 (click), check if we selected something or caused ANY change
         elif action_num == 6 and click_coords:
             clicked_obj = primitives.call('get_click_target', frame_before, click_coords[0], click_coords[1])
             
-            if clicked_obj:
-                result['object_id'] = clicked_obj
+            # Use new detect_click_effect primitive for comprehensive change detection
+            click_effect = primitives.call(
+                'detect_click_effect', 
+                frame_before, frame_after, 
+                click_coords[0], click_coords[1]
+            )
+            
+            if click_effect and click_effect.get('effect_detected'):
+                result['object_id'] = clicked_obj or f"pos_{click_coords[0]}_{click_coords[1]}"
+                result['discovered_control'] = True
+                result['confidence'] = click_effect.get('confidence', 0.6)
                 
-                # Did anything change after clicking?
-                for obj in objects_before:
-                    if obj['object_id'] == clicked_obj:
-                        # Check if object properties changed
-                        movement = primitives.call('get_object_movement', clicked_obj, frame_before, frame_after)
+                effect_type = click_effect.get('effect_type', 'unknown')
+                
+                # Handle different effect types
+                if effect_type == 'toggle':
+                    # IMPORTANT: Toggle = clicking changes object color/state
+                    # This is common in puzzle games like ft09
+                    result['control_type'] = 'toggle'
+                    result['color_change'] = (
+                        click_effect.get('color_before'),
+                        click_effect.get('color_after')
+                    )
+                    logger.info(
+                        f"[DISCOVERY] Toggle detected: {clicked_obj} "
+                        f"color {click_effect.get('color_before')} -> "
+                        f"{click_effect.get('color_after')}"
+                    )
+                    
+                    if game_type and level:
+                        self._record_toggle_discovery(
+                            game_type, level, click_coords[0], click_coords[1],
+                            click_effect.get('color_before'),
+                            click_effect.get('color_after'),
+                            clicked_obj, agent_id
+                        )
                         
-                        if movement != 'none':
-                            # Object moved when clicked - might be a button or direct control
-                            result['discovered_control'] = True
-                            result['control_type'] = 'button'
-                            result['confidence'] = 0.6
-                            
-                            if game_type and level:
-                                self._record_button_discovery(
-                                    game_type, level, click_coords[0], click_coords[1],
-                                    movement, clicked_obj, agent_id
-                                )
-                                
-                                # SHARE TO NETWORK: Button discovery based on observation
-                                # Uses same repeated testing logic as movement
-                                try:
-                                    controlled_color = int(clicked_obj.replace('obj_', ''))
-                                    self.learn_from_movement_correlation(
-                                        agent_id=agent_id or 'discovery',
-                                        game_id=f"{game_type}-discovery",
-                                        level=level,
-                                        action='ACTION6',
-                                        direction=movement,
-                                        controlled_color=controlled_color,
-                                        generation=0
-                                    )
-                                    # Log message handled by learn_from_movement_correlation
-                                except Exception as e:
-                                    logger.debug(f"Network button sharing failed: {e}")
-                        else:
-                            # Object didn't move - might be a selection (test with next movement)
-                            result['control_type'] = 'maybe_selectable'
-                            result['confidence'] = 0.3
+                elif effect_type == 'move':
+                    result['control_type'] = 'button'
+                    movement = primitives.call('get_object_movement', clicked_obj, frame_before, frame_after)
+                    
+                    if game_type and level:
+                        self._record_button_discovery(
+                            game_type, level, click_coords[0], click_coords[1],
+                            movement, clicked_obj, agent_id
+                        )
+                        
+                elif effect_type == 'remote':
+                    # Clicking here affected something elsewhere
+                    result['control_type'] = 'remote_trigger'
+                    result['affected_positions'] = click_effect.get('affected_positions', [])
+                    logger.info(
+                        f"[DISCOVERY] Remote effect: clicking ({click_coords[0]},{click_coords[1]}) "
+                        f"affected {len(result['affected_positions'])} positions"
+                    )
+                    
+                elif effect_type in ['appear', 'disappear']:
+                    result['control_type'] = effect_type
+                    
+                else:
+                    result['control_type'] = 'unknown_click_effect'
+                
+                # SHARE TO NETWORK: Any click effect is valuable knowledge
+                try:
+                    controlled_color = click_effect.get('color_before', 0)
+                    if controlled_color > 0:
+                        self.learn_from_click_effect(
+                            agent_id=agent_id or 'discovery',
+                            game_id=f"{game_type}-discovery" if game_type else "unknown",
+                            level=level or 1,
+                            click_x=click_coords[0],
+                            click_y=click_coords[1],
+                            effect_type=effect_type,
+                            color_before=click_effect.get('color_before'),
+                            color_after=click_effect.get('color_after'),
+                            generation=0
+                        )
+                except Exception as e:
+                    logger.debug(f"Network click effect sharing failed: {e}")
+                    
+            elif clicked_obj:
+                result['object_id'] = clicked_obj
+                # No effect detected - might be a selection for subsequent movement
+                result['control_type'] = 'maybe_selectable'
+                result['confidence'] = 0.3
         
         # Add spurious movers info to result (for debugging/analysis)
         if spurious_movers:
@@ -1960,16 +2076,27 @@ class AgentSelfModel:
             Action recommendation or None if discovery complete:
             {'action': 'ACTION6', 'x': 10, 'y': 15, 'reason': 'Testing object obj_3'}
         """
-        # Only do discovery phase in first 20 actions
-        # NOTE: Discovery length evolves naturally - agents with optimal discovery
-        # time succeed more and reproduce. No central coordinator intervention.
-        if actions_taken > 20:
-            return None
+        # UPDATED: Dynamic discovery length based on object count
+        # For games with many objects (like ft09 with 12 tiles), need more than 20 actions
+        # Discovery continues until all objects are tested OR we hit a reasonable limit
         
         # Generate plan if we don't have one
         if not hasattr(self, '_current_discovery_plan') or not self._current_discovery_plan:
             self._current_discovery_plan = self.generate_object_discovery_plan(frame, game_type, level)
             self._discovery_plan_index = 0
+            # Calculate required actions: each object needs 1 click + maybe 1 movement test
+            self._discovery_action_limit = min(
+                max(40, len(self._current_discovery_plan) * 2),  # At least 40 or 2x plan length
+                100  # Hard cap at 100 actions for discovery
+            )
+            logger.info(
+                f"[DISCOVERY] Plan has {len(self._current_discovery_plan)} steps, "
+                f"limit set to {self._discovery_action_limit} actions"
+            )
+        
+        # Check if discovery should end
+        if actions_taken > getattr(self, '_discovery_action_limit', 40):
+            return None
         
         # Get next action from plan
         if self._discovery_plan_index >= len(self._current_discovery_plan):
@@ -2024,6 +2151,28 @@ class AgentSelfModel:
         """, (game_type, level))
         
         return [f"obj_{r['object_color']}" for r in result] if result else []
+    
+    def _get_known_toggleable_objects(self, game_type: str, level: int) -> List[str]:
+        """Get objects already known to be toggleable for this game/level."""
+        # Check pseudo_button_behavior for toggle entries
+        result = self.db.execute_query("""
+            SELECT DISTINCT affected_objects FROM pseudo_button_behavior
+            WHERE game_type = ? AND level_number = ? AND movement_direction = 'toggle'
+        """, (game_type, level))
+        
+        toggleables = []
+        if result:
+            for r in result:
+                try:
+                    affected = json.loads(r['affected_objects'])
+                    if isinstance(affected, dict) and 'object' in affected:
+                        toggleables.append(affected['object'])
+                    elif isinstance(affected, list):
+                        toggleables.extend(affected)
+                except Exception:
+                    pass
+        
+        return toggleables
     
     def _record_control_discovery(
         self,
@@ -2114,6 +2263,142 @@ class AgentSelfModel:
         """, (game_type, level, region_x, region_y,
               f'ACTION6@{x},{y}', movement_direction, 
               json.dumps([affected_object]), 0.6))
+    
+    def _record_toggle_discovery(
+        self,
+        game_type: str,
+        level: int,
+        x: int,
+        y: int,
+        color_before: int,
+        color_after: int,
+        affected_object: str,
+        agent_id: str = None
+    ):
+        """
+        Record a toggle object discovery to the database.
+        
+        Toggle = clicking changes object color/state but doesn't move it.
+        Common in puzzle games where you click tiles to change their color.
+        """
+        region_x = min(x // 8, 7)
+        region_y = min(y // 8, 7)
+        
+        # Record in pseudo_button_behavior with toggle-specific data
+        self.db.execute_query("""
+            INSERT OR REPLACE INTO pseudo_button_behavior
+            (game_type, level_number, region_x, region_y, 
+             produces_action, movement_direction, affected_objects, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (game_type, level, region_x, region_y,
+              f'ACTION6@{x},{y}', 'toggle', 
+              json.dumps({
+                  'object': affected_object,
+                  'color_before': color_before,
+                  'color_after': color_after,
+                  'type': 'toggle'
+              }), 0.9))  # High confidence for toggles
+        
+        # Also record in object_selection_state as a toggleable object
+        self.db.execute_query("""
+            INSERT INTO object_selection_state 
+            (game_type, level_number, object_color, is_selectable, is_moveable, 
+             is_button, control_actions, confidence, discovered_by_agent)
+            VALUES (?, ?, ?, 1, 0, 1, ?, ?, ?)
+            ON CONFLICT(game_type, level_number, object_color) DO UPDATE SET
+                is_button = 1,
+                is_selectable = 1,
+                confidence = MAX(confidence, excluded.confidence),
+                discovery_count = discovery_count + 1,
+                last_observed = CURRENT_TIMESTAMP
+        """, (game_type, level, color_before, 
+              json.dumps(['ACTION6']),
+              0.9, agent_id))
+        
+        logger.info(
+            f"[TOGGLE-DISCOVERY] Recorded toggle at ({x},{y}): "
+            f"color {color_before} <-> {color_after}"
+        )
+    
+    def learn_from_click_effect(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int,
+        click_x: int,
+        click_y: int,
+        effect_type: str,
+        color_before: int,
+        color_after: int,
+        generation: int = 0
+    ) -> None:
+        """
+        Learn and share click effect discoveries to the network.
+        
+        This is the network knowledge sharing for click-based control,
+        parallel to learn_from_movement_correlation for directional control.
+        
+        Args:
+            agent_id: Agent making the discovery
+            game_id: Game identifier
+            level: Level number
+            click_x: Click X coordinate
+            click_y: Click Y coordinate
+            effect_type: 'toggle', 'move', 'remote', 'appear', 'disappear'
+            color_before: Color at click position before
+            color_after: Color at click position after
+            generation: Current evolution generation
+        """
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Create hypothesis ID for this click effect discovery
+        hypothesis_id = f"click_{game_type}_L{level}_{click_x}_{click_y}_{effect_type}"
+        
+        # Check for existing hypothesis
+        existing = self.db.execute_query("""
+            SELECT hypothesis_id, validation_attempts, validated_by_win
+            FROM network_object_control_hypotheses
+            WHERE hypothesis_id = ?
+        """, (hypothesis_id,))
+        
+        if existing:
+            # Update existing hypothesis with new observation
+            self.db.execute_query("""
+                UPDATE network_object_control_hypotheses
+                SET validation_attempts = validation_attempts + 1,
+                    last_validated = CURRENT_TIMESTAMP
+                WHERE hypothesis_id = ?
+            """, (hypothesis_id,))
+            
+            attempts = existing[0]['validation_attempts'] + 1
+            if attempts >= 3:
+                logger.info(
+                    f"[NETWORK] Click effect validated: {effect_type} at ({click_x},{click_y}) "
+                    f"in {game_type} L{level} ({attempts} observations)"
+                )
+        else:
+            # Create new hypothesis
+            control_pattern = {
+                'effect_type': effect_type,
+                'click_x': click_x,
+                'click_y': click_y,
+                'color_before': color_before,
+                'color_after': color_after,
+                'action': 'ACTION6'
+            }
+            
+            self.db.execute_query("""
+                INSERT INTO network_object_control_hypotheses
+                (hypothesis_id, game_type, level_number, controlled_color,
+                 control_pattern, validation_attempts, reliability_score,
+                 discovered_by_agent, discovered_generation, is_active)
+                VALUES (?, ?, ?, ?, ?, 1, 0.3, ?, ?, 1)
+            """, (hypothesis_id, game_type, level, color_before,
+                  json.dumps(control_pattern), agent_id, generation))
+            
+            logger.debug(
+                f"[NETWORK] New click effect hypothesis: {effect_type} at ({click_x},{click_y})"
+            )
     
     def reset_discovery_state(self):
         """Reset discovery state for a new game/level."""

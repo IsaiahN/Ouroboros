@@ -1237,6 +1237,26 @@ class GameplayEngine:
         """
         result = SequenceFallbackResult()
         result.game_state = game_state
+
+        # Frontier safeguard: pioneers should not replay sequences on frontier levels
+        try:
+            level_number = None
+            if hasattr(game_state, 'level_number'):
+                level_number = getattr(game_state, 'level_number')
+            elif hasattr(game_state, 'level'):
+                level_number = getattr(game_state, 'level')
+            if level_number is None:
+                try:
+                    level_number = int(game_state.score) + 1 if game_state and game_state.score is not None else 1
+                except Exception:
+                    level_number = 1
+            if agent_mode == 'pioneer' and self._is_frontier_level(game_id, level_number):
+                result.all_failed = True
+                result.reached_frontier = True
+                logger.info(f"[3-TRY] Frontier replay blocked for pioneer on level {level_number}")
+                return result
+        except Exception:
+            logger.debug("Frontier replay block check failed; continuing")
         
         if not ranked_sequences:
             result.all_failed = True
@@ -12944,7 +12964,18 @@ class GameplayEngine:
         try:
             failure_hypotheses = self._get_network_failure_hypotheses(game_id, level)
             if failure_hypotheses:
-                context['failure_insights'] = failure_hypotheses
+                # Deduplicate by hypothesis_id or normalized failure text
+                seen_keys = set()
+                deduped = []
+                for hyp in failure_hypotheses:
+                    key = hyp.get('hypothesis_id') or (hyp.get('failure') or '').strip().lower()
+                    if not key:
+                        key = (hyp.get('strategy') or '').strip().lower()
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    deduped.append(hyp)
+                context['failure_insights'] = deduped
         except Exception as e:
             logger.debug(f"Failure hypotheses query failed: {e}")
         
@@ -14151,7 +14182,12 @@ class GameplayEngine:
             return prediction
             
         except Exception:
-            return {'expected_outcome': 'unknown', 'confidence': 0.1, 'based_on': 'error'}
+            # Avoid surfacing raw error; use fallback provenance
+            return {
+                'expected_outcome': 'unknown',
+                'confidence': 0.15,
+                'based_on': 'fallback_error'
+            }
     
     def _score_action_against_theory(
         self,
@@ -14196,7 +14232,7 @@ class GameplayEngine:
             return {'score': 0.5, 'explanation': 'Neutral alignment during exploration'}
             
         except Exception:
-            return {'score': 0.0, 'explanation': 'Error computing alignment'}
+            return {'score': 0.0, 'explanation': 'fallback_error_computing_alignment'}
     
     def _get_blocking_questions_summary(self) -> List[Dict[str, Any]]:
         """
@@ -14558,8 +14594,17 @@ class GameplayEngine:
             goal_objects = tetra.get('goal_objects', [])
             
             if ctrl_objects:
-                # We have controlled objects - build movement theory
-                working_theory = f"I control {len(ctrl_objects)} objects and move with directional actions"
+                # We have controlled objects - build theory with control type info
+                # Count moveable vs toggleable objects
+                moveable = [o for o in ctrl_objects if not o.startswith('toggleable_')]
+                toggleable = [o for o in ctrl_objects if o.startswith('toggleable_')]
+                
+                if moveable and toggleable:
+                    working_theory = f"I control {len(moveable)} moveable and {len(toggleable)} toggleable objects"
+                elif toggleable:
+                    working_theory = f"I can toggle {len(toggleable)} objects by clicking"
+                else:
+                    working_theory = f"I control {len(ctrl_objects)} objects and move with directional actions"
             elif network_hypos:
                 # Network has hypotheses - form tentative theory
                 best_h = network_hypos[0] if network_hypos else {}
@@ -14929,6 +14974,26 @@ class GameplayEngine:
         # ===================================================================
         world_model = self._build_world_model_context(game_id, current_level, game_state.frame)
         environment = world_model or {'status': self._null_status(425)}
+
+        # Merge inferred goals into tetrahedral perception to keep goals visible in identity
+        try:
+            inferred_goals = environment.get('inferred_goals') or []
+            if inferred_goals and self_model and self_model.get('tetrahedral_perception'):
+                tetra = self_model.get('tetrahedral_perception', {}) or {}
+                existing_goals = list(tetra.get('goal_objects', []) or [])
+                for goal in inferred_goals:
+                    goal_center = goal.get('position') or goal.get('center') or [0, 0]
+                    existing_goals.append({
+                        'color': goal.get('color', 0),
+                        'center': goal_center,
+                        'size': goal.get('size') or goal.get('pixel_count', 1)
+                    })
+                # Keep list concise for payload size
+                tetra['goal_objects'] = existing_goals[:5]
+                self_model['tetrahedral_perception'] = tetra
+                identity['self_model'] = self_model
+        except Exception:
+            pass
         
         # ===================================================================
         # TIER 7: ACTION - What I'm doing
