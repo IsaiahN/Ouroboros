@@ -2,16 +2,300 @@
 
 ---
 
-## Session: January 8, 2026 - Prediction System 0% Accuracy Bug Fix
+## Session: January 8, 2026 - Comprehensive Metacognitive & Self-Model Fixes
 
 ---
 
-### Approach: Fix `frame_changed` always being False in metacognitive predictions
+### Overall Approach
 
-**Timestamp**: 11:55:00 AM  
+Systematic investigation and fixing of multiple interconnected bugs preventing agents from:
+1. Using learned knowledge effectively (self-model → ACTION6 disconnect)
+2. Storing knowledge in transferable format (coordinates vs colors)
+3. Making reasonable predictions (score_increase is unpredictable)
+4. Recording meaningful failure patterns (false positives)
+
+**Session Timestamp**: 2:43:22 PM  
+**Status**: IN PROGRESS - Multiple fixes complete, testing ongoing
+
+---
+
+## Fix 1: Prediction System 0% Accuracy (COMPLETE)
+
+**Timestamp**: ~11:55 AM
+
+### Problem
+All prediction types showed 0% accuracy. Log showed:
+`[METACOG] PREDICTION TYPE SUPPRESSED: 'score_increase' failed 58x consecutively`
+
+### Root Cause
+1. `frame_changed` always `False` due to reference vs copy issue
+2. Used `action_handler.last_frame` (already updated) instead of `_previous_frame` (before action)
+
+### Fixes Applied
+| File | Lines | Change |
+|------|-------|--------|
+| core_gameplay.py | L1855, L3783, L15235 | Deep copy frame: `[row[:] for row in frame]` |
+| core_gameplay.py | L5077-5084 | Use `_previous_frame` for comparison |
+
+---
+
+## Fix 2: Default Prediction Type (COMPLETE)
+
+**Timestamp**: ~12:00 PM
+
+### Problem
+Default prediction `score_increase` is impossible to predict - score only increases on level WIN.
+
+### Fix Applied
+Changed default from `score_increase` to `frame_change` in fallback path (L1790-1820).
+
+---
+
+## Fix 3: Failure Pattern False Positives (COMPLETE)
+
+**Timestamp**: ~12:05 PM
+
+### Problem
+Log showed tautological failure pattern:
+`[METACOG] FAILURE PATTERN: CONTEXT: level:2 - Pattern detected: CONTEXT: level:2 correlates with failure`
+
+### Root Cause
+Recording "no visible change" as failure instead of actual GAME_OVER/score decrease.
+
+### Fixes Applied
+| File | Lines | Change |
+|------|-------|--------|
+| core_gameplay.py | L2020-2033 | Only record `GAME_OVER` or `score_after < score_before` as failures |
+| core_gameplay.py | L5132-5148 | Same fix in second failure recording location |
+| agent_self_model.py | L9727-9737 | Exclude `level`, `state`, `available_actions` from commonality analysis |
+
+---
+
+## Fix 4: Self-Model to ACTION6 Integration (COMPLETE)
+
+**Timestamp**: 12:17:05 PM
+
+### Problem
+Agent has self-model knowledge (`objects_agent_controls: ["toggleable_color_12", "toggleable_color_9"]`)
+but ACTION6 clicks on wrong colors (0, 11, 14). Complete disconnect!
+
+### Root Cause
+`_prepare_action6_target()` only uses visual salience, never checks self-model.
+
+### Fixes Applied
+| File | Lines | Change |
+|------|-------|--------|
+| core_gameplay.py | L7026-7100 | NEW `_get_target_from_controlled_objects()` method |
+| core_gameplay.py | L6957-7025 | Modified `_prepare_action6_target()` to check self-model FIRST |
+| core_gameplay.py | L10380-10400 | Modified ACTION6 fallback to check self-model first |
+
+---
+
+## Fix 5: Network Knowledge Format (COMPLETE)
+
+**Timestamp**: 2:30:17 PM
+
+### Problem
+User asked: "All toggleable objects from past replays should be retrievable, right?"
+Network stored coordinates (`x:4,y:10`) instead of colors (`toggleable_color_9`).
+Coordinates are useless - positions change between game instances!
+
+### Root Cause
+`identify_controlled_objects()` stored positions instead of colors even though it HAD the color.
+
+### Fixes Applied
+| File | Lines | Change |
+|------|-------|--------|
+| agent_self_model.py | L1285-1323 | Store `moveable_color_N` instead of `moveable_x:N,y:M` |
+| agent_self_model.py | L3711-3728 | Use new parser in retrieval |
+| agent_self_model.py | L3951-4020 | NEW `_parse_control_pattern_to_colors()` helper |
+| core_data.db | - | Deactivated 146 stale coordinate-based hypotheses |
+
+### Verification
+```python
+get_controlled_objects('ft09-test', level=2)
+# Returns: ["toggleable_color_12", "toggleable_color_9", "obj_12", "obj_9"]
+```
+
+---
+
+## Fix 6: Prediction Type Still Using score_increase (COMPLETE)
+
+**Timestamp**: 2:43:22 PM
+
+### Problem
+Log showed: `[METACOG] PREDICTION: If 'Action from explore...' then ACTION6 should cause 'score_increase'`
+Earlier fix only changed the fallback default, not the main prediction generation.
+
+### Root Cause
+L4814 still defaulted to `score_increase`:
+```python
+expected_outcome = 'score_increase'  # Always fails!
+```
+
+### Fix Applied
+| File | Lines | Change |
+|------|-------|--------|
+| core_gameplay.py | L4810-4830 | Changed default to `frame_change`, added `object_control` for controlled objects |
+
+**New Logic:**
+- Default: `frame_change` (most verifiable)
+- If "explore" or "test" in reasoning: `discover_pattern`
+- If "controlled" or "toggle" in reasoning: `object_control`
+- Removed `score_increase` from prediction_types list entirely
+
+---
+
+## Summary of All Files Modified This Session
+
+| File | Key Changes |
+|------|-------------|
+| core_gameplay.py | Deep copy frames, prediction types, self-model→ACTION6 integration, failure recording |
+| agent_self_model.py | Color-based storage, pattern parsing, failure analysis exclusions |
+| core_data.db | Deactivated 146 stale hypotheses |
+
+---
+
+## Current Status
+
+**All 6 fixes complete and syntax-verified.**
+
+Next steps:
+1. Run evolution to verify fixes in live gameplay
+2. Monitor logs for:
+   - `[SELF-MODEL] ACTION6 target from controlled objects` (Fix 4 working)
+   - `[METACOG] PREDICTION: ... should cause 'frame_change'` (Fix 6 working)
+   - No more `score_increase` predictions
+   - No tautological failure patterns
+
+---
+
+## Session: January 8, 2026 - Network Knowledge Format Fix (CRITICAL)
+
+---
+
+### Approach: Integrate self-model knowledge into ACTION6 click targeting
+
+**Timestamp**: 12:17:05 PM  
 **Status**: COMPLETE
 
 ---
+
+### Problem Statement
+
+User analyzed reasoning log and found severe regression:
+- Agent has self-model knowledge: `objects_agent_controls: ["toggleable_color_12", "toggleable_color_9"]`
+- But ACTION6 clicks are targeting **completely different colors**: color 0, 11, 14 (rare colors)
+- Agent KNOWS it controls color 9 and 12 but NEVER clicks on them!
+- Previous iterations found 6 toggleable objects, now down to 2
+
+**Root Cause**: Complete disconnect between self-model knowledge and ACTION6 targeting:
+- `_prepare_action6_target()` only uses `visual_analyzer.analyze_frame()` for "rare colors"
+- `get_smart_coordinates()` also only uses visual salience
+- Neither path checks `agent_self_model.get_controlled_objects()` for known clickable objects
+
+### Investigation Steps
+
+| Step | Finding |
+|------|---------|
+| 1 | Reviewed reasoning log - "visual_reason" shows only "Rare color 11", "Rare color 14", "Grid exploration" |
+| 2 | Searched for self-model integration in ACTION6 targeting - NONE found |
+| 3 | `_prepare_action6_target()` at L6957 only calls `visual_analyzer.analyze_frame()` |
+| 4 | `get_smart_coordinates()` in action_handler.py also only uses visual analysis |
+| 5 | Both paths ignore `agent_self_model.get_controlled_objects()` entirely |
+
+### Fixes Applied
+
+#### Fix 1: New Method `_get_target_from_controlled_objects()`
+**File**: [core_gameplay.py](core_gameplay.py#L7026-7100)
+
+Added new method that extracts click targets from self-model knowledge:
+```python
+def _get_target_from_controlled_objects(self, frame) -> Optional[Tuple[int, int, str]]:
+    """Find a click target based on self-model's knowledge of controlled objects."""
+    # Get controlled objects from self-model
+    controlled = self.agent_self_model.get_controlled_objects()
+    
+    # Extract colors from names like "toggleable_color_9", "obj_12"
+    target_colors = set()
+    for obj in controlled:
+        if 'color_' in obj:
+            color = int(obj.split('color_')[-1])
+            target_colors.add(color)
+    
+    # Find pixels of those colors in frame
+    if target_colors:
+        candidates = []
+        for y, row in enumerate(frame):
+            for x, pixel in enumerate(row):
+                if pixel in target_colors:
+                    candidates.append((x, y, f"Controlled color {pixel}"))
+        if candidates:
+            return random.choice(candidates)
+```
+
+#### Fix 2: Modified `_prepare_action6_target()` to Check Self-Model FIRST
+**File**: [core_gameplay.py](core_gameplay.py#L6957-7025)
+
+Added self-model check as PRIORITY 1 before visual salience:
+```python
+def _prepare_action6_target(self, game_state, ...):
+    # PRIORITY 1: Use self-model knowledge of controlled objects
+    if hasattr(self, 'agent_self_model') and self.agent_self_model:
+        controlled_target = self._get_target_from_controlled_objects(game_state.frame)
+        if controlled_target:
+            x, y, reason = controlled_target
+            logger.info(f"[SELF-MODEL] ACTION6 target from controlled objects: ({x},{y})")
+            return selected
+    
+    # PRIORITY 2: Fall back to visual salience
+    analysis = self.action_handler.visual_analyzer.analyze_frame(...)
+```
+
+#### Fix 3: Modified ACTION6 Fallback in Execute Path
+**File**: [core_gameplay.py](core_gameplay.py#L10380-10400)
+
+The else block that calls `get_smart_coordinates()` now checks self-model first:
+```python
+else:
+    # PRIORITY 1: Try self-model controlled objects first
+    self_model_target = None
+    if hasattr(self, 'agent_self_model') and self.agent_self_model:
+        self_model_target = self._get_target_from_controlled_objects(game_state.frame)
+    
+    if self_model_target:
+        x, y, reason = self_model_target
+        logger.info(f"[SELF-MODEL] ACTION6 at ({x}, {y})")
+    else:
+        # PRIORITY 2: Fall back to visual analysis
+        x, y, reason = self.action_handler.get_smart_coordinates(...)
+```
+
+### Expected Behavior After Fix
+
+1. When agent has `objects_agent_controls: ["toggleable_color_9", "toggleable_color_12"]`
+2. ACTION6 will now click on pixels of color 9 and 12 in the frame
+3. Visual salience (rare colors) only used as fallback when no controlled objects known
+4. Log will show `[SELF-MODEL] ACTION6 target from controlled objects: (x,y) - Controlled color 9`
+
+---
+
+## Session: January 8, 2026 - Metacognitive System Bug Fixes
+
+---
+
+## Session: January 8, 2026 - Metacognitive System Bug Fixes
+
+---
+
+### Approach: Fix multiple issues in the metacognitive prediction and failure pattern detection systems
+
+**Timestamp**: 12:05:00 PM  
+**Status**: COMPLETE
+
+---
+
+## Issue 1: Prediction System 0% Accuracy
 
 ### Problem Statement
 
@@ -67,9 +351,125 @@ if hasattr(self, '_previous_frame') and self._previous_frame and game_state.fram
     prev_arr = np.array(self._previous_frame)
 ```
 
-### Verification
+---
 
-After restart, predictions should now correctly detect frame changes and have non-zero accuracy.
+## Issue 2: Default Prediction Type Too Ambitious
+
+### Problem Statement
+
+User noted: "'score_increase' is such a big goal, its like saying this action will win the level"
+
+The default prediction type was `score_increase` which is unrealistic for most actions.
+
+### Fix Applied
+
+**File**: [core_gameplay.py](core_gameplay.py#L1790-1820)
+
+Changed default prediction type from `score_increase` to `frame_change` and updated prediction type selection logic.
+
+---
+
+## Issue 3: Failure Pattern Detection Recording False Positives
+
+### Problem Statement
+
+Log showed: `[METACOG] FAILURE PATTERN: CONTEXT: level:2 - Pattern detected: CONTEXT: level:2 correlates with failure`
+
+This is a **tautology** - if stuck on level 2, ALL actions happen on level 2, so "level:2 correlates with failure" is meaningless.
+
+### Root Cause
+
+The system was recording "failures" for ANY action that didn't cause visible change:
+- [core_gameplay.py#L2020](core_gameplay.py#L2020): `if score_after <= score_before` recorded as failure
+- [core_gameplay.py#L5132](core_gameplay.py#L5132): `if score_change == 0 and not frame_changed` recorded as failure
+
+**This is wrong!** Most exploration actions don't cause immediate visible changes. Real failures are:
+- **GAME_OVER**: Agent died
+- **Score decrease**: Action caused penalty
+
+### Fixes Applied
+
+#### Fix 1: Only Record Real Failures
+**File**: [core_gameplay.py](core_gameplay.py#L2020-2033)
+
+Changed from:
+```python
+if score_after <= score_before and game_state.state != 'WIN':
+    # Record as failure...
+```
+To:
+```python
+is_real_failure = (
+    game_state.state == 'GAME_OVER' or  # Agent died
+    score_after < score_before  # Score decreased (penalty)
+)
+if is_real_failure:
+    # Record as failure...
+```
+
+#### Fix 2: Second Location Same Change
+**File**: [core_gameplay.py](core_gameplay.py#L5132-5140)
+
+Changed from:
+```python
+if score_change == 0 and not frame_changed_for_step:
+    self.metacognitive_engine.record_failure(...)
+```
+To:
+```python
+is_real_failure = (
+    game_state.state == 'GAME_OVER' or
+    score_change < 0
+)
+if is_real_failure:
+    self.metacognitive_engine.record_failure(...)
+```
+
+#### Fix 3: Exclude Tautological Context Elements
+**File**: [agent_self_model.py](agent_self_model.py#L9727-9737)
+
+Added exclusion list:
+```python
+EXCLUDED_KEYS = {'level', 'state', 'available_actions'}  # Always same when stuck
+for key, value in context.items():
+    if key in EXCLUDED_KEYS:
+        continue  # Skip tautological elements
+```
+
+#### Fix 4: Update Insight Messages
+**File**: [agent_self_model.py](agent_self_model.py#L9790-9804)
+
+Updated insight generation to reflect actual harm (death/penalty) instead of generic "failure":
+```python
+if 'is_game_over:True' in common_factor:
+    return "This action pattern leads to death - find alternative approach"
+elif 'score_delta' in common_factor and '-' in common_factor:
+    return "This action causes score penalty - avoid repeating"
+```
+
+---
+
+## Summary of All Changes
+
+| File | Lines | Change |
+|------|-------|--------|
+| core_gameplay.py | L1855-1857 | Deep copy frame before action |
+| core_gameplay.py | L3783-3784 | Deep copy frame before action |
+| core_gameplay.py | L15235-15236 | Deep copy frame before action |
+| core_gameplay.py | L5077-5084 | Use `_previous_frame` for comparison |
+| core_gameplay.py | L1790-1820 | Default prediction type `frame_change` |
+| core_gameplay.py | L2020-2033 | Only record GAME_OVER/score_decrease as failures |
+| core_gameplay.py | L5132-5148 | Only record GAME_OVER/score_decrease as failures |
+| agent_self_model.py | L9727-9737 | Exclude level/state from commonality analysis |
+| agent_self_model.py | L9790-9804 | Update failure insights to reflect death/penalty |
+
+---
+
+## Verification
+
+Syntax verified with `python -m py_compile core_gameplay.py agent_self_model.py` - no errors.
+
+Changes will take effect after evolution process restart.
 
 ---
 

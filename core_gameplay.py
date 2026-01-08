@@ -4811,12 +4811,20 @@ class GameplayEngine:
                             if mode_for_spine == 'LIVE' and hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
                                 try:
                                     game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
-                                    expected_outcome = 'score_increase'
+                                    
+                                    # FIX (2025-01-08): 'score_increase' is unpredictable - score only increases on level WIN
+                                    # Use more reasonable predictions based on action intent:
+                                    # - frame_change: default - something visible should change
+                                    # - object_control: when using controlled objects
+                                    # - avoid_failure: when in dangerous situations
+                                    expected_outcome = 'frame_change'  # Most verifiable prediction
                                     if 'explore' in reasoning.lower() or 'test' in reasoning.lower():
                                         expected_outcome = 'discover_pattern'
+                                    elif 'controlled' in reasoning.lower() or 'toggle' in reasoning.lower():
+                                        expected_outcome = 'object_control'
                                     
                                     # FIX #9: Check if prediction type is suppressed; try alternatives
-                                    prediction_types = ['score_increase', 'discover_pattern', 'frame_change', 'avoid_failure', 'object_control']
+                                    prediction_types = ['frame_change', 'object_control', 'discover_pattern', 'avoid_failure']
                                     suppressed = getattr(self.metacognitive_engine, '_suppressed_prediction_types', set())
                                     if expected_outcome in suppressed:
                                         alternatives = [pt for pt in prediction_types if pt not in suppressed]
@@ -6960,12 +6968,37 @@ class GameplayEngine:
         run_context: Optional[Any] = None,
         reason_prefix: str = "salient target"
     ) -> Optional[Dict[str, Any]]:
-        """Derive ACTION6 coordinates from visual salience/attention windows."""
+        """Derive ACTION6 coordinates from self-model knowledge OR visual salience.
+        
+        PRIORITY ORDER:
+        1. Self-model controlled objects (toggleable_color_X, moveable_X) - HIGHEST
+        2. Network hypotheses about this game/level
+        3. Visual salience (rare colors, clusters) - FALLBACK
+        """
         if not game_state.frame or not hasattr(self.action_handler, 'visual_analyzer'):
             self._pending_action6_target = None
             return None
 
         try:
+            # ================================================================
+            # PRIORITY 1: Use self-model knowledge of controlled objects
+            # ================================================================
+            # If agent knows it controls specific colors, click on those!
+            if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                controlled_target = self._get_target_from_controlled_objects(game_state.frame)
+                if controlled_target:
+                    x, y, reason = controlled_target
+                    window_id = f"selfmodel_{int(datetime.now().timestamp() * 1000)}"
+                    selected = {"x": x, "y": y, "reason": reason, "window_id": window_id}
+                    self._pending_action6_target = selected
+                    self._pending_action6_reason = f"Self-model: {reason}"
+                    self.game_config['current_attention_window_id'] = window_id
+                    logger.info(f"[SELF-MODEL] ACTION6 target from controlled objects: ({x},{y}) - {reason}")
+                    return selected
+            
+            # ================================================================
+            # PRIORITY 2: Fall back to visual salience
+            # ================================================================
             analysis = self.action_handler.visual_analyzer.analyze_frame(game_state.frame)
             target = self.action_handler.visual_analyzer.select_best_target(analysis)
             if not target:
@@ -6996,6 +7029,89 @@ class GameplayEngine:
             logger.debug(f"Action6 salience selection failed: {e}")
             self._pending_action6_target = None
         return None
+    
+    def _get_target_from_controlled_objects(
+        self,
+        frame: List[List[int]]
+    ) -> Optional[Tuple[int, int, str]]:
+        """Find a click target based on self-model's knowledge of controlled objects.
+        
+        Args:
+            frame: Current game frame
+            
+        Returns:
+            Tuple of (x, y, reason) or None if no controlled objects known
+        """
+        if not hasattr(self, 'agent_self_model') or not self.agent_self_model:
+            return None
+        
+        try:
+            # Get controlled objects from self-model
+            controlled = self.agent_self_model.get_controlled_objects()
+            if not controlled:
+                return None
+            
+            # Extract colors from controlled object names
+            # Formats: "toggleable_color_9", "moveable_color_12", "obj_9", "toggleable_x:5,y:10"
+            target_colors = set()
+            target_coords = []
+            
+            for obj in controlled:
+                obj_str = str(obj).lower()
+                
+                # Extract color number from various formats
+                if 'color_' in obj_str:
+                    try:
+                        color = int(obj_str.split('color_')[-1].split('_')[0].split(',')[0])
+                        if color > 0:  # Skip background (0)
+                            target_colors.add(color)
+                    except (ValueError, IndexError):
+                        pass
+                elif obj_str.startswith('obj_'):
+                    try:
+                        color = int(obj_str.replace('obj_', '').split('_')[0])
+                        if color > 0:
+                            target_colors.add(color)
+                    except (ValueError, IndexError):
+                        pass
+                
+                # Extract coordinates if present
+                if 'x:' in obj_str and 'y:' in obj_str:
+                    try:
+                        import re
+                        match = re.search(r'x:(\d+),y:(\d+)', obj_str)
+                        if match:
+                            x, y = int(match.group(1)), int(match.group(2))
+                            target_coords.append((x, y, f"Known controlled position"))
+                    except (ValueError, IndexError):
+                        pass
+            
+            # If we have specific coordinates, use them first
+            if target_coords:
+                # Pick a random one to avoid always clicking same spot
+                import random
+                x, y, reason = random.choice(target_coords)
+                if 0 <= y < len(frame) and 0 <= x < len(frame[0]):
+                    return (x, y, reason)
+            
+            # If we have target colors, find pixels of those colors in frame
+            if target_colors:
+                candidates = []
+                for y, row in enumerate(frame):
+                    for x, pixel in enumerate(row):
+                        if pixel in target_colors:
+                            candidates.append((x, y, f"Controlled color {pixel}"))
+                
+                if candidates:
+                    # Pick a random candidate to vary exploration
+                    import random
+                    return random.choice(candidates)
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Failed to get target from controlled objects: {e}")
+            return None
 
     def _prefer_non_action6(self, available_actions: Optional[List[Any]]) -> Optional[str]:
         """Choose a non-ACTION6 candidate when available."""
@@ -10269,13 +10385,27 @@ class GameplayEngine:
                 self._pending_action6_target = None
                 self._pending_action6_reason = None
             else:
-                # Use smart coordinate selection
-                x, y, reason = self.action_handler.get_smart_coordinates(
-                    game_state.frame,
-                    strategy="visual"
-                )
-                full_reasoning = f"{reasoning} | Visual: {reason}"
-                logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
+                # ================================================================
+                # PRIORITY 1: Try self-model controlled objects first
+                # ================================================================
+                self_model_target = None
+                if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                    self_model_target = self._get_target_from_controlled_objects(game_state.frame)
+                
+                if self_model_target:
+                    x, y, reason = self_model_target
+                    full_reasoning = f"{reasoning} | Self-model: {reason}"
+                    logger.info(f"[SELF-MODEL] ACTION6 at ({x}, {y}): {full_reasoning}")
+                else:
+                    # ================================================================
+                    # PRIORITY 2: Fall back to visual analysis
+                    # ================================================================
+                    x, y, reason = self.action_handler.get_smart_coordinates(
+                        game_state.frame,
+                        strategy="visual"
+                    )
+                    full_reasoning = f"{reasoning} | Visual: {reason}"
+                    logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
 
             # Frame integrity check before enforcing bounds
             frame_valid = self.action_handler._validate_frame_dimensions(

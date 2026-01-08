@@ -1282,10 +1282,14 @@ class AgentSelfModel:
                     object_control_score[obj_id]['correct'] += 1
         
         # Identify controlled objects: >60% correct movement correlation with at least 2 samples
-        # FIX (2025-01-08): Prefix with control TYPE to distinguish moveable vs toggleable
-        # - moveable_x:N,y:M = responds to ACTION 1-4 (directional movement)
-        # - toggleable_x:N,y:M = responds to ACTION5 (click/toggle, non-directional)
+        # FIX (2025-01-08): Store COLORS not positions for network transferability
+        # - moveable_color_N = color N responds to ACTION 1-4 (directional movement)
+        # - toggleable_color_N = color N responds to ACTION5/6 (click/toggle)
+        # Using colors allows knowledge to transfer across game instances
+        # (same level, different pixel layouts). Agents can find these colors
+        # in ANY frame rather than looking for stale coordinates.
         controlled = []
+        controlled_colors = set()  # Track unique colors to avoid duplicates
         best_score = 0.0
         
         for obj_id, scores in object_control_score.items():
@@ -1294,10 +1298,11 @@ class AgentSelfModel:
             
             correlation = scores['correct'] / scores['total']
             if correlation >= 0.6:  # 60% threshold for "controlled"
-                # Store representative position(s) of this object
+                # Store COLOR (obj_id IS the color) for network transferability
                 # PREFIX: moveable_ for ACTION 1-4 controlled objects
-                for pos in scores['positions'][:3]:  # Max 3 positions per controlled object
-                    controlled.append(f"moveable_x:{pos[0]},y:{pos[1]}")
+                if obj_id not in controlled_colors:
+                    controlled.append(f"moveable_color_{obj_id}")
+                    controlled_colors.add(obj_id)
                 best_score = max(best_score, correlation)
         
         # Also check ACTION5 effects - objects that consistently change on ACTION5
@@ -1309,13 +1314,13 @@ class AgentSelfModel:
             change_rate = effects['changes'] / effects['total']
             if change_rate >= 0.7:  # 70% threshold for ACTION5 control (higher since non-directional)
                 # This object responds to ACTION5 - mark as controlled
-                if obj_id not in object_control_score:
-                    # Get positions from the effects tracking
-                    # PREFIX: toggleable_ for ACTION5 controlled objects
-                    for pos in effects.get('positions', [])[:3]:
-                        controlled.append(f"toggleable_x:{pos[0]},y:{pos[1]}")
+                # Store COLOR for network transferability
+                # PREFIX: toggleable_ for ACTION5 controlled objects
+                if obj_id not in controlled_colors:
+                    controlled.append(f"toggleable_color_{obj_id}")
+                    controlled_colors.add(obj_id)
                     best_score = max(best_score, change_rate)
-                    logger.debug(f"[SELF-MODEL] ACTION5 controls object {obj_id} (change rate: {change_rate:.2f})")
+                    logger.debug(f"[SELF-MODEL] ACTION5 controls color_{obj_id} (change rate: {change_rate:.2f})")
         
         # Confidence is the best correlation score, or 0 if nothing found
         confidence = best_score if controlled else 0.0
@@ -3705,9 +3710,15 @@ class AgentSelfModel:
         
         hypotheses = []
         for row in results or []:
+            # Parse control_pattern which can be in multiple formats:
+            # 1. Old coordinate list: ["x:4,y:10", "x:5,y:10"]
+            # 2. Movement correlation dict: {"discovery_type": "movement_correlation", "controlled_color": 9}
+            # 3. New color list: ["moveable_color_9", "toggleable_color_12"]
+            controlled_objects = self._parse_control_pattern_to_colors(row['control_pattern'])
+            
             hypotheses.append({
                 'hypothesis_id': row['hypothesis_id'],
-                'controlled_objects': json.loads(row['control_pattern']) if row['control_pattern'].startswith('[') else row['control_pattern'].split(','),
+                'controlled_objects': controlled_objects,
                 'action_response_map': json.loads(row['action_response_map']) if row['action_response_map'] else {},
                 'reliability': row['reliability_score'],
                 'validation_count': row['validation_attempts'],
@@ -3935,6 +3946,76 @@ class AgentSelfModel:
         except Exception as e:
             logger.debug(f"Failed to store composite hypothesis: {e}")
             return None
+    
+    def _parse_control_pattern_to_colors(self, control_pattern: str) -> List[str]:
+        """
+        Parse control_pattern from database into color-based identifiers.
+        
+        Handles multiple formats from different discovery methods:
+        1. Old coordinate list: ["x:4,y:10", "x:5,y:10"] -> Try to extract colors
+        2. Movement correlation dict: {"discovery_type": "movement_correlation", "controlled_color": 9}
+           -> ["moveable_color_9"]
+        3. New color list: ["moveable_color_9", "toggleable_color_12"] -> pass through
+        4. Click effect dict: {"effect_type": "toggle", "color_before": 9, ...}
+           -> ["toggleable_color_9"]
+        
+        Args:
+            control_pattern: JSON string from database
+            
+        Returns:
+            List of color-based identifiers like ["moveable_color_9", "toggleable_color_12"]
+        """
+        if not control_pattern:
+            return []
+        
+        try:
+            parsed = json.loads(control_pattern)
+        except json.JSONDecodeError:
+            # Try splitting by comma as fallback
+            return [x.strip() for x in control_pattern.split(',') if x.strip()]
+        
+        # Case: Already a list
+        if isinstance(parsed, list):
+            colors = []
+            for item in parsed:
+                if isinstance(item, str):
+                    # Already color-based format?
+                    if 'color_' in item:
+                        colors.append(item)
+                    # Old coordinate format - try to extract from prefixes
+                    elif item.startswith('moveable_') or item.startswith('toggleable_'):
+                        colors.append(item)  # Keep as-is, may be moveable_x:N,y:M format
+                    # Pure coordinate like "x:4,y:10" - can't extract color, skip
+                elif isinstance(item, int):
+                    # Color number directly
+                    colors.append(f"color_{item}")
+            return colors if colors else parsed  # Return original if no colors extracted
+        
+        # Case: Dictionary (from learn_from_movement_correlation or share_click_effect)
+        if isinstance(parsed, dict):
+            colors = []
+            
+            # Movement correlation format
+            if 'controlled_color' in parsed:
+                color = parsed['controlled_color']
+                # Determine prefix based on discovery type
+                if parsed.get('discovery_type') == 'movement_correlation':
+                    colors.append(f"moveable_color_{color}")
+                else:
+                    colors.append(f"color_{color}")
+            
+            # Click effect format
+            if 'effect_type' in parsed:
+                if 'color_before' in parsed:
+                    color = parsed['color_before']
+                    if parsed['effect_type'] == 'toggle':
+                        colors.append(f"toggleable_color_{color}")
+                    else:
+                        colors.append(f"color_{color}")
+            
+            return colors
+        
+        return []
     
     def _create_pattern_signature(self, controlled_objects: List[str], action_map: Dict) -> str:
         """
