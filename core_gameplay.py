@@ -2446,6 +2446,8 @@ class GameplayEngine:
             try:
                 new_level = int(game_state.score) + 1
                 persona_ctx = getattr(self, '_last_persona_context', {}) or {}
+                # Check if the new level is a frontier (unexplored by network)
+                is_new_level_frontier = self._is_frontier_level(game_id, new_level)
                 self.cods_engine.set_context(
                     game_id=game_id,
                     level_number=new_level,
@@ -2453,8 +2455,9 @@ class GameplayEngine:
                     persona_id=getattr(self._last_persona_decision, 'persona_id', None) if getattr(self, '_last_persona_decision', None) else None,
                     world_model=persona_ctx.get('world_model') if isinstance(persona_ctx, dict) else None,
                     problem_signature=persona_ctx.get('problem_signature') if isinstance(persona_ctx, dict) else None,
+                    is_frontier=is_new_level_frontier,
                 )
-                logger.debug(f"[CODS] Advanced to level {new_level}")
+                logger.debug(f"[CODS] Advanced to level {new_level} (frontier={is_new_level_frontier})")
             except Exception as e:
                 logger.debug(f"CODS level advance failed (non-critical): {e}")
         
@@ -3684,10 +3687,13 @@ class GameplayEngine:
         # This allows primitives and operators to be used during gameplay
         if self.cods_engine and game_state.frame:
             try:
+                # Check if level 1 is a frontier (no network data exists)
+                is_level_1_frontier = self._is_frontier_level(game_id, 1)
                 self.cods_engine.set_context(
                     game_id=game_id,
                     level_number=1,
-                    agent_id=agent_id
+                    agent_id=agent_id,
+                    is_frontier=is_level_1_frontier,
                 )
                 # Give initial frame to CODS
                 self.cods_engine.update_frame(
@@ -3700,7 +3706,7 @@ class GameplayEngine:
                     bootstrap_count = self.cods_engine.bootstrap_operators_from_patterns(limit=10)
                     if bootstrap_count > 0:
                         logger.info(f"[CODS] Bootstrapped {bootstrap_count} operators for {game_id}")
-                logger.debug(f"[CODS] Context initialized for {game_id} level 1")
+                logger.debug(f"[CODS] Context initialized for {game_id} level 1 (frontier={is_level_1_frontier})")
             except Exception as e:
                 logger.debug(f"CODS context init failed (non-critical): {e}")
         
@@ -12392,13 +12398,21 @@ class GameplayEngine:
                 if frame is not None:
                     context['aggregated_controlled'] = self._aggregate_controlled_objects(controlled, frame)
                 
-                # Get confidence from DB
-                result = self.db.execute_query("""
-                    SELECT confidence FROM agent_object_control
-                    WHERE agent_id = ? AND game_id = ? AND level_number = ?
-                """, (agent_id, game_id, level))
-                if result:
-                    context['control_confidence'] = result[0]['confidence']
+                # FIX: Use calculate_control_confidence() which includes toggleable objects
+                # Previously only queried agent_object_control (movement only)
+                try:
+                    context['control_confidence'] = self.agent_self_model.calculate_control_confidence(
+                        agent_id, game_id, level
+                    )
+                except Exception as e:
+                    logger.debug(f"calculate_control_confidence failed: {e}")
+                    # Fallback to old method
+                    result = self.db.execute_query("""
+                        SELECT confidence FROM agent_object_control
+                        WHERE agent_id = ? AND game_id = ? AND level_number = ?
+                    """, (agent_id, game_id, level))
+                    if result:
+                        context['control_confidence'] = result[0]['confidence']
             
             # ===============================================================
             # GAP FIX 1: Bootstrap from network hypotheses if no local data
@@ -13541,6 +13555,50 @@ class GameplayEngine:
         result['confidence'] = min(0.9, 0.3 + (sample_size * 0.06))
         
         # ===================================================================
+        # FIX 3: CONNECT TO SELF-MODEL DISCOVERIES (CRITICAL)
+        # Q1 should incorporate what the agent has DISCOVERED about control,
+        # not just recent action traces. If agent knows it controls toggleable
+        # objects, Q1 should reflect that.
+        # ===================================================================
+        if hasattr(self, 'agent_self_model') and self.agent_self_model:
+            agent_id = self.session_manager.current_agent_id
+            game_id = self.session_manager.current_game_id
+            current_level = int(game_state.score) + 1
+            
+            if agent_id and game_id:
+                try:
+                    # Get discovered controlled objects
+                    controlled_objects = self.agent_self_model.get_controlled_objects(
+                        agent_id, game_id, current_level
+                    ) or []
+                    
+                    if controlled_objects:
+                        # Agent has discovered control! Update Q1 to reflect this
+                        moveable_count = len([obj for obj in controlled_objects if not obj.startswith('toggleable')])
+                        toggleable_count = len([obj for obj in controlled_objects if obj.startswith('toggleable')])
+                        
+                        if moveable_count and toggleable_count:
+                            result['insight'] = f"I control {moveable_count} moveable and {toggleable_count} toggleable objects"
+                        elif toggleable_count:
+                            result['insight'] = f"I can toggle {toggleable_count} objects by clicking (ACTION6)"
+                        elif moveable_count:
+                            result['insight'] = f"I control {moveable_count} objects with directional actions"
+                        
+                        result['confidence'] = 0.7  # High confidence from discoveries
+                        result['discovery_based'] = True
+                        result['controlled_objects'] = controlled_objects
+                        
+                        # Which actions work based on object types
+                        if moveable_count:
+                            actions_moved.update([1, 2, 3, 4])  # Directional actions work
+                        if toggleable_count:
+                            actions_moved.add(6)  # ACTION6 (click) works
+                        
+                        result['actions_that_changed_state'] = sorted(list(actions_moved))
+                except Exception as e:
+                    logger.debug(f"Q1 self-model integration failed: {e}")
+        
+        # ===================================================================
         # FIX: Use delta frame_changes when action traces show no changes
         # ===================================================================
         # The agent logs show 20+ frame_changes in delta but Q1 says
@@ -14644,8 +14702,9 @@ class GameplayEngine:
                         )
                 
                 # Build theory from merged counts
-                merged_moveable = int(merged_counts.get('moveable', 0))
-                merged_toggleable = int(merged_counts.get('toggleable', 0))
+                # Use round() not int() to avoid truncating 0.8 -> 0
+                merged_moveable = int(round(merged_counts.get('moveable', 0)))
+                merged_toggleable = int(round(merged_counts.get('toggleable', 0)))
                 
                 if merged_moveable and merged_toggleable:
                     working_theory = f"I control {merged_moveable} moveable and {merged_toggleable} toggleable objects"
@@ -14655,10 +14714,24 @@ class GameplayEngine:
                     working_theory = f"I control {merged_moveable} objects and move with directional actions"
                 
                 # Store theory in history
+                # FIX: Use calculate_control_confidence() instead of raw self_model value
+                # This properly accounts for toggleable objects
+                actual_confidence = 0.5
+                if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                    try:
+                        actual_confidence = self.agent_self_model.calculate_control_confidence(
+                            agent_id, game_id, current_level
+                        )
+                    except Exception as e:
+                        logger.debug(f"calculate_control_confidence failed: {e}")
+                        actual_confidence = self_model.get('control_confidence', 0.5)
+                else:
+                    actual_confidence = self_model.get('control_confidence', 0.5)
+                
                 _store_working_theory_history_for_gameplay(
                     self.db,
                     agent_id, game_id, current_level, working_theory,
-                    confidence=self_model.get('control_confidence', 0.5),
+                    confidence=actual_confidence,
                     evidence_count=merged_moveable + merged_toggleable
                 )
             elif network_hypos:
@@ -21425,17 +21498,31 @@ def _merge_theories_with_weights(
     else:
         norm_wa = norm_wb = remaining / 2
     
-    merged_moveable = (
-        current_evidence.get('moveable', 0) * norm_wa +
-        network_consensus.get('moveable', 0) * norm_wb +
-        hist_moveable * hist_weight
+    # COLD START FIX: If network and historical are both 0, trust current evidence 100%
+    # This is CRITICAL for frontier levels where agent must learn from scratch
+    network_is_cold = (
+        network_consensus.get('moveable', 0) == 0 and
+        network_consensus.get('toggleable', 0) == 0
     )
+    historical_is_cold = (hist_moveable == 0 and hist_toggleable == 0)
     
-    merged_toggleable = (
-        current_evidence.get('toggleable', 0) * norm_wa +
-        network_consensus.get('toggleable', 0) * norm_wb +
-        hist_toggleable * hist_weight
-    )
+    if network_is_cold and historical_is_cold:
+        # No prior knowledge - trust current evidence completely
+        merged_moveable = float(current_evidence.get('moveable', 0))
+        merged_toggleable = float(current_evidence.get('toggleable', 0))
+    else:
+        # Normal weighted merge when we have prior knowledge
+        merged_moveable = (
+            current_evidence.get('moveable', 0) * norm_wa +
+            network_consensus.get('moveable', 0) * norm_wb +
+            hist_moveable * hist_weight
+        )
+        
+        merged_toggleable = (
+            current_evidence.get('toggleable', 0) * norm_wa +
+            network_consensus.get('toggleable', 0) * norm_wb +
+            hist_toggleable * hist_weight
+        )
     
     return {
         'moveable': merged_moveable,

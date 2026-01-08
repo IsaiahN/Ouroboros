@@ -895,29 +895,83 @@ class OperatorComposer:
         generation: int = 0,
         contributed_to_win: bool = False,
         score_before: float = 0,
-        score_after: float = 0
+        score_after: float = 0,
+        is_frontier: bool = False
     ):
-        """Record a test result for an operator."""
+        """
+        Record a test result for an operator with frontier-weighted competition.
+        
+        Frontier levels carry MUCH more weight than replays in competition.
+        This ensures operators prove themselves on new challenges, not just
+        get inflated scores from replaying known solutions.
+        
+        Weighting:
+        - Frontier success: 10.0 points (the true proving ground)
+        - Frontier failure: 5.0 points (still valuable learning)
+        - Replay first success: 2.0 points (initial validation)
+        - Replay subsequent: 0.1 points (diminishing returns, capped at 10 total)
+        """
         test_id = f"test_{uuid.uuid4().hex[:12]}"
+        
+        # Calculate competition weight based on frontier vs replay
+        # Frontier = 10x base weight, Replays have diminishing returns
+        FRONTIER_SUCCESS_WEIGHT = 10.0
+        FRONTIER_FAILURE_WEIGHT = 5.0
+        REPLAY_INITIAL_WEIGHT = 2.0
+        REPLAY_SUBSEQUENT_WEIGHT = 0.1
+        REPLAY_CAP = 10.0  # Max total contribution from replays
+        
+        if is_frontier:
+            competition_weight = FRONTIER_SUCCESS_WEIGHT if success else FRONTIER_FAILURE_WEIGHT
+        else:
+            # Check current replay contribution for this operator
+            current_replay = self.db.execute_query("""
+                SELECT COALESCE(replay_contribution_total, 0) as total
+                FROM composed_operators WHERE operator_id = ?
+            """, (operator_id,))
+            
+            current_total = current_replay[0]['total'] if current_replay else 0.0
+            
+            if current_total < REPLAY_INITIAL_WEIGHT:
+                # First replay gets initial boost
+                competition_weight = REPLAY_INITIAL_WEIGHT
+            elif current_total >= REPLAY_CAP:
+                # Capped - replays no longer contribute
+                competition_weight = 0.0
+            else:
+                # Diminishing returns
+                competition_weight = REPLAY_SUBSEQUENT_WEIGHT
         
         self.db.execute_query("""
             INSERT INTO operator_test_results
             (test_id, operator_id, game_id, level_number, agent_id, generation,
              success, output_value, execution_time_ms, error_message,
-             contributed_to_win, score_before, score_after)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             contributed_to_win, score_before, score_after, is_frontier, competition_weight)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             test_id, operator_id, game_id, level_number, agent_id, generation,
             success, json.dumps(output_value, default=str) if output_value else None,
             execution_time_ms, error_message, contributed_to_win,
-            score_before, score_after
+            score_before, score_after, is_frontier, competition_weight
         ))
         
-        # Update operator stats
-        self._update_operator_stats(operator_id)
+        # Update operator stats with frontier weighting
+        self._update_operator_stats(operator_id, is_frontier, success, competition_weight)
     
-    def _update_operator_stats(self, operator_id: str):
-        """Update operator statistics from test results."""
+    def _update_operator_stats(
+        self, 
+        operator_id: str, 
+        is_frontier: bool = False, 
+        success: bool = False,
+        competition_weight: float = 1.0
+    ):
+        """
+        Update operator statistics from test results with frontier weighting.
+        
+        The weighted_competition_score is what drives survival pressure.
+        It's calculated to heavily favor frontier performance over replays.
+        """
+        # Get overall stats
         results = self.db.execute_query("""
             SELECT 
                 COUNT(*) as total,
@@ -927,45 +981,89 @@ class OperatorComposer:
             WHERE operator_id = ?
         """, (operator_id,))
         
-        if results:
-            total = results[0]['total'] or 0
-            successes = results[0]['successes'] or 0
-            games = results[0]['games_tested'] or 0
-            success_rate = successes / total if total > 0 else 0.0
-            
-            # Calculate cross-game rate (unique games with success / total unique games)
-            cross_game = self.db.execute_query("""
-                SELECT 
-                    COUNT(DISTINCT game_id) as games_with_success
-                FROM operator_test_results
-                WHERE operator_id = ? AND success = 1
-            """, (operator_id,))
-            
-            cross_game_rate = 0.0
-            if cross_game and games > 0:
-                cross_game_rate = (cross_game[0]['games_with_success'] or 0) / games
-            
-            # Determine status
-            status = 'cobbled'
-            if total >= 5:
-                status = 'tested'
-            if total >= 20 and success_rate >= 0.7:
-                status = 'validated'
-            if total >= 50 and success_rate >= 0.8 and cross_game_rate >= 0.6:
-                status = 'solid'
-            if total >= 100 and success_rate >= 0.9 and cross_game_rate >= 0.7:
-                status = 'canonical'
-            
+        if not results:
+            return
+        
+        total = results[0]['total'] or 0
+        successes = results[0]['successes'] or 0
+        games = results[0]['games_tested'] or 0
+        success_rate = successes / total if total > 0 else 0.0
+        
+        # Get frontier-specific stats (the REAL measure of value)
+        frontier_stats = self.db.execute_query("""
+            SELECT 
+                COUNT(*) as frontier_total,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as frontier_successes
+            FROM operator_test_results
+            WHERE operator_id = ? AND is_frontier = 1
+        """, (operator_id,))
+        
+        frontier_tests = frontier_stats[0]['frontier_total'] if frontier_stats else 0
+        frontier_successes = frontier_stats[0]['frontier_successes'] if frontier_stats else 0
+        
+        # Get weighted score (sum of all competition_weight for successes)
+        weighted_results = self.db.execute_query("""
+            SELECT 
+                SUM(CASE WHEN success = 1 THEN competition_weight ELSE 0 END) as weighted_success,
+                SUM(competition_weight) as weighted_total
+            FROM operator_test_results
+            WHERE operator_id = ?
+        """, (operator_id,))
+        
+        weighted_success = weighted_results[0]['weighted_success'] or 0.0 if weighted_results else 0.0
+        weighted_total = weighted_results[0]['weighted_total'] or 1.0 if weighted_results else 1.0
+        
+        # The weighted_competition_score = weighted_success_rate * frontier_bonus
+        # Operators with more frontier experience get extra credibility
+        frontier_bonus = 1.0 + (frontier_tests * 0.1)  # Each frontier test adds 10% bonus
+        weighted_competition_score = (weighted_success / weighted_total if weighted_total > 0 else 0.0) * frontier_bonus
+        
+        # Update replay contribution tracking if this was a replay
+        if not is_frontier and competition_weight > 0:
             self.db.execute_query("""
                 UPDATE composed_operators
-                SET times_tested = ?,
-                    successes = ?,
-                    success_rate = ?,
-                    cross_game_rate = ?,
-                    status = ?,
-                    last_tested_at = CURRENT_TIMESTAMP
+                SET replay_contribution_total = COALESCE(replay_contribution_total, 0) + ?
                 WHERE operator_id = ?
-            """, (total, successes, success_rate, cross_game_rate, status, operator_id))
+            """, (competition_weight, operator_id))
+        
+        # Calculate cross-game rate (unique games with success / total unique games)
+        cross_game = self.db.execute_query("""
+            SELECT 
+                COUNT(DISTINCT game_id) as games_with_success
+            FROM operator_test_results
+            WHERE operator_id = ? AND success = 1
+        """, (operator_id,))
+        
+        cross_game_rate = 0.0
+        if cross_game and games > 0:
+            cross_game_rate = (cross_game[0]['games_with_success'] or 0) / games
+        
+        # Determine status - NOW uses frontier performance as key factor
+        status = 'cobbled'
+        if total >= 5:
+            status = 'tested'
+        if total >= 20 and success_rate >= 0.7:
+            status = 'validated'
+        if total >= 50 and success_rate >= 0.8 and cross_game_rate >= 0.6:
+            status = 'solid'
+        # Canonical now requires FRONTIER success, not just replay grinding
+        if frontier_tests >= 10 and frontier_successes >= 7 and cross_game_rate >= 0.7:
+            status = 'canonical'
+        
+        self.db.execute_query("""
+            UPDATE composed_operators
+            SET times_tested = ?,
+                successes = ?,
+                success_rate = ?,
+                cross_game_rate = ?,
+                status = ?,
+                frontier_tests = ?,
+                frontier_successes = ?,
+                weighted_competition_score = ?,
+                last_tested_at = CURRENT_TIMESTAMP
+            WHERE operator_id = ?
+        """, (total, successes, success_rate, cross_game_rate, status,
+              frontier_tests, frontier_successes, weighted_competition_score, operator_id))
     
     # ======================================================================
     # STORAGE & RETRIEVAL
@@ -973,6 +1071,17 @@ class OperatorComposer:
     
     def _store_operator(self, operator: ComposedOperator):
         """Store an operator in the database."""
+        # Validate agent_id exists in agents table to avoid FK constraint failure
+        agent_id = operator.created_by_agent
+        if agent_id:
+            result = self.db.execute_query(
+                "SELECT agent_id FROM agents WHERE agent_id = ?",
+                (agent_id,)
+            )
+            if not result:
+                # Agent doesn't exist - use NULL to avoid FK constraint failure
+                agent_id = None
+        
         self.db.execute_query("""
             INSERT OR REPLACE INTO composed_operators
             (operator_id, name, composition_tree, composition_type, input_types,
@@ -986,7 +1095,7 @@ class OperatorComposer:
             json.dumps(operator.input_types),
             operator.output_type,
             operator.status.value,
-            operator.created_by_agent,
+            agent_id,
             json.dumps(operator.parent_operators)
         ))
     

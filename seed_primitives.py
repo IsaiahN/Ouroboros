@@ -63,6 +63,8 @@ class PrimitiveCategory(Enum):
     QUANTITATIVE = "quantitative"     # Approximate numerosity (counting, comparing)
     METACOGNITION = "metacognition"   # Know what you know (confidence, stuck detection)
     NEGATIVE_SPACE = "negative_space" # Absence detection (holes, missing things)
+    # === ARC-SPECIFIC PERCEPTUAL PRIMITIVES ===
+    PERCEPTUAL = "perceptual"         # Core ARC reasoning (templates, analogies, roles)
 
 
 @dataclass
@@ -1308,6 +1310,168 @@ class SeedPrimitiveRegistry:
             output_type="int",
             unlock_level="late",
             piaget_stage="concrete_operational"
+        ))
+        
+        # ==================================================================
+        # ARC-SPECIFIC PERCEPTUAL PRIMITIVES (15 primitives) - ALL SEED
+        # ==================================================================
+        # These are the core perceptual capabilities needed for ARC reasoning.
+        # All are seed primitives (default unlocked) because they represent
+        # fundamental perceptual operations that agents need from the start.
+        # ==================================================================
+        
+        self._register(Primitive(
+            name="color_sampling",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Query color at (x,y) or within a region. Returns color value(s).",
+            func=self._color_sampling,
+            input_types=["frame", "x", "y", "region"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="pattern_detection",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Identify repeated structures, symmetries, checkerboards in frame.",
+            func=self._pattern_detection,
+            input_types=["frame"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="scale_measurement",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Compare relative sizes of objects. Returns size ratios and comparisons.",
+            func=self._scale_measurement,
+            input_types=["frame", "object_a", "object_b"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="spatial_relationships",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Determine which object is center/adjacent/inside another.",
+            func=self._spatial_relationships,
+            input_types=["frame", "object_a", "object_b"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="template_extraction",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Treat one object as a rule/key for interpreting others.",
+            func=self._template_extraction,
+            input_types=["frame", "reference_region"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="analogical_mapping",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="'This is to that as X is to Y' reasoning. Map structural relationships.",
+            func=self._analogical_mapping,
+            input_types=["source_a", "source_b", "target_a"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="role_binding",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Assign semantic roles (primary/secondary, source/target) to objects.",
+            func=self._role_binding,
+            input_types=["frame", "objects"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="hierarchical_composition",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Understanding nested or scaled patterns in the frame.",
+            func=self._hierarchical_composition,
+            input_types=["frame"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="color_substitution",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Change colors while preserving spatial structure.",
+            func=self._color_substitution,
+            input_types=["frame", "color_map"],
+            output_type="frame",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="pattern_replication",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Copy structure from one region to another with transformations.",
+            func=self._pattern_replication,
+            input_types=["frame", "source_region", "target_region", "transform"],
+            output_type="frame",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="functional_attribution",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Detect if object might have special purpose/role in the system.",
+            func=self._functional_attribution,
+            input_types=["frame", "object_id"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="rule_detection",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Detect if region encodes instructions rather than being an instance.",
+            func=self._rule_detection,
+            input_types=["frame", "region"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="metadata_recognition",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Distinguish data vs metadata, example vs template, instance vs class, content vs legend.",
+            func=self._metadata_recognition,
+            input_types=["frame"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="complexity_signaling",
+            category=PrimitiveCategory.PERCEPTUAL,
+            description="Detect if unusual complexity/centrality/uniqueness indicates special status.",
+            func=self._complexity_signaling,
+            input_types=["frame", "object_id"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
         ))
     
     # ======================================================================
@@ -2868,6 +3032,897 @@ class SeedPrimitiveRegistry:
                     empty_count += 1
         
         return empty_count
+    
+    # ======================================================================
+    # ARC-SPECIFIC PERCEPTUAL PRIMITIVE IMPLEMENTATIONS
+    # ======================================================================
+    # These implement the core perceptual operations for ARC reasoning.
+    # All are seed primitives - available by default to all agents.
+    # ======================================================================
+    
+    def _color_sampling(
+        self,
+        frame: List[List[int]],
+        x: Optional[int] = None,
+        y: Optional[int] = None,
+        region: Optional[Tuple[int, int, int, int]] = None
+    ) -> Dict[str, Any]:
+        """
+        Query color at (x,y) or within a region.
+        
+        Returns:
+            {
+                'point_color': int if x,y provided,
+                'region_colors': Dict[int, int] if region provided (color -> count),
+                'dominant_color': int (most common),
+                'unique_colors': List[int]
+            }
+        """
+        result = {
+            'point_color': None,
+            'region_colors': {},
+            'dominant_color': None,
+            'unique_colors': []
+        }
+        
+        if not frame or not frame[0]:
+            return result
+        
+        height = len(frame)
+        width = len(frame[0])
+        
+        # Point sampling
+        if x is not None and y is not None:
+            if 0 <= y < height and 0 <= x < width:
+                result['point_color'] = frame[y][x]
+        
+        # Region sampling
+        if region is not None:
+            x1, y1, x2, y2 = region
+            color_counts: Dict[int, int] = {}
+            for ry in range(max(0, y1), min(height, y2 + 1)):
+                for rx in range(max(0, x1), min(width, x2 + 1)):
+                    c = frame[ry][rx]
+                    color_counts[c] = color_counts.get(c, 0) + 1
+            result['region_colors'] = color_counts
+            if color_counts:
+                result['dominant_color'] = max(color_counts, key=color_counts.get)
+                result['unique_colors'] = list(color_counts.keys())
+        else:
+            # Sample whole frame
+            color_counts: Dict[int, int] = {}
+            for row in frame:
+                for c in row:
+                    color_counts[c] = color_counts.get(c, 0) + 1
+            result['region_colors'] = color_counts
+            if color_counts:
+                result['dominant_color'] = max(color_counts, key=color_counts.get)
+                result['unique_colors'] = list(color_counts.keys())
+        
+        return result
+    
+    def _pattern_detection(
+        self,
+        frame: List[List[int]]
+    ) -> Dict[str, Any]:
+        """
+        Identify repeated structures, symmetries, checkerboards in frame.
+        
+        Returns:
+            {
+                'has_horizontal_symmetry': bool,
+                'has_vertical_symmetry': bool,
+                'has_rotational_symmetry': bool,
+                'has_checkerboard': bool,
+                'repeating_units': List[Dict],
+                'periodicity': Optional[Tuple[int, int]]
+            }
+        """
+        result = {
+            'has_horizontal_symmetry': False,
+            'has_vertical_symmetry': False,
+            'has_rotational_symmetry': False,
+            'has_checkerboard': False,
+            'repeating_units': [],
+            'periodicity': None
+        }
+        
+        if not frame or not frame[0]:
+            return result
+        
+        height = len(frame)
+        width = len(frame[0])
+        
+        # Check horizontal symmetry (left-right mirror)
+        h_sym = True
+        for y in range(height):
+            for x in range(width // 2):
+                if frame[y][x] != frame[y][width - 1 - x]:
+                    h_sym = False
+                    break
+            if not h_sym:
+                break
+        result['has_horizontal_symmetry'] = h_sym
+        
+        # Check vertical symmetry (top-bottom mirror)
+        v_sym = True
+        for y in range(height // 2):
+            if frame[y] != frame[height - 1 - y]:
+                v_sym = False
+                break
+        result['has_vertical_symmetry'] = v_sym
+        
+        # Check 180-degree rotational symmetry
+        rot_sym = True
+        for y in range(height):
+            for x in range(width):
+                if frame[y][x] != frame[height - 1 - y][width - 1 - x]:
+                    rot_sym = False
+                    break
+            if not rot_sym:
+                break
+        result['has_rotational_symmetry'] = rot_sym
+        
+        # Check for checkerboard pattern
+        if height >= 2 and width >= 2:
+            colors = set()
+            is_checker = True
+            for y in range(height):
+                for x in range(width):
+                    colors.add(frame[y][x])
+                    expected_parity = (x + y) % 2
+                    if len(colors) == 2:
+                        c1, c2 = list(colors)
+                        expected_color = c1 if expected_parity == 0 else c2
+                        if frame[y][x] != expected_color and frame[y][x] != (c2 if expected_parity == 0 else c1):
+                            is_checker = False
+                            break
+                if not is_checker:
+                    break
+            result['has_checkerboard'] = is_checker and len(colors) == 2
+        
+        # Detect periodicity (repeating pattern in x and y)
+        for period_x in range(1, width // 2 + 1):
+            if width % period_x == 0:
+                is_periodic = True
+                for y in range(height):
+                    for x in range(width):
+                        if frame[y][x] != frame[y][x % period_x]:
+                            is_periodic = False
+                            break
+                    if not is_periodic:
+                        break
+                if is_periodic:
+                    result['periodicity'] = (period_x, None)
+                    break
+        
+        return result
+    
+    def _scale_measurement(
+        self,
+        frame: List[List[int]],
+        object_a: Optional[Dict[str, Any]] = None,
+        object_b: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Compare relative sizes of objects.
+        
+        Returns:
+            {
+                'size_a': int,
+                'size_b': int,
+                'ratio': float (a/b),
+                'comparison': str ('larger', 'smaller', 'equal'),
+                'scale_factor': float (approximate scaling)
+            }
+        """
+        result = {
+            'size_a': 0,
+            'size_b': 0,
+            'ratio': 1.0,
+            'comparison': 'equal',
+            'scale_factor': 1.0
+        }
+        
+        if object_a:
+            result['size_a'] = object_a.get('size', len(object_a.get('positions', [])))
+        if object_b:
+            result['size_b'] = object_b.get('size', len(object_b.get('positions', [])))
+        
+        if result['size_b'] > 0:
+            result['ratio'] = result['size_a'] / result['size_b']
+            result['scale_factor'] = result['ratio'] ** 0.5  # Square root for 2D scaling
+            
+            if result['ratio'] > 1.1:
+                result['comparison'] = 'larger'
+            elif result['ratio'] < 0.9:
+                result['comparison'] = 'smaller'
+            else:
+                result['comparison'] = 'equal'
+        
+        return result
+    
+    def _spatial_relationships(
+        self,
+        frame: List[List[int]],
+        object_a: Optional[Dict[str, Any]] = None,
+        object_b: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Determine which object is center/adjacent/inside another.
+        
+        Returns:
+            {
+                'a_position': str ('center', 'corner', 'edge'),
+                'relative_position': str ('above', 'below', 'left', 'right', 'inside', 'outside', 'overlapping'),
+                'distance': float,
+                'is_adjacent': bool,
+                'is_contained': bool
+            }
+        """
+        result = {
+            'a_position': 'unknown',
+            'relative_position': 'unknown',
+            'distance': float('inf'),
+            'is_adjacent': False,
+            'is_contained': False
+        }
+        
+        if not frame:
+            return result
+        
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
+        if object_a and 'centroid' in object_a:
+            cx, cy = object_a['centroid']
+            # Determine if center, corner, or edge
+            center_x, center_y = width / 2, height / 2
+            dist_to_center = ((cx - center_x) ** 2 + (cy - center_y) ** 2) ** 0.5
+            max_dist = ((width/2) ** 2 + (height/2) ** 2) ** 0.5
+            
+            if dist_to_center < max_dist * 0.3:
+                result['a_position'] = 'center'
+            elif cx <= 1 or cx >= width - 2 or cy <= 1 or cy >= height - 2:
+                if (cx <= 1 or cx >= width - 2) and (cy <= 1 or cy >= height - 2):
+                    result['a_position'] = 'corner'
+                else:
+                    result['a_position'] = 'edge'
+            else:
+                result['a_position'] = 'interior'
+        
+        if object_a and object_b and 'centroid' in object_a and 'centroid' in object_b:
+            ax, ay = object_a['centroid']
+            bx, by = object_b['centroid']
+            
+            result['distance'] = ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
+            result['is_adjacent'] = result['distance'] < 3
+            
+            # Relative position
+            dx = ax - bx
+            dy = ay - by
+            
+            if abs(dx) > abs(dy):
+                result['relative_position'] = 'right' if dx > 0 else 'left'
+            else:
+                result['relative_position'] = 'below' if dy > 0 else 'above'
+            
+            # Check containment
+            if 'positions' in object_a and 'positions' in object_b:
+                a_pos = set(object_a['positions'])
+                b_pos = set(object_b['positions'])
+                if a_pos.issubset(b_pos):
+                    result['is_contained'] = True
+                    result['relative_position'] = 'inside'
+        
+        return result
+    
+    def _template_extraction(
+        self,
+        frame: List[List[int]],
+        reference_region: Optional[Tuple[int, int, int, int]] = None
+    ) -> Dict[str, Any]:
+        """
+        Treat one object/region as a rule/key for interpreting others.
+        
+        Returns:
+            {
+                'template': List[List[int]] (extracted pattern),
+                'template_size': Tuple[int, int],
+                'color_mapping': Dict[int, str] (colors to roles),
+                'structural_pattern': str
+            }
+        """
+        result = {
+            'template': [],
+            'template_size': (0, 0),
+            'color_mapping': {},
+            'structural_pattern': 'unknown'
+        }
+        
+        if not frame:
+            return result
+        
+        if reference_region:
+            x1, y1, x2, y2 = reference_region
+            template = []
+            for y in range(max(0, y1), min(len(frame), y2 + 1)):
+                row = []
+                for x in range(max(0, x1), min(len(frame[0]), x2 + 1)):
+                    row.append(frame[y][x])
+                template.append(row)
+            result['template'] = template
+            result['template_size'] = (len(template[0]) if template else 0, len(template))
+            
+            # Extract color roles
+            colors_found = set()
+            for row in template:
+                colors_found.update(row)
+            
+            colors_sorted = sorted(colors_found)
+            for i, c in enumerate(colors_sorted):
+                if c == 0:
+                    result['color_mapping'][c] = 'background'
+                elif i == 1:
+                    result['color_mapping'][c] = 'primary'
+                elif i == 2:
+                    result['color_mapping'][c] = 'secondary'
+                else:
+                    result['color_mapping'][c] = f'role_{i}'
+        
+        return result
+    
+    def _analogical_mapping(
+        self,
+        source_a: Any,
+        source_b: Any,
+        target_a: Any
+    ) -> Dict[str, Any]:
+        """
+        'This is to that as X is to Y' reasoning.
+        
+        Returns:
+            {
+                'inferred_target_b': Any,
+                'transformation_type': str,
+                'confidence': float,
+                'mapping': Dict
+            }
+        """
+        result = {
+            'inferred_target_b': None,
+            'transformation_type': 'unknown',
+            'confidence': 0.0,
+            'mapping': {}
+        }
+        
+        # Detect transformation between source_a and source_b
+        if isinstance(source_a, int) and isinstance(source_b, int):
+            # Color transformation
+            diff = source_b - source_a
+            result['transformation_type'] = 'color_shift'
+            result['mapping'] = {'shift': diff}
+            result['inferred_target_b'] = target_a + diff if isinstance(target_a, int) else target_a
+            result['confidence'] = 0.8
+        
+        elif isinstance(source_a, dict) and isinstance(source_b, dict):
+            # Object transformation
+            if 'size' in source_a and 'size' in source_b:
+                scale = source_b.get('size', 1) / max(source_a.get('size', 1), 1)
+                result['transformation_type'] = 'scale'
+                result['mapping'] = {'scale_factor': scale}
+                result['confidence'] = 0.7
+        
+        return result
+    
+    def _role_binding(
+        self,
+        frame: List[List[int]],
+        objects: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Assign semantic roles (primary/secondary, source/target) to objects.
+        
+        Returns:
+            {
+                'primary': object_id or None,
+                'secondary': List[object_id],
+                'source': object_id or None,
+                'target': object_id or None,
+                'reference': object_id or None,
+                'roles': Dict[object_id, List[str]]
+            }
+        """
+        result = {
+            'primary': None,
+            'secondary': [],
+            'source': None,
+            'target': None,
+            'reference': None,
+            'roles': {}
+        }
+        
+        if not objects:
+            objects = self._find_distinct_objects(frame) if frame else []
+        
+        if not objects:
+            return result
+        
+        # Assign roles based on properties
+        # Primary = largest or most central
+        # Reference = smallest distinct object (might be legend/key)
+        
+        sorted_by_size = sorted(objects, key=lambda o: o.get('size', 0), reverse=True)
+        
+        if sorted_by_size:
+            result['primary'] = sorted_by_size[0].get('color', 0)
+            result['roles'][sorted_by_size[0].get('color', 0)] = ['primary']
+            
+            if len(sorted_by_size) > 1:
+                result['secondary'] = [o.get('color', 0) for o in sorted_by_size[1:]]
+                for o in sorted_by_size[1:]:
+                    result['roles'][o.get('color', 0)] = ['secondary']
+            
+            # Smallest might be reference/legend
+            smallest = sorted_by_size[-1]
+            if smallest.get('size', 0) < sorted_by_size[0].get('size', 0) * 0.2:
+                result['reference'] = smallest.get('color', 0)
+                result['roles'][smallest.get('color', 0)].append('reference')
+        
+        return result
+    
+    def _hierarchical_composition(
+        self,
+        frame: List[List[int]]
+    ) -> Dict[str, Any]:
+        """
+        Understanding nested or scaled patterns in the frame.
+        
+        Returns:
+            {
+                'nesting_levels': int,
+                'nested_objects': List[Dict],
+                'scaling_pattern': Optional[float],
+                'composition_type': str ('nested', 'tiled', 'scaled', 'none')
+            }
+        """
+        result = {
+            'nesting_levels': 0,
+            'nested_objects': [],
+            'scaling_pattern': None,
+            'composition_type': 'none'
+        }
+        
+        if not frame or not frame[0]:
+            return result
+        
+        objects = self._find_distinct_objects(frame)
+        
+        if len(objects) < 2:
+            return result
+        
+        # Check for containment relationships
+        for obj_a in objects:
+            for obj_b in objects:
+                if obj_a == obj_b:
+                    continue
+                a_pos = set(obj_a.get('positions', []))
+                b_pos = set(obj_b.get('positions', []))
+                
+                # Check if b's bounding box contains a
+                if 'bounding_box' in obj_b:
+                    bx1, by1, bx2, by2 = obj_b['bounding_box']
+                    a_centroid = obj_a.get('centroid', (0, 0))
+                    if bx1 <= a_centroid[0] <= bx2 and by1 <= a_centroid[1] <= by2:
+                        result['nesting_levels'] += 1
+                        result['nested_objects'].append({
+                            'outer': obj_b.get('color'),
+                            'inner': obj_a.get('color')
+                        })
+        
+        if result['nesting_levels'] > 0:
+            result['composition_type'] = 'nested'
+        
+        # Check for tiling
+        height = len(frame)
+        width = len(frame[0])
+        for tile_h in range(2, height // 2 + 1):
+            for tile_w in range(2, width // 2 + 1):
+                if height % tile_h == 0 and width % tile_w == 0:
+                    # Check if tiles repeat
+                    first_tile = [row[:tile_w] for row in frame[:tile_h]]
+                    is_tiled = True
+                    for ty in range(0, height, tile_h):
+                        for tx in range(0, width, tile_w):
+                            tile = [row[tx:tx+tile_w] for row in frame[ty:ty+tile_h]]
+                            if tile != first_tile:
+                                is_tiled = False
+                                break
+                        if not is_tiled:
+                            break
+                    if is_tiled:
+                        result['composition_type'] = 'tiled'
+                        result['scaling_pattern'] = (tile_w, tile_h)
+                        return result
+        
+        return result
+    
+    def _color_substitution(
+        self,
+        frame: List[List[int]],
+        color_map: Dict[int, int]
+    ) -> List[List[int]]:
+        """
+        Change colors while preserving spatial structure.
+        
+        Returns: New frame with substituted colors.
+        """
+        if not frame:
+            return frame
+        
+        new_frame = []
+        for row in frame:
+            new_row = [color_map.get(c, c) for c in row]
+            new_frame.append(new_row)
+        
+        return new_frame
+    
+    def _pattern_replication(
+        self,
+        frame: List[List[int]],
+        source_region: Tuple[int, int, int, int],
+        target_region: Tuple[int, int, int, int],
+        transform: Optional[str] = None
+    ) -> List[List[int]]:
+        """
+        Copy structure from one region to another with optional transformations.
+        
+        Transform options: 'none', 'flip_h', 'flip_v', 'rotate_90', 'rotate_180'
+        
+        Returns: New frame with replicated pattern.
+        """
+        if not frame:
+            return frame
+        
+        # Deep copy frame
+        new_frame = [row[:] for row in frame]
+        
+        sx1, sy1, sx2, sy2 = source_region
+        tx1, ty1, tx2, ty2 = target_region
+        
+        # Extract source pattern
+        pattern = []
+        for y in range(max(0, sy1), min(len(frame), sy2 + 1)):
+            row = []
+            for x in range(max(0, sx1), min(len(frame[0]), sx2 + 1)):
+                row.append(frame[y][x])
+            pattern.append(row)
+        
+        if not pattern:
+            return new_frame
+        
+        # Apply transformation
+        if transform == 'flip_h':
+            pattern = [row[::-1] for row in pattern]
+        elif transform == 'flip_v':
+            pattern = pattern[::-1]
+        elif transform == 'rotate_180':
+            pattern = [row[::-1] for row in pattern[::-1]]
+        elif transform == 'rotate_90':
+            pattern = [[pattern[len(pattern)-1-j][i] for j in range(len(pattern))] for i in range(len(pattern[0]))]
+        
+        # Apply to target region
+        ph = len(pattern)
+        pw = len(pattern[0]) if pattern else 0
+        
+        for dy in range(min(ph, ty2 - ty1 + 1)):
+            for dx in range(min(pw, tx2 - tx1 + 1)):
+                ty = ty1 + dy
+                tx = tx1 + dx
+                if 0 <= ty < len(new_frame) and 0 <= tx < len(new_frame[0]):
+                    new_frame[ty][tx] = pattern[dy][dx]
+        
+        return new_frame
+    
+    def _functional_attribution(
+        self,
+        frame: List[List[int]],
+        object_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Detect if object might have special purpose/role in the system.
+        
+        Returns:
+            {
+                'is_special': bool,
+                'possible_roles': List[str],
+                'uniqueness_score': float,
+                'centrality_score': float,
+                'complexity_score': float
+            }
+        """
+        result = {
+            'is_special': False,
+            'possible_roles': [],
+            'uniqueness_score': 0.0,
+            'centrality_score': 0.0,
+            'complexity_score': 0.0
+        }
+        
+        if not frame:
+            return result
+        
+        objects = self._find_distinct_objects(frame)
+        
+        # Find the target object
+        target_obj = None
+        for obj in objects:
+            if object_id and str(obj.get('color')) == object_id.replace('obj_', ''):
+                target_obj = obj
+                break
+        
+        if not target_obj:
+            target_obj = objects[0] if objects else None
+        
+        if not target_obj:
+            return result
+        
+        # Calculate uniqueness (how different from others)
+        if len(objects) > 1:
+            target_size = target_obj.get('size', 0)
+            other_sizes = [o.get('size', 0) for o in objects if o != target_obj]
+            avg_other_size = sum(other_sizes) / len(other_sizes) if other_sizes else target_size
+            result['uniqueness_score'] = abs(target_size - avg_other_size) / max(avg_other_size, 1)
+        
+        # Calculate centrality
+        if 'centroid' in target_obj:
+            cx, cy = target_obj['centroid']
+            center_x = len(frame[0]) / 2
+            center_y = len(frame) / 2
+            max_dist = ((center_x ** 2) + (center_y ** 2)) ** 0.5
+            dist = ((cx - center_x) ** 2 + (cy - center_y) ** 2) ** 0.5
+            result['centrality_score'] = 1.0 - (dist / max_dist)
+        
+        # Estimate complexity (edge count relative to size)
+        if 'positions' in target_obj:
+            positions = set(target_obj['positions'])
+            edge_count = 0
+            for x, y in positions:
+                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    if (x + dx, y + dy) not in positions:
+                        edge_count += 1
+            size = len(positions)
+            result['complexity_score'] = edge_count / max(size * 4, 1)
+        
+        # Determine if special
+        if result['uniqueness_score'] > 0.5 or result['centrality_score'] > 0.8:
+            result['is_special'] = True
+            if result['centrality_score'] > 0.8:
+                result['possible_roles'].append('primary')
+            if result['uniqueness_score'] > 0.7:
+                result['possible_roles'].append('reference')
+                result['possible_roles'].append('legend')
+        
+        return result
+    
+    def _rule_detection(
+        self,
+        frame: List[List[int]],
+        region: Optional[Tuple[int, int, int, int]] = None
+    ) -> Dict[str, Any]:
+        """
+        Detect if region encodes instructions rather than being an instance.
+        
+        Returns:
+            {
+                'is_rule': bool,
+                'rule_type': str ('legend', 'example', 'instruction', 'data'),
+                'confidence': float,
+                'indicators': List[str]
+            }
+        """
+        result = {
+            'is_rule': False,
+            'rule_type': 'data',
+            'confidence': 0.0,
+            'indicators': []
+        }
+        
+        if not frame:
+            return result
+        
+        # Extract region or use whole frame
+        if region:
+            x1, y1, x2, y2 = region
+            analysis_frame = [row[x1:x2+1] for row in frame[y1:y2+1]]
+        else:
+            analysis_frame = frame
+        
+        if not analysis_frame:
+            return result
+        
+        # Indicators that suggest this is a rule/template:
+        # 1. Small size relative to total
+        # 2. Contains all colors present elsewhere
+        # 3. Separated/isolated from main content
+        # 4. High information density
+        
+        total_size = len(frame) * len(frame[0])
+        region_size = len(analysis_frame) * len(analysis_frame[0]) if analysis_frame[0] else 0
+        
+        if region_size < total_size * 0.25:
+            result['indicators'].append('small_relative_size')
+            result['confidence'] += 0.2
+        
+        # Check color coverage
+        region_colors = set()
+        for row in analysis_frame:
+            region_colors.update(row)
+        
+        frame_colors = set()
+        for row in frame:
+            frame_colors.update(row)
+        
+        if region_colors == frame_colors or frame_colors - region_colors == {0}:
+            result['indicators'].append('contains_all_colors')
+            result['confidence'] += 0.3
+        
+        # Check for isolation (surrounded by background)
+        if region:
+            x1, y1, x2, y2 = region
+            is_isolated = True
+            # Check borders
+            if y1 > 0:
+                for x in range(max(0, x1-1), min(len(frame[0]), x2+2)):
+                    if frame[y1-1][x] != 0:
+                        is_isolated = False
+                        break
+            if is_isolated:
+                result['indicators'].append('isolated')
+                result['confidence'] += 0.2
+        
+        if result['confidence'] >= 0.5:
+            result['is_rule'] = True
+            if 'contains_all_colors' in result['indicators']:
+                result['rule_type'] = 'legend'
+            elif 'small_relative_size' in result['indicators']:
+                result['rule_type'] = 'example'
+            else:
+                result['rule_type'] = 'instruction'
+        
+        return result
+    
+    def _metadata_recognition(
+        self,
+        frame: List[List[int]]
+    ) -> Dict[str, Any]:
+        """
+        Distinguish data vs metadata, example vs template, instance vs class.
+        
+        Returns:
+            {
+                'metadata_regions': List[Tuple[int, int, int, int]],
+                'data_regions': List[Tuple[int, int, int, int]],
+                'has_legend': bool,
+                'has_example': bool,
+                'classification': Dict[region -> type]
+            }
+        """
+        result = {
+            'metadata_regions': [],
+            'data_regions': [],
+            'has_legend': False,
+            'has_example': False,
+            'classification': {}
+        }
+        
+        if not frame or not frame[0]:
+            return result
+        
+        height = len(frame)
+        width = len(frame[0])
+        
+        # Find connected regions
+        objects = self._find_distinct_objects(frame)
+        
+        for obj in objects:
+            if 'bounding_box' not in obj:
+                continue
+            
+            bbox = obj['bounding_box']
+            region = (bbox[0], bbox[1], bbox[2], bbox[3])
+            
+            # Analyze this region
+            rule_info = self._rule_detection(frame, region)
+            
+            if rule_info['is_rule']:
+                result['metadata_regions'].append(region)
+                result['classification'][region] = rule_info['rule_type']
+                if rule_info['rule_type'] == 'legend':
+                    result['has_legend'] = True
+                elif rule_info['rule_type'] == 'example':
+                    result['has_example'] = True
+            else:
+                result['data_regions'].append(region)
+                result['classification'][region] = 'data'
+        
+        return result
+    
+    def _complexity_signaling(
+        self,
+        frame: List[List[int]],
+        object_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Detect if unusual complexity/centrality/uniqueness indicates special status.
+        
+        Returns:
+            {
+                'is_complex': bool,
+                'complexity_rank': int (1 = most complex),
+                'is_central': bool,
+                'is_unique': bool,
+                'signals_special_status': bool,
+                'suggested_role': str
+            }
+        """
+        result = {
+            'is_complex': False,
+            'complexity_rank': 0,
+            'is_central': False,
+            'is_unique': False,
+            'signals_special_status': False,
+            'suggested_role': 'normal'
+        }
+        
+        if not frame:
+            return result
+        
+        objects = self._find_distinct_objects(frame)
+        
+        if not objects:
+            return result
+        
+        # Calculate complexity for each object
+        complexities = []
+        for obj in objects:
+            func_attr = self._functional_attribution(frame, f"obj_{obj.get('color', 0)}")
+            complexities.append({
+                'object': obj,
+                'complexity': func_attr['complexity_score'],
+                'centrality': func_attr['centrality_score'],
+                'uniqueness': func_attr['uniqueness_score']
+            })
+        
+        # Sort by complexity
+        complexities.sort(key=lambda x: x['complexity'], reverse=True)
+        
+        # Find target object
+        target_idx = 0
+        if object_id:
+            for i, c in enumerate(complexities):
+                if str(c['object'].get('color')) == object_id.replace('obj_', ''):
+                    target_idx = i
+                    break
+        
+        target = complexities[target_idx]
+        result['complexity_rank'] = target_idx + 1
+        result['is_complex'] = target['complexity'] > 0.5
+        result['is_central'] = target['centrality'] > 0.7
+        result['is_unique'] = target['uniqueness'] > 0.5
+        
+        # Determine if signals special status
+        if result['is_complex'] and result['is_central']:
+            result['signals_special_status'] = True
+            result['suggested_role'] = 'primary'
+        elif result['is_unique'] and not result['is_central']:
+            result['signals_special_status'] = True
+            result['suggested_role'] = 'reference'
+        elif result['complexity_rank'] == 1:
+            result['signals_special_status'] = True
+            result['suggested_role'] = 'key'
+        
+        return result
     
     # ======================================================================
     # PUBLIC API

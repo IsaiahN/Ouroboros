@@ -2072,6 +2072,31 @@ class AutonomousEvolutionRunner:
                 import traceback
                 traceback.print_exc()
             
+            # OPERATOR LIFECYCLE: Promote strong operators, kill weak ones
+            print(f"\n[OPERATOR LIFECYCLE] Running operator survival selection for generation {self.current_generation}...")
+            try:
+                from cods_engine import get_cods_engine
+                cods_engine = get_cods_engine(self.db_path)
+                lifecycle_results = cods_engine.run_operator_lifecycle()
+                
+                if lifecycle_results.get('promoted', 0) > 0:
+                    print(f"[OK] Promoted {lifecycle_results['promoted']} operators to canonical status")
+                if lifecycle_results.get('killed', 0) > 0:
+                    print(f"[OK] Killed {lifecycle_results['killed']} failing/unused operators")
+                
+                # Show survival stats
+                survival_stats = cods_engine.get_operator_survival_stats()
+                by_status = survival_stats.get('by_status', {})
+                total = sum(by_status.values())
+                canonical = by_status.get('canonical', 0)
+                at_risk = survival_stats.get('at_risk', 0)
+                print(f"[OK] Operator population: {total} total, {canonical} canonical, {at_risk} at risk")
+                
+            except Exception as e:
+                print(f"[WARN] Operator lifecycle failed: {e}")
+                import traceback
+                traceback.print_exc()
+            
             # OPTIMIZATION TRACKING: Update which levels are optimized vs need work
             print(f"\n[OPTIMIZATION] Updating level optimization status for generation {self.current_generation}...")
             try:

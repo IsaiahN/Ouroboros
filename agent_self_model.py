@@ -1635,12 +1635,14 @@ class AgentSelfModel:
         game_type = game_id.split('-')[0] if '-' in game_id else game_id
         
         # 3. Get toggleable/button objects from object_selection_state
+        # FIX: Lower threshold to 0.4 since toggleable objects are deterministic
+        # (clicking always toggles color, no randomness like movement)
         toggle_result = self.db.execute_query("""
             SELECT object_color, confidence 
             FROM object_selection_state
             WHERE game_type = ? AND level_number = ? 
             AND (is_button = 1 OR is_selectable = 1)
-            AND confidence >= 0.5
+            AND confidence >= 0.4
         """, (game_type, level))
         
         if toggle_result:
@@ -1697,6 +1699,64 @@ class AgentSelfModel:
             'level': level,
             'game_id': game_id,
         }
+
+    def calculate_control_confidence(
+        self,
+        agent_id: str,
+        game_id: str,
+        level: int
+    ) -> float:
+        """
+        Calculate overall control confidence including BOTH movement and toggleable objects.
+        
+        FIX: Previously only counted movement-based control, causing toggleable
+        objects to be ignored even when discovered. Now properly weights both types.
+        
+        Args:
+            agent_id: Agent identifier
+            game_id: Game identifier
+            level: Level number
+            
+        Returns:
+            Confidence score 0.0-1.0
+        """
+        confidences = []
+        
+        # 1. Movement-controlled objects
+        result = self.db.execute_query("""
+            SELECT confidence
+            FROM agent_object_control
+            WHERE agent_id = ? AND game_id = ? AND level_number = ?
+        """, (agent_id, game_id, level))
+        
+        if result and result[0].get('confidence'):
+            confidences.append(float(result[0]['confidence']))
+        
+        # 2. Toggleable objects (click-based control)
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        toggle_result = self.db.execute_query("""
+            SELECT AVG(confidence) as avg_confidence, COUNT(*) as count
+            FROM object_selection_state
+            WHERE game_type = ? AND level_number = ? 
+            AND (is_button = 1 OR is_selectable = 1)
+            AND confidence >= 0.4
+        """, (game_type, level))
+        
+        if toggle_result and toggle_result[0].get('avg_confidence'):
+            avg_toggle_conf = float(toggle_result[0]['avg_confidence'])
+            toggle_count = int(toggle_result[0].get('count', 0))
+            
+            # Weight toggleable confidence by discovery count
+            # Multiple toggleable objects = higher overall confidence
+            weighted_toggle_conf = min(1.0, avg_toggle_conf + (toggle_count - 1) * 0.05)
+            confidences.append(weighted_toggle_conf)
+        
+        if not confidences:
+            return 0.0
+        
+        # Average all confidence sources
+        return sum(confidences) / len(confidences)
 
     def compute_grounding_score(
         self,
@@ -1920,6 +1980,7 @@ class AgentSelfModel:
                     result['movement_matches_action'] = True
                     # LOWER initial confidence - correlation != causation
                     # Requires 3+ observations to reach high confidence (0.7+)
+                    # Note: Movement is less deterministic than toggles (0.35 vs 0.6)
                     result['confidence'] = 0.35  # Single observation only
                     
                     # Store discovery locally
@@ -2024,8 +2085,17 @@ class AgentSelfModel:
                     result['control_type'] = 'unknown_click_effect'
                 
                 # SHARE TO NETWORK: Any click effect is valuable knowledge
+                # FIX: Add logging to verify this is being called
                 try:
                     controlled_color = click_effect.get('color_before', 0)
+                    color_after = click_effect.get('color_after', 0)
+                    
+                    # Log discovery for debugging
+                    logger.info(
+                        f"[DISCOVERY] Click effect: color_{controlled_color} -> color_{color_after} "
+                        f"at ({click_coords[0]},{click_coords[1]}) type={effect_type}"
+                    )
+                    
                     if controlled_color > 0:
                         self.learn_from_click_effect(
                             agent_id=agent_id or 'discovery',
@@ -2038,8 +2108,11 @@ class AgentSelfModel:
                             color_after=click_effect.get('color_after'),
                             generation=0
                         )
+                        logger.info(f"[NETWORK] Shared toggleable discovery to network: color_{controlled_color}")
+                    else:
+                        logger.warning(f"[NETWORK] Skip sharing: controlled_color={controlled_color} <= 0")
                 except Exception as e:
-                    logger.debug(f"Network click effect sharing failed: {e}")
+                    logger.warning(f"Network click effect sharing failed: {e}")
                     
             elif clicked_obj:
                 result['object_id'] = clicked_obj
@@ -2085,7 +2158,19 @@ class AgentSelfModel:
         # FIX 1: Check for pending symmetry experiments FIRST
         symmetry_action = self._get_next_symmetry_experiment_action(game_type, level, frame)
         if symmetry_action:
+            logger.info(f"[SYMMETRY] Executing symmetry experiment: {symmetry_action.get('reason')}")
             return symmetry_action
+        
+        # Check if experiments exist but weren't returned
+        pending_count = self.db.execute_query(
+            "SELECT COUNT(*) as cnt FROM pending_symmetry_experiments WHERE game_type = ? AND level_number = ?",
+            (game_type, level)
+        )
+        if pending_count and pending_count[0].get('cnt', 0) > 0:
+            logger.warning(
+                f"[SYMMETRY] {pending_count[0]['cnt']} experiments pending but none returned "
+                f"(actions_taken={actions_taken})"
+            )
         
         # Generate plan if we don't have one
         if not hasattr(self, '_current_discovery_plan') or not self._current_discovery_plan:

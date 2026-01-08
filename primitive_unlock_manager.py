@@ -34,6 +34,15 @@ from enum import Enum
 
 from database_interface import DatabaseInterface
 
+# Import seed primitives for syncing
+try:
+    from seed_primitives import get_seed_primitives, SeedPrimitiveRegistry
+    SEED_PRIMITIVES_AVAILABLE = True
+except ImportError:
+    get_seed_primitives = None
+    SeedPrimitiveRegistry = None
+    SEED_PRIMITIVES_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,7 +106,9 @@ class PrimitiveUnlockManager:
     
     def __init__(self, db: Optional[DatabaseInterface] = None, db_path: str = "core_data.db"):
         self.db = db or DatabaseInterface(db_path)
+        self._seed_registry: Optional[Any] = None
         self._initialize_schema()
+        self._register_seed_primitives()  # Register seeds FIRST so they're available
         self._register_locked_primitives()
         self._grandfathered_primitives: Dict[str, str] = {}  # name -> implementation
 
@@ -267,6 +278,49 @@ class PrimitiveUnlockManager:
             CREATE INDEX IF NOT EXISTS idx_unlock_attempts_primitive 
             ON primitive_unlock_attempts(primitive_name, rlvr_validation_passed)
         """)
+    
+    def _register_seed_primitives(self):
+        """
+        Register all seed primitives from SeedPrimitiveRegistry into the database.
+        
+        This ensures that is_available() returns True for seed primitives.
+        Seed primitives are always available - they are the foundation.
+        """
+        if not SEED_PRIMITIVES_AVAILABLE or get_seed_primitives is None:
+            logger.warning("[UNLOCK] Seed primitives not available - cannot register")
+            return
+        
+        try:
+            self._seed_registry = get_seed_primitives()
+            registered_count = 0
+            
+            for name, primitive in self._seed_registry.primitives.items():
+                # Check if already registered
+                existing = self.db.execute_query(
+                    "SELECT primitive_name FROM primitive_status WHERE primitive_name = ?",
+                    (name,)
+                )
+                
+                if not existing:
+                    # Register as seed (always available)
+                    self.db.execute_query("""
+                        INSERT INTO primitive_status 
+                        (primitive_name, status, category, description, difficulty)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        name,
+                        PrimitiveStatus.SEED.value,
+                        primitive.category.value if hasattr(primitive.category, 'value') else str(primitive.category),
+                        primitive.description,
+                        0.0  # Seeds have no difficulty - they're given
+                    ))
+                    registered_count += 1
+            
+            if registered_count > 0:
+                logger.info(f"[UNLOCK] Registered {registered_count} seed primitives in database")
+                
+        except Exception as e:
+            logger.warning(f"[UNLOCK] Failed to register seed primitives: {e}")
     
     def _register_locked_primitives(self):
         """Register all locked primitives from CODS design doc."""
@@ -573,12 +627,28 @@ class PrimitiveUnlockManager:
         )
         if result:
             return PrimitiveStatus(result[0]['status'])
+        
+        # Fallback: Check if it's a seed primitive not yet in database
+        if self._seed_registry and primitive_name in self._seed_registry.primitives:
+            return PrimitiveStatus.SEED
+        
         return None
     
     def is_available(self, primitive_name: str) -> bool:
-        """Check if a primitive is available for use."""
+        """
+        Check if a primitive is available for use.
+        
+        Returns True for:
+        - SEED primitives (always available)
+        - UNLOCKED primitives (earned through discovery)
+        - NOVEL primitives (system-discovered)
+        - GRANDFATHERED primitives (oracle-approved existing code)
+        """
         status = self.get_status(primitive_name)
         if status is None:
+            # Final fallback: Check seed registry directly
+            if self._seed_registry and primitive_name in self._seed_registry.primitives:
+                return True
             return False
         return status in [
             PrimitiveStatus.SEED, 

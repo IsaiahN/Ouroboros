@@ -88,6 +88,7 @@ class CODSGameContext:
     persona_id: Optional[str] = None
     world_model: Optional[str] = None
     problem_signature: Optional[str] = None
+    is_frontier: bool = False  # True if this level is unexplored territory
     
     def update_frame(self, frame: List[List[int]]):
         """Update current frame, moving old to previous."""
@@ -285,6 +286,7 @@ class CODSEngine:
         persona_id: Optional[str] = None,
         world_model: Optional[str] = None,
         problem_signature: Optional[str] = None,
+        is_frontier: bool = False,
     ):
         """Set the current game context."""
         self._context = CODSGameContext(
@@ -295,6 +297,7 @@ class CODSEngine:
             persona_id=persona_id,
             world_model=world_model,
             problem_signature=problem_signature,
+            is_frontier=is_frontier,
         )
         
         # Set episode context in seed primitives
@@ -964,6 +967,336 @@ class CODSEngine:
         return pruned_count
     
     # ======================================================================
+    # OPERATOR SURVIVAL & COMPETITION SYSTEM
+    # ======================================================================
+    # Operators must fight to survive like viral packages and pariahs.
+    # Good operators get promoted, bad operators die.
+    # ======================================================================
+    
+    def run_operator_lifecycle(self) -> Dict[str, Any]:
+        """
+        Run the full operator lifecycle: promote, demote, and kill operators.
+        
+        Called periodically (e.g., every generation) to apply evolutionary pressure.
+        
+        Returns:
+            Summary of lifecycle actions taken
+        """
+        results = {
+            'promoted': 0,
+            'demoted': 0,
+            'killed': 0,
+            'spared': 0
+        }
+        
+        try:
+            # 1. Promote strong operators to canonical
+            results['promoted'] = self._promote_strong_operators()
+            
+            # 2. Kill weak operators (not just prune - actually delete)
+            results['killed'] = self._kill_weak_operators()
+            
+            # 3. Track competition stats
+            self._update_competition_rankings()
+            
+            logger.info(f"[CODS] Operator lifecycle: {results['promoted']} promoted, "
+                       f"{results['killed']} killed")
+            
+        except Exception as e:
+            logger.error(f"[CODS] Operator lifecycle error: {e}")
+            results['error'] = str(e)
+        
+        return results
+    
+    def _promote_strong_operators(
+        self,
+        min_success_rate: float = 0.9,
+        min_tests: int = 10,
+        min_games: int = 2
+    ) -> int:
+        """
+        Promote operators that consistently succeed to 'canonical' status.
+        
+        Canonical operators are:
+        - Protected from pruning/killing
+        - Prioritized in operator selection
+        - Shared network-wide as validated solutions
+        """
+        try:
+            # Find operators that deserve promotion
+            candidates = self.db.execute_query("""
+                SELECT operator_id, name, success_rate, times_tested, games_tested_on
+                FROM composed_operators
+                WHERE status = 'tested'
+                  AND success_rate >= ?
+                  AND times_tested >= ?
+            """, (min_success_rate, min_tests))
+            
+            promoted = 0
+            for op in (candidates or []):
+                # Check game diversity (tested on multiple games)
+                games = op['games_tested_on'] or ''
+                unique_games = len(set(g for g in games.split(',') if g.strip('"')))
+                
+                if unique_games >= min_games:
+                    self.db.execute_query("""
+                        UPDATE composed_operators
+                        SET status = 'canonical'
+                        WHERE operator_id = ?
+                    """, (op['operator_id'],))
+                    promoted += 1
+                    logger.info(f"[CODS] Promoted operator to canonical: {op['name']} "
+                               f"(rate={op['success_rate']:.2f}, tests={op['times_tested']})")
+            
+            return promoted
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error promoting operators: {e}")
+            return 0
+    
+    def _kill_weak_operators(
+        self,
+        max_failure_rate: float = 0.9,
+        min_tests: int = 5,
+        kill_old_unused: bool = True,
+        unused_days: int = 14
+    ) -> int:
+        """
+        Permanently DELETE operators that consistently fail.
+        
+        Unlike pruning (status change), this removes them from the database.
+        Dead operators free up space for new experiments.
+        
+        Note: Thresholds are aggressive - operators must prove value quickly
+        or be replaced by better alternatives.
+        """
+        killed = 0
+        
+        try:
+            # Temporarily disable foreign keys for batch deletion
+            self.db.execute_query("PRAGMA foreign_keys=OFF")
+            
+            # Kill high-failure operators (success_rate < 10% after 5+ tests)
+            failures = self.db.execute_query("""
+                SELECT operator_id, name, success_rate, times_tested
+                FROM composed_operators
+                WHERE status NOT IN ('canonical', 'solid')
+                  AND times_tested >= ?
+                  AND success_rate < ?
+            """, (min_tests, 1 - max_failure_rate))
+            
+            for op in (failures or []):
+                op_id = op['operator_id']
+                op_name = op['name']
+                
+                # Delete from ALL referencing tables FIRST (foreign key order)
+                self.db.execute_query("""
+                    DELETE FROM operator_test_results WHERE operator_id = ?
+                """, (op_id,))
+                self.db.execute_query("""
+                    DELETE FROM concept_operator_map WHERE operator_id = ?
+                """, (op_id,))
+                self.db.execute_query("""
+                    DELETE FROM gametype_primitive_theory WHERE primitive_or_operator = ?
+                """, (op_name,))
+                # Now delete the operator itself
+                self.db.execute_query("""
+                    DELETE FROM composed_operators WHERE operator_id = ?
+                """, (op_id,))
+                killed += 1
+                logger.debug(f"[CODS] Killed failing operator: {op_name} "
+                           f"(rate={op['success_rate']:.2f})")
+            
+            # Kill old unused operators (stale ideas that never caught on)
+            if kill_old_unused:
+                old_unused = self.db.execute_query("""
+                    SELECT operator_id, name, times_tested
+                    FROM composed_operators
+                    WHERE status NOT IN ('canonical', 'solid')
+                      AND times_tested < 3
+                      AND created_at < datetime('now', ? || ' days')
+                """, (f"-{unused_days}",))
+                
+                for op in (old_unused or []):
+                    op_id = op['operator_id']
+                    op_name = op['name']
+                    
+                    # Delete from ALL referencing tables FIRST
+                    self.db.execute_query("""
+                        DELETE FROM operator_test_results WHERE operator_id = ?
+                    """, (op_id,))
+                    self.db.execute_query("""
+                        DELETE FROM concept_operator_map WHERE operator_id = ?
+                    """, (op_id,))
+                    self.db.execute_query("""
+                        DELETE FROM gametype_primitive_theory WHERE primitive_or_operator = ?
+                    """, (op_name,))
+                    self.db.execute_query("""
+                        DELETE FROM composed_operators WHERE operator_id = ?
+                    """, (op_id,))
+                    killed += 1
+                    logger.debug(f"[CODS] Killed unused operator: {op_name}")
+            
+            # Re-enable foreign keys
+            self.db.execute_query("PRAGMA foreign_keys=ON")
+            return killed
+            
+        except Exception as e:
+            # Re-enable foreign keys even on error
+            try:
+                self.db.execute_query("PRAGMA foreign_keys=ON")
+            except:
+                pass
+            logger.error(f"[CODS] Error killing operators: {e}")
+            return killed  # Return what we killed so far
+    
+    def _update_competition_rankings(self) -> None:
+        """
+        Update competition stats between operators targeting similar goals.
+        
+        Operators that solve the same problem compete for survival.
+        The winner gets used more, the loser eventually dies.
+        
+        CRITICAL: Uses weighted_competition_score, NOT raw success_rate!
+        This ensures frontier performance matters more than replay grinding.
+        """
+        try:
+            # Group operators by their composition type and find competitors
+            # Use weighted_competition_score for ranking (frontier-weighted)
+            operators = self.db.execute_query("""
+                SELECT operator_id, name, composition_type, 
+                       success_rate, times_tested,
+                       COALESCE(weighted_competition_score, success_rate) as competition_score,
+                       COALESCE(frontier_tests, 0) as frontier_tests
+                FROM composed_operators
+                WHERE status NOT IN ('pruned')
+                  AND times_tested >= 5
+                ORDER BY composition_type, competition_score DESC
+            """)
+            
+            if not operators:
+                return
+            
+            # Group by composition type
+            by_type = {}
+            for op in operators:
+                comp_type = op['composition_type'] or 'unknown'
+                if comp_type not in by_type:
+                    by_type[comp_type] = []
+                by_type[comp_type].append(op)
+            
+            # Within each type, mark competition
+            for comp_type, ops in by_type.items():
+                if len(ops) < 2:
+                    continue
+                
+                # Best performer vs rest (based on weighted_competition_score)
+                best = ops[0]
+                for competitor in ops[1:]:
+                    best_score = best.get('competition_score', 0) or 0
+                    comp_score = competitor.get('competition_score', 0) or 0
+                    
+                    # Require meaningful difference (10% gap)
+                    if best_score > comp_score + 0.1:
+                        # Best wins - but weight by frontier experience
+                        # Operators with frontier experience earn more decisive wins
+                        frontier_bonus = 1 + min(best.get('frontier_tests', 0) or 0, 10) * 0.1
+                        
+                        self.db.execute_query("""
+                            UPDATE composed_operators
+                            SET wins_vs_primitive = wins_vs_primitive + ?
+                            WHERE operator_id = ?
+                        """, (int(frontier_bonus), best['operator_id']))
+                        self.db.execute_query("""
+                            UPDATE composed_operators
+                            SET losses_vs_primitive = losses_vs_primitive + 1
+                            WHERE operator_id = ?
+                        """, (competitor['operator_id'],))
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error updating competition rankings: {e}")
+    
+    def get_operator_survival_stats(self) -> Dict[str, Any]:
+        """Get statistics on operator population and survival."""
+        try:
+            stats = {}
+            
+            # Population by status
+            status_counts = self.db.execute_query("""
+                SELECT status, COUNT(*) as count
+                FROM composed_operators
+                GROUP BY status
+            """)
+            stats['by_status'] = {r['status']: r['count'] for r in (status_counts or [])}
+            
+            # Success rate distribution
+            rate_dist = self.db.execute_query("""
+                SELECT 
+                    CASE 
+                        WHEN success_rate >= 0.8 THEN 'excellent'
+                        WHEN success_rate >= 0.5 THEN 'good'
+                        WHEN success_rate >= 0.3 THEN 'poor'
+                        ELSE 'failing'
+                    END as tier,
+                    COUNT(*) as count
+                FROM composed_operators
+                WHERE times_tested >= 5
+                GROUP BY tier
+            """)
+            stats['by_performance'] = {r['tier']: r['count'] for r in (rate_dist or [])}
+            
+            # Competition leaders (by weighted_competition_score, not raw success)
+            leaders = self.db.execute_query("""
+                SELECT name, wins_vs_primitive, losses_vs_primitive, success_rate,
+                       COALESCE(frontier_tests, 0) as frontier_tests,
+                       COALESCE(frontier_successes, 0) as frontier_successes,
+                       COALESCE(weighted_competition_score, 0) as weighted_score
+                FROM composed_operators
+                WHERE wins_vs_primitive > 0
+                ORDER BY weighted_competition_score DESC, wins_vs_primitive DESC
+                LIMIT 10
+            """)
+            stats['competition_leaders'] = [dict(r) for r in (leaders or [])]
+            
+            # At-risk (likely to die next lifecycle - matches _kill_weak_operators thresholds)
+            at_risk = self.db.execute_query("""
+                SELECT COUNT(*) as count
+                FROM composed_operators
+                WHERE status NOT IN ('canonical', 'solid')
+                  AND times_tested >= 5
+                  AND success_rate < 0.1
+            """)
+            stats['at_risk'] = at_risk[0]['count'] if at_risk else 0
+            
+            # Frontier-specific stats (the REAL measure of value)
+            frontier_stats = self.db.execute_query("""
+                SELECT 
+                    COUNT(*) as operators_with_frontier_experience,
+                    SUM(COALESCE(frontier_tests, 0)) as total_frontier_tests,
+                    SUM(COALESCE(frontier_successes, 0)) as total_frontier_successes,
+                    AVG(CASE WHEN COALESCE(frontier_tests, 0) > 0 
+                        THEN CAST(frontier_successes AS REAL) / frontier_tests 
+                        ELSE NULL END) as avg_frontier_success_rate
+                FROM composed_operators
+                WHERE COALESCE(frontier_tests, 0) > 0
+            """)
+            if frontier_stats and frontier_stats[0]:
+                stats['frontier'] = {
+                    'operators': frontier_stats[0]['operators_with_frontier_experience'] or 0,
+                    'total_tests': frontier_stats[0]['total_frontier_tests'] or 0,
+                    'total_successes': frontier_stats[0]['total_frontier_successes'] or 0,
+                    'avg_success_rate': round(frontier_stats[0]['avg_frontier_success_rate'] or 0, 3)
+                }
+            else:
+                stats['frontier'] = {'operators': 0, 'total_tests': 0, 'total_successes': 0, 'avg_success_rate': 0}
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error getting survival stats: {e}")
+            return {'error': str(e)}
+
+    # ======================================================================
     # COMPOSED OPERATOR TESTING
     # ======================================================================
     
@@ -1553,12 +1886,243 @@ class CODSEngine:
             logger.info(f"[CODS] Game outcome: {'WIN' if won else 'FAIL'} L{max_level_reached} "
                        f"- {len(results['primitive_gaps'])} primitive gaps detected")
             
+            # If game was successful, record which primitives/operators contributed
+            if final_score > 0:
+                self._record_gametype_primitive_success(game_id, final_score, max_level_reached)
+            
         except Exception as e:
             logger.error(f"[CODS] Error recording game outcome: {e}")
             results['error'] = str(e)
         
         return results
     
+    def _record_gametype_primitive_success(
+        self, 
+        game_id: str, 
+        final_score: float, 
+        max_level_reached: int
+    ) -> None:
+        """
+        Record which primitives/operators contributed to success for this game_type.
+        
+        Called when a game scores positive. Updates the gametype_primitive_theory table
+        so the network learns which primitives work for which game types.
+        """
+        try:
+            # Extract game_type from game_id (e.g., "sp80-xxx" -> "sp80")
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            # Get operators that were tested in this game
+            tested_operators = self.db.execute_query("""
+                SELECT DISTINCT operator_id, success
+                FROM operator_test_results
+                WHERE game_id = ?
+            """, (game_id,))
+            
+            if not tested_operators:
+                return
+            
+            updated = 0
+            for op_record in tested_operators:
+                operator_id = op_record['operator_id']
+                was_successful = op_record['success']
+                
+                # Get operator details to find primitive names
+                op_details = self.db.execute_query("""
+                    SELECT name, composition_tree FROM composed_operators
+                    WHERE operator_id = ?
+                """, (operator_id,))
+                
+                if not op_details:
+                    continue
+                
+                op = op_details[0]
+                
+                # Record the operator itself
+                self._update_gametype_theory(
+                    game_type, op['name'], is_operator=True,
+                    was_successful=was_successful, score=final_score,
+                    level=max_level_reached
+                )
+                updated += 1
+                
+                # Also record the underlying primitives
+                if op['composition_tree']:
+                    try:
+                        tree = json.loads(op['composition_tree'])
+                        primitives = self._extract_primitives_from_tree(tree)
+                        for prim in primitives:
+                            self._update_gametype_theory(
+                                game_type, prim, is_operator=False,
+                                was_successful=was_successful, score=final_score,
+                                level=max_level_reached
+                            )
+                            updated += 1
+                    except json.JSONDecodeError:
+                        pass
+            
+            if updated > 0:
+                logger.debug(f"[CODS] Updated {updated} primitive theories for {game_type}")
+                
+        except Exception as e:
+            logger.error(f"[CODS] Error recording gametype primitive success: {e}")
+    
+    def _update_gametype_theory(
+        self,
+        game_type: str,
+        primitive_or_operator: str,
+        is_operator: bool,
+        was_successful: bool,
+        score: float,
+        level: int
+    ) -> None:
+        """Update a single entry in the gametype_primitive_theory table."""
+        try:
+            theory_id = f"{game_type}_{primitive_or_operator}"
+            
+            # Check if exists
+            existing = self.db.execute_query("""
+                SELECT times_used, times_successful, total_score_contribution, levels_effective
+                FROM gametype_primitive_theory
+                WHERE theory_id = ?
+            """, (theory_id,))
+            
+            if existing:
+                record = existing[0]
+                new_times_used = record['times_used'] + 1
+                new_times_successful = record['times_successful'] + (1 if was_successful else 0)
+                new_score_contribution = record['total_score_contribution'] + (score if was_successful else 0)
+                new_success_rate = new_times_successful / new_times_used if new_times_used > 0 else 0
+                
+                # Update levels_effective
+                levels = json.loads(record['levels_effective']) if record['levels_effective'] else []
+                if was_successful and level not in levels:
+                    levels.append(level)
+                
+                self.db.execute_query("""
+                    UPDATE gametype_primitive_theory
+                    SET times_used = ?,
+                        times_successful = ?,
+                        success_rate = ?,
+                        total_score_contribution = ?,
+                        levels_effective = ?,
+                        last_updated = CURRENT_TIMESTAMP
+                    WHERE theory_id = ?
+                """, (new_times_used, new_times_successful, new_success_rate,
+                      new_score_contribution, json.dumps(levels), theory_id))
+            else:
+                # Insert new
+                self.db.execute_query("""
+                    INSERT INTO gametype_primitive_theory (
+                        theory_id, game_type, primitive_or_operator, is_operator,
+                        times_used, times_successful, success_rate, total_score_contribution,
+                        levels_effective
+                    ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+                """, (
+                    theory_id, game_type, primitive_or_operator, is_operator,
+                    1 if was_successful else 0,
+                    1.0 if was_successful else 0.0,
+                    score if was_successful else 0,
+                    json.dumps([level]) if was_successful else '[]'
+                ))
+                
+        except Exception as e:
+            logger.error(f"[CODS] Error updating gametype theory: {e}")
+    
+    def get_recommended_primitives_for_gametype(
+        self, 
+        game_type: str, 
+        limit: int = 10,
+        min_success_rate: float = 0.5,
+        min_uses: int = 1
+    ) -> List[Dict[str, Any]]:
+        """
+        Get the best primitives/operators for a game_type based on network experience.
+        
+        Called when an agent starts a game to know which primitives to prioritize.
+        
+        Args:
+            game_type: The game type (e.g., 'sp80', 'ft09')
+            limit: Maximum number of recommendations
+            min_success_rate: Minimum success rate to include
+            min_uses: Minimum times_used to include (higher = more confident)
+            
+        Returns:
+            List of recommended primitives/operators with their stats
+        """
+        try:
+            results = self.db.execute_query("""
+                SELECT 
+                    primitive_or_operator,
+                    is_operator,
+                    times_used,
+                    times_successful,
+                    success_rate,
+                    total_score_contribution,
+                    levels_effective,
+                    network_confidence
+                FROM gametype_primitive_theory
+                WHERE game_type = ?
+                  AND success_rate >= ?
+                  AND times_used >= ?
+                ORDER BY success_rate DESC, times_successful DESC
+                LIMIT ?
+            """, (game_type, min_success_rate, min_uses, limit))
+            
+            if not results:
+                # Return general high-performing primitives if no game-specific data
+                return self._get_general_primitive_recommendations(limit)
+            
+            recommendations = []
+            for r in results:
+                recommendations.append({
+                    'name': r['primitive_or_operator'],
+                    'is_operator': r['is_operator'],
+                    'success_rate': r['success_rate'],
+                    'times_used': r['times_used'],
+                    'score_contribution': r['total_score_contribution'],
+                    'effective_levels': json.loads(r['levels_effective']) if r['levels_effective'] else [],
+                    'confidence': r['network_confidence']
+                })
+            
+            return recommendations
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error getting recommended primitives: {e}")
+            return []
+    
+    def _get_general_primitive_recommendations(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get generally useful primitives when no game-specific data exists."""
+        try:
+            results = self.db.execute_query("""
+                SELECT 
+                    primitive_or_operator,
+                    is_operator,
+                    SUM(times_used) as total_uses,
+                    SUM(times_successful) as total_successes,
+                    AVG(success_rate) as avg_success_rate
+                FROM gametype_primitive_theory
+                WHERE times_used >= 5
+                GROUP BY primitive_or_operator, is_operator
+                HAVING avg_success_rate >= 0.5
+                ORDER BY avg_success_rate DESC, total_uses DESC
+                LIMIT ?
+            """, (limit,))
+            
+            return [{
+                'name': r['primitive_or_operator'],
+                'is_operator': r['is_operator'],
+                'success_rate': r['avg_success_rate'],
+                'times_used': r['total_uses'],
+                'score_contribution': 0,
+                'effective_levels': [],
+                'confidence': 0.5
+            } for r in results] if results else []
+            
+        except Exception as e:
+            logger.error(f"[CODS] Error getting general primitive recommendations: {e}")
+            return []
+
     def _analyze_level_failure(self, level: int, actions_used: int) -> None:
         """Analyze a level failure to identify primitive gaps."""
         if not self._context:
@@ -3138,7 +3702,46 @@ class CODSEngine:
                 )
             """)
             
+            # ================================================================
+            # GAME-TYPE -> PRIMITIVE THEORY TABLE
+            # ================================================================
+            # Network learns which primitives/operators work best for each game type.
+            # When agents start a game, they query this to prioritize useful primitives.
+            # Updated when games score positive - primitives used get credit.
+            # ================================================================
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS gametype_primitive_theory (
+                    theory_id TEXT PRIMARY KEY,
+                    game_type TEXT NOT NULL,
+                    primitive_or_operator TEXT NOT NULL,
+                    is_operator BOOLEAN DEFAULT FALSE,
+                    
+                    -- Effectiveness tracking
+                    times_used INTEGER DEFAULT 0,
+                    times_successful INTEGER DEFAULT 0,
+                    success_rate REAL DEFAULT 0.0,
+                    total_score_contribution REAL DEFAULT 0.0,
+                    
+                    -- Context - which levels was this useful on?
+                    levels_effective TEXT DEFAULT '[]',
+                    
+                    -- Network consensus
+                    agents_validated INTEGER DEFAULT 0,
+                    network_confidence REAL DEFAULT 0.5,
+                    
+                    -- Timestamps
+                    first_observed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    
+                    UNIQUE(game_type, primitive_or_operator)
+                )
+            """)
+            
             # Create indexes
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_gametype_theory_lookup
+                ON gametype_primitive_theory(game_type, success_rate DESC)
+            """)
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_cods_level_game 
                 ON cods_level_outcomes(game_id, level_number)
@@ -3284,6 +3887,9 @@ class CODSEngine:
         if not self._context:
             return
         
+        # Determine if this is frontier or replay from context
+        is_frontier = self._context.is_frontier if self._context else False
+        
         self.composer.record_test_result(
             operator_id=operator_id,
             game_id=self._context.game_id,
@@ -3294,7 +3900,8 @@ class CODSEngine:
             agent_id=self._context.agent_id,
             generation=self._context.generation,
             score_before=self._context.score,
-            score_after=self._context.score
+            score_after=self._context.score,
+            is_frontier=is_frontier
         )
         
         # Tier 4: Track operator patterns for concept discovery
