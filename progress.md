@@ -2,6 +2,77 @@
 
 ---
 
+## Session: January 8, 2026 - Prediction System 0% Accuracy Bug Fix
+
+---
+
+### Approach: Fix `frame_changed` always being False in metacognitive predictions
+
+**Timestamp**: 11:55:00 AM  
+**Status**: COMPLETE
+
+---
+
+### Problem Statement
+
+User observed:
+- `[METACOG] PREDICTION TYPE SUPPRESSED: 'score_increase' failed 58x consecutively`
+- ALL prediction types have 0% accuracy in database
+- `action_traces` table has `frame_changed=1` for 294 actions
+- `metacognitive_predictions` ALWAYS has `frame_changed=False`
+
+### Root Cause Analysis
+
+**Two issues discovered:**
+
+1. **Reference vs Copy Issue** ([core_gameplay.py](core_gameplay.py#L1855)):
+   ```python
+   self._previous_frame = game_state.frame  # Reference, not copy!
+   ```
+   When `game_state.frame` is a list of lists, this creates a reference. If any row is mutated, both would point to same data.
+
+2. **Wrong Frame Reference in Comparison** ([core_gameplay.py](core_gameplay.py#L5077-5082)):
+   ```python
+   if self.action_handler.last_frame is not None and game_state.frame:
+       prev_arr = np.array(self.action_handler.last_frame)
+       curr_arr = np.array(game_state.frame)
+   ```
+   The `action_handler.last_frame` is updated AFTER the action returns (at action_handler.py:578). By the time L5077 runs, `last_frame` already contains the NEW frame, so comparing it with `game_state.frame` always shows no change!
+
+### Fixes Applied
+
+#### Fix 1: Deep Copy Frame Before Action
+**Files**: [core_gameplay.py](core_gameplay.py#L1855), [core_gameplay.py](core_gameplay.py#L3783), [core_gameplay.py](core_gameplay.py#L15235)
+
+Changed all three locations from:
+```python
+self._previous_frame = game_state.frame  # Reference
+```
+To:
+```python
+self._previous_frame = [row[:] for row in game_state.frame] if game_state.frame else None  # Deep copy
+```
+
+#### Fix 2: Use Correct Frame Reference for Comparison
+**File**: [core_gameplay.py](core_gameplay.py#L5077-5082)
+
+Changed from:
+```python
+if self.action_handler.last_frame is not None and game_state.frame:
+    prev_arr = np.array(self.action_handler.last_frame)
+```
+To:
+```python
+if hasattr(self, '_previous_frame') and self._previous_frame and game_state.frame:
+    prev_arr = np.array(self._previous_frame)
+```
+
+### Verification
+
+After restart, predictions should now correctly detect frame changes and have non-zero accuracy.
+
+---
+
 ## Session: January 8, 2026 - Moveable vs Toggleable Classification Bug Fix
 
 ---

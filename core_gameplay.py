@@ -1791,17 +1791,22 @@ class GameplayEngine:
                         game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
                         
                         # Infer expected outcome from reasoning
-                        expected_outcome = 'score_increase'  # Default: expect progress
+                        # FIX (2025-01-08): 'score_increase' is too ambitious - score only increases on level WIN
+                        # Use 'frame_change' as default (any action should cause observable change)
+                        # Other types: 'discover_pattern' (exploration), 'object_control' (test hypothesis)
+                        expected_outcome = 'frame_change'  # Default: expect observable change
                         if 'explore' in reasoning.lower() or 'test' in reasoning.lower():
                             expected_outcome = 'discover_pattern'
                         elif 'avoid' in reasoning.lower() or 'escape' in reasoning.lower():
                             expected_outcome = 'avoid_failure'
-                        elif 'optimal' in reasoning.lower() or 'sequence' in reasoning.lower():
-                            expected_outcome = 'score_increase'
+                        elif 'control' in reasoning.lower() or 'move' in reasoning.lower():
+                            expected_outcome = 'object_control'
+                        # NOTE: 'score_increase' removed as default - only use for explicit win attempts
                         
                         # FIX #9: Check if prediction type is suppressed; try alternatives
                         # Available prediction types (in priority order for fallback)
-                        prediction_types = ['score_increase', 'discover_pattern', 'frame_change', 'avoid_failure', 'object_control']
+                        # 'frame_change' is most general - any action should cause some change
+                        prediction_types = ['frame_change', 'discover_pattern', 'object_control', 'avoid_failure']
                         suppressed = getattr(self.metacognitive_engine, '_suppressed_prediction_types', set())
                         
                         # If default type is suppressed, find an alternative
@@ -1846,8 +1851,9 @@ class GameplayEngine:
                     except Exception:
                         pass
                 
-                # Save frame for observation comparison
-                self._previous_frame = game_state.frame
+                # Save frame for observation comparison - DEEP COPY to avoid reference issues
+                # If we just store the reference, frame mutations would make both point to same data
+                self._previous_frame = [row[:] for row in game_state.frame] if game_state.frame else None
                 
                 game_state = await self._execute_action(action, game_state, reasoning, loop_state.current_level)
             
@@ -2010,17 +2016,23 @@ class GameplayEngine:
                             actual_outcome=actual_outcome
                         )
                     
-                    # Record failure for pattern analysis if outcome was negative
-                    if score_after <= score_before and game_state.state != 'WIN':
+                    # Record failure for pattern analysis ONLY if actual failure occurred
+                    # Real failures = GAME_OVER (death) or score DECREASE, NOT just "no change"
+                    # "No change" is normal exploration - not worth tracking as failure
+                    is_real_failure = (
+                        game_state.state == 'GAME_OVER' or  # Agent died
+                        score_after < score_before  # Score decreased (penalty)
+                    )
+                    if is_real_failure:
                         game_type = game_id[:4] if game_id else ''
                         current_level = int(game_state.score) + 1
                         
-                        # Build context for failure
+                        # Build context for failure - include WHY it failed
                         context = {
                             'action': action,
-                            'frame_changed': frame_changed,
-                            'score_before': score_before,
-                            'score_after': score_after
+                            'is_game_over': game_state.state == 'GAME_OVER',
+                            'score_delta': score_after - score_before,
+                            'frame_changed': frame_changed
                         }
                         
                         safe_action = action or 'noop'
@@ -3775,7 +3787,7 @@ class GameplayEngine:
         # FIX: Reset delta tracking for new game
         # This prevents score_change calculation from using previous game's values
         self._previous_score = game_state.score  # Start fresh for this game
-        self._previous_frame = game_state.frame  # Start fresh
+        self._previous_frame = [row[:] for row in game_state.frame] if game_state.frame else None  # Deep copy
         self._previous_level = 1  # Starting level
         self._recent_action_traces = []  # Reset action traces for Q1-Q5
         self._q1_trace_logged = False  # Reset debug flag
@@ -5068,8 +5080,10 @@ class GameplayEngine:
                             elif game_state.state == 'GAME_OVER' and game_state.score == 0:
                                 outcome_type = 'game_over'
                             try:
-                                if self.action_handler.last_frame is not None and game_state.frame:
-                                    prev_arr = np.array(self.action_handler.last_frame)
+                                # FIX: Use self._previous_frame (deep copy saved BEFORE action)
+                                # instead of action_handler.last_frame (which is updated AFTER action)
+                                if hasattr(self, '_previous_frame') and self._previous_frame and game_state.frame:
+                                    prev_arr = np.array(self._previous_frame)
                                     curr_arr = np.array(game_state.frame)
                                     if prev_arr.shape == curr_arr.shape:
                                         frame_changed = not np.array_equal(prev_arr, curr_arr)
@@ -5121,14 +5135,20 @@ class GameplayEngine:
                                     except Exception:
                                         logger.debug("Metacog revision spine log failed (non-critical)")
 
-                                # Record failure pattern candidates (no change = likely wrong theory)
-                                if score_change == 0 and not frame_changed_for_step:
+                                # Record failure pattern candidates ONLY for real failures
+                                # Real failure = GAME_OVER (death) or score DECREASE
+                                # "No change" is NOT a failure - it's normal exploration
+                                is_real_failure = (
+                                    game_state.state == 'GAME_OVER' or
+                                    score_change < 0
+                                )
+                                if is_real_failure:
                                     self.metacognitive_engine.record_failure(
                                         action=str(action),
                                         context={
-                                            'level': current_level,
+                                            'is_game_over': game_state.state == 'GAME_OVER',
+                                            'score_delta': score_change,
                                             'state': game_state.state,
-                                            'available_actions': game_state.available_actions,
                                             'reasoning': reasoning[:80] if isinstance(reasoning, str) else ''
                                         }
                                     )
@@ -15226,8 +15246,8 @@ class GameplayEngine:
             '8_primitives': primitives_tier
         }
         
-        # Store for next delta calculation
-        self._previous_frame = game_state.frame
+        # Store for next delta calculation - DEEP COPY to avoid reference issues
+        self._previous_frame = [row[:] for row in game_state.frame] if game_state.frame else None
         self._previous_score = game_state.score
         self._previous_level = current_level
         self._last_action_taken = action

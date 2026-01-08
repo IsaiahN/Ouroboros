@@ -9723,10 +9723,14 @@ class MetacognitiveReasoningEngine:
             action_counts[action] = action_counts.get(action, 0) + 1
         
         # Check for common context elements
+        # EXCLUDE trivial/tautological elements that don't help pattern detection
+        EXCLUDED_KEYS = {'level', 'state', 'available_actions'}  # Always same when stuck
         context_elements = {}
         for f in recent_failures:
             context = f.get('context', {})
             for key, value in context.items():
+                if key in EXCLUDED_KEYS:
+                    continue  # Skip tautological elements
                 element = f"{key}:{value}"
                 context_elements[element] = context_elements.get(element, 0) + 1
         
@@ -9790,14 +9794,18 @@ class MetacognitiveReasoningEngine:
             # ACTION6 special case: don't suggest eliminating it entirely
             # Instead suggest trying different coordinates
             if action == '6' or action.upper() == 'ACTION6':
-                return "Click locations are failing - try clicking different objects or coordinates"
-            return f"Stop using ACTION{action} - it consistently fails in this context"
+                return "Click locations causing death - try clicking different objects or coordinates"
+            return f"Stop using ACTION{action} - it consistently causes death/penalty"
+        elif 'is_game_over:True' in common_factor:
+            return "This action pattern leads to death - find alternative approach"
+        elif 'score_delta' in common_factor and '-' in common_factor:
+            return "This action causes score penalty - avoid repeating"
         elif 'color' in common_factor.lower():
-            return f"Avoid interaction with {common_factor.split(':')[1]} - it leads to failure"
+            return f"Avoid interaction with {common_factor.split(':')[1]} - it leads to death"
         elif 'position' in common_factor.lower():
-            return f"This position/area seems dangerous - avoid or find another route"
+            return f"This position/area is deadly - avoid or find another route"
         else:
-            return f"Pattern detected: {common_factor} correlates with failure"
+            return f"Pattern detected: {common_factor} causes death/penalty"
     
     # ========================================================================
     # 5. ELIMINATION TRACKER
