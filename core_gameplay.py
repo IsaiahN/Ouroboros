@@ -12523,6 +12523,26 @@ class GameplayEngine:
                     for h in network_hypotheses[:3]
                 ]
             
+            # ===============================================================
+            # NETWORK OBJECT INVENTORY: Complete picture from all agents
+            # ===============================================================
+            # This aggregates ALL object discoveries across ALL games of this
+            # game_type. If agent A found 3 toggleables and agent B found 2 more,
+            # the current agent now knows about all 5.
+            # ===============================================================
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            network_inventory = self.agent_self_model.get_network_object_inventory(game_type, level)
+            if network_inventory and network_inventory.get('total_unique', 0) > 0:
+                context['network_object_inventory'] = {
+                    'toggleable_count': len(network_inventory.get('toggleable', [])),
+                    'moveable_count': len(network_inventory.get('moveable', [])),
+                    'interactable_count': len(network_inventory.get('interactable', [])),
+                    'total_unique': network_inventory.get('total_unique', 0),
+                    # Include actual object IDs for reference (limited for JSON size)
+                    'toggleable_objects': network_inventory.get('toggleable', [])[:8],
+                    'moveable_objects': network_inventory.get('moveable', [])[:8],
+                }
+            
             # McGuffin Grammar: Integrate tetrahedral perception from sensation context
             tetra = context['tetrahedral_perception']
             
@@ -13561,8 +13581,8 @@ class GameplayEngine:
         # objects, Q1 should reflect that.
         # ===================================================================
         if hasattr(self, 'agent_self_model') and self.agent_self_model:
-            agent_id = self.session_manager.current_agent_id
-            game_id = self.session_manager.current_game_id
+            agent_id = self.game_config.get('agent_id')
+            game_id = self.session_manager.current_game_id if self.session_manager else None
             current_level = int(game_state.score) + 1
             
             if agent_id and game_id:

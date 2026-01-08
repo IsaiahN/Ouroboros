@@ -1669,7 +1669,227 @@ class AgentSelfModel:
                 except (json.JSONDecodeError, TypeError):
                     pass
         
+        # 5. NETWORK KNOWLEDGE: Aggregate ALL toggleable discoveries from network
+        # This combines discoveries from ALL agents across ALL games of this type
+        # If agent A found toggleables at (10,20) and agent B found at (30,40),
+        # we want to know about BOTH for a complete picture
+        network_toggleables = self._get_network_toggleable_discoveries(game_type, level)
+        for obj_id in network_toggleables:
+            if obj_id not in controlled_objects:
+                controlled_objects.append(obj_id)
+        
         return controlled_objects if controlled_objects else None
+
+    def _get_network_toggleable_discoveries(
+        self,
+        game_type: str,
+        level: int
+    ) -> List[str]:
+        """
+        Aggregate ALL toggleable object discoveries from the network.
+        
+        This queries across ALL games of the same game_type to find every
+        toggleable object that ANY agent has ever discovered. This builds
+        a complete picture over time:
+        - Game 1: Agent discovers toggleable at color 3
+        - Game 2: Agent discovers toggleable at color 5
+        - Game 3: Agent now knows about BOTH colors 3 and 5
+        
+        Args:
+            game_type: Game type (e.g., 'ft09')
+            level: Level number
+            
+        Returns:
+            List of unique toggleable object identifiers from network
+        """
+        network_objects = []
+        
+        try:
+            # Query object_selection_state for ALL discoveries (not just high confidence)
+            # Use a lower threshold (0.3) since network validation strengthens over time
+            result = self.db.execute_query("""
+                SELECT DISTINCT object_color, 
+                       MAX(confidence) as max_conf,
+                       COUNT(*) as discovery_count
+                FROM object_selection_state
+                WHERE game_type = ? AND level_number = ?
+                AND (is_button = 1 OR is_selectable = 1)
+                AND confidence >= 0.3
+                GROUP BY object_color
+                ORDER BY max_conf DESC
+            """, (game_type, level))
+            
+            if result:
+                for r in result:
+                    obj_id = f"toggleable_color_{r['object_color']}"
+                    if obj_id not in network_objects:
+                        network_objects.append(obj_id)
+            
+            # Also query network_object_control_hypotheses for validated toggleables
+            # Note: This table uses control_pattern, not control_type/target_objects
+            hyp_result = self.db.execute_query("""
+                SELECT DISTINCT control_pattern, action_response_map
+                FROM network_object_control_hypotheses
+                WHERE game_type = ? AND level_number = ?
+                AND (control_pattern LIKE '%toggle%' OR control_pattern LIKE '%click%')
+                AND (validated_by_win = 1 OR validation_attempts >= 3)
+                AND is_active = 1
+            """, (game_type, level))
+            
+            if hyp_result:
+                for r in hyp_result:
+                    try:
+                        action_map = json.loads(r['action_response_map']) if r['action_response_map'] else {}
+                        for action, response in action_map.items() if isinstance(action_map, dict) else []:
+                            if isinstance(response, dict):
+                                obj = response.get('object') or response.get('target')
+                                if obj and obj not in network_objects:
+                                    network_objects.append(obj)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            
+            # Log network knowledge aggregation
+            if network_objects:
+                logger.debug(
+                    f"[NETWORK-KNOWLEDGE] {game_type} L{level}: "
+                    f"Found {len(network_objects)} toggleables from network: {network_objects}"
+                )
+                
+        except Exception as e:
+            logger.debug(f"Network toggleable query failed: {e}")
+        
+        return network_objects
+
+    def get_network_object_inventory(
+        self,
+        game_type: str,
+        level: int
+    ) -> Dict[str, List[str]]:
+        """
+        Get the COMPLETE inventory of ALL objects the network has discovered.
+        
+        This aggregates knowledge from ALL agents across ALL games of this type
+        to build a comprehensive picture of what exists in this level.
+        
+        Returns:
+            Dictionary with categorized objects:
+            {
+                'toggleable': ['toggleable_color_3', 'toggleable_color_5', ...],
+                'moveable': ['obj_12', 'obj_9', ...],
+                'interactable': ['x:10,y:20', ...],  # Coordinates that respond to clicks
+                'total_unique': 15
+            }
+        """
+        inventory = {
+            'toggleable': [],
+            'moveable': [],
+            'interactable': [],
+            'total_unique': 0
+        }
+        all_objects = set()
+        
+        try:
+            # 1. Toggleable objects from object_selection_state
+            toggle_result = self.db.execute_query("""
+                SELECT DISTINCT object_color, 
+                       MAX(confidence) as max_conf,
+                       COUNT(*) as times_seen
+                FROM object_selection_state
+                WHERE game_type = ? AND level_number = ?
+                AND (is_button = 1 OR is_selectable = 1)
+                GROUP BY object_color
+                HAVING max_conf >= 0.3 OR times_seen >= 2
+            """, (game_type, level))
+            
+            if toggle_result:
+                for r in toggle_result:
+                    obj_id = f"toggleable_color_{r['object_color']}"
+                    inventory['toggleable'].append(obj_id)
+                    all_objects.add(obj_id)
+            
+            # 2. Moveable objects from agent_object_control (network-wide)
+            move_result = self.db.execute_query("""
+                SELECT DISTINCT controlled_objects
+                FROM agent_object_control
+                WHERE game_id LIKE ? || '-%' AND level_number = ?
+                AND controlled_objects IS NOT NULL
+            """, (game_type, level))
+            
+            if move_result:
+                for r in move_result:
+                    try:
+                        objs = json.loads(r['controlled_objects'])
+                        for obj in objs:
+                            if obj not in all_objects and not obj.startswith('toggleable'):
+                                inventory['moveable'].append(obj)
+                                all_objects.add(obj)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            
+            # 3. Interactable positions from pseudo_button_behavior
+            interact_result = self.db.execute_query("""
+                SELECT DISTINCT region_x, region_y, produces_action
+                FROM pseudo_button_behavior
+                WHERE game_type = ? AND level_number = ?
+                AND movement_direction = 'toggle'
+                AND discovery_count >= 1
+            """, (game_type, level))
+            
+            if interact_result:
+                for r in interact_result:
+                    coord_id = f"x:{r['region_x']},y:{r['region_y']}"
+                    if coord_id not in all_objects:
+                        inventory['interactable'].append(coord_id)
+                        all_objects.add(coord_id)
+            
+            # 4. Network hypotheses (validated control theories)
+            # Note: This table uses control_pattern and action_response_map, not target_objects
+            hyp_result = self.db.execute_query("""
+                SELECT control_pattern, action_response_map
+                FROM network_object_control_hypotheses
+                WHERE game_type = ? AND level_number = ?
+                AND is_active = 1
+                AND (validated_by_win = 1 OR reliability_score >= 0.5)
+            """, (game_type, level))
+            
+            if hyp_result:
+                for r in hyp_result:
+                    try:
+                        # Parse control_pattern for object info
+                        pattern = r['control_pattern'] or ''
+                        action_map = json.loads(r['action_response_map']) if r['action_response_map'] else {}
+                        
+                        # Extract objects from action_response_map
+                        # Format varies, but often contains object references
+                        for action, response in action_map.items() if isinstance(action_map, dict) else []:
+                            if isinstance(response, dict):
+                                obj = response.get('object') or response.get('target')
+                                if obj and obj not in all_objects:
+                                    # Infer type from pattern or response
+                                    if 'toggle' in pattern.lower() or 'click' in pattern.lower():
+                                        if obj not in inventory['toggleable']:
+                                            inventory['toggleable'].append(obj)
+                                    else:
+                                        if obj not in inventory['moveable']:
+                                            inventory['moveable'].append(obj)
+                                    all_objects.add(obj)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            
+            inventory['total_unique'] = len(all_objects)
+            
+            if all_objects:
+                logger.info(
+                    f"[NETWORK-INVENTORY] {game_type} L{level}: "
+                    f"{len(inventory['toggleable'])} toggleable, "
+                    f"{len(inventory['moveable'])} moveable, "
+                    f"{len(inventory['interactable'])} interactable positions"
+                )
+                
+        except Exception as e:
+            logger.debug(f"Network inventory query failed: {e}")
+        
+        return inventory
 
     def get_self_identity_snapshot(
         self,

@@ -2,6 +2,58 @@
 
 ---
 
+## Session: January 8, 2026 - Network Object Inventory Bug Fix
+
+---
+
+### Approach: Fix SQL column errors preventing network inventory aggregation
+
+**Timestamp**: 6:00 AM  
+**Status**: COMPLETE
+
+---
+
+### Problem Statement
+
+The `get_network_object_inventory()` method was returning `total_unique: 0` despite correctly finding toggleable and moveable objects. Agent wasn't seeing the full network knowledge.
+
+### Root Cause
+
+**SQL Query Error**: The `pseudo_button_behavior` query used incorrect column names:
+- Used `button_x`, `button_y`, `button_color`, `success_count` 
+- Actual columns: `region_x`, `region_y`, `produces_action`, `discovery_count`
+
+The exception was silently caught and the method returned before setting `total_unique`.
+
+### Fix Applied
+
+[agent_self_model.py](agent_self_model.py#L1833-L1847):
+```python
+# BEFORE (wrong columns)
+SELECT DISTINCT button_x, button_y, button_color ... success_count >= 1
+
+# AFTER (correct columns)  
+SELECT DISTINCT region_x, region_y, produces_action ... discovery_count >= 1
+```
+
+### Verification
+
+```
+Network Object Inventory for ft09 Level 1:
+  Toggleable: 2 objects (color 8 and 9)
+  Moveable: 3 objects  
+  Interactable: 9 positions
+  Total Unique: 14
+
+Testing across game types:
+  ls20 L1: Toggle: 2, Move: 577, Total: 579
+  sp80 L1: Toggle: 1, Move: 1462, Total: 1463
+```
+
+**Result**: Network now correctly aggregates ALL object discoveries across ALL games of the same game_type!
+
+---
+
 ## Session: January 8, 2026 - CODS Operator Survival & Frontier-Weighted Competition
 
 ---
