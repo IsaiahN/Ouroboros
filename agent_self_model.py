@@ -1282,6 +1282,9 @@ class AgentSelfModel:
                     object_control_score[obj_id]['correct'] += 1
         
         # Identify controlled objects: >60% correct movement correlation with at least 2 samples
+        # FIX (2025-01-08): Prefix with control TYPE to distinguish moveable vs toggleable
+        # - moveable_x:N,y:M = responds to ACTION 1-4 (directional movement)
+        # - toggleable_x:N,y:M = responds to ACTION5 (click/toggle, non-directional)
         controlled = []
         best_score = 0.0
         
@@ -1292,8 +1295,9 @@ class AgentSelfModel:
             correlation = scores['correct'] / scores['total']
             if correlation >= 0.6:  # 60% threshold for "controlled"
                 # Store representative position(s) of this object
+                # PREFIX: moveable_ for ACTION 1-4 controlled objects
                 for pos in scores['positions'][:3]:  # Max 3 positions per controlled object
-                    controlled.append(f"x:{pos[0]},y:{pos[1]}")
+                    controlled.append(f"moveable_x:{pos[0]},y:{pos[1]}")
                 best_score = max(best_score, correlation)
         
         # Also check ACTION5 effects - objects that consistently change on ACTION5
@@ -1307,8 +1311,9 @@ class AgentSelfModel:
                 # This object responds to ACTION5 - mark as controlled
                 if obj_id not in object_control_score:
                     # Get positions from the effects tracking
+                    # PREFIX: toggleable_ for ACTION5 controlled objects
                     for pos in effects.get('positions', [])[:3]:
-                        controlled.append(f"x:{pos[0]},y:{pos[1]}")
+                        controlled.append(f"toggleable_x:{pos[0]},y:{pos[1]}")
                     best_score = max(best_score, change_rate)
                     logger.debug(f"[SELF-MODEL] ACTION5 controls object {obj_id} (change rate: {change_rate:.2f})")
         
@@ -2059,6 +2064,9 @@ class AgentSelfModel:
         known_buttons = self._get_known_buttons(game_type, level)
         known_toggles = self._get_known_toggleable_objects(game_type, level)
         
+        # Count known objects to decide on discovery strategy
+        total_known = len(known_controllable) + len(known_buttons) + len(known_toggles)
+        
         # Generate discovery plan in two phases:
         # PHASE 1: Click on every unknown object (detects toggles, buttons, selections)
         # PHASE 2: Test movement for objects that might need selection first
@@ -2071,9 +2079,20 @@ class AgentSelfModel:
             centroid = obj.get('centroid', (0, 0))
             cx, cy = int(centroid[0]), int(centroid[1])
             
-            # Skip if we already know about this object
-            if obj_id in known_controllable or obj_id in known_buttons or obj_id in known_toggles:
+            # FIX: Only skip if network has HIGH confidence (many observations)
+            # Don't blindly trust network knowledge - verify some objects each game
+            # This ensures we don't miss objects due to stale/incorrect network data
+            is_known = obj_id in known_controllable or obj_id in known_buttons or obj_id in known_toggles
+            
+            # If network claims to know EVERYTHING, still test a few objects for verification
+            # This prevents the "0 steps" problem where discovery does nothing
+            if is_known and total_known < len(objects):
+                # Network doesn't know all objects - safe to skip known ones
                 continue
+            elif is_known and len(plan) >= 3:
+                # Network claims to know all, but we've added 3 verification tests - skip rest
+                continue
+            # Otherwise: either unknown OR we need verification tests
             
             # PHASE 1: Click on the object to detect toggles/buttons/selection
             plan.append({

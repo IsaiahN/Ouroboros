@@ -2,6 +2,124 @@
 
 ---
 
+## Session: January 8, 2026 - Moveable vs Toggleable Classification Bug Fix
+
+---
+
+### Approach: Fix working_theory counts that incorrectly classify toggleable objects as moveable
+
+**Timestamp**: 9:35:11 AM  
+**Status**: COMPLETE
+
+---
+
+### Problem Statement
+
+User observed from ft09 reasoning log that:
+- Agent finds **6 different toggleable objects** across frames
+- But working_theory says "I control **5 moveable and 1 toggleable** objects"
+- Agent was confusing **moveable** (uses ACTION 1-4 to move after clicking) vs **toggleable** (clicking causes some property change)
+
+The `objects_agent_controls` list contained coordinates like `x:0,y:1` being classified as "moveable" when they should be toggleable click positions.
+
+### Root Cause Analysis
+
+**Three interconnected issues discovered:**
+
+1. **Storage format lacked type information**: Objects from `identify_controlled_objects()` were stored as `x:N,y:M` format regardless of whether they responded to:
+   - Directional actions (ACTION 1-4) → should be **moveable**
+   - Toggle/click actions (ACTION 5) → should be **toggleable**
+
+2. **Classification used naive prefix check** ([core_gameplay.py](core_gameplay.py#L14690-L14696)):
+   ```python
+   moveable = [o for o in ctrl_objects if not o.startswith('toggleable_')]
+   toggleable = [o for o in ctrl_objects if o.startswith('toggleable_')]
+   ```
+   This meant ALL `x:N,y:M` coordinates were classified as moveable!
+
+3. **Stale database records with massive coordinate lists**: Checked `agent_object_control` table and found:
+   - Old records (Dec 2025): 320-1664 objects per record (entire screen treated as "controlled")
+   - Recent records (Jan 2026): Only 3-9 objects per record (fix was working)
+   - The old bad data was polluting counts
+
+### Investigation Steps
+
+| Step | Action | Finding |
+|------|--------|---------|
+| 1 | Searched for `working_theory` in codebase | Found classification at core_gameplay.py L14690-14696 |
+| 2 | Read classification logic | Uses `startswith('toggleable_')` check only |
+| 3 | Searched for `get_controlled_objects` | Found at agent_self_model.py L1598 - aggregates from multiple sources |
+| 4 | Read `identify_controlled_objects` | Returns `x:N,y:M` for BOTH moveable and toggleable |
+| 5 | Queried `agent_object_control` timestamps | Found 206 bad records with avg 917 objects each |
+
+### Fixes Applied
+
+#### Fix 1: Add Type Prefixes to Controlled Objects
+**File**: [agent_self_model.py](agent_self_model.py#L1284-L1319)
+
+When storing controlled objects, now prefixes with control type:
+- `moveable_x:N,y:M` for objects responding to ACTION 1-4 (directional movement)
+- `toggleable_x:N,y:M` for objects responding to ACTION 5 (click/toggle)
+
+```python
+# BEFORE
+controlled.append(f"x:{pos[0]},y:{pos[1]}")
+
+# AFTER (for directional movement)
+controlled.append(f"moveable_x:{pos[0]},y:{pos[1]}")
+
+# AFTER (for ACTION5 toggle effects)  
+controlled.append(f"toggleable_x:{pos[0]},y:{pos[1]}")
+```
+
+#### Fix 2: Update Classification Logic for Backward Compatibility
+**File**: [core_gameplay.py](core_gameplay.py#L14689-L14710)
+
+Updated classification to handle:
+- New prefixed format (`moveable_`, `toggleable_`)
+- Legacy unprefixed coordinates (`x:N,y:M`) → treated as moveable for backward compatibility
+
+```python
+def is_toggleable(obj):
+    return obj.startswith('toggleable_') or obj.startswith('toggle_')
+
+def is_moveable(obj):
+    return obj.startswith('moveable_')
+
+def is_legacy_coordinate(obj):
+    return obj.startswith('x:') and ',y:' in obj
+
+toggleable = [o for o in ctrl_objects if is_toggleable(o)]
+moveable = [o for o in ctrl_objects if is_moveable(o)]
+# Legacy coordinates without prefix: treat as moveable
+legacy_coords = [o for o in ctrl_objects if is_legacy_coordinate(o) and not is_moveable(o) and not is_toggleable(o)]
+moveable.extend(legacy_coords)
+```
+
+#### Fix 3: Database Cleanup
+Deleted 206 stale records with >100 objects each:
+```
+Bad records (>100 objects): 206
+Avg objects in bad records: 916.6
+Max objects in bad records: 2880
+[CLEANUP] Deleted records with >100 objects (stale data)
+Remaining records: 38, max objects: 33
+```
+
+### Verification
+
+- Syntax check passed: `python -m py_compile agent_self_model.py core_gameplay.py`
+- Database cleaned: 38 records remaining, max 33 objects (reasonable)
+
+### Result
+
+- New controlled object discoveries will be properly typed
+- Working theory counts will correctly distinguish moveable vs toggleable
+- Legacy data cleaned up to prevent count pollution
+- Agent should now correctly report "I control N moveable and M toggleable objects" based on actual control type
+
+---
+
 ## Session: January 8, 2026 - Network Object Inventory Bug Fix
 
 ---

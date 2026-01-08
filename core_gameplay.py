@@ -14689,8 +14689,25 @@ class GameplayEngine:
             if ctrl_objects:
                 # We have controlled objects - build theory with control type info
                 # Count moveable vs toggleable objects
-                moveable = [o for o in ctrl_objects if not o.startswith('toggleable_')]
-                toggleable = [o for o in ctrl_objects if o.startswith('toggleable_')]
+                # FIX (2025-01-08): Handle prefixed format AND legacy unprefixed coordinates
+                # - moveable_x:N,y:M = responds to ACTION 1-4 (directional)
+                # - toggleable_x:N,y:M or toggleable_color_N = responds to clicks
+                # - Legacy x:N,y:M (no prefix) = assume moveable for backward compatibility
+                def is_toggleable(obj):
+                    return obj.startswith('toggleable_') or obj.startswith('toggle_')
+                
+                def is_moveable(obj):
+                    return obj.startswith('moveable_')
+                
+                def is_legacy_coordinate(obj):
+                    # Legacy format: x:N,y:M without moveable_/toggleable_ prefix
+                    return obj.startswith('x:') and ',y:' in obj
+                
+                toggleable = [o for o in ctrl_objects if is_toggleable(o)]
+                moveable = [o for o in ctrl_objects if is_moveable(o)]
+                # Legacy coordinates without prefix: treat as moveable
+                legacy_coords = [o for o in ctrl_objects if is_legacy_coordinate(o) and not is_moveable(o) and not is_toggleable(o)]
+                moveable.extend(legacy_coords)
                 
                 # FIX 3: THEORY MERGING with wa/wb weights
                 current_count = {'moveable': len(moveable), 'toggleable': len(toggleable)}
