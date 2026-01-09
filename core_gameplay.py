@@ -32,12 +32,25 @@ import json
 import uuid
 import random
 import math
+import numpy as np
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles numpy types for serialization."""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+
 
 # Local types
 from run_context import RunContext, BudgetState
 import hashlib
 from datetime import datetime
-import numpy as np
 import tempfile
 from typing import Dict, Any, List, Optional, Callable, Tuple, Set, Sequence, TYPE_CHECKING, no_type_check
 
@@ -374,6 +387,665 @@ class PrimitiveHelper:
         except Exception as e:
             logger.debug(f"[PRIMITIVES] Negative space detection failed: {e}")
             return {'available': False, 'error': str(e)}
+
+    # ========================================================================
+    # NEW PRIMITIVES (2025-01-08): Expanding from 10% to 50%+ usage
+    # ========================================================================
+    
+    def find_all_interactable(self, frame: List) -> Dict[str, Any]:
+        """
+        Use object interaction primitives to find all clickable/interactable objects.
+        Critical for ft09-type games where clicking tiles is the mechanic.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'objects': []}
+        
+        try:
+            interactables = registry.call('find_all_interactable_objects', frame)
+            return {
+                'available': True,
+                'objects': interactables or [],
+                'count': len(interactables) if interactables else 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] find_all_interactable failed: {e}")
+            return {'available': False, 'objects': [], 'error': str(e)}
+
+    def find_similar(self, reference_obj: Any, frame: List, criteria: str = 'color') -> Dict[str, Any]:
+        """
+        Find all objects similar to a reference object.
+        Critical for symmetry testing - "if this tile toggles, do all same-colored tiles toggle?"
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'similar': []}
+        
+        try:
+            similar = registry.call('find_similar_objects', reference_obj, frame, criteria)
+            return {
+                'available': True,
+                'similar': similar or [],
+                'count': len(similar) if similar else 0,
+                'criteria': criteria
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] find_similar failed: {e}")
+            return {'available': False, 'similar': [], 'error': str(e)}
+
+    def test_object_control(self, object_id: str, action: int, frame_before: List, frame_after: List) -> Dict[str, Any]:
+        """
+        Test if an action caused a specific object to respond.
+        Returns whether the object moved/changed and how.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'controlled': False}
+        
+        try:
+            result = registry.call('test_object_control', object_id, action, frame_before, frame_after)
+            if isinstance(result, dict):
+                return {'available': True, **result}
+            return {
+                'available': True,
+                'controlled': bool(result),
+                'object_id': object_id,
+                'action': action
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] test_object_control failed: {e}")
+            return {'available': False, 'controlled': False, 'error': str(e)}
+
+    def detect_click_effect(self, click_pos: Tuple[int, int], frame_before: List, frame_after: List) -> Dict[str, Any]:
+        """
+        Detect what effect a click had at a specific position.
+        Returns toggle/transform/move information.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'effect': None}
+        
+        try:
+            effect = registry.call('detect_click_effect', click_pos, frame_before, frame_after)
+            if isinstance(effect, dict):
+                return {'available': True, **effect}
+            return {
+                'available': True,
+                'effect': effect,
+                'click_pos': click_pos
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] detect_click_effect failed: {e}")
+            return {'available': False, 'effect': None, 'error': str(e)}
+
+    def detect_patterns(self, frame: List) -> Dict[str, Any]:
+        """
+        Use pattern detection primitives to find repeating structures, symmetries, grids.
+        Core ARC reasoning primitive.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'patterns': []}
+        
+        try:
+            patterns = registry.call('pattern_detection', frame)
+            return {
+                'available': True,
+                'patterns': patterns or [],
+                'has_patterns': bool(patterns)
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] detect_patterns failed: {e}")
+            return {'available': False, 'patterns': [], 'error': str(e)}
+
+    def analyze_spatial_relationships(self, frame: List) -> Dict[str, Any]:
+        """
+        Analyze spatial relationships between objects (above, below, adjacent, inside).
+        Critical for understanding game layouts.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'relationships': []}
+        
+        try:
+            relationships = registry.call('spatial_relationships', frame)
+            return {
+                'available': True,
+                'relationships': relationships or [],
+                'count': len(relationships) if relationships else 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] spatial_relationships failed: {e}")
+            return {'available': False, 'relationships': [], 'error': str(e)}
+
+    def extract_template(self, frame: List, region: Optional[Tuple] = None) -> Dict[str, Any]:
+        """
+        Extract a template/pattern from a frame or region.
+        Used for template matching and analogical reasoning.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'template': None}
+        
+        try:
+            template = registry.call('template_extraction', frame, region)
+            return {
+                'available': True,
+                'template': template,
+                'has_template': template is not None
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] template_extraction failed: {e}")
+            return {'available': False, 'template': None, 'error': str(e)}
+
+    def match_pattern(self, pattern: Any, frame: List) -> Dict[str, Any]:
+        """
+        Find where a pattern matches in a frame.
+        Returns match locations and confidence.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'matches': []}
+        
+        try:
+            matches = registry.call('pattern_matching', pattern, frame)
+            return {
+                'available': True,
+                'matches': matches or [],
+                'count': len(matches) if matches else 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] pattern_matching failed: {e}")
+            return {'available': False, 'matches': [], 'error': str(e)}
+
+    def detect_rules(self, observations: List[Dict]) -> Dict[str, Any]:
+        """
+        Infer rules from a set of observations (before/after pairs).
+        Core learning primitive.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'rules': []}
+        
+        try:
+            rules = registry.call('rule_detection', observations)
+            return {
+                'available': True,
+                'rules': rules or [],
+                'count': len(rules) if rules else 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] rule_detection failed: {e}")
+            return {'available': False, 'rules': [], 'error': str(e)}
+
+    def color_analysis(self, frame: List) -> Dict[str, Any]:
+        """
+        Analyze colors in a frame - sampling, counting, substitution patterns.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'colors': {}}
+        
+        try:
+            sampling = registry.call('color_sampling', frame)
+            return {
+                'available': True,
+                'colors': sampling or {},
+                'unique_colors': len(sampling) if isinstance(sampling, (list, dict)) else 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] color_analysis failed: {e}")
+            return {'available': False, 'colors': {}, 'error': str(e)}
+
+    def find_distinct_objects(self, frame: List) -> Dict[str, Any]:
+        """
+        Find all distinct objects in a frame based on color/shape.
+        Returns list of object descriptors.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'objects': []}
+        
+        try:
+            objects = registry.call('find_distinct_objects', frame)
+            return {
+                'available': True,
+                'objects': objects or [],
+                'count': len(objects) if objects else 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] find_distinct_objects failed: {e}")
+            return {'available': False, 'objects': [], 'error': str(e)}
+
+    def calculate_surprise(self, expected: Any, actual: Any) -> Dict[str, Any]:
+        """
+        Calculate how surprising an outcome was vs expectation.
+        Used for attention/learning prioritization.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'surprise': 0.5}
+        
+        try:
+            surprise = registry.call('surprise_magnitude', expected, actual)
+            return {
+                'available': True,
+                'surprise': float(surprise) if surprise is not None else 0.5
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] surprise_magnitude failed: {e}")
+            return {'available': False, 'surprise': 0.5, 'error': str(e)}
+
+    def calculate_information_gain(self, action: int, outcome: Dict) -> Dict[str, Any]:
+        """
+        Calculate information gain from an action.
+        Used to prioritize exploratory actions.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'gain': 0.0}
+        
+        try:
+            gain = registry.call('information_gain', action, outcome)
+            return {
+                'available': True,
+                'gain': float(gain) if gain is not None else 0.0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] information_gain failed: {e}")
+            return {'available': False, 'gain': 0.0, 'error': str(e)}
+
+    def get_exploration_value(self, position: Tuple[int, int], visit_history: List) -> Dict[str, Any]:
+        """
+        Calculate exploration value for a position.
+        Higher for unvisited/novel positions.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'value': 0.5}
+        
+        try:
+            value = registry.call('exploration_value', position, visit_history)
+            return {
+                'available': True,
+                'value': float(value) if value is not None else 0.5,
+                'position': position
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] exploration_value failed: {e}")
+            return {'available': False, 'value': 0.5, 'error': str(e)}
+
+    def detect_absence(self, frame_before: List, frame_after: List) -> Dict[str, Any]:
+        """
+        Detect what disappeared between frames.
+        Critical for understanding game mechanics.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'absent': []}
+        
+        try:
+            absent = registry.call('detect_absence', frame_before, frame_after)
+            return {
+                'available': True,
+                'absent': absent or [],
+                'count': len(absent) if absent else 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] detect_absence failed: {e}")
+            return {'available': False, 'absent': [], 'error': str(e)}
+
+    def check_physics_priors(self, frame: List, action: int) -> Dict[str, Any]:
+        """
+        Check physics priors (gravity, solidity, continuity).
+        Returns expectations based on physics understanding.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'expectations': {}}
+        
+        try:
+            gravity = registry.call('gravity_bias', frame, action)
+            solidity = registry.call('solidity_bias', frame)
+            continuity = registry.call('continuity_bias', frame)
+            
+            return {
+                'available': True,
+                'gravity': gravity,
+                'solidity': solidity,
+                'continuity': continuity
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] physics_priors failed: {e}")
+            return {'available': False, 'expectations': {}, 'error': str(e)}
+
+    def count_and_compare(self, frame: List, color_filter: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Count objects and compare quantities.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'count': 0}
+        
+        try:
+            count = registry.call('count_objects', frame, color_filter)
+            one_vs_many = registry.call('detect_one_vs_many', [1] * count if count else [])
+            
+            return {
+                'available': True,
+                'count': count or 0,
+                'one_vs_many': one_vs_many
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] count_and_compare failed: {e}")
+            return {'available': False, 'count': 0, 'error': str(e)}
+
+    def get_object_movement(self, object_id: str, frame_before: List, frame_after: List) -> Dict[str, Any]:
+        """
+        Get detailed movement information for an object.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'moved': False}
+        
+        try:
+            movement = registry.call('get_object_movement', object_id, frame_before, frame_after)
+            did_move = registry.call('did_object_move', object_id, frame_before, frame_after)
+            
+            return {
+                'available': True,
+                'movement': movement,
+                'moved': bool(did_move),
+                'object_id': object_id
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] get_object_movement failed: {e}")
+            return {'available': False, 'moved': False, 'error': str(e)}
+
+    def color_substitution(self, frame: List, from_color: int, to_color: int) -> Dict[str, Any]:
+        """
+        Apply color substitution transformation.
+        Critical for understanding ARC color rules.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'result': None}
+        
+        try:
+            result = registry.call('color_substitution', frame, from_color, to_color)
+            return {
+                'available': True,
+                'result': result,
+                'from_color': from_color,
+                'to_color': to_color
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] color_substitution failed: {e}")
+            return {'available': False, 'result': None, 'error': str(e)}
+
+    def check_contact_causality(self, objects_before: List, objects_after: List, action: int) -> Dict[str, Any]:
+        """
+        Check if contact between objects caused a change.
+        Essential for understanding cause-effect relationships.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'caused_by_contact': False}
+        
+        try:
+            result = registry.call('contact_causality', objects_before, objects_after, action)
+            return {
+                'available': True,
+                'caused_by_contact': bool(result),
+                'details': result
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] contact_causality failed: {e}")
+            return {'available': False, 'caused_by_contact': False, 'error': str(e)}
+
+    def analyze_hierarchical_composition(self, frame: List) -> Dict[str, Any]:
+        """
+        Analyze hierarchical structure of objects.
+        Key for understanding part-whole relationships in ARC.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'hierarchy': None}
+        
+        try:
+            result = registry.call('hierarchical_composition', frame)
+            return {
+                'available': True,
+                'hierarchy': result,
+                'has_hierarchy': result is not None and len(result) > 0 if isinstance(result, (list, dict)) else bool(result)
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] hierarchical_composition failed: {e}")
+            return {'available': False, 'hierarchy': None, 'error': str(e)}
+
+    def find_analogical_mapping(self, source: List, target: List) -> Dict[str, Any]:
+        """
+        Find analogical mappings between source and target patterns.
+        Core to ARC reasoning - finding structural correspondences.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'mapping': None}
+        
+        try:
+            result = registry.call('analogical_mapping', source, target)
+            return {
+                'available': True,
+                'mapping': result,
+                'has_mapping': result is not None
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] analogical_mapping failed: {e}")
+            return {'available': False, 'mapping': None, 'error': str(e)}
+
+    def check_action_matches_movement(self, action: int, dx: int, dy: int) -> Dict[str, Any]:
+        """
+        Check if an action corresponds to observed movement direction.
+        Directly useful for building self-model (I control this object).
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'matches': False}
+        
+        try:
+            result = registry.call('action_matches_movement', action, dx, dy)
+            return {
+                'available': True,
+                'matches': bool(result),
+                'action': action,
+                'direction': (dx, dy)
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] action_matches_movement failed: {e}")
+            return {'available': False, 'matches': False, 'error': str(e)}
+
+    def get_strategy_effectiveness(self, strategy_id: str, history: List) -> Dict[str, Any]:
+        """
+        Evaluate how effective a strategy has been historically.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'effectiveness': 0.0}
+        
+        try:
+            result = registry.call('strategy_effectiveness', strategy_id, history)
+            return {
+                'available': True,
+                'effectiveness': float(result) if result is not None else 0.0,
+                'strategy_id': strategy_id
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] strategy_effectiveness failed: {e}")
+            return {'available': False, 'effectiveness': 0.0, 'error': str(e)}
+
+    def get_competence_signal(self, performance_history: List) -> Dict[str, Any]:
+        """
+        Get competence signal from performance history.
+        Used for intrinsic motivation and learning rate adjustment.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'competence': 0.5}
+        
+        try:
+            result = registry.call('competence_signal', performance_history)
+            return {
+                'available': True,
+                'competence': float(result) if result is not None else 0.5
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] competence_signal failed: {e}")
+            return {'available': False, 'competence': 0.5, 'error': str(e)}
+
+    def check_persistence_bias(self, object_id: str, frame_history: List) -> Dict[str, Any]:
+        """
+        Check if an object persists across frames.
+        Physics prior: objects don't disappear without reason.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'persists': True}
+        
+        try:
+            result = registry.call('persistence_bias', object_id, frame_history)
+            return {
+                'available': True,
+                'persists': bool(result),
+                'object_id': object_id
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] persistence_bias failed: {e}")
+            return {'available': False, 'persists': True, 'error': str(e)}
+
+    def get_boredom_threshold(self, repetition_count: int, novelty_history: List) -> Dict[str, Any]:
+        """
+        Calculate boredom threshold for exploration.
+        Used to trigger novel action exploration.
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'threshold': 5, 'is_bored': False}
+        
+        try:
+            result = registry.call('boredom_threshold', repetition_count, novelty_history)
+            threshold = float(result) if result is not None else 5
+            return {
+                'available': True,
+                'threshold': threshold,
+                'is_bored': repetition_count >= threshold
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] boredom_threshold failed: {e}")
+            return {'available': False, 'threshold': 5, 'is_bored': False, 'error': str(e)}
+
+    def recommend_action(self, analysis: Dict[str, Any], recent_actions: List[str]) -> Dict[str, Any]:
+        """
+        Recommend an action based on primitive analysis results.
+        Uses the computed primitives to make intelligent suggestions.
+        
+        Args:
+            analysis: Results from _analyze_situation_with_primitives
+            recent_actions: Last N actions taken
+            
+        Returns:
+            Dict with 'action', 'reason', 'confidence'
+        """
+        if not analysis or not analysis.get('available'):
+            return {'action': None, 'reason': 'No primitive analysis available', 'confidence': 0.0}
+        
+        recommendations = []
+        
+        # 1. If we found moved objects, try actions that weren't in recent history
+        moved_objects = analysis.get('moved_objects', [])
+        if moved_objects:
+            # Objects are responding - try to identify the control pattern
+            last_action = recent_actions[-1] if recent_actions else None
+            if last_action and last_action.startswith('ACTION'):
+                try:
+                    action_num = int(last_action.replace('ACTION', ''))
+                    # If last action caused movement, maybe try opposite to see bidirectional control
+                    opposite_map = {1: 2, 2: 1, 3: 4, 4: 3, 5: 5, 6: 6, 7: 7}
+                    opposite = opposite_map.get(action_num, action_num)
+                    recommendations.append({
+                        'action': f'ACTION{opposite}',
+                        'reason': f'Test opposite direction after movement detected',
+                        'confidence': 0.7
+                    })
+                except ValueError:
+                    pass
+        
+        # 2. If click effects detected, prioritize ACTION6
+        click_effects = analysis.get('click_effects', {})
+        if click_effects.get('available') and click_effects.get('effects'):
+            recommendations.append({
+                'action': 'ACTION6',
+                'reason': 'Click effects detected - continue clicking exploration',
+                'confidence': 0.65
+            })
+        
+        # 3. If patterns detected, try ACTION7 (submit) to test pattern completion
+        patterns = analysis.get('patterns', {})
+        if patterns.get('available') and patterns.get('has_pattern'):
+            # Only suggest submit if we haven't tried it recently
+            if 'ACTION7' not in recent_actions[-3:]:
+                recommendations.append({
+                    'action': 'ACTION7',
+                    'reason': f'Pattern detected: {patterns.get("type", "unknown")} - try submit',
+                    'confidence': 0.5
+                })
+        
+        # 4. If interactable objects exist that we haven't clicked
+        interactables = analysis.get('interactables', {})
+        if interactables.get('available') and interactables.get('objects'):
+            # Check if ACTION6 is underexplored
+            action6_count = sum(1 for a in recent_actions[-10:] if a == 'ACTION6')
+            if action6_count < 3:
+                recommendations.append({
+                    'action': 'ACTION6',
+                    'reason': f'{len(interactables["objects"])} interactable objects found',
+                    'confidence': 0.6
+                })
+        
+        # 5. If no movement detected and physics priors suggest gravity
+        physics = analysis.get('physics', {})
+        if physics.get('available') and physics.get('gravity'):
+            # Gravity detected - try vertical movement
+            if 'ACTION2' not in recent_actions[-5:]:  # Down
+                recommendations.append({
+                    'action': 'ACTION2',
+                    'reason': 'Gravity physics detected - try downward',
+                    'confidence': 0.55
+                })
+        
+        # 6. If nothing interesting found, suggest unexplored action
+        action_counts = {}
+        for a in recent_actions:
+            action_counts[a] = action_counts.get(a, 0) + 1
+        
+        underexplored = []
+        for action_num in [1, 2, 3, 4, 5, 6]:
+            action = f'ACTION{action_num}'
+            if action_counts.get(action, 0) < 2:
+                underexplored.append(action)
+        
+        if underexplored:
+            recommendations.append({
+                'action': underexplored[0],
+                'reason': f'Underexplored action ({action_counts.get(underexplored[0], 0)} uses)',
+                'confidence': 0.4
+            })
+        
+        # Return highest confidence recommendation
+        if recommendations:
+            recommendations.sort(key=lambda x: x['confidence'], reverse=True)
+            return recommendations[0]
+        
+        return {'action': None, 'reason': 'No primitive-based recommendation', 'confidence': 0.0}
 
 
 # Global primitive helper instance
@@ -1790,27 +2462,59 @@ class GameplayEngine:
                     try:
                         game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
                         
-                        # Infer expected outcome from reasoning
-                        # FIX (2025-01-08): 'score_increase' is too ambitious - score only increases on level WIN
-                        # Use 'frame_change' as default (any action should cause observable change)
-                        # Other types: 'discover_pattern' (exploration), 'object_control' (test hypothesis)
-                        expected_outcome = 'frame_change'  # Default: expect observable change
-                        if 'explore' in reasoning.lower() or 'test' in reasoning.lower():
-                            expected_outcome = 'discover_pattern'
-                        elif 'avoid' in reasoning.lower() or 'escape' in reasoning.lower():
-                            expected_outcome = 'avoid_failure'
-                        elif 'control' in reasoning.lower() or 'move' in reasoning.lower():
-                            expected_outcome = 'object_control'
+                        # ISSUE FIX #1: If action was blocked, don't predict original action's outcome
+                        # ACTION6 clicks won't cause 'object_control' movement - use 'frame_change'
+                        action_was_blocked = getattr(self, '_action_was_blocked', False)
+                        if action_was_blocked:
+                            self._action_was_blocked = False  # Reset for next action
+                            expected_outcome = 'frame_change'  # Generic: expect any change from click
+                        else:
+                            # Infer expected outcome from reasoning
+                            # ISSUE FIX #2: 'frame_change' fails too often for exploratory actions
+                            # because random clicks rarely cause changes. Use 'discover_pattern'
+                            # as default which succeeds on ANY observable effect (frame OR score).
+                            # Only use 'frame_change' when we have high confidence the action will work.
+                            # Only use 'object_control' when explicitly testing a control hypothesis.
+                            
+                            reasoning_lower = reasoning.lower()
+                            
+                            # Check action type - ACTION6 clicks are exploratory by nature
+                            is_action6 = action == 'ACTION6' if action else False
+                            
+                            # Keywords indicating high confidence in expected change
+                            high_confidence_keywords = ['control', 'move', 'known', 'proven', 'replay', 'sequence']
+                            exploration_keywords = ['explore', 'test', 'probe', 'salience', 'micro', 'discover', 'grid', 'search']
+                            
+                            has_high_confidence = any(kw in reasoning_lower for kw in high_confidence_keywords)
+                            is_exploration = any(kw in reasoning_lower for kw in exploration_keywords)
+                            
+                            if is_exploration or is_action6:
+                                # Exploratory actions: use forgiving 'discover_pattern' 
+                                # (succeeds if ANYTHING happens: frame_changed OR score_delta)
+                                expected_outcome = 'discover_pattern'
+                            elif has_high_confidence:
+                                # High confidence: expect specific outcome
+                                if 'control' in reasoning_lower or 'move' in reasoning_lower:
+                                    expected_outcome = 'object_control'
+                                else:
+                                    expected_outcome = 'frame_change'
+                            elif 'avoid' in reasoning_lower or 'escape' in reasoning_lower:
+                                expected_outcome = 'avoid_failure'
+                            else:
+                                # Default for unknown actions: 'discover_pattern' is more forgiving
+                                expected_outcome = 'discover_pattern'
                         # NOTE: 'score_increase' removed as default - only use for explicit win attempts
                         
                         # FIX #9: Check if prediction type is suppressed; try alternatives
                         # Available prediction types (in priority order for fallback)
                         # 'frame_change' is most general - any action should cause some change
-                        prediction_types = ['frame_change', 'discover_pattern', 'object_control', 'avoid_failure']
+                        # NOTE: avoid_failure is NOT in this list - it should only be used when explicitly avoiding danger
+                        prediction_types = ['frame_change', 'discover_pattern', 'object_control']
                         suppressed = getattr(self.metacognitive_engine, '_suppressed_prediction_types', set())
                         
                         # If default type is suppressed, find an alternative
-                        if expected_outcome in suppressed:
+                        # But NEVER suppress frame_change - it's the ultimate fallback
+                        if expected_outcome in suppressed and expected_outcome != 'frame_change':
                             alternatives = [pt for pt in prediction_types if pt not in suppressed]
                             if alternatives:
                                 expected_outcome = alternatives[0]
@@ -4390,8 +5094,8 @@ class GameplayEngine:
             
             # STUCK STATE DETECTION (for games like ls20 that finish but don't report it)
             consecutive_no_frame_change = 0  # Track actions with no frame change
-            STUCK_STATE_THRESHOLD = 100  # Default for non-frontier levels
-            STUCK_STATE_THRESHOLD_FRONTIER = 30  # Frontier levels: detect stuck faster (was 100, wasted budget)
+            STUCK_STATE_THRESHOLD = 200  # Default for non-frontier levels
+            STUCK_STATE_THRESHOLD_FRONTIER = 200  # Frontier levels: same as non-frontier (15/30 was too aggressive)
             
             # Cycle detection for early stuck detection
             recent_action_hashes = []  # Track last N action patterns for cycle detection
@@ -4812,21 +5516,33 @@ class GameplayEngine:
                                 try:
                                     game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
                                     
-                                    # FIX (2025-01-08): 'score_increase' is unpredictable - score only increases on level WIN
-                                    # Use more reasonable predictions based on action intent:
-                                    # - frame_change: default - something visible should change
-                                    # - object_control: when using controlled objects
-                                    # - avoid_failure: when in dangerous situations
-                                    expected_outcome = 'frame_change'  # Most verifiable prediction
-                                    if 'explore' in reasoning.lower() or 'test' in reasoning.lower():
+                                    # ISSUE FIX #2: Use same improved prediction logic as main loop
+                                    # 'frame_change' fails too often; 'discover_pattern' is more forgiving
+                                    reasoning_lower = reasoning.lower()
+                                    is_action6 = action == 'ACTION6' if action else False
+                                    
+                                    high_confidence_keywords = ['control', 'move', 'known', 'proven', 'replay', 'sequence']
+                                    exploration_keywords = ['explore', 'test', 'probe', 'salience', 'micro', 'discover', 'grid', 'search']
+                                    
+                                    has_high_confidence = any(kw in reasoning_lower for kw in high_confidence_keywords)
+                                    is_exploration = any(kw in reasoning_lower for kw in exploration_keywords)
+                                    
+                                    if is_exploration or is_action6:
                                         expected_outcome = 'discover_pattern'
-                                    elif 'controlled' in reasoning.lower() or 'toggle' in reasoning.lower():
-                                        expected_outcome = 'object_control'
+                                    elif has_high_confidence:
+                                        if 'control' in reasoning_lower or 'toggle' in reasoning_lower:
+                                            expected_outcome = 'object_control'
+                                        else:
+                                            expected_outcome = 'frame_change'
+                                    else:
+                                        expected_outcome = 'discover_pattern'
                                     
                                     # FIX #9: Check if prediction type is suppressed; try alternatives
-                                    prediction_types = ['frame_change', 'object_control', 'discover_pattern', 'avoid_failure']
+                                    # NOTE: avoid_failure is NOT in this list - only used when explicitly avoiding danger
+                                    prediction_types = ['frame_change', 'object_control', 'discover_pattern']
                                     suppressed = getattr(self.metacognitive_engine, '_suppressed_prediction_types', set())
-                                    if expected_outcome in suppressed:
+                                    # Never suppress frame_change - it's the ultimate fallback
+                                    if expected_outcome in suppressed and expected_outcome != 'frame_change':
                                         alternatives = [pt for pt in prediction_types if pt not in suppressed]
                                         if alternatives:
                                             expected_outcome = alternatives[0]
@@ -5116,7 +5832,11 @@ class GameplayEngine:
                         # Metacognitive evaluation: prediction vs outcome + elimination/failure tagging
                         if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
                             try:
-                                actual_outcome = f"score_delta={score_change}, frame_changed={frame_changed}"
+                                # FIX (2025-01-08): Include GAME_OVER in actual_outcome for proper avoid_failure evaluation
+                                if game_state.state == 'GAME_OVER':
+                                    actual_outcome = f"game_over, score_delta={score_change}, frame_changed={frame_changed}"
+                                else:
+                                    actual_outcome = f"score_delta={score_change}, frame_changed={frame_changed}"
                                 eval_result = self.metacognitive_engine.evaluate_prediction(
                                     actual_outcome=actual_outcome,
                                     score_before=previous_score,
@@ -5368,8 +6088,9 @@ class GameplayEngine:
                         # (Uses the action traces populated above)
                         if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
                             try:
-                                # Every 5 actions, analyze control patterns
-                                if len(self._recent_action_traces) >= 5:
+                                # 2025-01-08: Changed from every 5 actions to every action
+                                # Consciousness loop should run every frame per checklist
+                                if len(self._recent_action_traces) >= 1:
                                     action_sequence = [t for t in self._recent_action_traces]
                                     frame_sequence = [{'grid': t.get('frame_before', [])} for t in self._recent_action_traces]
                                     frame_sequence.append({'grid': game_state.frame or []})
@@ -5379,7 +6100,9 @@ class GameplayEngine:
                                     )
                                     
                                     # Store if confident
-                                    if controlled and confidence > 0.5:
+                                    # 2025-01-08: Lowered from 0.5 to 0.3 to match self-model reporting
+                                    # threshold and allow capturing weaker correlations
+                                    if controlled and confidence > 0.3:
                                         self.agent_self_model.store_control_map(
                                             agent_id, game_id, current_level, controlled, confidence
                                         )
@@ -5506,6 +6229,28 @@ class GameplayEngine:
                             # Score increase without frame change does NOT reset stuck counter.
                             consecutive_no_frame_change += 1
                             
+                            # ================================================================
+                            # FIX: EARLY PERSONA SPAWN AT 30 FRAMES (before 200 escape mode)
+                            # Checklist Phase 6 requires persona spawning at 30 frames stuck,
+                            # but escape mode triggers at 200. Spawn investigator early.
+                            # ================================================================
+                            if consecutive_no_frame_change == 30 and hasattr(self, 'persona_manager') and self.persona_manager:
+                                try:
+                                    early_stuckness_spec = {
+                                        'type': 'stuckness_detector',
+                                        'investigating': 'early_stuck_warning',
+                                        'focus': f'level_{current_level}_early_stuck',
+                                        'game_type': game_id.split('-')[0] if '-' in game_id else game_id[:4],
+                                        'level': current_level,
+                                        'trigger_action': action_count,
+                                        'consecutive_stuck': 30
+                                    }
+                                    persona_id = self.persona_manager.spawn_temporary_persona(early_stuckness_spec)
+                                    if persona_id:
+                                        logger.info(f"[PERSONA] Early stuckness_detector spawned at 30 frames: {persona_id[:16]}")
+                                except Exception as e:
+                                    logger.debug(f"Early persona spawn failed: {e}")
+                            
                             # ADAPTIVE THRESHOLD: Lower threshold at frontier (30) vs non-frontier (100)
                             current_stuck_threshold = STUCK_STATE_THRESHOLD_FRONTIER if is_frontier_level else STUCK_STATE_THRESHOLD
                             
@@ -5553,9 +6298,9 @@ class GameplayEngine:
                                     )
                             
                             # Trigger escape if threshold hit OR cycle detected with enough stagnation
-                            # With frame_changed now computed correctly in game_session_manager.py,
-                            # we can use a moderate threshold of 15 for cycle-triggered escape
-                            cycle_trigger_threshold = 15  # Must have 15 no-frame-change + cycle to trigger early
+                            # 2025-01-08: Increased from 15 to 200 - 15 was too aggressive and triggered
+                            # escape mode before agent had chance to explore properly
+                            cycle_trigger_threshold = 200  # Must have 200 no-frame-change + cycle to trigger early
                             if consecutive_no_frame_change >= current_stuck_threshold or (cycle_detected and consecutive_no_frame_change >= cycle_trigger_threshold):
                                 # ================================================================
                                 # STUCK STATE ESCAPE: Try different actions before giving up
@@ -6997,6 +7742,33 @@ class GameplayEngine:
                     return selected
             
             # ================================================================
+            # PRIORITY 1.5: Use find_all_interactable primitive
+            # ================================================================
+            # If no self-model knowledge, use primitives to find clickable objects
+            if hasattr(self, 'primitive_helper') and self.primitive_helper.available:
+                try:
+                    interactables = self.primitive_helper.find_all_interactable(game_state.frame)
+                    if interactables.get('available') and interactables.get('objects'):
+                        # Pick an interactable object we haven't clicked recently
+                        recent_clicks = getattr(self, '_recent_click_colors', set())
+                        for obj in interactables['objects']:
+                            color = obj.get('color', 0)
+                            if color not in recent_clicks and color > 0:
+                                centroid = obj.get('centroid', (0, 0))
+                                x, y = int(centroid[0]), int(centroid[1])
+                                if 0 <= x < len(game_state.frame[0]) and 0 <= y < len(game_state.frame):
+                                    reason = f"Interactable object color {color}"
+                                    window_id = f"primitive_{int(datetime.now().timestamp() * 1000)}"
+                                    selected = {"x": x, "y": y, "reason": reason, "window_id": window_id}
+                                    self._pending_action6_target = selected
+                                    self._pending_action6_reason = f"Primitive: {reason}"
+                                    self.game_config['current_attention_window_id'] = window_id
+                                    logger.info(f"[PRIMITIVE] ACTION6 target from find_all_interactable: ({x},{y}) - {reason}")
+                                    return selected
+                except Exception as e:
+                    logger.debug(f"[PRIMITIVE] find_all_interactable failed: {e}")
+            
+            # ================================================================
             # PRIORITY 2: Fall back to visual salience
             # ================================================================
             analysis = self.action_handler.visual_analyzer.analyze_frame(game_state.frame)
@@ -7778,8 +8550,24 @@ class GameplayEngine:
                             
                             if not is_exploration and not is_click_explore:
                                 # BLOCK exploitation actions when theory contradicted
-                                import random
-                                revision_action = f"ACTION{random.choice([1, 2, 3, 4])}"
+                                # Use primitive analysis to pick intelligent exploration action
+                                revision_action = None
+                                try:
+                                    if hasattr(self, 'primitive_helper') and self.primitive_helper.available:
+                                        recent = getattr(self, '_recent_actions', [])[-10:]
+                                        prim_analysis = getattr(self, '_last_primitive_analysis', None)
+                                        if prim_analysis:
+                                            rec = self.primitive_helper.recommend_action(prim_analysis, recent)
+                                            if rec.get('action') and rec['action'].startswith('ACTION'):
+                                                revision_action = rec['action']
+                                                logger.debug(f"[PRIMITIVE] Revision action from primitives: {revision_action}")
+                                except Exception as prim_err:
+                                    logger.debug(f"[PRIMITIVE] recommend_action failed: {prim_err}")
+                                
+                                if not revision_action:
+                                    import random
+                                    revision_action = f"ACTION{random.choice([1, 2, 3, 4])}"
+                                
                                 theory_gated_action = revision_action
                                 theory_gated_reason = f"[THEORY-GATED] Theory CONTRADICTED - forced exploration | original: {reason[:60]}"
                                 logger.info(f"[THEORY-GATE] Stage=contradicted, blocked {action} -> {revision_action}")
@@ -7887,12 +8675,32 @@ class GameplayEngine:
                                 original_action = action
                                 original_reason = reason
                                 
-                                # Default to random movement for exploration
-                                import random
-                                exploration_action = f"ACTION{random.choice([1, 2, 3, 4])}"
+                                # Use primitive analysis to pick intelligent exploration action
+                                exploration_action = None
+                                try:
+                                    if hasattr(self, 'primitive_helper') and self.primitive_helper.available:
+                                        recent = getattr(self, '_recent_actions', [])[-10:]
+                                        prim_analysis = getattr(self, '_last_primitive_analysis', None)
+                                        if prim_analysis:
+                                            rec = self.primitive_helper.recommend_action(prim_analysis, recent)
+                                            if rec.get('action') and rec['action'].startswith('ACTION'):
+                                                exploration_action = rec['action']
+                                                logger.debug(f"[PRIMITIVE] Exploration action from primitives: {exploration_action}")
+                                except Exception as prim_err:
+                                    logger.debug(f"[PRIMITIVE] recommend_action failed: {prim_err}")
+                                
+                                if not exploration_action:
+                                    import random
+                                    exploration_action = f"ACTION{random.choice([1, 2, 3, 4])}"
+                                
                                 action = exploration_action
                                 reason = f"BLOCKED by {blocking_qs}: {original_reason[:50]}... -> forced exploration"
                                 rung = 'heuristic'
+                                
+                                # ISSUE FIX #1: Mark that action was blocked so prediction logic knows
+                                # to adjust expected outcome (don't expect 'object_control' from ACTION6)
+                                self._action_was_blocked = True
+                                self._blocked_original_action = original_action
                                 
                                 logger.info(f"[QUESTIONING] {original_action} blocked by {blocking_qs}, substituting {action}")
                 except Exception as qe_err:
@@ -10522,38 +11330,37 @@ class GameplayEngine:
                             )
                         
                         # ================================================================
-                        # DISCOVERY PHASE: ACTION6 OBSERVATION-BASED VALIDATION
+                        # DISCOVERY: ACTION6 OBSERVATION-BASED VALIDATION
                         # ================================================================
-                        # During discovery phase, observe if clicking caused movement
+                        # Continuously observe if clicking caused movement
                         # and share to network immediately (not waiting for win).
+                        # Discovery runs ALWAYS, not just first 20 actions.
                         # ================================================================
-                        actions_this_level = getattr(self, '_level_action_count', 0)
-                        if actions_this_level <= 20:
-                            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
-                            
-                            discovery_result = self.agent_self_model.execute_object_discovery(
-                                frame_before=game_state.frame,
-                                frame_after=new_state.frame,
-                                action_taken='ACTION6',
-                                click_coords=(x, y),
-                                game_type=game_type,
-                                level=current_level,
-                                agent_id=agent_id
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                        
+                        discovery_result = self.agent_self_model.execute_object_discovery(
+                            frame_before=game_state.frame,
+                            frame_after=new_state.frame,
+                            action_taken='ACTION6',
+                            click_coords=(x, y),
+                            game_type=game_type,
+                            level=current_level,
+                            agent_id=agent_id
+                        )
+                        
+                        # Record symmetry experiment result if this was a symmetry test
+                        if hasattr(selected_action, 'get') and selected_action.get('_symmetry_experiment'):
+                            self.agent_self_model.record_symmetry_experiment_result(
+                                experiment_id=selected_action['_symmetry_experiment'],
+                                x=x, y=y,
+                                discovery_result=discovery_result
                             )
-                            
-                            # Record symmetry experiment result if this was a symmetry test
-                            if hasattr(selected_action, 'get') and selected_action.get('_symmetry_experiment'):
-                                self.agent_self_model.record_symmetry_experiment_result(
-                                    experiment_id=selected_action['_symmetry_experiment'],
-                                    x=x, y=y,
-                                    discovery_result=discovery_result
-                                )
-                            
-                            if discovery_result and discovery_result.get('discovered_control'):
-                                logger.info(
-                                    f"[DISCOVERY] ACTION6 at ({x},{y}) triggers {discovery_result['object_id']} "
-                                    f"(shared to network for {game_type} L{current_level})"
-                                )
+                        
+                        if discovery_result and discovery_result.get('discovered_control'):
+                            logger.info(
+                                f"[DISCOVERY] ACTION6 at ({x},{y}) triggers {discovery_result['object_id']} "
+                                f"(shared to network for {game_type} L{current_level})"
+                            )
                 except Exception as e:
                     logger.debug(f"Selection tracking failed (non-critical): {e}")
             
@@ -10702,15 +11509,13 @@ class GameplayEngine:
                 # ================================================================
                 # DISCOVERY PHASE OBSERVATION-BASED VALIDATION (Added 2025-12-28)
                 # ================================================================
-                # During first N actions, systematically test objects and IMMEDIATELY
-                # validate control hypotheses based on observed movement - not waiting
-                # for win. This is per game_type + level validation.
+                # Continuously test objects and IMMEDIATELY validate control
+                # hypotheses based on observed movement - not waiting for win.
+                # Discovery runs ALWAYS, not just first 20 actions.
                 # ================================================================
                 if action_num in ['1', '2', '3', '4'] and hasattr(self, 'agent_self_model'):
                     try:
-                        actions_this_level = getattr(self, '_level_action_count', 0)
-                        # Only run during discovery phase (first 20 actions)
-                        if actions_this_level <= 20 and new_state and new_state.frame:
+                        if new_state and new_state.frame:
                             game_id = self.session_manager.current_game_id
                             game_type = game_id.split('-')[0] if game_id and '-' in game_id else (game_id or 'unknown')[:4]
                             agent_id = self.game_config.get('agent_id')
@@ -12610,10 +13415,11 @@ class GameplayEngine:
             # FIX #15: COMMIT TO HYPOTHESIS AFTER EXTENDED DISCOVERY
             # ===================================================================
             # Problem: Discovery phase runs for 152+ frames but never concludes.
-            # After 30 frames with no self-model, commit to best available hypothesis.
+            # 2025-01-08: Increased from 30 to 100 frames - checklist says let theories
+            # evolve naturally through evidence gathering, not forced commitment.
             # ===================================================================
             frame_count = getattr(self, '_frame_count', 0)
-            if not context.get('objects_agent_controls') and frame_count >= 30:
+            if not context.get('objects_agent_controls') and frame_count >= 100:
                 # Discovery has been running too long - force commitment
                 network_hypotheses = self.agent_self_model.get_network_control_hypotheses(
                     game_id, level, min_reliability=0.3  # Lower threshold for commitment
@@ -12630,8 +13436,10 @@ class GameplayEngine:
                             f"[SELF-MODEL] Forced commitment to hypothesis after {frame_count} frames: "
                             f"{len(network_controlled)} objects (reliability={best.get('reliability', 0.3):.2f})"
                         )
-                elif frame is not None and frame_count >= 50:
+                elif frame is not None and frame_count >= 150:
                     # No network hypotheses - make an arbitrary commitment based on frame analysis
+                    # 2025-01-08: Increased from 50 to 150 frames - heuristic guessing
+                    # should be last resort, give discovery system time to work
                     # Pick the most prominent non-background color objects
                     try:
                         import numpy as np
@@ -12647,7 +13455,8 @@ class GameplayEngine:
                             positions = np.argwhere(frame_arr == candidate_color)
                             if len(positions) > 0:
                                 center = positions.mean(axis=0).astype(int).tolist()
-                                context['objects_agent_controls'] = [f"color_{candidate_color}_at_{center[1]}_{center[0]}"]
+                                # Ensure Python int for JSON serialization
+                                context['objects_agent_controls'] = [f"color_{candidate_color}_at_{int(center[1])}_{int(center[0])}"]
                                 context['control_confidence'] = 0.2
                                 context['control_source'] = 'heuristic_guess'
                                 logger.info(
@@ -12770,15 +13579,52 @@ class GameplayEngine:
             
             for coord_str in raw_coords[:10]:  # Limit to 10 for JSON size
                 try:
-                    # Parse "x:5,y:3" format
-                    parts = coord_str.split(',')
-                    x = int(parts[0].replace('x:', ''))
-                    y = int(parts[1].replace('y:', ''))
+                    x, y, color = None, None, None
                     
-                    # Get color at this position
-                    if 0 <= y < frame_arr.shape[0] and 0 <= x < frame_arr.shape[1]:
-                        color = int(frame_arr[y][x])
-                        
+                    # Handle multiple formats:
+                    # 1. "color_X_at_Y_Z" format (e.g., "color_11_at_19_4")
+                    if coord_str.startswith('color_') and '_at_' in coord_str:
+                        import re
+                        match = re.search(r'color_(\d+)_at_(\d+)_(\d+)', coord_str)
+                        if match:
+                            color = int(match.group(1))
+                            x = int(match.group(2))
+                            y = int(match.group(3))
+                    
+                    # 2. "x:N,y:M" format (legacy)
+                    elif coord_str.startswith('x:') and ',y:' in coord_str:
+                        parts = coord_str.split(',')
+                        x = int(parts[0].replace('x:', ''))
+                        y = int(parts[1].replace('y:', ''))
+                        # Get color from frame
+                        if 0 <= y < frame_arr.shape[0] and 0 <= x < frame_arr.shape[1]:
+                            color = int(frame_arr[y][x])
+                    
+                    # 3. "moveable_x:N,y:M" or "toggleable_x:N,y:M" format
+                    elif '_x:' in coord_str and ',y:' in coord_str:
+                        import re
+                        match = re.search(r'x:(\d+),y:(\d+)', coord_str)
+                        if match:
+                            x = int(match.group(1))
+                            y = int(match.group(2))
+                            # Get color from frame
+                            if 0 <= y < frame_arr.shape[0] and 0 <= x < frame_arr.shape[1]:
+                                color = int(frame_arr[y][x])
+                    
+                    # 4. "toggleable_color_X" format
+                    elif coord_str.startswith('toggleable_color_'):
+                        import re
+                        match = re.search(r'toggleable_color_(\d+)', coord_str)
+                        if match:
+                            color = int(match.group(1))
+                            # Find position of this color in frame
+                            positions = np.argwhere(frame_arr == color)
+                            if len(positions) > 0:
+                                # Use center of all positions - convert to Python int
+                                center = positions.mean(axis=0).astype(int)
+                                y, x = int(center[0]), int(center[1])
+                    
+                    if x is not None and y is not None and color is not None:
                         # Track color frequency
                         if color not in color_counts:
                             color_counts[color] = 0
@@ -14591,13 +15437,15 @@ class GameplayEngine:
             Delta section dict with frame changes in natural language
         """
         # ===================================================================
-        # FIX #4: RESOLVE "425 TOO EARLY" AFTER 20 FRAMES
+        # FIX #4: RESOLVE "425 TOO EARLY" AFTER 10 FRAMES
         # ===================================================================
         # Problem: "NULL - 425 Too Early" persists for 100+ frames.
-        # Solution: After 20 frames, force resolution to meaningful status.
+        # Solution: After 10 frames, force resolution to meaningful status.
+        # 2025-01-08: Reduced from 20 to 10 - checklist says "never too early,
+        # there's always a working hypothesis". Get into speculation mode faster.
         # ===================================================================
         frame_count = getattr(self, '_frame_count', 0)
-        past_early_phase = frame_count >= 20
+        past_early_phase = frame_count >= 10
         
         # Determine appropriate fallback statuses based on frame count
         if past_early_phase:
@@ -14652,7 +15500,8 @@ class GameplayEngine:
             for coord in diff_coords[:20]:  # Limit to 20 changes
                 # Handle both 2D and 3D+ arrays (RGB, etc.)
                 if len(coord) >= 2:
-                    y, x = coord[0], coord[1]
+                    # Convert numpy.int64 to Python int for JSON serialization
+                    y, x = int(coord[0]), int(coord[1])
                 else:
                     continue  # Skip malformed coordinates
                 if previous_arr.ndim == 2:
@@ -14843,6 +15692,7 @@ class GameplayEngine:
                 # - moveable_x:N,y:M = responds to ACTION 1-4 (directional)
                 # - toggleable_x:N,y:M or toggleable_color_N = responds to clicks
                 # - Legacy x:N,y:M (no prefix) = assume moveable for backward compatibility
+                # - color_X_at_Y_Z = heuristic guess, treat as moveable
                 def is_toggleable(obj):
                     return obj.startswith('toggleable_') or obj.startswith('toggle_')
                 
@@ -14853,11 +15703,18 @@ class GameplayEngine:
                     # Legacy format: x:N,y:M without moveable_/toggleable_ prefix
                     return obj.startswith('x:') and ',y:' in obj
                 
+                def is_color_at_format(obj):
+                    # Format: color_X_at_Y_Z (heuristic guess)
+                    return obj.startswith('color_') and '_at_' in obj
+                
                 toggleable = [o for o in ctrl_objects if is_toggleable(o)]
                 moveable = [o for o in ctrl_objects if is_moveable(o)]
                 # Legacy coordinates without prefix: treat as moveable
                 legacy_coords = [o for o in ctrl_objects if is_legacy_coordinate(o) and not is_moveable(o) and not is_toggleable(o)]
                 moveable.extend(legacy_coords)
+                # color_X_at_Y_Z format (heuristic guess): treat as moveable
+                color_at_objects = [o for o in ctrl_objects if is_color_at_format(o)]
+                moveable.extend(color_at_objects)
                 
                 # FIX 3: THEORY MERGING with wa/wb weights
                 current_count = {'moveable': len(moveable), 'toggleable': len(toggleable)}
@@ -15385,18 +16242,18 @@ class GameplayEngine:
         # ===================================================================
         # SIZE ENFORCEMENT (<=16 KB)
         # ===================================================================
-        reasoning_json = json.dumps(reasoning_obj)
+        reasoning_json = json.dumps(reasoning_obj, cls=NumpyEncoder)
         if len(reasoning_json) > 16384:
             # Truncate environment first (largest), then delta
             reasoning_obj['6_environment'] = {'status': 'truncated', 'reason': 'size_limit'}
             reasoning_obj['2_delta']['frame_changes'] = ['truncated']
-            reasoning_json = json.dumps(reasoning_obj)
+            reasoning_json = json.dumps(reasoning_obj, cls=NumpyEncoder)
             
             if len(reasoning_json) > 16384:
                 # Truncate understanding and network_wisdom
                 reasoning_obj['3_understanding'] = {'status': 'truncated'}
                 reasoning_obj['4_network_wisdom'] = {'status': 'truncated'}
-                reasoning_json = json.dumps(reasoning_obj)
+                reasoning_json = json.dumps(reasoning_obj, cls=NumpyEncoder)
                 
                 if len(reasoning_json) > 16384:
                     # Last resort: truncate reasoning text
@@ -16636,6 +17493,183 @@ class GameplayEngine:
                 result['recommendations'].append(
                     "Container/enclosed regions detected - may need to fill or empty them"
                 )
+        
+        # ========================================================================
+        # NEW PRIMITIVES (2025-01-08): Expanded analysis using more of the 122 primitives
+        # ========================================================================
+        
+        # 5. Find all interactable objects (critical for ft09-type games)
+        if frame_after:
+            try:
+                result['interactables'] = self.primitive_helper.find_all_interactable(frame_after)
+                if result['interactables'].get('count', 0) > 0:
+                    result['recommendations'].append(
+                        f"Found {result['interactables']['count']} interactable objects - try clicking them"
+                    )
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] find_all_interactable failed: {e}")
+        
+        # 6. Pattern Detection (core ARC reasoning)
+        if frame_after:
+            try:
+                result['patterns'] = self.primitive_helper.detect_patterns(frame_after)
+                if result['patterns'].get('has_patterns'):
+                    result['recommendations'].append(
+                        "Patterns detected - look for repeating structures or symmetries"
+                    )
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] detect_patterns failed: {e}")
+        
+        # 7. Spatial Relationships
+        if frame_after:
+            try:
+                result['spatial'] = self.primitive_helper.analyze_spatial_relationships(frame_after)
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] spatial_relationships failed: {e}")
+        
+        # 8. Object Movement Tracking
+        if frame_before and frame_after and action_taken:
+            try:
+                # Find distinct objects and check which ones moved
+                objects = self.primitive_helper.find_distinct_objects(frame_before)
+                moved_objects = []
+                for obj in objects.get('objects', [])[:10]:  # Limit to 10 for performance
+                    obj_id = obj.get('object_id', '')
+                    if obj_id:
+                        movement = self.primitive_helper.get_object_movement(obj_id, frame_before, frame_after)
+                        if movement.get('moved'):
+                            moved_objects.append({
+                                'object_id': obj_id,
+                                'movement': movement.get('movement')
+                            })
+                result['moved_objects'] = moved_objects
+                if moved_objects:
+                    result['recommendations'].append(
+                        f"{len(moved_objects)} object(s) moved after ACTION{action_taken}"
+                    )
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] object movement tracking failed: {e}")
+        
+        # 9. Click Effect Detection (for ACTION6)
+        if action_taken == 6 and frame_before and frame_after:
+            try:
+                # Get click position from last action
+                click_pos = getattr(self, '_last_click_position', None)
+                if click_pos:
+                    result['click_effect'] = self.primitive_helper.detect_click_effect(
+                        click_pos, frame_before, frame_after
+                    )
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] click effect detection failed: {e}")
+        
+        # 10. Absence Detection (what disappeared?)
+        if frame_before and frame_after:
+            try:
+                result['absence'] = self.primitive_helper.detect_absence(frame_before, frame_after)
+                if result['absence'].get('count', 0) > 0:
+                    result['recommendations'].append(
+                        f"{result['absence']['count']} object(s) disappeared - action may have consumed/removed them"
+                    )
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] detect_absence failed: {e}")
+        
+        # 11. Color Analysis
+        if frame_after:
+            try:
+                result['colors'] = self.primitive_helper.color_analysis(frame_after)
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] color_analysis failed: {e}")
+        
+        # 12. Physics Priors (for games with gravity/physics)
+        if frame_after and action_taken:
+            try:
+                result['physics'] = self.primitive_helper.check_physics_priors(frame_after, action_taken)
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] physics_priors failed: {e}")
+        
+        # 13. Information Gain (how much did we learn?)
+        if action_taken and result.get('frame_changes'):
+            try:
+                outcome = {
+                    'frame_changed': result['frame_changes'].get('has_changes', False),
+                    'objects_moved': len(result.get('moved_objects', [])),
+                    'objects_disappeared': result.get('absence', {}).get('count', 0)
+                }
+                result['info_gain'] = self.primitive_helper.calculate_information_gain(action_taken, outcome)
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] information_gain failed: {e}")
+        
+        # ========================================================================
+        # 2025-01-08: Additional primitives for self-model and strategy
+        # ========================================================================
+        
+        # 14. Action-Movement Correlation (critical for self-model)
+        if action_taken and result.get('moved_objects'):
+            try:
+                for moved in result['moved_objects']:
+                    movement = moved.get('movement', {})
+                    dx = movement.get('dx', 0) if isinstance(movement, dict) else 0
+                    dy = movement.get('dy', 0) if isinstance(movement, dict) else 0
+                    if dx != 0 or dy != 0:
+                        match_result = self.primitive_helper.check_action_matches_movement(action_taken, dx, dy)
+                        if match_result.get('matches'):
+                            moved['action_matches'] = True
+                            result['recommendations'].append(
+                                f"ACTION{action_taken} correlates with object movement - possible controlled object!"
+                            )
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] action_matches_movement failed: {e}")
+        
+        # 15. Hierarchical Composition Analysis
+        if frame_after:
+            try:
+                result['hierarchy'] = self.primitive_helper.analyze_hierarchical_composition(frame_after)
+                if result['hierarchy'].get('has_hierarchy'):
+                    result['recommendations'].append(
+                        "Hierarchical structure detected - look for part-whole relationships"
+                    )
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] hierarchical_composition failed: {e}")
+        
+        # 16. Persistence Check (physics prior: objects don't vanish)
+        if frame_before and frame_after and result.get('absence', {}).get('absent'):
+            try:
+                frame_history = getattr(self, '_recent_frames', [])
+                for absent_obj in result['absence']['absent'][:5]:  # Limit for performance
+                    obj_id = absent_obj if isinstance(absent_obj, str) else str(absent_obj)
+                    persistence = self.primitive_helper.check_persistence_bias(obj_id, frame_history)
+                    if not persistence.get('persists'):
+                        result['recommendations'].append(
+                            f"Object {obj_id} unexpectedly disappeared - unusual event!"
+                        )
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] persistence_bias failed: {e}")
+        
+        # 17. Boredom/Exploration Trigger
+        if action_history:
+            try:
+                # Count recent action repetitions
+                recent = action_history[-20:] if len(action_history) >= 20 else action_history
+                from collections import Counter
+                counts = Counter(recent)
+                max_rep = max(counts.values()) if counts else 0
+                novelty_hist = getattr(self, '_novelty_history', [])
+                
+                boredom = self.primitive_helper.get_boredom_threshold(max_rep, novelty_hist)
+                if boredom.get('is_bored'):
+                    result['recommendations'].append(
+                        f"Boredom threshold reached (repeating action {max_rep} times) - explore new actions!"
+                    )
+                result['boredom'] = boredom
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] boredom_threshold failed: {e}")
+        
+        # 18. Competence Signal (intrinsic motivation)
+        if score_history:
+            try:
+                result['competence'] = self.primitive_helper.get_competence_signal(score_history)
+            except Exception as e:
+                logger.debug(f"[PRIMITIVES] competence_signal failed: {e}")
         
         return result
 
@@ -21685,31 +22719,35 @@ def _merge_theories_with_weights(
     else:
         norm_wa = norm_wb = remaining / 2
     
-    # COLD START FIX: If network and historical are both 0, trust current evidence 100%
-    # This is CRITICAL for frontier levels where agent must learn from scratch
-    network_is_cold = (
-        network_consensus.get('moveable', 0) == 0 and
-        network_consensus.get('toggleable', 0) == 0
-    )
-    historical_is_cold = (hist_moveable == 0 and hist_toggleable == 0)
+    # ISSUE FIX #6: The old "COLD START" logic was wrong
+    # Network saying 0 doesn't mean "no knowledge" - it means "learned there are 0"
+    # 
+    # The problem: If network=0 and historical=0 but current=10, the old code
+    # trusted current 100%, but 10 is likely FALSE POSITIVE from bad detection.
+    # 
+    # New approach: Network 0 should COUNT as evidence, not be ignored.
+    # Only trust current 100% if there's genuinely NO network data (None, not 0).
+    # Use validation_attempts or similar to detect "no data" vs "data is zero".
+    #
+    # For now: Always use weighted merge. If network says 0, that pulls theory down.
+    # Cap current evidence at 3 objects max to prevent runaway false positives.
     
-    if network_is_cold and historical_is_cold:
-        # No prior knowledge - trust current evidence completely
-        merged_moveable = float(current_evidence.get('moveable', 0))
-        merged_toggleable = float(current_evidence.get('toggleable', 0))
-    else:
-        # Normal weighted merge when we have prior knowledge
-        merged_moveable = (
-            current_evidence.get('moveable', 0) * norm_wa +
-            network_consensus.get('moveable', 0) * norm_wb +
-            hist_moveable * hist_weight
-        )
-        
-        merged_toggleable = (
-            current_evidence.get('toggleable', 0) * norm_wa +
-            network_consensus.get('toggleable', 0) * norm_wb +
-            hist_toggleable * hist_weight
-        )
+    # Cap current evidence to prevent runaway false positives
+    # (10 detected objects is almost certainly wrong - likely detecting background colors)
+    current_moveable = min(current_evidence.get('moveable', 0), 3)
+    current_toggleable = min(current_evidence.get('toggleable', 0), 3)
+    
+    merged_moveable = (
+        current_moveable * norm_wa +
+        network_consensus.get('moveable', 0) * norm_wb +
+        hist_moveable * hist_weight
+    )
+    
+    merged_toggleable = (
+        current_toggleable * norm_wa +
+        network_consensus.get('toggleable', 0) * norm_wb +
+        hist_toggleable * hist_weight
+    )
     
     return {
         'moveable': merged_moveable,

@@ -719,6 +719,20 @@ class ActionHandler:
                 
                 elif diversity_check['oscillation_detected']:
                     logger.warning(f"[SYNC] Coordinate oscillation detected (unproductive) - trying pseudo-button pathfinding")
+                    
+                    # ISSUE FIX #5: Blacklist oscillating coordinates to prevent returning to them
+                    # Get the oscillating coordinates from recent history
+                    last_6 = self.recent_coordinates[-6:] if len(self.recent_coordinates) >= 6 else self.recent_coordinates
+                    oscillating_coords = set(last_6)
+                    
+                    # Add oscillating coordinates to visual analyzer's blacklist
+                    for osc_coord in oscillating_coords:
+                        self.visual_analyzer.mark_coordinate_clicked(osc_coord[0], osc_coord[1])
+                        logger.debug(f"[OSCILLATION] Blacklisting coordinate: {osc_coord}")
+                    
+                    # Clear recent coordinates to break oscillation pattern detection
+                    self.recent_coordinates = []
+                    
                     # Try pathfinding between oscillating points
                     combination_target = self.visual_analyzer._find_combination_target(
                         analysis.get("targets", [])
@@ -737,14 +751,14 @@ class ActionHandler:
                             reason = f"Pseudo-button pathfinding: {reason}"
                             logger.info(f"[TARGET] Pathfinding target: ({x}, {y})")
                     else:
-                        # Force wide exploration
+                        # Force wide exploration with increased radius
                         self.visual_analyzer.exploration_radius = min(
-                            self.visual_analyzer.exploration_radius + 5,
+                            self.visual_analyzer.exploration_radius + 10,  # Bigger jump
                             self.visual_analyzer.max_exploration_radius
                         )
                         x, y = self.visual_analyzer.get_exploratory_coordinates(
                             frame,
-                            radius=self.visual_analyzer.exploration_radius + 10
+                            radius=self.visual_analyzer.exploration_radius + 15  # Even wider
                         )
                         reason = "Anti-oscillation wide search"
                     

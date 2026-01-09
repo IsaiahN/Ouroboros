@@ -9614,14 +9614,32 @@ class MetacognitiveReasoningEngine:
         predicted = pred['predicted'].lower()
         prediction_correct = False
         
+        # FIX (2025-01-08): Add proper handlers for all prediction types
+        # Parse actual_outcome to check for GAME_OVER
+        is_game_over = 'game_over' in actual_outcome.lower() if actual_outcome else False
+        
         if 'score' in predicted and 'increase' in predicted:
+            # score_increase: Did score go up?
             prediction_correct = score_after > score_before
+        elif 'avoid_failure' in predicted or 'avoid' in predicted:
+            # avoid_failure: Did agent survive? (NOT game over)
+            # Prediction is CORRECT if agent is still alive (no GAME_OVER)
+            prediction_correct = not is_game_over
+        elif 'frame_change' in predicted:
+            # frame_change: Did the frame visibly change?
+            prediction_correct = frame_changed
+        elif 'object_control' in predicted or 'control' in predicted:
+            # object_control: Did clicking/moving cause a change?
+            prediction_correct = frame_changed
+        elif 'discover_pattern' in predicted or 'discover' in predicted:
+            # discover_pattern: Any observable effect counts as discovery
+            prediction_correct = frame_changed or score_after != score_before
         elif 'move' in predicted:
             prediction_correct = frame_changed
         elif 'no change' in predicted:
             prediction_correct = not frame_changed
         else:
-            # Generic check - frame change or score change counts as something happened
+            # Generic fallback - frame change or score change counts as something happened
             prediction_correct = frame_changed or score_after > score_before
         
         # Record outcome
