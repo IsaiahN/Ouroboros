@@ -871,13 +871,18 @@ class SensationEngine:
         self,
         agent_id: str,
         object_info: dict,
-        control_data: Optional[dict] = None
+        control_data: Optional[dict] = None,
+        w_a: float = 0.5,
+        w_b: float = 0.5
     ) -> dict:
         """
-        Calculate four-axis tetrahedral sensation for an object.
+        Calculate Stream-aware sensation for an object.
         
-        Implements the McGuffin grammar: Structure >< Function >< Method >< Interpretation
-        Each object is perceived through all four axes simultaneously.
+        Aligned with Two Streams Theory:
+        - stream_a: Private sensory observation (what I personally perceive)
+        - stream_b: Collective network wisdom (what others know about this type)
+        - hypothesis: Current working theory from CODS (how I think it works)
+        - synthesis: Weighted integration via w_a/w_b (persona output)
         
         Args:
             agent_id: The perceiving agent
@@ -890,39 +895,12 @@ class SensationEngine:
                 - 'is_controlled': bool
                 - 'confidence': float
                 - 'control_method': str
+            w_a: Stream A weight (private experience) - 0 to 1
+            w_b: Stream B weight (collective wisdom) - 0 to 1
                 
         Returns:
-            Tetrahedral sensation dict:
-            {
-                'structure': {  # What IS it (invariant form)
-                    'identity': str,  # Object type/class
-                    'position': tuple,  # Spatial coordinates
-                    'properties': dict,  # Color, shape, size
-                    'stability': float  # How fixed/stable (0-1)
-                },
-                'function': {  # What does it DO (relational dynamics)
-                    'sensation_score': float,  # Emotional valence (-1 to 1)
-                    'attraction': float,  # Draw toward/away (-1 to 1)
-                    'association': str,  # danger/obstacle/neutral/opportunity/goal
-                    'predicted_behavior': str  # What we expect it to do
-                },
-                'method': {  # HOW we interact (procedural knowledge)
-                    'is_controlled': bool,  # Do we control it?
-                    'control_method': str,  # How we control (if applicable)
-                    'approach_actions': List[int],  # Actions to approach
-                    'avoid_actions': List[int],  # Actions to avoid
-                    'interaction_history': int  # Times interacted
-                },
-                'interpretation': {  # WHY it matters (semantic meaning)
-                    'semantic_role': str,  # self/tool/goal/obstacle/environment
-                    'goal_relevance': float,  # How relevant to current goal (-1 to 1)
-                    'threat_level': float,  # Danger assessment (0-1)
-                    'curiosity': float,  # Novelty/exploration value (0-1)
-                    'personal_meaning': str  # Agent's personal interpretation
-                },
-                'balance': float,  # How balanced the four axes are (0-1)
-                'dominant_axis': str  # Which axis dominates perception
-            }
+            Stream-aware sensation dict with stream_a, stream_b, hypothesis, synthesis
+            plus legacy aliases (structure, function, method, interpretation)
         """
         object_type = object_info.get('object_type', 'unknown')
         position = object_info.get('position', (0, 0))
@@ -936,73 +914,166 @@ class SensationEngine:
                 'color': color,
                 'shape': object_info.get('shape', 'unknown')
             },
-            'stability': 1.0 if 'wall' in object_type or 'boundary' in object_type else 0.5
+            'stability': 1.0 if 'wall' in object_type or 'boundary' in object_type else 0.5,
+            'goal_relevance': 0.0,
+            'threat_level': 0.0,
+            'approach_score': 0.0
         }
         
-        # FUNCTION AXIS - What does it DO (from sensation/impression data)
+        # STREAM B (Collective) - What does the network know? (from impression data)
         impression = self.query_personal_impression(agent_id, object_type)
         
         if impression:
-            function = {
+            stream_b = {
                 'sensation_score': impression.get('sensation_score', 0.0),
                 'attraction': self._calculate_attraction(impression),
                 'association': impression.get('association', 'neutral'),
-                'predicted_behavior': self._predict_object_behavior(object_type, impression)
+                'predicted_behavior': self._predict_object_behavior(object_type, impression),
+                'network_goal_relevance': 1.0 if impression.get('association') == 'goal' else 0.0,
+                'network_threat_level': 1.0 if impression.get('association') == 'danger' else 0.0,
+                'network_approach_score': self._calculate_attraction(impression)
             }
+            # Update Stream A with learned associations
+            stream_a['goal_relevance'] = stream_b['network_goal_relevance'] * 0.5
+            stream_a['threat_level'] = stream_b['network_threat_level'] * 0.5
+            stream_a['approach_score'] = stream_b['sensation_score']
         else:
-            # Default function for unknown objects
-            function = {
+            # Default stream_b for unknown objects
+            stream_b = {
                 'sensation_score': 0.0,
                 'attraction': 0.0,
                 'association': 'neutral',
-                'predicted_behavior': 'unknown'
+                'predicted_behavior': 'unknown',
+                'network_goal_relevance': 0.0,
+                'network_threat_level': 0.0,
+                'network_approach_score': 0.0
             }
         
-        # METHOD AXIS - HOW we interact (from control data)
+        # HYPOTHESIS (Theory) - Current working hypothesis about control
         if control_data:
-            method = {
+            hypothesis = {
                 'is_controlled': control_data.get('is_controlled', False),
+                'control_correlation': control_data.get('confidence', 0.0),
                 'control_method': control_data.get('control_method', 'none'),
                 'approach_actions': control_data.get('approach_actions', []),
                 'avoid_actions': control_data.get('avoid_actions', []),
-                'interaction_history': control_data.get('interaction_count', 0)
+                'interaction_history': control_data.get('interaction_count', 0),
+                'expected_control': control_data.get('is_controlled', False),
+                'expected_goal': False
             }
         else:
-            method = {
+            hypothesis = {
                 'is_controlled': False,
+                'control_correlation': 0.0,
                 'control_method': 'none',
                 'approach_actions': [],
                 'avoid_actions': [],
-                'interaction_history': 0
+                'interaction_history': 0,
+                'expected_control': False,
+                'expected_goal': False
             }
         
-        # INTERPRETATION AXIS - WHY it matters
-        interpretation = self._calculate_interpretation(
-            agent_id, object_type, structure, function, method
+        # SYNTHESIS (Persona Output) - Weighted integration of streams
+        synthesis = self._calculate_synthesis(
+            agent_id, object_type, stream_a, stream_b, hypothesis, w_a, w_b
         )
         
-        # Calculate balance and dominant axis
-        axis_strengths = {
-            'structure': structure['stability'],
-            'function': abs(function['sensation_score']),
-            'method': 1.0 if method['is_controlled'] else 0.3,
-            'interpretation': interpretation['goal_relevance']
-        }
+        # Calculate stream conflict (consciousness intensity)
+        goal_conflict = abs(stream_a.get('goal_relevance', 0) - stream_b.get('network_goal_relevance', 0))
+        threat_conflict = abs(stream_a.get('threat_level', 0) - stream_b.get('network_threat_level', 0))
+        stream_conflict = (goal_conflict + threat_conflict) / 2.0
         
-        max_strength = max(axis_strengths.values())
-        min_strength = min(axis_strengths.values())
-        balance = 1.0 - (max_strength - min_strength) if max_strength > 0 else 0.5
-        
-        dominant_axis = max(axis_strengths, key=axis_strengths.get)
+        # Determine dominant stream
+        if w_a > w_b + 0.2:
+            dominant_stream = 'stream_a'
+        elif w_b > w_a + 0.2:
+            dominant_stream = 'stream_b'
+        else:
+            dominant_stream = 'balanced'
         
         return {
-            'structure': structure,
-            'function': function,
-            'method': method,
-            'interpretation': interpretation,
-            'balance': balance,
-            'dominant_axis': dominant_axis
+            'stream_a': stream_a,
+            'stream_b': stream_b,
+            'hypothesis': hypothesis,
+            'synthesis': synthesis,
+            'stream_conflict': stream_conflict,
+            'dominant_stream': dominant_stream,
+            # Legacy compatibility aliases
+            'structure': stream_a,
+            'function': stream_b,
+            'method': hypothesis,
+            'interpretation': synthesis,
+            'balance': 1.0 - stream_conflict,
+            'dominant_axis': dominant_stream
         }
+    
+    def _calculate_synthesis(
+        self,
+        agent_id: str,
+        object_type: str,
+        stream_a: dict,
+        stream_b: dict,
+        hypothesis: dict,
+        w_a: float,
+        w_b: float
+    ) -> dict:
+        """
+        Calculate synthesis axis - persona output integrating streams.
+        
+        From Unified Consciousness Theory: synthesis is the weighted
+        integration of Stream A (private) and Stream B (collective).
+        """
+        # Weighted integration
+        goal_relevance = w_a * stream_a.get('goal_relevance', 0) + w_b * stream_b.get('network_goal_relevance', 0)
+        threat_level = w_a * stream_a.get('threat_level', 0) + w_b * stream_b.get('network_threat_level', 0)
+        approach_score = w_a * stream_a.get('approach_score', 0) + w_b * stream_b.get('network_approach_score', 0)
+        
+        control_quality = hypothesis.get('control_correlation', 0.0)
+        
+        synthesis = {
+            'semantic_role': 'unknown',
+            'goal_relevance': goal_relevance,
+            'threat_level': threat_level,
+            'curiosity': 0.5 if stream_b.get('association') == 'neutral' else 0.2,
+            'personal_meaning': 'unexplored',
+            'is_self': False,
+            'is_tool': False,
+            'is_goal': False,
+            'is_obstacle': False,
+            'meaning_confidence': 0.0,
+            'attraction': 0.0
+        }
+        
+        # Determine semantic role from synthesis
+        if control_quality > 0.8:
+            synthesis['semantic_role'] = 'self'
+            synthesis['is_self'] = True
+            synthesis['meaning_confidence'] = control_quality
+        elif control_quality > 0.5:
+            synthesis['semantic_role'] = 'tool'
+            synthesis['is_tool'] = True
+            synthesis['meaning_confidence'] = control_quality * 0.8
+        elif threat_level > 0.5:
+            synthesis['semantic_role'] = 'obstacle'
+            synthesis['is_obstacle'] = True
+            synthesis['meaning_confidence'] = threat_level
+        elif goal_relevance > 0.5:
+            synthesis['semantic_role'] = 'goal'
+            synthesis['is_goal'] = True
+            synthesis['meaning_confidence'] = goal_relevance
+        else:
+            synthesis['semantic_role'] = 'environmental'
+            synthesis['meaning_confidence'] = 0.3
+        
+        # Calculate attraction
+        synthesis['attraction'] = max(-1.0, min(1.0, (
+            goal_relevance * 0.5 +
+            approach_score * 0.2 -
+            threat_level * 0.5 +
+            (0.2 if synthesis['is_tool'] else 0.0)
+        )))
+        
+        return synthesis
     
     def _calculate_attraction(self, impression: dict) -> float:
         """Calculate attraction score from impression data."""

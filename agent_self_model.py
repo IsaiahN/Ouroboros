@@ -2966,55 +2966,66 @@ class AgentSelfModel:
         self._test_action_index = 0
 
     # ========================================================================
-    # TETRAHEDRAL GRAMMAR: INTERPRETATION (VOID) AXIS
+    # STREAM-AWARE OBJECT PERCEPTION (Two Streams + Persona Synthesis)
     # ========================================================================
-    # From McGuffin Tensor Framework: Every object needs four axes:
-    #   Structure (A) - What it IS (position, color, form)
-    #   Function (B)  - What it DOES (responds to actions, effects)
-    #   Method (C)    - HOW it operates (control correlation, action map)
-    #   Interpretation (D) - WHAT IT MEANS (semantic role, goal relevance)
-    # 
-    # This is the VOID axis - the meaning anchor that makes all other axes coherent.
+    # Aligned with Unified Consciousness Theory - each object perception is a
+    # "micro-consciousness" operation integrating:
+    #
+    #   stream_a (Private)    - What I personally perceive (my sensory data)
+    #   stream_b (Collective) - What the network knows (viral packages about this type)
+    #   hypothesis (Theory)   - Current working theory from CODS discoveries
+    #   synthesis (Persona)   - Weighted integration: w_A * stream_a + w_B * stream_b
+    #
+    # When streams agree -> automatic action (low consciousness)
+    # When streams conflict -> vivid consciousness (deliberation required)
+    # The synthesis axis is the PERSONA output that resolves stream conflicts.
     # ========================================================================
     
-    # Relational tensors from McGuffin: Each pair of axes creates a relationship
-    OBJECT_RELATIONSHIP_TENSORS = {
-        ('structure', 'function'): 'enables',      # Structure enables Function
-        ('structure', 'method'): 'constrains',     # Structure constrains Method
-        ('structure', 'interpretation'): 'defines', # Structure defines Meaning
-        ('function', 'method'): 'triggers',        # Function triggers Method
-        ('function', 'interpretation'): 'reveals', # Function reveals Meaning
-        ('method', 'interpretation'): 'anchors',   # Method anchors Meaning
+    # Stream relationship dynamics - how knowledge sources interact
+    STREAM_RELATIONSHIP_TENSORS = {
+        ('stream_a', 'stream_b'): 'validates',     # Private validates/contradicts Collective
+        ('stream_a', 'hypothesis'): 'grounds',     # Experience grounds Theory
+        ('stream_a', 'synthesis'): 'contributes',  # Private contributes to Synthesis
+        ('stream_b', 'hypothesis'): 'transfers',   # Network wisdom transfers to Theory
+        ('stream_b', 'synthesis'): 'contributes',  # Collective contributes to Synthesis
+        ('hypothesis', 'synthesis'): 'gates',      # Theory gates what Synthesis accepts
     }
     
-    def calculate_interpretation_axis(
+    def calculate_synthesis_axis(
         self,
         agent_id: str,
-        obj_data: Dict[str, Any],
-        goal_context: Dict[str, Any],
+        stream_a_data: Dict[str, Any],
+        stream_b_data: Dict[str, Any],
+        hypothesis_data: Dict[str, Any],
+        w_a: float = 0.5,
+        w_b: float = 0.5,
         sensation_engine: Any = None
     ) -> Dict[str, Any]:
         """
-        Calculate the Interpretation (Void) axis for an object.
+        Calculate the Synthesis axis - the Persona output that integrates streams.
         
-        This is the MEANING layer that integrates:
-        - Is this ME or something else?
-        - Is this relevant to my goal?
-        - Is this dangerous or helpful?
+        This is where consciousness happens: Stream A (private) and Stream B (collective)
+        are weighted by w_A/w_B and filtered through the current hypothesis to produce
+        a unified interpretation.
         
-        From McGuffin: Void = Context = Meaning. Without this axis,
-        agents see facts but don't understand them.
+        From Unified Consciousness Theory:
+        - When streams agree -> low conflict, automatic action
+        - When streams disagree -> high conflict, deliberation required
+        - The synthesis resolves conflicts through weighted integration
         
         Args:
             agent_id: Agent identifier
-            obj_data: Object data with structure/function/method info
-            goal_context: Goal information (positions, types)
+            stream_a_data: Private observation data (what I perceive)
+            stream_b_data: Network wisdom data (what the collective knows)
+            hypothesis_data: Current working theory from CODS
+            w_a: Weight for Stream A (private) - 0 to 1
+            w_b: Weight for Stream B (collective) - 0 to 1  
             sensation_engine: Optional SensationEngine for emotional data
             
         Returns:
-            Interpretation axis dictionary with semantic role, relevance, threat, attraction
+            Synthesis axis dictionary with unified interpretation
         """
-        interpretation = {
+        synthesis = {
             'semantic_role': 'unknown',    # 'self', 'tool', 'obstacle', 'goal', 'environmental'
             'goal_relevance': 0.0,         # 0-1: How relevant to winning?
             'threat_level': 0.0,           # 0-1: How dangerous?
@@ -3023,92 +3034,97 @@ class AgentSelfModel:
             'is_self': False,              # Boolean: Is this the agent?
             'is_tool': False,              # Boolean: Is this a controllable tool?
             'is_goal': False,              # Boolean: Is this a goal/target?
-            'is_obstacle': False           # Boolean: Is this blocking progress?
+            'is_obstacle': False,          # Boolean: Is this blocking progress?
+            'stream_conflict': 0.0,        # 0-1: How much do streams disagree?
+            'dominant_stream': 'balanced', # 'stream_a', 'stream_b', or 'balanced'
+            'theory_alignment': 0.0        # 0-1: How well does this fit our hypothesis?
         }
         
-        # Get sensation data if available (emotional context)
-        sensation_score = 0.0
-        impression_data = None
-        if sensation_engine:
-            try:
-                obj_type = f"color_{obj_data.get('color', 0)}"
-                sensation_score = sensation_engine.perceive_object(agent_id, obj_type, obj_data)
-                impression_data = sensation_engine.query_personal_impression(agent_id, obj_type)
-                
-                if impression_data:
-                    # Apply learned associations from sensation engine
-                    association = impression_data.get('association', 'neutral')
-                    strength = impression_data.get('impression_strength', 0.5)
-                    
-                    if association == 'danger':
-                        interpretation['threat_level'] = strength
-                        interpretation['is_obstacle'] = strength > 0.5
-                    elif association == 'goal':
-                        interpretation['goal_relevance'] = strength
-                        interpretation['is_goal'] = strength > 0.5
-                    elif association == 'obstacle':
-                        interpretation['threat_level'] = strength * 0.5
-                        interpretation['is_obstacle'] = strength > 0.5
-            except Exception as e:
-                logger.debug(f"Sensation integration failed: {e}")
+        # Extract control quality from hypothesis
+        control_quality = hypothesis_data.get('control_correlation', 0.0)
         
-        # Determine semantic role based on control quality (Method axis)
-        control_quality = obj_data.get('control_correlation', 0.0)
+        # STREAM A (Private) predictions
+        stream_a_goal = stream_a_data.get('goal_relevance', 0.0)
+        stream_a_threat = stream_a_data.get('threat_level', 0.0)
+        stream_a_approach = stream_a_data.get('approach_score', 0.0)
         
+        # STREAM B (Collective) predictions - from network viral packages
+        stream_b_goal = stream_b_data.get('network_goal_relevance', 0.0)
+        stream_b_threat = stream_b_data.get('network_threat_level', 0.0)
+        stream_b_approach = stream_b_data.get('network_approach_score', 0.0)
+        
+        # Calculate stream conflict (vivid consciousness when high)
+        goal_conflict = abs(stream_a_goal - stream_b_goal)
+        threat_conflict = abs(stream_a_threat - stream_b_threat)
+        synthesis['stream_conflict'] = (goal_conflict + threat_conflict) / 2.0
+        
+        # Determine dominant stream
+        if w_a > w_b + 0.2:
+            synthesis['dominant_stream'] = 'stream_a'
+        elif w_b > w_a + 0.2:
+            synthesis['dominant_stream'] = 'stream_b'
+        else:
+            synthesis['dominant_stream'] = 'balanced'
+        
+        # WEIGHTED SYNTHESIS: Integrate streams based on w_A/w_B
+        synthesized_goal = w_a * stream_a_goal + w_b * stream_b_goal
+        synthesized_threat = w_a * stream_a_threat + w_b * stream_b_threat
+        synthesized_approach = w_a * stream_a_approach + w_b * stream_b_approach
+        
+        synthesis['goal_relevance'] = synthesized_goal
+        synthesis['threat_level'] = synthesized_threat
+        
+        # THEORY ALIGNMENT: Check if synthesis aligns with working hypothesis
+        hypothesis_control = hypothesis_data.get('expected_control', False)
+        hypothesis_goal = hypothesis_data.get('expected_goal', False)
+        if hypothesis_control == synthesis.get('is_self', False):
+            synthesis['theory_alignment'] += 0.3
+        if hypothesis_goal == synthesis.get('is_goal', False):
+            synthesis['theory_alignment'] += 0.3
+        synthesis['theory_alignment'] = min(1.0, synthesis['theory_alignment'])
+        
+        # Determine semantic role from control quality (from hypothesis axis)
         if control_quality > 0.8:
             # High control = likely self
-            interpretation['semantic_role'] = 'self'
-            interpretation['is_self'] = True
-            interpretation['meaning_confidence'] = control_quality
-            interpretation['attraction'] = 0.0  # Neutral - we ARE this
+            synthesis['semantic_role'] = 'self'
+            synthesis['is_self'] = True
+            synthesis['meaning_confidence'] = control_quality
+            synthesis['attraction'] = 0.0  # Neutral - we ARE this
         elif control_quality > 0.5:
             # Medium control = tool we can use
-            interpretation['semantic_role'] = 'tool'
-            interpretation['is_tool'] = True
-            interpretation['meaning_confidence'] = control_quality * 0.8
-            interpretation['attraction'] = 0.3  # Mild approach
-        elif interpretation['threat_level'] > 0.5:
+            synthesis['semantic_role'] = 'tool'
+            synthesis['is_tool'] = True
+            synthesis['meaning_confidence'] = control_quality * 0.8
+            synthesis['attraction'] = 0.3  # Mild approach
+        elif synthesis['threat_level'] > 0.5:
             # High threat = obstacle
-            interpretation['semantic_role'] = 'obstacle'
-            interpretation['meaning_confidence'] = interpretation['threat_level']
-            interpretation['attraction'] = -0.8  # Strong avoid
-        elif interpretation['goal_relevance'] > 0.5:
+            synthesis['semantic_role'] = 'obstacle'
+            synthesis['is_obstacle'] = True
+            synthesis['meaning_confidence'] = synthesis['threat_level']
+            synthesis['attraction'] = -0.8  # Strong avoid
+        elif synthesis['goal_relevance'] > 0.5:
             # High goal relevance = target
-            interpretation['semantic_role'] = 'goal'
-            interpretation['meaning_confidence'] = interpretation['goal_relevance']
-            interpretation['attraction'] = 0.9  # Strong approach
+            synthesis['semantic_role'] = 'goal'
+            synthesis['is_goal'] = True
+            synthesis['meaning_confidence'] = synthesis['goal_relevance']
+            synthesis['attraction'] = 0.9  # Strong approach
         else:
             # Default: environmental object
-            interpretation['semantic_role'] = 'environmental'
-            interpretation['meaning_confidence'] = 0.3
-            interpretation['attraction'] = sensation_score * 0.3  # Mild bias from sensation
+            synthesis['semantic_role'] = 'environmental'
+            synthesis['meaning_confidence'] = 0.3
+            synthesis['attraction'] = synthesized_approach * 0.3  # From stream integration
         
-        # Check against goal context for goal relevance
-        goal_positions = goal_context.get('goal_positions', [])
-        obj_position = obj_data.get('position')
-        
-        if obj_position and goal_positions:
-            # Check if this object is at or near a goal position
-            for goal_pos in goal_positions:
-                if obj_position == goal_pos:
-                    interpretation['goal_relevance'] = 1.0
-                    interpretation['is_goal'] = True
-                    interpretation['semantic_role'] = 'goal'
-                    interpretation['attraction'] = 1.0
-                    interpretation['meaning_confidence'] = 0.9
-                    break
-        
-        # Final attraction calculation: combine all signals
-        interpretation['attraction'] = max(-1.0, min(1.0, (
-            interpretation['goal_relevance'] * 0.5 +
-            sensation_score * 0.2 -
-            interpretation['threat_level'] * 0.5 +
-            (0.2 if interpretation['is_tool'] else 0.0)
+        # Final attraction: weighted synthesis of all signals
+        synthesis['attraction'] = max(-1.0, min(1.0, (
+            synthesis['goal_relevance'] * 0.5 +
+            synthesized_approach * 0.2 -
+            synthesis['threat_level'] * 0.5 +
+            (0.2 if synthesis['is_tool'] else 0.0)
         )))
         
-        return interpretation
+        return synthesis
     
-    def build_tetrahedral_object(
+    def build_stream_aware_perception(
         self,
         agent_id: str,
         obj_color: int,
@@ -3116,16 +3132,20 @@ class AgentSelfModel:
         game_id: str,
         level: int,
         frame: Optional[List] = None,
-        sensation_engine: Any = None
+        sensation_engine: Any = None,
+        w_a: float = 0.5,
+        w_b: float = 0.5
     ) -> Dict[str, Any]:
         """
-        Build a complete tetrahedral perception for an object.
+        Build a Stream-aware perception for an object.
         
-        Integrates all four axes:
-        - Structure (A): What it IS
-        - Function (B): What it DOES
-        - Method (C): HOW it operates
-        - Interpretation (D): WHAT IT MEANS
+        Aligned with Unified Consciousness Theory - each perception is a
+        micro-consciousness operation integrating:
+        
+        - stream_a: Private sensory observation (what I personally see)
+        - stream_b: Collective network wisdom (what others know about this type)
+        - hypothesis: Current working theory from CODS (how I think it works)
+        - synthesis: Persona output integrating streams (weighted conclusion)
         
         Args:
             agent_id: Agent identifier
@@ -3135,12 +3155,14 @@ class AgentSelfModel:
             level: Level number
             frame: Current game frame
             sensation_engine: Optional SensationEngine
+            w_a: Stream A weight (private experience) - 0 to 1
+            w_b: Stream B weight (collective wisdom) - 0 to 1
             
         Returns:
-            Complete tetrahedral object perception
+            Stream-aware object perception with all 4 axes
         """
-        # STRUCTURE AXIS (A) - What it IS
-        structure = {
+        # STREAM A (Private) - What I personally observe right now
+        stream_a = {
             'color': obj_color,
             'positions': positions[:10],  # Limit for size
             'cell_count': len(positions),
@@ -3148,19 +3170,44 @@ class AgentSelfModel:
             'centroid': (
                 sum(p[0] for p in positions) / len(positions) if positions else 0,
                 sum(p[1] for p in positions) / len(positions) if positions else 0
-            )
+            ),
+            'goal_relevance': 0.0,      # Will be updated from personal experience
+            'threat_level': 0.0,        # Will be updated from personal experience
+            'approach_score': 0.0       # Will be updated from personal experience
         }
         
-        # FUNCTION AXIS (B) - What it DOES
-        function = {
-            'responds_to_actions': [],
-            'effect': 'unknown',
-            'reactivity': 0.0,
-            'known_effects': []
+        # Get personal sensation data for Stream A enrichment
+        if sensation_engine:
+            try:
+                obj_type = f"color_{obj_color}"
+                sensation_score = sensation_engine.perceive_object(agent_id, obj_type, {'color': obj_color})
+                impression = sensation_engine.query_personal_impression(agent_id, obj_type)
+                
+                if impression:
+                    association = impression.get('association', 'neutral')
+                    strength = impression.get('impression_strength', 0.5)
+                    
+                    if association == 'danger':
+                        stream_a['threat_level'] = strength
+                    elif association == 'goal':
+                        stream_a['goal_relevance'] = strength
+                    elif association == 'opportunity':
+                        stream_a['approach_score'] = strength
+                stream_a['approach_score'] = sensation_score
+            except Exception:
+                pass
+        
+        # STREAM B (Collective) - What the network knows about this object type
+        stream_b = {
+            'network_goal_relevance': 0.0,
+            'network_threat_level': 0.0,
+            'network_approach_score': 0.0,
+            'known_effects': [],
+            'reactivity': 0.0
         }
         
         try:
-            # Query collision effects for this color
+            # Query collision effects from network (collective wisdom)
             effects = self.db.execute_query("""
                 SELECT effect_type, confidence, occurrence_count
                 FROM collision_effects
@@ -3170,40 +3217,52 @@ class AgentSelfModel:
             """, (game_id, level, obj_color, obj_color))
             
             if effects:
-                function['known_effects'] = [
+                stream_b['known_effects'] = [
                     {'type': e['effect_type'], 'confidence': e['confidence']}
                     for e in effects
                 ]
-                function['reactivity'] = len(effects) / 5.0  # Normalize
+                stream_b['reactivity'] = len(effects) / 5.0
+                
+                # Derive network assessments from effect types
+                for e in effects:
+                    effect_type = e.get('effect_type', '')
+                    conf = e.get('confidence', 0.0)
+                    if 'score' in effect_type or 'goal' in effect_type:
+                        stream_b['network_goal_relevance'] = max(stream_b['network_goal_relevance'], conf)
+                        stream_b['network_approach_score'] = max(stream_b['network_approach_score'], conf)
+                    elif 'damage' in effect_type or 'death' in effect_type:
+                        stream_b['network_threat_level'] = max(stream_b['network_threat_level'], conf)
         except Exception:
             pass
         
-        # METHOD AXIS (C) - HOW it operates
-        method = {
+        # HYPOTHESIS (Theory) - Current working hypothesis about control
+        hypothesis = {
             'is_controlled': False,
             'control_correlation': 0.0,
             'action_response_map': {},
-            'intentionality': 0.0  # 0 = passive, 1 = autonomous
+            'intentionality': 0.0,  # 0 = passive, 1 = autonomous
+            'expected_control': False,
+            'expected_goal': False
         }
         
         try:
-            # Check if this color is in controlled objects
+            # Check if this color is in controlled objects (CODS-validated)
             controlled = self.get_controlled_objects(agent_id, game_id, level)
             if controlled:
                 for coord in controlled:
-                    # Parse coordinate and check if it matches this object's positions
                     try:
                         parts = coord.split(',')
                         x = int(parts[0].replace('x:', ''))
                         y = int(parts[1].replace('y:', ''))
                         if (y, x) in positions:
-                            method['is_controlled'] = True
-                            method['control_correlation'] = 0.8
+                            hypothesis['is_controlled'] = True
+                            hypothesis['control_correlation'] = 0.8
+                            hypothesis['expected_control'] = True
                             break
                     except Exception:
                         pass
             
-            # Check for autonomous movement patterns
+            # Check for autonomous movement patterns from network knowledge
             autonomous = self.db.execute_query("""
                 SELECT movement_pattern, moves_per_turn, is_ever_controllable
                 FROM autonomous_objects
@@ -3212,96 +3271,96 @@ class AgentSelfModel:
             
             if autonomous:
                 a = autonomous[0]
-                method['intentionality'] = a['moves_per_turn'] if a['moves_per_turn'] else 0.0
+                hypothesis['intentionality'] = a['moves_per_turn'] if a['moves_per_turn'] else 0.0
                 if a['is_ever_controllable']:
-                    method['is_controlled'] = True
+                    hypothesis['is_controlled'] = True
         except Exception:
             pass
         
-        # INTERPRETATION AXIS (D) - WHAT IT MEANS (The Void)
-        interpretation = self.calculate_interpretation_axis(
+        # SYNTHESIS (Persona Output) - Weighted integration of streams
+        synthesis = self.calculate_synthesis_axis(
             agent_id,
-            {
-                'color': obj_color,
-                'position': structure['centroid'],
-                'control_correlation': method['control_correlation']
-            },
-            {'goal_positions': []},  # Will be populated by caller if available
+            stream_a,
+            stream_b,
+            hypothesis,
+            w_a,
+            w_b,
             sensation_engine
         )
         
         return {
-            'structure': structure,
-            'function': function,
-            'method': method,
-            'interpretation': interpretation
+            'stream_a': stream_a,
+            'stream_b': stream_b,
+            'hypothesis': hypothesis,
+            'synthesis': synthesis,
+            # Legacy compatibility aliases (for code that still uses old names)
+            'structure': stream_a,
+            'function': stream_b,
+            'method': hypothesis,
+            'interpretation': synthesis
         }
     
-    def calculate_mood_vector(self, tetrahedral_perception: Dict[str, Dict]) -> str:
+    # Keep old function name as alias for backward compatibility
+    def build_tetrahedral_object(self, *args, **kwargs) -> Dict[str, Any]:
+        """Backward-compatible alias for build_stream_aware_perception."""
+        return self.build_stream_aware_perception(*args, **kwargs)
+    
+    def calculate_stream_conflict(self, stream_perception: Dict[str, Dict]) -> str:
         """
-        Calculate agent's decision mood from tetrahedral perception balance.
+        Calculate agent's cognitive state from stream conflict levels.
         
-        From McGuffin's decision framework:
-        - Driven: One axis dominant - focused action
-        - Balanced: Two axes compete - careful action
-        - Diffuse: Three axes equal - exploratory
-        - Conflict: Void axis outlying - hesitate
+        From Unified Consciousness Theory:
+        - automatic: Streams agree - no deliberation needed
+        - deliberative: Streams mildly conflict - conscious choice required
+        - vivid: Streams strongly conflict - intense consciousness
+        - paralyzed: Extreme conflict - action blocked
         
         Args:
-            tetrahedral_perception: Dict of object_key -> tetrahedral object
+            stream_perception: Dict of object_key -> stream-aware perception
             
         Returns:
-            Mood state: 'driven', 'balanced', 'diffuse', or 'conflict'
+            Cognitive state: 'automatic', 'deliberative', 'vivid', or 'paralyzed'
         """
-        if not tetrahedral_perception:
-            return 'diffuse'
+        if not stream_perception:
+            return 'automatic'
         
-        # Aggregate weights across all perceived objects
-        structure_weight = 0.0
-        function_weight = 0.0
-        method_weight = 0.0
-        interpretation_weight = 0.0
+        # Aggregate stream conflict across all perceived objects
+        total_conflict = 0.0
+        theory_alignment = 0.0
         obj_count = 0
         
-        for obj_key, obj_data in tetrahedral_perception.items():
-            structure = obj_data.get('structure', {})
-            function = obj_data.get('function', {})
-            method = obj_data.get('method', {})
-            interpretation = obj_data.get('interpretation', {})
+        for obj_key, obj_data in stream_perception.items():
+            synthesis = obj_data.get('synthesis', {})
             
-            structure_weight += structure.get('stability', 0.5)
-            function_weight += function.get('reactivity', 0.5)
-            method_weight += method.get('control_correlation', 0.5)
-            interpretation_weight += interpretation.get('goal_relevance', 0.5)
+            # Stream conflict is the key measure of consciousness intensity
+            total_conflict += synthesis.get('stream_conflict', 0.0)
+            theory_alignment += synthesis.get('theory_alignment', 0.5)
             obj_count += 1
         
         if obj_count == 0:
-            return 'diffuse'
+            return 'automatic'
         
-        # Normalize
-        weights = [
-            structure_weight / obj_count,
-            function_weight / obj_count,
-            method_weight / obj_count,
-            interpretation_weight / obj_count
-        ]
+        # Average conflict and alignment
+        avg_conflict = total_conflict / obj_count
+        avg_alignment = theory_alignment / obj_count
         
-        max_w, min_w = max(weights), min(weights)
-        spread = max_w - min_w
+        # Determine cognitive state based on stream conflict
+        # High conflict = vivid consciousness (deliberation required)
+        # Low conflict = automatic action (streams agree)
         
-        # Check if void (interpretation) is outlying
-        void_weight = interpretation_weight / obj_count
-        other_avg = (structure_weight + function_weight + method_weight) / (obj_count * 3)
-        void_deviation = abs(void_weight - other_avg)
-        
-        if void_deviation > 0.4:
-            return 'conflict'  # Void axis misaligned - internal struggle
-        elif spread > 0.5:
-            return 'driven'    # One axis dominates - focused action
-        elif spread > 0.3:
-            return 'balanced'  # Two axes compete - careful action
+        if avg_conflict > 0.7:
+            return 'paralyzed'    # Extreme conflict - action blocked
+        elif avg_conflict > 0.5:
+            return 'vivid'        # Strong conflict - intense consciousness
+        elif avg_conflict > 0.2:
+            return 'deliberative' # Mild conflict - conscious choice needed
         else:
-            return 'diffuse'   # All axes similar - exploratory
+            return 'automatic'    # Streams agree - no deliberation needed
+    
+    # Keep old function name as alias for backward compatibility
+    def calculate_mood_vector(self, perception: Dict[str, Dict]) -> str:
+        """Backward-compatible alias for calculate_stream_conflict."""
+        return self.calculate_stream_conflict(perception)
     
     def build_control_map(
         self,

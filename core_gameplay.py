@@ -1386,7 +1386,7 @@ class GameplayEngine:
         self._last_ladder_rung: Optional[str] = None
         self._current_stage: Optional[int] = None
         self.counterfactual_analyzer = CounterfactualAnalyzer(self.db)
-        self.object_detector = ObjectDetector(db_path)  # Object detection for tetrahedral perception
+        self.object_detector = ObjectDetector(db_path)  # Object detection for Stream-aware perception
         
         # FIX: Initialize action traces for Q1-Q5 emergent reasoning
         # These traces track frame changes per action for learning what changes vs what's fixed
@@ -2288,7 +2288,9 @@ class GameplayEngine:
             # 1. SELF-MODEL: Who am I? What do I control?
             if hasattr(self, 'agent_self_model') and self.agent_self_model and agent_id:
                 try:
-                    consciousness_state['self_identity'] = self.agent_self_model.get_self_identity_snapshot(agent_id) or {}
+                    game_id = getattr(self.session_manager, 'current_game_id', None) if hasattr(self, 'session_manager') else None
+                    level_num = getattr(loop_state, 'current_level', 1) if loop_state else 1
+                    consciousness_state['self_identity'] = self.agent_self_model.get_self_identity_snapshot(agent_id, game_id, level_num) or {}
                 except Exception:
                     pass
             
@@ -2313,9 +2315,12 @@ class GameplayEngine:
             if hasattr(self, 'questioning_engine') and self.questioning_engine:
                 try:
                     action_count = getattr(loop_state, 'action_count', 0) if loop_state else 0
+                    wt_for_questions = consciousness_state.get('working_theory', {})  # type: Dict[str, Any]
+                    if not isinstance(wt_for_questions, dict):
+                        wt_for_questions = {}
                     questions = self.questioning_engine.generate_questions(
                         self_identity=consciousness_state['self_identity'],
-                        working_theory=consciousness_state['working_theory'],
+                        working_theory=wt_for_questions,
                         observer_flags=consciousness_state.get('observer_flags', {}),
                         action_count=action_count
                     )
@@ -2829,8 +2834,8 @@ class GameplayEngine:
                     if callable(obs_fn):
                         _th_controlled = []
                         try:
-                            if hasattr(self, 'self_model') and self.self_model:
-                                _th_controlled = getattr(self.self_model, 'objects_agent_controls', []) or []
+                            if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                _th_controlled = getattr(self.agent_self_model, 'objects_agent_controls', []) or []
                         except Exception:
                             pass
                         
@@ -3132,7 +3137,7 @@ class GameplayEngine:
                 game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
                 
                 # Get action history for this level
-                action_history = list(loop_state.level_actions) if hasattr(loop_state, 'level_actions') else []
+                action_history = list(getattr(loop_state, 'level_actions', []) or []) if loop_state else []
                 
                 # Get working theory if available
                 working_theory = None
@@ -7819,7 +7824,10 @@ class GameplayEngine:
         
         try:
             # Get controlled objects from self-model
-            controlled = self.agent_self_model.get_controlled_objects()
+            agent_id = self.game_config.get('agent_id')
+            game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+            level = 1  # Default level for selection logic
+            controlled = self.agent_self_model.get_controlled_objects(str(agent_id), str(game_id or ''), level) if agent_id and game_id else []
             if not controlled:
                 return None
             
@@ -10226,11 +10234,11 @@ class GameplayEngine:
                 logger.debug(f" Sensation disabled for agent")
             else:
                 try:
-                    # Analyze frame for emotional context using tetrahedral perception
+                    # Analyze frame for emotional context using Stream-aware perception
                     frame_data = self._convert_game_state_for_sensation_analysis(game_state)
                     
                     # Update agent's navigation state based on perceptions
-                    # McGuffin Grammar: Now uses tetrahedral perception with all 4 axes
+                    # Two Streams: Integrates private observation (Stream A) with network wisdom (Stream B)
                     sensation_context = self._analyze_sensation_context(
                         frame_data, 
                         agent_id,
@@ -11710,7 +11718,9 @@ class GameplayEngine:
                     stage_pauses=stage_pauses
                 )
                 if recovery_state:
-                    game_state = self._normalize_game_state(recovery_state)
+                    recovered = self._normalize_game_state(recovery_state)
+                    if recovered:
+                        game_state = recovered
                     logger.info("[RECOVER] Frame recovered for ACTION6; continuing exploration")
                 else:
                     frontier_mode = bool(self.game_config.get('frontier_mode'))
@@ -11830,9 +11840,10 @@ class GameplayEngine:
                         )
                         
                         # Record symmetry experiment result if this was a symmetry test
-                        if hasattr(selected_action, 'get') and selected_action.get('_symmetry_experiment'):
+                        _selected_action_dict = getattr(self, '_selected_action_dict', None)
+                        if _selected_action_dict and isinstance(_selected_action_dict, dict) and _selected_action_dict.get('_symmetry_experiment'):
                             self.agent_self_model.record_symmetry_experiment_result(
-                                experiment_id=selected_action['_symmetry_experiment'],
+                                experiment_id=_selected_action_dict['_symmetry_experiment'],
                                 x=x, y=y,
                                 discovery_result=discovery_result
                             )
@@ -13743,10 +13754,11 @@ class GameplayEngine:
                     if callable(_wt_fn):
                         working_theory = _wt_fn(game_type, level)
                 
-                action_scores = self._apply_theory_gate(action_scores, working_theory, agent_id)
+                wt_dict = working_theory if isinstance(working_theory, dict) else None  # type: ignore[assignment]
+                action_scores = self._apply_theory_gate(action_scores, wt_dict, agent_id)
                 
-                if working_theory:
-                    stage = working_theory.get('stage', 'exploring')
+                if wt_dict:
+                    stage = wt_dict.get('stage', 'exploring')
                     reasoning_parts.append(f"Theory:{stage}")
                 else:
                     reasoning_parts.append("NoTheory:explore")
@@ -13821,18 +13833,18 @@ class GameplayEngine:
         Also queries network-validated control hypotheses for bootstrapping.
         Task 3 enhancement: Now aggregates raw coordinates into meaningful object IDs.
         
-        McGuffin Grammar Enhancement: Includes tetrahedral perception context
-        when sensation_context is provided, unifying Structure-Function-Method-Interpretation.
+        Stream-Aware Perception: Integrates private observation (Stream A) with
+        collective network wisdom (Stream B) via weighted synthesis.
         
         Args:
             agent_id: Agent identifier
             game_id: Current game ID
             level: Current level number
             frame: Current game frame for object aggregation
-            sensation_context: Optional tetrahedral sensation context from _analyze_sensation_context
+            sensation_context: Optional stream-aware sensation context from _analyze_sensation_context
             
         Returns:
-            Self-model context dictionary with tetrahedral perception
+            Self-model context dictionary with stream-aware perception
         """
         context = {
             'objects_agent_controls': [],      # Raw coordinates (legacy)
@@ -13840,12 +13852,12 @@ class GameplayEngine:
             'control_confidence': 0.0,
             'object_dependencies': [],
             'network_control_hypotheses': [],   # Cross-agent validated hypotheses
-            # McGuffin Grammar: Tetrahedral perception axes
-            'tetrahedral_perception': {
-                'self_objects': [],       # Objects agent controls (Method axis)
-                'goal_objects': [],       # Objects identified as goals (Interpretation axis)
-                'threat_objects': [],     # Objects identified as threats (Interpretation axis)
-                'mood': {                 # Emotional state from sensation balance
+            # Stream-Aware Perception: Stream A (private) + Stream B (collective) synthesis
+            'tetrahedral_perception': {        # Legacy key name for compatibility
+                'self_objects': [],       # Objects agent controls (from hypothesis)
+                'goal_objects': [],       # Objects identified as goals (from synthesis)
+                'threat_objects': [],     # Objects identified as threats (from synthesis)
+                'mood': {                 # Cognitive state from stream conflict
                     'valence': 0.0,
                     'arousal': 0.0,
                     'dominance': 0.0
@@ -14004,34 +14016,37 @@ class GameplayEngine:
             # ===============================================================
             game_type = game_id.split('-')[0] if '-' in game_id else game_id
             network_inventory = self.agent_self_model.get_network_object_inventory(game_type, level)
-            if network_inventory and network_inventory.get('total_unique', 0) > 0:
-                context['network_object_inventory'] = {
-                    'toggleable_count': len(network_inventory.get('toggleable', [])),
-                    'moveable_count': len(network_inventory.get('moveable', [])),
-                    'interactable_count': len(network_inventory.get('interactable', [])),
-                    'total_unique': network_inventory.get('total_unique', 0),
-                    # Include actual object IDs for reference (limited for JSON size)
-                    'toggleable_objects': network_inventory.get('toggleable', [])[:8],
-                    'moveable_objects': network_inventory.get('moveable', [])[:8],
+            total_unique = 0
+            if network_inventory and isinstance(network_inventory, dict):
+                total_unique = network_inventory.get('total_unique', 0)
+                if isinstance(total_unique, int) and total_unique > 0:
+                    context['network_object_inventory'] = {
+                        'toggleable_count': len(network_inventory.get('toggleable', []) or []),
+                        'moveable_count': len(network_inventory.get('moveable', []) or []),
+                        'interactable_count': len(network_inventory.get('interactable', []) or []),
+                        'total_unique': total_unique,
+                        # Include actual object IDs for reference (limited for JSON size)
+                        'toggleable_objects': (network_inventory.get('toggleable') or [])[:8],
+                        'moveable_objects': (network_inventory.get('moveable') or [])[:8],
                 }
             
-            # McGuffin Grammar: Integrate tetrahedral perception from sensation context
-            tetra = context['tetrahedral_perception']
+            # Stream-Aware Perception: Integrate from sensation context
+            tetra = context['tetrahedral_perception']  # Legacy key name
             
             if sensation_context:
-                # Self objects (Method axis - what we control)
+                # Self objects (from hypothesis - what we control)
                 tetra['self_objects'] = [
                     self._summarize_object(obj) 
                     for obj in sensation_context.get('self_objects', [])[:5]
                 ]
                 
-                # Goal objects (Interpretation axis - what we want)
+                # Goal objects (from synthesis - what we want)
                 tetra['goal_objects'] = [
                     self._summarize_object(obj)
                     for obj in sensation_context.get('goal_objects', [])[:5]
                 ]
                 
-                # Threat objects (Interpretation axis - what to avoid)
+                # Threat objects (from synthesis - what to avoid)
                 tetra['threat_objects'] = [
                     self._summarize_object(obj)
                     for obj in sensation_context.get('threat_objects', [])[:5]
@@ -15733,7 +15748,8 @@ class GameplayEngine:
                         control_confidence = 0.3  # Has controlled objects but no network backup
                 
                 # Check for contradictions from theory revision
-                if hasattr(self, '_contradicted_actions') and self._contradicted_actions:
+                _contradicted = getattr(self, '_contradicted_actions', None)
+                if _contradicted:
                     has_contradictions = True
             
             # Check theory text for stuck indicators
@@ -16223,7 +16239,7 @@ class GameplayEngine:
         # ===================================================================
         
         # ALWAYS compute sensation_context if not already available
-        # This ensures tetrahedral_perception is populated in every payload
+        # This ensures stream-aware perception is populated in every payload
         sensation_context = getattr(self, '_last_sensation_context', None)
         if not sensation_context and agent_id and game_state.frame:
             try:
@@ -16323,7 +16339,8 @@ class GameplayEngine:
                 # Check if theory differs significantly from historical
                 if historical_theories:
                     last_theory = historical_theories[0]
-                    if _theory_differs_significantly_for_gameplay(last_theory, merged_counts):
+                    merged_counts_int = {k: int(v) for k, v in merged_counts.items()}  # Convert to int
+                    if _theory_differs_significantly_for_gameplay(last_theory, merged_counts_int):
                         # Log the discrepancy for debugging
                         logger.warning(
                             f"[THEORY] CHANGED: Previous '{last_theory.get('theory_text')}' "
@@ -16350,21 +16367,25 @@ class GameplayEngine:
                 actual_confidence = 0.5
                 if hasattr(self, 'agent_self_model') and self.agent_self_model:
                     try:
-                        actual_confidence = self.agent_self_model.calculate_control_confidence(
-                            agent_id, game_id, current_level
-                        )
+                        if agent_id and game_id:  # Only call if we have valid IDs
+                            actual_confidence = self.agent_self_model.calculate_control_confidence(
+                                str(agent_id), str(game_id), current_level
+                            )
+                        else:
+                            actual_confidence = self_model.get('control_confidence', 0.5)
                     except Exception as e:
                         logger.debug(f"calculate_control_confidence failed: {e}")
                         actual_confidence = self_model.get('control_confidence', 0.5)
                 else:
                     actual_confidence = self_model.get('control_confidence', 0.5)
                 
-                _store_working_theory_history_for_gameplay(
-                    self.db,
-                    agent_id, game_id, current_level, working_theory,
-                    confidence=actual_confidence,
-                    evidence_count=merged_moveable + merged_toggleable
-                )
+                if agent_id and game_id:  # Only store if we have valid IDs
+                    _store_working_theory_history_for_gameplay(
+                        self.db,
+                        str(agent_id), str(game_id), current_level, working_theory,
+                        confidence=actual_confidence,
+                        evidence_count=merged_moveable + merged_toggleable
+                    )
             elif network_hypos:
                 # Network has hypotheses - form tentative theory
                 best_h = network_hypos[0] if network_hypos else {}
@@ -16381,9 +16402,10 @@ class GameplayEngine:
                 # Fix #3: Don't claim success if we're stuck on current level
                 # Check recent frame history for signs of being stuck
                 recent_frames_identical = False
-                if hasattr(self, '_frame_history') and len(self._frame_history) >= 10:
+                _frame_history = getattr(self, '_frame_history', None)
+                if _frame_history and len(_frame_history) >= 10:
                     # If last 10 frames are identical, we're stuck
-                    recent = list(self._frame_history)[-10:]
+                    recent = list(_frame_history)[-10:]
                     if all(f == recent[0] for f in recent):
                         recent_frames_identical = True
                 
@@ -16441,7 +16463,7 @@ class GameplayEngine:
             'role': agent_mode or self._null_status(425),
             'generation': generation if generation is not None else self._null_status(425),
             'working_theory': working_theory,
-            'theory_stage': self._classify_theory_stage(working_theory, self_model, game_state),
+            'theory_stage': self._classify_theory_stage(str(working_theory) if working_theory else '', self_model, game_state),
             'self_model': self_model or {'status': self._null_status(425)},
             'genome': {
                 'agent_type': genome.get('agent_type') if genome else self._null_status(404),
@@ -16512,13 +16534,13 @@ class GameplayEngine:
                         pass
                     
                     working_theory = get_theory_fn(_wm_game_type, _wm_level)
-                    if working_theory and working_theory.get('stage') != 'speculating':
+                    if working_theory and isinstance(working_theory, dict) and working_theory.get('stage') != 'speculating':
                         # We have a real theory - format for display
                         stage = working_theory.get('stage', 'unknown')
                         description = working_theory.get('description', '')[:80]
                         confidence = working_theory.get('confidence', 0)
                         delta['world_model_update'] = f"[{stage}] {description} (conf={confidence:.2f})"
-                    elif working_theory and working_theory.get('stage') == 'speculating':
+                    elif working_theory and isinstance(working_theory, dict) and working_theory.get('stage') == 'speculating':
                         # Early exploration - show what we're looking for
                         delta['world_model_update'] = "SPECULATING: No confirmed pattern yet - exploring mechanics"
             except Exception as e:
@@ -16749,11 +16771,11 @@ class GameplayEngine:
         world_model = self._build_world_model_context(game_id, current_level, game_state.frame)
         environment = world_model or {'status': self._null_status(425)}
 
-        # Merge inferred goals into tetrahedral perception to keep goals visible in identity
+        # Merge inferred goals into stream-aware perception to keep goals visible in identity
         try:
             inferred_goals = environment.get('inferred_goals') or []
             if inferred_goals and self_model and self_model.get('tetrahedral_perception'):
-                tetra = self_model.get('tetrahedral_perception', {}) or {}
+                tetra = self_model.get('tetrahedral_perception', {}) or {}  # Legacy key
                 existing_goals = list(tetra.get('goal_objects', []) or [])
                 for goal in inferred_goals:
                     goal_center = goal.get('position') or goal.get('center') or [0, 0]
@@ -16806,9 +16828,9 @@ class GameplayEngine:
             'reasoning': reasoning_text,
             'emotional_state': emotional_state,
             # CHECKLIST FIX: Add prediction field (what agent expects to happen)
-            'prediction': self._generate_action_prediction(action, working_theory, self_model, game_state),
+            'prediction': self._generate_action_prediction(action, str(working_theory) if working_theory else '', self_model, game_state),
             # CHECKLIST FIX: Add theory-gated scoring (how this action relates to theory)
-            'theory_alignment': self._score_action_against_theory(action, working_theory, self_model)
+            'theory_alignment': self._score_action_against_theory(action, str(working_theory) if working_theory else '', self_model)
         }
         
         # Store prediction for next round's surprise calculation
@@ -17001,8 +17023,10 @@ class GameplayEngine:
                     if theory and theory not in ('425 Too Early', 'NULL', ''):
                         live_score += 0.3  # Theory exists
                     # Check if controlled object identified
-                    if hasattr(self, 'self_model') and self.self_model:
-                        controlled = self.self_model.get_controlled_objects()
+                    if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                        agent_id = self.game_config.get('agent_id')
+                        _gid = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                        controlled = self.agent_self_model.get_controlled_objects(str(agent_id), str(_gid or ''), 1) if agent_id and _gid else []
                         if controlled:
                             live_score += 0.2  # Self-model has identification
                     # Check if we've made any progress
@@ -17930,7 +17954,7 @@ class GameplayEngine:
                     
                     # Most repeated action during stuck period = avoid it
                     if action_counts:
-                        most_repeated = max(action_counts, key=action_counts.get)
+                        most_repeated = max(action_counts.keys(), key=lambda k: action_counts.get(k, 0))
                         if action_counts[most_repeated] >= 5:
                             actionable['avoid_actions'] = [most_repeated]
         
@@ -22282,10 +22306,13 @@ class GameplayEngine:
         level: int = 0
     ) -> Dict[str, Any]:
         """
-        Analyze frame data using tetrahedral perception grammar.
+        Analyze frame data using Stream-aware perception.
         
-        Implements McGuffin grammar: Structure >< Function >< Method >< Interpretation
-        Each detected object is perceived through all four axes.
+        Aligned with Two Streams Theory:
+        - Stream A: Private sensory observation (what I see)
+        - Stream B: Collective network wisdom (what others know)
+        - Hypothesis: Current working theory from CODS
+        - Synthesis: Weighted integration (persona output)
         
         Args:
             frame_data: Current frame with grid data
@@ -22294,18 +22321,20 @@ class GameplayEngine:
             level: Current level number
             
         Returns:
-            Sensation context with tetrahedral perception data
+            Sensation context with stream-aware perception data
         """
         
         sensation_context = {
             'dominant_sensation': 0.0,
-            'perceived_objects': [],  # Now contains tetrahedral data, not just strings
+            'perceived_objects': [],  # Now contains stream-aware data, not just strings
             'complexity_score': 0.0,
-            'tetrahedral_perceptions': [],  # Full 4-axis perception for each object
+            'stream_perceptions': [],  # Full 4-axis stream-aware perception for each object
+            'tetrahedral_perceptions': [],  # Legacy alias for stream_perceptions
             'mood_vector': {'valence': 0.0, 'arousal': 0.0, 'dominance': 0.0},
-            'self_objects': [],  # Objects agent controls
-            'goal_objects': [],  # Objects identified as goals
-            'threat_objects': []  # Objects identified as threats
+            'cognitive_state': 'automatic',  # automatic/deliberative/vivid/paralyzed
+            'self_objects': [],  # Objects agent controls (from hypothesis)
+            'goal_objects': [],  # Objects identified as goals (from synthesis)
+            'threat_objects': []  # Objects identified as threats (from synthesis)
         }
         
         grid = frame_data.get('current_frame', {}).get('grid', [])
@@ -22339,7 +22368,7 @@ class GameplayEngine:
                 0  # frame_index
             )
             
-            # BUILD TETRAHEDRAL PERCEPTION FOR EACH OBJECT
+            # BUILD STREAM-AWARE PERCEPTION FOR EACH OBJECT
             total_sensation = 0.0
             total_goal_relevance = 0.0
             total_threat = 0.0

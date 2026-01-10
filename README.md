@@ -78,17 +78,17 @@ The workforce is divided into specialized roles:
 -   **Exploiters**: Post-optimization refiners
 
 ### 4. Agent Self-Model & Perception
-Agents develop a concept of "Self" using 4-axis perception (based on Patrick Cox's Tetrahedral Grammar):
+Agents develop a concept of "Self" using Stream-aware perception (aligned with Two Streams Theory):
 -   **Self-Recognition**: Tracks which pixels/objects move in response to agent actions.
 -   **Confidence Maps**: Builds a probability map of controlled elements.
 -   **Agency**: Distinguishes between agent actions and environmental physics.
--   **Self-Direction**: Agents balance private reasoning vs network wisdom based on role.
--   **Tetrahedral Perception**: Each object perceived with 4 axes:
-    - **Structure** (What): Color, position, shape
-    - **Function** (How): How it responds to actions
-    - **Method** (Control): Agent's relationship to it
-    - **Interpretation** (Why): Semantic meaning for goals
--   **Mood Vector**: Calculated from perception balance (valence, arousal, dominance) to modulate decisions.    
+-   **Self-Direction**: Agents balance private reasoning vs network wisdom based on w_A/w_B weighting.
+-   **Stream-Aware Perception**: Each object perceived through 4 knowledge sources:
+    - **Stream A** (Private): What I personally observe (color, position, shape)
+    - **Stream B** (Collective): What the network knows about this object type
+    - **Hypothesis** (Theory): Current working theory from CODS about control
+    - **Synthesis** (Persona): Weighted integration (w_A * Stream A + w_B * Stream B)
+-   **Cognitive State**: Calculated from stream conflict (automatic/deliberative/vivid/paralyzed) to modulate decisions.    
 
 ### 5. Cross-Role Resonance Detection
 The system identifies objective truths through cross-role pattern agreement:
