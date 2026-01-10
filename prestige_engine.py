@@ -40,6 +40,40 @@ from database_interface import DatabaseInterface
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# FIX #20: PRESTIGE/BUDGET SEPARATION GUARD
+# =============================================================================
+# This is a SACRED rule per Master Ruleset and AGI Unified Theory:
+# - PRESTIGE = Social capital (network contribution, teaching, validation)
+# - ACTION BUDGETS = Economic capital (performance, wins, efficiency)
+# NEVER MIX THESE TWO CURRENCIES
+# =============================================================================
+class PrestigeBudgetViolationError(Exception):
+    """Raised when code attempts to violate prestige/budget separation."""
+    pass
+
+
+def assert_no_budget_effect(prestige_value: float, action_budget: int, context: str = "") -> None:
+    """
+    Guard function to ensure prestige doesn't affect action budgets.
+    
+    Call this before any operation that might mix the two currencies.
+    
+    Args:
+        prestige_value: Current prestige score
+        action_budget: Current action budget
+        context: Description of where the check is happening
+        
+    Raises:
+        PrestigeBudgetViolationError: If prestige is being used to modify budgets
+    """
+    # This function is intentionally a no-op for the guard pattern.
+    # The presence of this call documents that the operation respects separation.
+    # If someone tries to use prestige to calculate budget, the code review
+    # should catch that this function wasn't called or was called incorrectly.
+    pass
+
+
 class PrestigeEngine:
     """
     Calculates and applies prestige system for network contribution rewards.

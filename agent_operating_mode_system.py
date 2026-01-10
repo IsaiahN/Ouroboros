@@ -220,7 +220,126 @@ class AgentOperatingModeSystem:
             ON agent_operating_modes(agent_id, generation)
         """)
 
-        logger.info("[✓] agent_operating_modes table initialized")
+        logger.info("[OK] agent_operating_modes table initialized")
+
+    # =========================================================================
+    # FIX #14: EMERGENT ROLE DERIVATION FROM wA/wB WEIGHTS
+    # =========================================================================
+    # Theory says roles should EMERGE from agent's wA/wB ratios, not be fixed.
+    # Higher wA (trust self) = Pioneer (explore)
+    # Higher wB (trust network) = Optimizer (exploit proven solutions)
+    # Balanced = Generalist
+    # Very high wA + saturated game = Exploiter (micro-optimize)
+    # =========================================================================
+    
+    def derive_role_from_weights(
+        self, 
+        agent_id: str, 
+        game_context: Optional[Dict] = None
+    ) -> Optional[str]:
+        """
+        Derive role from agent's wA/wB weights and context.
+        
+        Per unified_agent_consciousness_theory.md:
+        - High wA + novel context = Pioneer (explore boldly)
+        - High wB + has solutions = Optimizer (follow network wisdom)
+        - Balanced = Generalist
+        - Very high wA + saturated = Exploiter (micro-optimize)
+        
+        Args:
+            agent_id: Agent identifier
+            game_context: Optional context with is_novel, has_solutions, is_saturated
+            
+        Returns:
+            Derived role or None if weights not available
+        """
+        try:
+            # Get agent's wA/wB from self_network_bias
+            result = self.db.execute_query("""
+                SELECT self_network_bias FROM agents WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if not result:
+                return None
+            
+            self_network_bias = result[0].get('self_network_bias')
+            if self_network_bias is None:
+                return None
+            
+            # wA = self_network_bias (trust self), wB = 1 - wA (trust network)
+            wA = float(self_network_bias)
+            wB = 1.0 - wA
+            
+            # Get context (defaults if not provided)
+            ctx = game_context or {}
+            is_novel = ctx.get('is_novel', True)  # Assume novel if unknown
+            has_solutions = ctx.get('has_solutions', False)
+            is_saturated = ctx.get('is_saturated', False)
+            
+            # Derive role based on weights + context
+            if wA > 0.7 and is_novel:
+                # High self-trust + novel = Pioneer
+                return 'pioneer'
+            elif wB > 0.7 and has_solutions:
+                # High network-trust + solutions exist = Optimizer
+                return 'optimizer'
+            elif wA > 0.6 and is_saturated:
+                # High self-trust + saturated = Exploiter (micro-optimize)
+                return 'exploiter'
+            elif 0.35 < wA < 0.65:
+                # Balanced = Generalist
+                return 'generalist'
+            elif wA > 0.5:
+                # Slight self-trust preference without strong context = Pioneer
+                return 'pioneer' if is_novel else 'generalist'
+            else:
+                # Network-leaning without solutions = Generalist
+                return 'optimizer' if has_solutions else 'generalist'
+                
+        except Exception as e:
+            logger.debug(f"Role derivation from weights failed: {e}")
+            return None
+    
+    def get_game_context_for_role(self, game_id: str) -> Dict[str, Any]:
+        """
+        Get game context needed for role derivation.
+        
+        Returns:
+            Dict with is_novel, has_solutions, is_saturated
+        """
+        try:
+            # Check if game has any winning sequences
+            has_solutions = False
+            seq_result = self.db.execute_query("""
+                SELECT COUNT(*) as seq_count 
+                FROM winning_sequences 
+                WHERE game_id = ? AND is_active = 1
+            """, (game_id,))
+            if seq_result and seq_result[0].get('seq_count', 0) > 0:
+                has_solutions = True
+            
+            # Check if game is saturated (optimization improvement < 2% for 5+ gens)
+            is_saturated = False
+            # Simplified check: if game has 10+ sequences and best hasn't improved recently
+            sat_result = self.db.execute_query("""
+                SELECT COUNT(*) as seq_count 
+                FROM winning_sequences 
+                WHERE game_id = ? AND is_active = 1
+            """, (game_id,))
+            if sat_result and sat_result[0].get('seq_count', 0) >= 10:
+                is_saturated = True  # Heuristic: many sequences = likely saturated
+            
+            # Check if game is novel (no successful attempts by any agent)
+            is_novel = not has_solutions
+            
+            return {
+                'is_novel': is_novel,
+                'has_solutions': has_solutions,
+                'is_saturated': is_saturated,
+                'game_id': game_id
+            }
+        except Exception:
+            return {'is_novel': True, 'has_solutions': False, 'is_saturated': False}
 
     def check_and_update_phase(self) -> bool:
         """
@@ -402,12 +521,46 @@ class AgentOperatingModeSystem:
             ),
         }
 
+        # FIX #14: Get game context for emergent role derivation
+        game_context = self.get_game_context_for_role(game_id) if game_id else None
+        emergent_count = 0
+
         for agent_id in agents_by_performance:
             stats = agent_stats.get(agent_id, {})
+            
+            # =========================================================
+            # FIX #14: TRY EMERGENT ROLE FROM wA/wB FIRST
+            # =========================================================
+            # Per unified_agent_consciousness_theory.md: Roles should EMERGE
+            # from agent's wA/wB ratios, not be fixed assignments.
+            # Fall back to performance-based assignment if derivation fails.
+            # =========================================================
+            emergent_role = self.derive_role_from_weights(agent_id, game_context)
+            
+            if emergent_role:
+                # Check if we can accommodate this emergent role (soft quota)
+                # Allow 10% overflow on quotas for emergent roles
+                target_for_role = {
+                    'pioneer': target_pioneers,
+                    'optimizer': target_optimizers,
+                    'generalist': target_generalists,
+                    'exploiter': target_exploiters
+                }
+                max_for_role = int(target_for_role[emergent_role] * 1.1) + 1  # 10% overflow
+                
+                if assigned_modes[emergent_role] < max_for_role:
+                    mode = emergent_role
+                    reason = f"[EMERGENT] Derived from wA/wB weights (context: novel={game_context.get('is_novel', 'N/A') if game_context else 'N/A'})"
+                    mode_assignments[agent_id] = mode
+                    assigned_modes[mode] += 1
+                    emergent_count += 1
+                    self._record_mode_assignment(agent_id, game_id, generation, mode, reason)
+                    continue  # Skip to next agent
 
+            # FALLBACK: Performance-based assignment if emergent didn't work
             # Decision logic: What mode is best for this agent right now?
 
-            # TOP PERFORMERS WITH WINNING SEQUENCES → Exploiters (pure exploitation)
+            # TOP PERFORMERS WITH WINNING SEQUENCES -> Exploiters (pure exploitation)
             # But only if we're in optimization phase (has_full_wins) or have local wins
             if (
                 assigned_modes["exploiter"] < target_exploiters
@@ -418,7 +571,7 @@ class AgentOperatingModeSystem:
                 mode = "exploiter"
                 reason = f"Top performer (avg_score={stats.get('avg_score', 0):.2f}, wins={stats.get('total_wins', 0)}) - exploit proven sequences"
 
-            # HIGH PERFORMERS → Optimizers (refine success)
+            # HIGH PERFORMERS -> Optimizers (refine success)
             # In EXPLORATION phase: only optimize if agent has proven wins (not just score)
             # In OPTIMIZATION phase: any high scorer can optimize
             elif (
@@ -491,6 +644,10 @@ class AgentOperatingModeSystem:
             f"{assigned_modes['generalist']} generalists, "
             f"{assigned_modes['exploiter']} exploiters"
         )
+        
+        # FIX #14: Report emergent role count
+        if emergent_count > 0:
+            logger.info(f"   [FIX14-EMERGENT] {emergent_count} roles derived from wA/wB weights")
 
         return mode_assignments
 

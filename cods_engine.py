@@ -38,7 +38,8 @@ from database_interface import DatabaseInterface
 from seed_primitives import get_seed_primitives, SeedPrimitiveRegistry, Primitive
 from primitive_unlock_manager import PrimitiveUnlockManager, grandfather_existing_primitives, PrimitiveStatus
 from operator_composer import OperatorComposer, ComposedOperator, OperatorStatus
-from oracle_interface import OracleInterface, OracleVerdict
+# FIX #12: Oracle is internal to CODS - import and re-export so external code uses cods_engine
+from oracle_interface import OracleInterface, OracleVerdict, OracleDecision
 
 # Concept Discovery Engine (Tier 4 - Semantic Models)
 try:
@@ -1480,19 +1481,26 @@ class CODSEngine:
         """
         Use cognitive operators to suggest an action.
         
+        FIX #13: Operators now return action candidates with scores.
+        Returns multiple candidates when available, with confidence scores.
+        
         Tier 4: Uses concept discovery to find relevant operators for this game.
         
         Args:
             frame: Current frame
             
         Returns:
-            Dict with 'action', 'confidence', 'operator', 'concept' or None
+            Dict with 'action', 'confidence', 'operator', 'concept', 'candidates' or None
         """
         frame = frame or (self._context.current_frame if self._context else None)
         if not frame:
             return None
         
         game_type = self._context.game_id.split('-')[0] if self._context and self._context.game_id else None
+        
+        # FIX #13: Collect ALL action candidates from operators
+        action_candidates = []  # [{action, confidence, operator, reasoning}]
+        operators_consulted = []
         
         # Tier 4: Check if we have a concept that applies to this game
         if self.concept_engine and game_type:
@@ -1502,65 +1510,137 @@ class CODSEngine:
             )
             
             if suggested_concept:
+                operators_consulted.append(f"concept:{suggested_concept.name}")
+                
                 # Get operators organized by this concept
                 relevant_ops = self.concept_engine.get_relevant_operators_for_concept(
                     concept_id=suggested_concept.concept_id,
                     min_relevance=0.4
                 )
                 
-                if relevant_ops:
-                    # Use the most relevant operator
-                    best_op = relevant_ops[0]
-                    operator_id = best_op['operator_id']
+                for op_info in (relevant_ops or [])[:3]:  # Top 3 operators
+                    operator_id = op_info['operator_id']
+                    operators_consulted.append(operator_id[:12])
                     
                     # Try to apply the operator
                     result = self.apply(operator_id, frame)
                     
                     if result.success:
-                        logger.info(
-                            f"[CODS-CONCEPT] Using concept '{suggested_concept.name}' "
-                            f"suggests operator '{operator_id[:8]}'"
-                        )
-                        
-                        # Extract action from operator result if possible
                         action = self._extract_action_from_output(result.output)
                         if action:
-                            return {
+                            action_candidates.append({
                                 'action': action,
-                                'confidence': best_op['relevance'],
+                                'confidence': op_info['relevance'],
                                 'operator': operator_id,
-                                'operators': [operator_id, suggested_concept.name],  # FIX #25: Track all operators consulted
-                                'concept': suggested_concept.name
-                            }
+                                'reasoning': f"Concept '{suggested_concept.name}' operator"
+                            })
         
         # Analyze frame with available operators
         analysis = self.analyze_frame(frame)
+        operators_consulted.extend(list(analysis.keys()) if analysis else [])
         
-        # FIX #25: Track all operators that were consulted for diversity logging
-        operators_consulted = list(analysis.keys()) if analysis else []
-        
-        # Simple heuristic based on analysis
-        # (This would be replaced by learned action selection)
+        # FIX #13: Convert operator outputs to spatial action candidates
+        # Instead of hard-coding "symmetry -> action 1", reason about space
         
         if 'detect_symmetry' in analysis:
             symmetry = analysis['detect_symmetry']
+            # Symmetry suggests movement along the axis of symmetry
             if symmetry.get('horizontal'):
-                return {'action': 1, 'confidence': 0.3, 'operator': 'detect_symmetry', 
-                        'operators': operators_consulted, 'concept': None}
+                # Move along horizontal axis (left/right)
+                action_candidates.append({
+                    'action': 3, 'confidence': 0.35, 'operator': 'detect_symmetry',
+                    'reasoning': 'Horizontal symmetry - try right movement'
+                })
+                action_candidates.append({
+                    'action': 4, 'confidence': 0.30, 'operator': 'detect_symmetry',
+                    'reasoning': 'Horizontal symmetry - try left movement'
+                })
             if symmetry.get('vertical'):
-                return {'action': 3, 'confidence': 0.3, 'operator': 'detect_symmetry', 
-                        'operators': operators_consulted, 'concept': None}
+                # Move along vertical axis (up/down)
+                action_candidates.append({
+                    'action': 1, 'confidence': 0.35, 'operator': 'detect_symmetry',
+                    'reasoning': 'Vertical symmetry - try up movement'
+                })
+                action_candidates.append({
+                    'action': 2, 'confidence': 0.30, 'operator': 'detect_symmetry',
+                    'reasoning': 'Vertical symmetry - try down movement'
+                })
         
         if 'detect_shapes' in analysis:
-            shapes = analysis['detect_shapes']
+            shapes = analysis.get('detect_shapes', {})
             if shapes:
-                # Move toward first detected shape
-                return {'action': 1, 'confidence': 0.2, 'operator': 'detect_shapes', 
-                        'operators': operators_consulted, 'concept': None}
+                # FIX #13: Move TOWARD detected shapes based on their position
+                for shape_info in (shapes if isinstance(shapes, list) else [shapes])[:2]:
+                    if isinstance(shape_info, dict) and shape_info.get('center'):
+                        cx, cy = shape_info.get('center', (0, 0))
+                        frame_h = len(frame)
+                        frame_w = len(frame[0]) if frame else 0
+                        mid_y, mid_x = frame_h // 2, frame_w // 2
+                        
+                        # Suggest action toward shape center
+                        if cy < mid_y:
+                            action_candidates.append({
+                                'action': 1, 'confidence': 0.25, 'operator': 'detect_shapes',
+                                'reasoning': f'Shape above center - move up'
+                            })
+                        elif cy > mid_y:
+                            action_candidates.append({
+                                'action': 2, 'confidence': 0.25, 'operator': 'detect_shapes',
+                                'reasoning': f'Shape below center - move down'
+                            })
+                        if cx > mid_x:
+                            action_candidates.append({
+                                'action': 3, 'confidence': 0.25, 'operator': 'detect_shapes',
+                                'reasoning': f'Shape right of center - move right'
+                            })
+                        elif cx < mid_x:
+                            action_candidates.append({
+                                'action': 4, 'confidence': 0.25, 'operator': 'detect_shapes',
+                                'reasoning': f'Shape left of center - move left'
+                            })
+                    else:
+                        # Fallback if no center info
+                        action_candidates.append({
+                            'action': 1, 'confidence': 0.15, 'operator': 'detect_shapes',
+                            'reasoning': 'Shapes detected - explore up'
+                        })
+        
+        if 'goal_distance' in analysis:
+            goal_info = analysis.get('goal_distance', {})
+            if isinstance(goal_info, dict):
+                direction = goal_info.get('direction', goal_info.get('suggested_direction'))
+                if direction:
+                    dir_to_action = {'up': 1, 'down': 2, 'right': 3, 'left': 4}
+                    action = dir_to_action.get(str(direction).lower())
+                    if action:
+                        action_candidates.append({
+                            'action': action, 'confidence': 0.45, 'operator': 'goal_distance',
+                            'reasoning': f'Goal detected in direction: {direction}'
+                        })
+        
+        # FIX #13: Return best candidate if we have any
+        if action_candidates:
+            # Sort by confidence
+            action_candidates.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+            best = action_candidates[0]
+            
+            logger.debug(f"[CODS] {len(action_candidates)} candidates, best: ACTION{best['action']} "
+                        f"({best['confidence']:.2f}) via {best['operator']}")
+            
+            return {
+                'action': best['action'],
+                'confidence': best['confidence'],
+                'operator': best['operator'],
+                'operators': operators_consulted if operators_consulted else [best['operator']],
+                'concept': None,
+                'candidates': action_candidates[:5],  # FIX #13: Return top 5 candidates
+                'reasoning': best.get('reasoning', '')
+            }
         
         # Default to random action - still log operators consulted
         return {'action': self.seeds.call('rand_int', 1, 7), 'confidence': 0.1, 'operator': 'random', 
-                'operators': operators_consulted if operators_consulted else ['random'], 'concept': None}
+                'operators': operators_consulted if operators_consulted else ['random'], 'concept': None,
+                'candidates': [], 'reasoning': 'No operator candidates - random fallback'}
     
     def _extract_action_from_output(self, output: Any) -> Optional[int]:
         """Extract an action number from operator output."""
@@ -5291,3 +5371,21 @@ def compose(primitives: List[str], name: Optional[str] = None) -> ComposedOperat
 def analyze(frame: List[List[int]]) -> Dict[str, Any]:
     """Analyze a frame (convenience function)."""
     return get_cods_engine().analyze_frame(frame)
+
+
+# =============================================================================
+# FIX #12: RE-EXPORT ORACLE TYPES FOR EXTERNAL CODE
+# =============================================================================
+# External code should import from cods_engine, not oracle_interface directly.
+# This makes Oracle internal to CODS as per the architecture docs.
+# Usage: from cods_engine import OracleInterface, OracleVerdict, OracleDecision
+__all__ = [
+    # Main engine
+    'CODSEngine', 'get_cods_engine', 'reset_cods_engine',
+    # Game context
+    'CODSGameContext', 'OperatorResult',
+    # Convenience functions
+    'apply', 'compose', 'analyze',
+    # Oracle types (re-exported from oracle_interface)
+    'OracleInterface', 'OracleVerdict', 'OracleDecision',
+]

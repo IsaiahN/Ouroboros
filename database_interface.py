@@ -368,21 +368,31 @@ class DatabaseInterface:
         lifetime_exposures: Optional[int] = None,
         reliability_global: Optional[float] = None,
         novelty_bias: Optional[float] = None,
+        stream_type: Optional[str] = None,  # FIX #9: 'A', 'B', or 'neutral'
     ) -> None:
         """Insert or update a persona profile."""
         reliability_value = reliability_global if reliability_global is not None else 0.5
         novelty_value = novelty_bias if novelty_bias is not None else 0.0
         persistence_value = persistence_class if persistence_class is not None else None
         exposures_value = lifetime_exposures if lifetime_exposures is not None else None
+        stream_type_value = stream_type if stream_type is not None else 'neutral'  # FIX #9
+        
+        # FIX #9: Ensure stream_type column exists (ALTER TABLE is idempotent if column exists)
         conn = self._get_connection()
+        try:
+            conn.execute("ALTER TABLE persona_profiles ADD COLUMN stream_type TEXT DEFAULT 'neutral'")
+        except Exception:
+            pass  # Column already exists
+        
         with conn:
             conn.execute(
                 """
                 INSERT INTO persona_profiles (
                     persona_id, agent_id, role, stage, world_model, bias_vector,
                     persona_type, bias_risk, bias_abstraction, bias_symbolic,
-                    persistence_class, lifetime_exposures, reliability_global, novelty_bias, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    persistence_class, lifetime_exposures, reliability_global, novelty_bias, 
+                    stream_type, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(persona_id) DO UPDATE SET
                     agent_id=excluded.agent_id,
                     role=COALESCE(excluded.role, persona_profiles.role),
@@ -397,6 +407,7 @@ class DatabaseInterface:
                     lifetime_exposures=COALESCE(excluded.lifetime_exposures, persona_profiles.lifetime_exposures),
                     reliability_global=COALESCE(excluded.reliability_global, persona_profiles.reliability_global),
                     novelty_bias=COALESCE(excluded.novelty_bias, persona_profiles.novelty_bias),
+                    stream_type=COALESCE(excluded.stream_type, persona_profiles.stream_type),
                     updated_at=CURRENT_TIMESTAMP
                 """,
                 (
@@ -414,6 +425,7 @@ class DatabaseInterface:
                     exposures_value,
                     reliability_value,
                     novelty_value,
+                    stream_type_value,
                 ),
             )
 
@@ -1265,6 +1277,9 @@ class DatabaseInterface:
 
     def execute_query(self, query: str, params: Tuple = ()) -> List[Dict[str, Any]]:
         """Execute a custom query.
+        
+        FIX #16: Auto-commit after write operations so discoveries are
+        immediately queryable in the same session.
 
         Args:
             query: SQL query to execute
@@ -1275,7 +1290,15 @@ class DatabaseInterface:
         """
         with self._get_connection() as conn:
             cursor = conn.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
+            results = [dict(row) for row in cursor.fetchall()]
+            
+            # FIX #16: Auto-commit after write operations
+            # This ensures discoveries made in action N are queryable in action N+1
+            query_upper = query.strip().upper()
+            if query_upper.startswith(('INSERT', 'UPDATE', 'DELETE', 'REPLACE')):
+                conn.commit()
+            
+            return results
 
     def get_database_stats(self) -> Dict[str, Any]:
         """Get database statistics.
@@ -1320,14 +1343,19 @@ class DatabaseInterface:
             conn.commit()
 
     def store_agent(self, agent_data: Dict[str, Any]):
-        """Store agent in database."""
+        """Store agent in database.
+        
+        Fix #3 (CHECKLIST): Include Two-Streams columns so network wisdom isn't empty.
+        """
         with self._get_connection() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO agents (
                     agent_id, agent_type, genome, epigenetics, generation, parent_ids,
                     specialization, created_at, is_active, total_games_played,
-                    total_games_won, total_score_achieved
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    total_games_won, total_score_achieved,
+                    self_network_bias, navigation_state, role_confidence, sensation_profile,
+                    sensation_learning_rate, state_update_sensitivity, emotional_intelligence_score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 agent_data['agent_id'],
                 agent_data['agent_type'],
@@ -1340,7 +1368,15 @@ class DatabaseInterface:
                 agent_data.get('is_active', True),
                 agent_data.get('total_games_played', 0),
                 agent_data.get('total_games_won', 0),
-                agent_data.get('total_score_achieved', 0.0)
+                agent_data.get('total_score_achieved', 0.0),
+                # Fix #3: Include Two-Streams columns
+                agent_data.get('self_network_bias', 0.5),
+                agent_data.get('navigation_state', 0.0),
+                agent_data.get('role_confidence', 0.5),
+                agent_data.get('sensation_profile', '{}'),
+                agent_data.get('sensation_learning_rate', 0.3),
+                agent_data.get('state_update_sensitivity', 0.7),
+                agent_data.get('emotional_intelligence_score', 0.0)
             ))
             conn.commit()
 

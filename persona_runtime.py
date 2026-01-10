@@ -342,9 +342,25 @@ class PersonaManager:
         novelty_bias: Optional[float] = None,
         persistence_class: Optional[str] = None,
         lifetime_exposures: Optional[int] = None,
+        stream_type: Optional[str] = None,  # FIX #9: 'A', 'B', or 'neutral'
     ) -> None:
         if persona_id in self._persona_cache:
             return
+        
+        # FIX #9: Derive stream_type from persona_type if not provided
+        # Action Proposers = Stream A (private experience)
+        # Observers/Evaluators = Stream B (network wisdom)
+        if stream_type is None:
+            pt_lower = (persona_type or '').lower()
+            if pt_lower in ('proposer', 'explorer', 'pioneer', 'investigator', 'discovery'):
+                stream_type = 'A'  # Private experience stream
+            elif pt_lower in ('observer', 'evaluator', 'validator', 'optimizer', 'network'):
+                stream_type = 'B'  # Network wisdom stream
+            elif pt_lower in ('counterfactual', 'scorer', 'classifier'):
+                stream_type = 'neutral'  # Both streams equally
+            else:
+                stream_type = 'neutral'  # Default
+        
         bias_str = json.dumps(bias_vector) if bias_vector is not None else None
         self.db.upsert_persona_profile(
             persona_id=persona_id,
@@ -360,6 +376,7 @@ class PersonaManager:
             novelty_bias=novelty_bias,
             persistence_class=persistence_class,
             lifetime_exposures=lifetime_exposures,
+            stream_type=stream_type,  # FIX #9
         )
         self._persona_cache[persona_id] = {
             'persona_type': persona_type,
@@ -373,6 +390,7 @@ class PersonaManager:
             'novelty_bias': novelty_bias,
             'persistence_class': persistence_class,
             'lifetime_exposures': lifetime_exposures,
+            'stream_type': stream_type,  # FIX #9
         }
 
     def _default_persona_id(self, rung: str) -> str:

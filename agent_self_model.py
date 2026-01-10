@@ -1125,6 +1125,126 @@ class AgentSelfModel:
             CREATE INDEX IF NOT EXISTS idx_inferred_goals_confidence 
             ON inferred_goal_states(confidence DESC)
         """)
+        
+        # =====================================================================
+        # UNIVERSAL OBJECT PATTERNS (Fix #13: Game-Agnostic Knowledge Transfer)
+        # =====================================================================
+        # Object behaviors that TRANSFER across games - learned once, used everywhere.
+        # Key insight: A "color 5 object that moves up on ACTION1" behaves the same
+        # across different games. Store patterns by BEHAVIOR, not by game.
+        #
+        # This enables:
+        # - New games benefit from prior learning (zero-shot transfer)
+        # - Similar mechanics across games reinforce confidence
+        # - Pattern abstraction: "player-controlled object" vs "obstacle"
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS universal_object_patterns (
+                pattern_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                
+                -- Pattern signature (game-agnostic identifier)
+                -- Format: "color_{color}_action_{action}_response_{direction}"
+                -- Example: "color_5_action_1_response_up"
+                pattern_signature TEXT NOT NULL UNIQUE,
+                
+                -- Object characteristics (what defines this pattern)
+                object_color INTEGER NOT NULL,
+                
+                -- Control response (how it responds to actions)
+                action_type TEXT NOT NULL,            -- ACTION1, ACTION2, etc.
+                response_type TEXT NOT NULL,          -- 'move_up', 'move_down', 'rotate', 'toggle', etc.
+                
+                -- Pattern classification
+                pattern_class TEXT DEFAULT 'unknown', -- 'player_controlled', 'selectable', 'obstacle', 
+                                                      -- 'collectible', 'enemy', 'button', 'goal'
+                
+                -- Cross-game validation (Bayesian aggregation across ALL games)
+                total_observations INTEGER DEFAULT 0,
+                total_confirmations INTEGER DEFAULT 0,
+                total_contradictions INTEGER DEFAULT 0,
+                global_confidence REAL DEFAULT 0.5,   -- Confidence across all games
+                
+                -- Which games contributed to this pattern
+                contributing_games TEXT,              -- JSON list of game_types
+                game_count INTEGER DEFAULT 0,         -- Number of different games
+                
+                -- Transfer tracking
+                transfer_successes INTEGER DEFAULT 0, -- Times pattern worked in new game
+                transfer_failures INTEGER DEFAULT 0,  -- Times pattern failed in new game
+                transfer_reliability REAL DEFAULT 0.5,
+                
+                -- Timestamps
+                first_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_observed DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                -- Deprecation tracking
+                is_active INTEGER DEFAULT 1
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_universal_patterns_color 
+            ON universal_object_patterns(object_color, action_type)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_universal_patterns_confidence 
+            ON universal_object_patterns(global_confidence DESC)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_universal_patterns_class 
+            ON universal_object_patterns(pattern_class, is_active)
+        """)
+        
+        # =====================================================================
+        # GAME-TO-PATTERN LINKAGE (Connect game-specific to universal)
+        # =====================================================================
+        # Links game-specific observations to universal patterns.
+        # Enables querying: "What universal patterns apply to game X?"
+        # And reverse: "Which games have pattern Y?"
+        # =====================================================================
+        
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS game_pattern_links (
+                link_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                
+                -- Game-specific context
+                game_type TEXT NOT NULL,
+                level_number INTEGER NOT NULL,
+                
+                -- Link to universal pattern
+                pattern_id INTEGER NOT NULL,
+                pattern_signature TEXT NOT NULL,
+                
+                -- Local validation (within this specific game)
+                local_observations INTEGER DEFAULT 0,
+                local_confirmations INTEGER DEFAULT 0,
+                local_confidence REAL DEFAULT 0.5,
+                
+                -- Did transfer work for this game?
+                was_transferred INTEGER DEFAULT 0,    -- 1 if pattern was used from another game
+                transfer_outcome TEXT,                -- 'success', 'failure', 'partial'
+                
+                -- Timestamps
+                first_linked DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_validated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                
+                UNIQUE(game_type, level_number, pattern_id),
+                FOREIGN KEY (pattern_id) REFERENCES universal_object_patterns(pattern_id)
+            )
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_game_pattern_links_game 
+            ON game_pattern_links(game_type, level_number)
+        """)
+        
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_game_pattern_links_pattern 
+            ON game_pattern_links(pattern_id)
+        """)
     
     def _get_current_generation(self) -> int:
         """Get current generation from evolutionary_state for deprecation tracking."""
@@ -3347,7 +3467,7 @@ class AgentSelfModel:
         direction: str,
         controlled_color: int,
         generation: int = 0
-    ) -> None:
+    ) -> Optional[Dict[str, Any]]:
         """
         Learn object control from action-movement correlation.
         
@@ -3355,6 +3475,9 @@ class AgentSelfModel:
         that corresponds to that direction, we learn that we control color_X.
         
         This is the core "I am this object" learning mechanism.
+        
+        FIX #1 (CHECKLIST): Now RETURNS discovery info for immediate exploitation.
+        The caller should use this to override the next action.
         
         Args:
             agent_id: Agent making the discovery
@@ -3364,6 +3487,10 @@ class AgentSelfModel:
             direction: Direction object moved (e.g., "left")
             controlled_color: Color number that moved
             generation: Current evolution generation
+            
+        Returns:
+            Discovery dict if new/validated discovery, None if contradiction or no news.
+            Dict contains: controlled_color, action, direction, is_validated, reliability_score
         """
         game_type = game_id.split('-')[0] if '-' in game_id else game_id
         
@@ -3416,7 +3543,7 @@ class AgentSelfModel:
                             f"[MOVEMENT] CONTRADICTION: {action} moved color_{controlled_color} {direction} "
                             f"but expected {expected_direction} - lowering reliability"
                         )
-                        return  # Don't update with contradictory data
+                        return None  # Don't update with contradictory data
             except Exception as e:
                 logger.debug(f"Pattern comparison failed: {e}")
             
@@ -3432,7 +3559,8 @@ class AgentSelfModel:
             """, (new_reliability, row['hypothesis_id']))
             
             # Only log as validated after 3+ consistent observations
-            if current_attempts + 1 >= 3:
+            is_validated = current_attempts + 1 >= 3
+            if is_validated:
                 logger.info(
                     f"[MOVEMENT] VALIDATED (x{current_attempts + 1}): color_{controlled_color} "
                     f"responds to {action} with {direction} (reliability {new_reliability:.2f})"
@@ -3447,8 +3575,34 @@ class AgentSelfModel:
                     )
                 except Exception as e:
                     logger.debug(f"Symmetry experiment trigger failed: {e}")
+                
+                # FIX #13: Store in universal patterns for transfer learning
+                try:
+                    response_type = f"move_{direction}"
+                    self.store_universal_pattern(
+                        game_type=game_type,
+                        level_number=level,
+                        object_color=controlled_color,
+                        action_type=action,
+                        response_type=response_type,
+                        is_confirmation=True,
+                        pattern_class='player_controlled'
+                    )
+                except Exception as e:
+                    logger.debug(f"Universal pattern storage failed: {e}")
             else:
                 logger.debug(f"[MOVEMENT] Observation {current_attempts + 1}/3 for color_{controlled_color}")
+            
+            # FIX #1 (CHECKLIST): Return discovery info for immediate exploitation
+            return {
+                'controlled_color': controlled_color,
+                'action': action,
+                'direction': direction,
+                'is_validated': is_validated,
+                'reliability_score': new_reliability,
+                'observation_count': current_attempts + 1,
+                'hypothesis_id': row['hypothesis_id']
+            }
         else:
             # Create new hypothesis with LOW initial confidence
             # Correlation != Causation - need multiple observations to validate
@@ -3467,6 +3621,18 @@ class AgentSelfModel:
                 f"[MOVEMENT] Observation 1/3: {action} may control color_{controlled_color} "
                 f"(needs {2} more consistent observations)"
             )
+            
+            # FIX #1 (CHECKLIST): Return NEW discovery for immediate use
+            # Even first observation is useful - agent should try to exploit it!
+            return {
+                'controlled_color': controlled_color,
+                'action': action,
+                'direction': direction,
+                'is_validated': False,  # Not yet validated (needs 2 more)
+                'reliability_score': 0.3,
+                'observation_count': 1,
+                'hypothesis_id': hypothesis_id
+            }
         
         # Also store in agent's personal control map
         try:
@@ -3479,6 +3645,10 @@ class AgentSelfModel:
             )
         except Exception as e:
             logger.debug(f"Personal control map update failed: {e}")
+        
+        # FIX #1 (CHECKLIST): If we reach here via the new hypothesis path,
+        # the return already happened. This is a fallback return.
+        return None
 
     def _trigger_symmetry_experiment(
         self,
@@ -5529,6 +5699,274 @@ class AgentSelfModel:
         """Generate a unique hypothesis ID."""
         import uuid
         return str(uuid.uuid4())[:12]
+
+    # ========================================================================
+    # FIX #13: UNIVERSAL OBJECT PATTERNS (Game-Agnostic Knowledge Transfer)
+    # ========================================================================
+    # Store object behaviors that transfer across games. When we learn that
+    # "color 5 moves up on ACTION1" in one game, this knowledge should help
+    # in other games with similar mechanics.
+    # ========================================================================
+    
+    def store_universal_pattern(
+        self,
+        game_type: str,
+        level_number: int,
+        object_color: int,
+        action_type: str,
+        response_type: str,
+        is_confirmation: bool = True,
+        pattern_class: str = 'unknown'
+    ) -> Optional[int]:
+        """
+        Store or update a universal (game-agnostic) object pattern.
+        
+        FIX #13: Enables transfer learning by storing patterns that work
+        across multiple games, not just within one game.
+        
+        Args:
+            game_type: Source game type
+            level_number: Source level
+            object_color: Color of the object
+            action_type: Action that triggers this behavior (e.g., ACTION1)
+            response_type: How object responds (e.g., 'move_up')
+            is_confirmation: True if confirming, False if contradicting
+            pattern_class: Classification (player_controlled, obstacle, etc.)
+            
+        Returns:
+            Pattern ID if stored/updated, None on error
+        """
+        try:
+            # Create unique pattern signature
+            pattern_signature = f"color_{object_color}_action_{action_type}_response_{response_type}"
+            
+            # Check if pattern already exists
+            existing = self.db.execute_query("""
+                SELECT pattern_id, total_observations, total_confirmations, 
+                       total_contradictions, contributing_games, game_count
+                FROM universal_object_patterns
+                WHERE pattern_signature = ?
+            """, (pattern_signature,))
+            
+            if existing:
+                # Update existing pattern
+                row = existing[0]
+                pattern_id = row['pattern_id']
+                new_obs = row['total_observations'] + 1
+                new_conf = row['total_confirmations'] + (1 if is_confirmation else 0)
+                new_contra = row['total_contradictions'] + (0 if is_confirmation else 1)
+                
+                # Update global confidence using Bayesian approach
+                new_confidence = (new_conf + 1) / (new_obs + 2)  # Laplace smoothing
+                
+                # Track contributing games
+                games_list = json.loads(row['contributing_games'] or '[]')
+                if game_type not in games_list:
+                    games_list.append(game_type)
+                
+                self.db.execute_query("""
+                    UPDATE universal_object_patterns
+                    SET total_observations = ?,
+                        total_confirmations = ?,
+                        total_contradictions = ?,
+                        global_confidence = ?,
+                        contributing_games = ?,
+                        game_count = ?,
+                        last_observed = CURRENT_TIMESTAMP,
+                        pattern_class = CASE WHEN pattern_class = 'unknown' THEN ? ELSE pattern_class END
+                    WHERE pattern_id = ?
+                """, (new_obs, new_conf, new_contra, new_confidence, 
+                      json.dumps(games_list), len(games_list), pattern_class, pattern_id))
+                
+                logger.debug(f"[UNIVERSAL] Updated pattern {pattern_signature}: "
+                            f"conf={new_confidence:.2f}, games={len(games_list)}")
+            else:
+                # Create new pattern
+                games_list = [game_type]
+                initial_confidence = 0.5 if is_confirmation else 0.3
+                
+                self.db.execute_query("""
+                    INSERT INTO universal_object_patterns
+                    (pattern_signature, object_color, action_type, response_type, pattern_class,
+                     total_observations, total_confirmations, total_contradictions,
+                     global_confidence, contributing_games, game_count)
+                    VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, 1)
+                """, (pattern_signature, object_color, action_type, response_type, pattern_class,
+                      1 if is_confirmation else 0, 0 if is_confirmation else 1,
+                      initial_confidence, json.dumps(games_list)))
+                
+                pattern_id = self.db.execute_query(
+                    "SELECT last_insert_rowid() as id"
+                )[0]['id']
+                
+                logger.debug(f"[UNIVERSAL] Created new pattern {pattern_signature}")
+            
+            # Link to game-specific context
+            self._link_pattern_to_game(pattern_id, pattern_signature, game_type, level_number, is_confirmation)
+            
+            return pattern_id
+            
+        except Exception as e:
+            logger.debug(f"Failed to store universal pattern: {e}")
+            return None
+    
+    def _link_pattern_to_game(
+        self,
+        pattern_id: int,
+        pattern_signature: str,
+        game_type: str,
+        level_number: int,
+        is_confirmation: bool
+    ) -> None:
+        """Link a universal pattern to a specific game context."""
+        try:
+            existing = self.db.execute_query("""
+                SELECT link_id, local_observations, local_confirmations
+                FROM game_pattern_links
+                WHERE game_type = ? AND level_number = ? AND pattern_id = ?
+            """, (game_type, level_number, pattern_id))
+            
+            if existing:
+                row = existing[0]
+                new_obs = row['local_observations'] + 1
+                new_conf = row['local_confirmations'] + (1 if is_confirmation else 0)
+                new_local_conf = (new_conf + 1) / (new_obs + 2)
+                
+                self.db.execute_query("""
+                    UPDATE game_pattern_links
+                    SET local_observations = ?,
+                        local_confirmations = ?,
+                        local_confidence = ?,
+                        last_validated = CURRENT_TIMESTAMP
+                    WHERE link_id = ?
+                """, (new_obs, new_conf, new_local_conf, row['link_id']))
+            else:
+                self.db.execute_query("""
+                    INSERT INTO game_pattern_links
+                    (game_type, level_number, pattern_id, pattern_signature,
+                     local_observations, local_confirmations, local_confidence)
+                    VALUES (?, ?, ?, ?, 1, ?, ?)
+                """, (game_type, level_number, pattern_id, pattern_signature,
+                      1 if is_confirmation else 0, 0.5 if is_confirmation else 0.3))
+        except Exception as e:
+            logger.debug(f"Failed to link pattern to game: {e}")
+    
+    def get_universal_patterns_for_color(
+        self,
+        object_color: int,
+        min_confidence: float = 0.4,
+        min_games: int = 1
+    ) -> List[Dict[str, Any]]:
+        """
+        Get universal patterns for a specific object color.
+        
+        FIX #13: Query game-agnostic patterns to transfer knowledge to new games.
+        
+        Args:
+            object_color: Color to look up
+            min_confidence: Minimum global confidence
+            min_games: Minimum number of games confirming this pattern
+            
+        Returns:
+            List of patterns with action-response mappings
+        """
+        try:
+            results = self.db.execute_query("""
+                SELECT pattern_signature, action_type, response_type, pattern_class,
+                       global_confidence, game_count, transfer_reliability
+                FROM universal_object_patterns
+                WHERE object_color = ? 
+                  AND global_confidence >= ?
+                  AND game_count >= ?
+                  AND is_active = 1
+                ORDER BY global_confidence DESC, game_count DESC
+            """, (object_color, min_confidence, min_games))
+            
+            return results if results else []
+        except Exception as e:
+            logger.debug(f"Failed to get universal patterns: {e}")
+            return []
+    
+    def get_transferable_knowledge_for_game(
+        self,
+        game_type: str,
+        level_number: int,
+        available_colors: List[int],
+        min_confidence: float = 0.5
+    ) -> Dict[int, List[Dict]]:
+        """
+        Get transferable knowledge from other games for each color in this game.
+        
+        FIX #13: Core transfer learning query - "What do we know about these
+        colors from OTHER games that might help here?"
+        
+        Args:
+            game_type: Current game type
+            level_number: Current level
+            available_colors: Colors visible in current frame
+            min_confidence: Minimum confidence to transfer
+            
+        Returns:
+            Dict mapping color -> list of applicable patterns
+        """
+        result = {}
+        
+        for color in available_colors:
+            if color == 0:  # Skip background
+                continue
+                
+            patterns = self.get_universal_patterns_for_color(color, min_confidence)
+            if patterns:
+                result[color] = patterns
+                
+        return result
+    
+    def record_transfer_outcome(
+        self,
+        pattern_signature: str,
+        game_type: str,
+        level_number: int,
+        was_successful: bool
+    ) -> None:
+        """
+        Record whether a transferred pattern worked in a new game.
+        
+        FIX #13: Track transfer reliability to improve future predictions.
+        """
+        try:
+            # Update universal pattern transfer stats
+            if was_successful:
+                self.db.execute_query("""
+                    UPDATE universal_object_patterns
+                    SET transfer_successes = transfer_successes + 1,
+                        transfer_reliability = 
+                            CAST(transfer_successes + 1 AS REAL) / 
+                            CAST(transfer_successes + transfer_failures + 2 AS REAL)
+                    WHERE pattern_signature = ?
+                """, (pattern_signature,))
+            else:
+                self.db.execute_query("""
+                    UPDATE universal_object_patterns
+                    SET transfer_failures = transfer_failures + 1,
+                        transfer_reliability = 
+                            CAST(transfer_successes AS REAL) / 
+                            CAST(transfer_successes + transfer_failures + 2 AS REAL)
+                    WHERE pattern_signature = ?
+                """, (pattern_signature,))
+            
+            # Update game link
+            self.db.execute_query("""
+                UPDATE game_pattern_links
+                SET was_transferred = 1,
+                    transfer_outcome = ?
+                WHERE pattern_signature = ? 
+                  AND game_type = ? 
+                  AND level_number = ?
+            """, ('success' if was_successful else 'failure', 
+                  pattern_signature, game_type, level_number))
+                  
+        except Exception as e:
+            logger.debug(f"Failed to record transfer outcome: {e}")
 
     # ========================================================================
     # COLLISION/INTERACTION DETECTION (Added 2025-12-08)
@@ -9073,6 +9511,11 @@ class MetacognitiveReasoningEngine:
         # Value = {'consecutive_failures': int, 'last_context': str}
         self._prediction_type_failures: Dict[str, Dict[str, Any]] = {}
         self._suppressed_prediction_types: set = set()  # Types that should be avoided
+        
+        # Fix #4: Track contradicted action-object pairs for actionable theory revision
+        # Key = action (e.g., 'ACTION1'), Value = list of contradictions
+        # Each contradiction: {'reason': str, 'outcome': str, 'timestamp': str}
+        self._contradicted_actions: Dict[str, List[Dict[str, Any]]] = {}
 
     def set_session_provenance(
         self,
@@ -9733,11 +10176,29 @@ class MetacognitiveReasoningEngine:
         """
         Generate a revised theory based on failed prediction.
         
+        Fix #4 (CHECKLIST): Theory revision must AFFECT behavior, not just log.
+        Now also populates _contradicted_actions for actionable filtering.
+        
         Returns:
             New theory text
         """
         # Simple heuristic revision rules
         new_theory = old_theory
+        
+        # Fix #4: Extract action from theory/prediction and mark as contradicted
+        # Look for ACTION patterns in the theory/prediction
+        import re
+        action_match = re.search(r'ACTION(\d+)', old_theory.upper() + ' ' + failed_prediction.upper())
+        if action_match:
+            action_str = f"ACTION{action_match.group(1)}"
+            if action_str not in self._contradicted_actions:
+                self._contradicted_actions[action_str] = []
+            self._contradicted_actions[action_str].append({
+                'reason': failed_prediction,
+                'outcome': actual_outcome,
+                'timestamp': datetime.now().isoformat()
+            })
+            logger.info(f"[METACOG-FIX4] Marked {action_str} as contradicted: {failed_prediction[:50]}")
         
         if 'control' in old_theory.lower() and 'no change' in actual_outcome.lower():
             # "I control X" but nothing moved -> probably don't control X
@@ -9759,6 +10220,16 @@ class MetacognitiveReasoningEngine:
         
         self._current_theory = new_theory
         return new_theory
+    
+    def get_contradicted_actions(self) -> Dict[str, int]:
+        """
+        Fix #4: Get actions that have been contradicted by failed theories.
+        
+        Returns:
+            Dict mapping action string to number of contradictions
+        """
+        return {action: len(contradictions) 
+                for action, contradictions in self._contradicted_actions.items()}
     
     def get_current_theory(self) -> Optional[str]:
         """Get the current working theory."""

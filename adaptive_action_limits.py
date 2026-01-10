@@ -11,6 +11,20 @@ generation performance. Gives more exploration time to successful agents/generat
 and reduces time for unproductive ones.
 
 Rule 4: LLM Self-Management - System adjusts autonomously based on data
+
+FIX #20: ACTION BUDGET DETERMINATION RULES
+==========================================
+Action budgets are determined ONLY by:
+1. Agent PERFORMANCE (level completions, efficiency)
+2. Agent ROLE (Pioneer gets more, Exploiter gets less)
+3. Generation metrics (network-wide adjustments)
+
+Action budgets are NEVER determined by:
+- Prestige score (social capital - completely separate)
+- Discovery count (affects prestige, not budgets)
+- Network contribution (affects prestige, not budgets)
+
+This is a SACRED separation per Master Ruleset.
 """
 
 import os
@@ -19,6 +33,31 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 from database_interface import DatabaseInterface
 from typing import Dict, Tuple, Any
 from datetime import datetime, timedelta
+
+
+def validate_budget_inputs_no_prestige(inputs: Dict[str, Any], context: str = "") -> None:
+    """
+    FIX #20: Guard function to ensure budget calculation doesn't use prestige.
+    
+    Call this before computing action budgets to verify inputs are valid.
+    
+    Args:
+        inputs: Dictionary of values being used for budget calculation
+        context: Description of where the check is happening
+        
+    Raises:
+        ValueError: If prestige-related values are in the inputs
+    """
+    forbidden_keys = ['prestige', 'prestige_score', 'discovery_prestige', 
+                      'network_contribution', 'viral_spread', 'teaching_score']
+    
+    for key in forbidden_keys:
+        if key in inputs:
+            raise ValueError(
+                f"[FIX20-VIOLATION] Action budget calculation cannot use '{key}' "
+                f"(prestige/social capital). Context: {context}. "
+                f"Use performance metrics instead."
+            )
 
 
 class AdaptiveActionLimits:
@@ -336,6 +375,8 @@ class AdaptiveActionLimits:
                 - role_multiplier: Role-specific ATP component
                 - progress_bonus: Growth-based bonus
         """
+        # FIX #20: GUARD - verify we're using performance inputs, not prestige
+        # This query ONLY gets performance metrics - no prestige fields
         # Get agent's comprehensive success (performance-based, NOT prestige)
         agent = self.db.execute_query("""
             SELECT 
@@ -348,6 +389,13 @@ class AdaptiveActionLimits:
             FROM agents 
             WHERE agent_id = ?
         """, (agent_id,))
+        
+        # FIX #20: Validate inputs don't include prestige
+        if agent and len(agent) > 0:
+            validate_budget_inputs_no_prestige(
+                dict(agent[0]), 
+                context=f"calculate_agent_salary for {agent_id}"
+            )
         
         # Get role fairness info (role, initial_w_B, current_w_B, progress)
         role_info = self._get_agent_role_info(agent_id, generation)

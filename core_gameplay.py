@@ -8320,6 +8320,7 @@ class GameplayEngine:
         
         Uses:
         0. NEW: Terminal pattern foresight (avoid known fatal actions)
+        0.5 FIX #1: Discovery exploitation (use recent discoveries immediately!)
         1. NEW: Learned rules from network (Step 8 - query before all other strategies)
         2. NEW: Hierarchical subgoal planning (multi-step strategy)
         3. PHASE 4.5: Sensation-based navigation (emotional intelligence for actions 1-7)
@@ -8337,10 +8338,190 @@ class GameplayEngine:
         """
         agent_id = self.game_config.get('agent_id')
         run_context = self.game_config.get('run_context')
+        
+        # ================================================================
+        # FIX #1 (CHECKLIST): DISCOVERY EXPLOITATION - HIGHEST PRIORITY
+        # ================================================================
+        # If we just discovered object control, USE IT IMMEDIATELY!
+        # Don't go through all the other decision logic - exploit the discovery.
+        # This closes the loop: Discovery -> Immediate Action
+        # ================================================================
+        last_discovery = getattr(self, '_last_discovery', None)
+        if last_discovery:
+            # Clear the discovery so we don't keep using it forever
+            self._last_discovery = None
+            
+            discovered_action = last_discovery.get('action')
+            discovered_color = last_discovery.get('controlled_color')
+            reliability = last_discovery.get('reliability_score', 0.3)
+            is_validated = last_discovery.get('is_validated', False)
+            
+            # Only exploit if we have valid action info
+            if discovered_action and discovered_action.startswith('ACTION'):
+                # Determine exploitation strategy based on reliability
+                if reliability >= 0.6 or is_validated:
+                    # High confidence - use the same action to continue progress
+                    exploit_reason = (
+                        f"[DISCOVERY-EXPLOIT] Using validated control: {discovered_action} moves "
+                        f"color_{discovered_color} (reliability: {reliability:.2f})"
+                    )
+                    logger.info(f"[DISCOVERY->ACTION] Exploiting: {discovered_action} (reliability {reliability:.2f})")
+                    return discovered_action, exploit_reason
+                elif reliability >= 0.3:
+                    # Medium confidence - test the hypothesis again
+                    exploit_reason = (
+                        f"[DISCOVERY-TEST] Testing hypothesis: {discovered_action} may control "
+                        f"color_{discovered_color} (reliability: {reliability:.2f}, testing...)"
+                    )
+                    logger.info(f"[DISCOVERY->ACTION] Testing hypothesis: {discovered_action}")
+                    return discovered_action, exploit_reason
+            # If discovery wasn't usable, continue with normal selection
+        
         # Sanity check incoming frame before any processing to avoid operating on malformed grids
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
-        # Deterministic ladder trace for Phase 4 (Sequence → CODS → Heuristic/Escape → Noop)
+        
+        # ===================================================================
+        # FIX #19 (CHECKLIST): POPULATE IMAGINATION CONTEXT EARLY
+        # ===================================================================
+        # Imagination budget data should flow to reasoning payload and decision-making.
+        # Compute context now so it's available for all decision branches.
+        # ===================================================================
+        try:
+            current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+            if not self._imagination_ctx:
+                self._imagination_ctx = self._compute_imagination_context(game_state, current_level)
+            
+            # Extract key values for decision-making
+            imagination_budget = self._imagination_ctx.get('budget_total', 1000.0)
+            imagination_mode = self._imagination_ctx.get('context_mode', 'exploration')
+            
+            # Log when budget is limited (late generations)
+            if imagination_budget is not None and imagination_budget < 100:
+                logger.debug(f"[FIX19-IMAGINATION] Budget limited: {imagination_budget:.1f}, mode: {imagination_mode}")
+        except Exception as img_err:
+            logger.debug(f"Imagination context population failed: {img_err}")
+            imagination_budget = 1000.0
+            imagination_mode = 'exploration'
+        
+        # ===================================================================
+        # FIX #7 (CHECKLIST): COMPUTE wA/wB FOR DECISION-ACTIVE USE
+        # ===================================================================
+        # Two-Streams weights: wA = trust private memory, wB = trust network
+        # These should ACTIVELY influence decisions, not just get logged.
+        # Higher wA = favor personal exploration/discovery
+        # Higher wB = favor network sequences/hypotheses
+        # ===================================================================
+        wA_decision = 0.5  # Private experience weight
+        wB_decision = 0.5  # Network wisdom weight
+        
+        try:
+            agent_id = self.game_config.get('agent_id')
+            if agent_id:
+                # Get persisted self_network_bias from agent
+                bias_result = self.db.execute_query("""
+                    SELECT self_network_bias FROM agents WHERE agent_id = ?
+                """, (agent_id,))
+                if bias_result:
+                    stored_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
+                    wA_decision = stored_bias
+                    wB_decision = 1.0 - stored_bias
+            
+            # Also check autobiography for dynamic wA/wB
+            if hasattr(self, 'game_config') and self.game_config.get('agent_autobiography'):
+                autobiography = self.game_config['agent_autobiography']
+                session = autobiography.get('session_state', {})
+                if session.get('wA') is not None:
+                    wA_decision = session.get('wA', wA_decision)
+                    wB_decision = session.get('wB', wB_decision)
+        except Exception:
+            wA_decision, wB_decision = 0.5, 0.5
+        
+        # Store for use throughout action selection
+        self._current_wA = wA_decision
+        self._current_wB = wB_decision
+        
+        # ===================================================================
+        # FIX #8: I-THREAD STREAM WEAVER - COLLECT STREAM PROPOSALS
+        # ===================================================================
+        # Stream A = Private experience (discoveries, self-model, recent failures)
+        # Stream B = Network wisdom (hypotheses, sequences, peer failures)
+        # I-Thread detects conflict and synthesizes using wA/wB weights
+        # ===================================================================
+        stream_a_proposals = []  # [(action, confidence, source)]
+        stream_b_proposals = []  # [(action, confidence, source)]
+        
+        # Stream A: Recent discovery (from _last_discovery handled at top)
+        if hasattr(self, '_last_discovery') and self._last_discovery:
+            disc = self._last_discovery
+            if disc.get('action'):
+                stream_a_proposals.append({
+                    'action': disc['action'],
+                    'confidence': disc.get('reliability_score', 0.3),
+                    'source': 'discovery'
+                })
+        
+        # Stream A: Contradicted actions (from theory revision)
+        contradicted = getattr(self, '_contradicted_actions', {})
+        if contradicted:
+            # Add NEGATIVE proposals for contradicted actions
+            for action, count in contradicted.items():
+                if count >= 2:
+                    stream_a_proposals.append({
+                        'action': action,
+                        'confidence': -min(0.5, count * 0.1),  # Negative = avoid
+                        'source': 'contradicted'
+                    })
+        
+        # Stream B: Network control hypotheses (already queried)
+        # Note: These are passed to hypothesis_biases later, but we record them for I-Thread
+        try:
+            game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+            if game_id and hasattr(self.agent_self_model, 'get_network_control_hypotheses'):
+                net_hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                    game_type=game_id.split('-')[0] if '-' in str(game_id) else game_id,
+                    min_reliability=0.15,
+                    limit=5
+                ) or []
+                for hyp in net_hypotheses:
+                    action_map = hyp.get('action_response_map', {})
+                    for action_str, response in action_map.items():
+                        if 'ACTION' in str(action_str).upper():
+                            stream_b_proposals.append({
+                                'action': action_str,
+                                'confidence': hyp.get('reliability_score', 0.2),
+                                'source': f"network_hyp_{hyp.get('hypothesis_id', '')[:8]}"
+                            })
+        except Exception:
+            pass
+        
+        # Stream B: Peer failure avoidance (already stored)
+        peer_failures = getattr(self, '_peer_failures_to_avoid', [])
+        for failure in peer_failures:
+            action_num = failure.get('action')
+            if action_num:
+                stream_b_proposals.append({
+                    'action': f"ACTION{action_num}",
+                    'confidence': -failure.get('confidence', 0.3),  # Negative = avoid
+                    'source': 'peer_failure'
+                })
+        
+        # I-Thread: Detect conflicts and log
+        stream_a_actions = {p['action'] for p in stream_a_proposals if p.get('confidence', 0) > 0}
+        stream_b_actions = {p['action'] for p in stream_b_proposals if p.get('confidence', 0) > 0}
+        stream_conflict = stream_a_actions and stream_b_actions and stream_a_actions != stream_b_actions
+        
+        if stream_conflict:
+            logger.info(f"[I-THREAD] Conflict detected: StreamA suggests {stream_a_actions}, "
+                       f"StreamB suggests {stream_b_actions}, wA={wA_decision:.2f} wB={wB_decision:.2f}")
+        
+        # Store for later use in weaving
+        self._stream_a_proposals = stream_a_proposals
+        self._stream_b_proposals = stream_b_proposals
+        self._stream_conflict = stream_conflict
+        
+        # Deterministic ladder trace for Phase 4 (Sequence -> CODS -> Heuristic/Escape -> Noop)
         ladder_trace: Dict[str, Any] = {
+            'discovery': {'status': 'checked', 'reason': 'no pending discovery to exploit'},
             'sequence': {'status': 'skipped', 'reason': 'no sequence replay path in selector'},
             'cods': {'status': 'pending', 'reason': ''},
             'micro_cf': {'status': 'pending', 'reason': '', 'persona_type': 'counterfactual'},
@@ -8351,6 +8532,12 @@ class GameplayEngine:
             'strategy': {'status': 'pending', 'reason': 'problem classifier', 'persona_type': 'classifier'},
             'selected_by_scorer': None,
             'best_alternative': None,
+            'two_streams': {'wA': wA_decision, 'wB': wB_decision},  # Fix #7: Track in trace
+            'imagination': {  # FIX #19: Include imagination context in ladder trace
+                'budget': imagination_budget,
+                'mode': imagination_mode,
+                'remaining': getattr(self, '_imagination_budget_remaining', None),
+            },
         }
         action_source = None
         self.loop_state = loop_state
@@ -8609,6 +8796,131 @@ class GameplayEngine:
                     reason = theory_gated_reason
             except Exception as tg_err:
                 logger.debug(f"Theory-gated scoring failed: {tg_err}")
+            
+            # ===============================================================
+            # FIX #8 (CHECKLIST): I-THREAD SYNTHESIS
+            # FIX #18: Include w_R resonance weight in decision formula
+            # When streams conflict, synthesize using wA/wB/wR weights
+            # R = cross-domain pattern agreement (validated patterns from other games)
+            # ===============================================================
+            stream_conflict = getattr(self, '_stream_conflict', False)
+            wA = getattr(self, '_current_wA', 0.5)
+            wB = getattr(self, '_current_wB', 0.5)
+            wR = self.game_config.get('w_R_weight') or 0.0  # FIX #18: Add resonance weight
+            
+            # FIX #18: Compute resonance score - cross-domain pattern agreement
+            resonance_score = 0.0
+            resonance_source = None
+            try:
+                # Query universal patterns that apply to this action
+                if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                    action_num = int(action.replace('ACTION', '')) if 'ACTION' in action else 0
+                    if action_num > 0:
+                        # Check if universal patterns support this action
+                        universal_fn = getattr(self.agent_self_model, 'get_transferable_knowledge_for_game', None)
+                        if callable(universal_fn):
+                            game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                            if game_id:
+                                game_type = game_id.split('-')[0] if '-' in str(game_id) else str(game_id)
+                                transferable = universal_fn(game_type, limit=10) or []
+                                for pattern in transferable:
+                                    if pattern.get('action') == action_num:
+                                        pattern_reliability = pattern.get('reliability', 0.3)
+                                        games_count = pattern.get('unique_games', 1)
+                                        # Boost score for patterns validated across many games
+                                        resonance_score += pattern_reliability * min(1.0, games_count / 3.0)
+                                        resonance_source = f"universal_pattern_{pattern.get('color', '?')}"
+            except Exception as res_err:
+                logger.debug(f"Resonance scoring failed: {res_err}")
+            
+            if stream_conflict:
+                try:
+                    stream_a = getattr(self, '_stream_a_proposals', [])
+                    stream_b = getattr(self, '_stream_b_proposals', [])
+                    
+                    # Score the proposed action from both streams' perspective
+                    action_str = action
+                    stream_a_score = 0.0
+                    stream_b_score = 0.0
+                    
+                    for prop in stream_a:
+                        if prop.get('action') == action_str:
+                            stream_a_score += prop.get('confidence', 0.0)
+                    
+                    for prop in stream_b:
+                        if prop.get('action') == action_str:
+                            stream_b_score += prop.get('confidence', 0.0)
+                    
+                    # FIX #18: Weighted score includes resonance
+                    # decision = wA*A + wB*B + wR*R (cross-domain pattern agreement)
+                    weighted_score = wA * stream_a_score + wB * stream_b_score + wR * resonance_score
+                    
+                    # Log when resonance contributes significantly
+                    if wR > 0 and resonance_score > 0.1:
+                        logger.info(f"[FIX18-RESONANCE] Action {action_str}: wR={wR:.2f} * R={resonance_score:.2f} "
+                                   f"= {wR * resonance_score:.2f} added to weighted score")
+                    
+                    # If weighted score is negative (both streams want to avoid), override
+                    if weighted_score < -0.3:
+                        # Find best action across both streams
+                        all_proposals = [(p, wA) for p in stream_a] + [(p, wB) for p in stream_b]
+                        action_scores = {}
+                        for prop, weight in all_proposals:
+                            act = prop.get('action', '')
+                            if act and 'ACTION' in act:
+                                action_scores[act] = action_scores.get(act, 0) + prop.get('confidence', 0) * weight
+                        
+                        if action_scores:
+                            best = max(action_scores.items(), key=lambda x: x[1])
+                            if best[1] > 0 and best[0] != action:
+                                logger.info(f"[I-THREAD] Synthesized: {action} -> {best[0]} "
+                                           f"(StreamA={stream_a_score:.2f}, StreamB={stream_b_score:.2f}, R={resonance_score:.2f}, weighted={weighted_score:.2f})")
+                                action = best[0]
+                                reason = f"[I-THREAD] Synthesized from streams (wA={wA:.2f}, wB={wB:.2f}, wR={wR:.2f}) | {reason[:50]}"
+                except Exception as synth_err:
+                    logger.debug(f"I-Thread synthesis failed: {synth_err}")
+            
+            # ===============================================================
+            # FIX #6 (CHECKLIST): PEER FAILURE FILTERING
+            # FIX #7 (CHECKLIST): USE wB TO GATE NETWORK TRUST
+            # Check if the proposed action is in the list of peer failures
+            # If so, try to pick an alternative action - BUT respect wB weight
+            # Higher wB = more trust in network failures, lower wB = ignore more
+            # ===============================================================
+            peer_failures_to_avoid = getattr(self, '_peer_failures_to_avoid', [])
+            
+            if peer_failures_to_avoid and action.startswith('ACTION') and wB > 0.3:  # Only filter if wB > 0.3
+                try:
+                    action_num = int(action.replace('ACTION', ''))
+                    
+                    # Check if this action is in failures
+                    matching_failures = [f for f in peer_failures_to_avoid if f.get('action') == action_num]
+                    
+                    if matching_failures:
+                        # Calculate penalty based on confidence AND wB
+                        avg_confidence = sum(f.get('confidence', 0.5) for f in matching_failures) / len(matching_failures)
+                        effective_confidence = avg_confidence * wB  # Scale by network trust
+                        
+                        # If effective confidence > 0.4 (was 0.6 before wB scaling), block the action
+                        if effective_confidence > 0.4:
+                            # Find alternative action not in failures
+                            failed_actions = set(f.get('action') for f in peer_failures_to_avoid)
+                            available = [i for i in [1, 2, 3, 4, 5, 6, 7] if i not in failed_actions]
+                            
+                            if available:
+                                import random
+                                alt_action = random.choice(available)
+                                failure_reason = matching_failures[0].get('reason', 'peer failure')[:40]
+                                original_action = action
+                                action = f"ACTION{alt_action}"
+                                reason = f"[FIX6-PEER-FILTER] Avoided {original_action} ({failure_reason}...) -> {action} | {reason[:50]}"
+                                logger.info(f"[FIX6] Peer failure filter: {original_action} -> {action}")
+                            else:
+                                # All actions failed - note but don't block
+                                reason = f"[PEER-WARN: all actions have failures] {reason}"
+                                logger.debug("[FIX6] All actions have peer failures, proceeding anyway")
+                except Exception as pf_err:
+                    logger.debug(f"Peer failure filter failed: {pf_err}")
             
             # ===============================================================
             # QUESTIONING ENGINE WITH TEETH: Check for blocking questions
@@ -8975,6 +9287,78 @@ class GameplayEngine:
                 logger.debug("Persona dialogue emission skipped")
             return action, reason
         
+        # ===================================================================
+        # FIX #5 (CHECKLIST): STUCK DETECTION -> RECOVERY MODE
+        # ===================================================================
+        # When primitive analysis detects stuck (_is_stuck=True), OR when
+        # metacognitive confidence in being stuck is high, break the current
+        # strategy and try something completely different.
+        # ===================================================================
+        is_stuck_by_primitive = getattr(self, '_is_stuck', False)
+        stuck_confidence = 0.0
+        
+        # Check metacognitive stuck confidence if available
+        if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+            try:
+                summary = self.metacognitive_engine.get_metacognitive_summary()
+                # High theory revisions + many eliminated actions = high stuck confidence
+                revision_count = summary.get('theory_revisions', 0)
+                eliminated_count = summary.get('actions_eliminated', 0)
+                failures_count = summary.get('failures_recorded', 0)
+                
+                # Calculate stuck confidence: 0.0 = not stuck, 1.0 = definitely stuck
+                stuck_confidence = min(1.0, 
+                    (revision_count * 0.15) +       # Each revision adds 0.15
+                    (eliminated_count * 0.1) +       # Each elimination adds 0.1
+                    (failures_count * 0.05)          # Each failure adds 0.05
+                )
+            except Exception:
+                stuck_confidence = 0.0
+        
+        # If stuck confidence > 0.7 OR primitive detected stuck, force recovery
+        if (stuck_confidence > 0.7 or is_stuck_by_primitive) and not hasattr(self, '_recovery_mode_active'):
+            logger.info(f"[FIX5-RECOVERY] Entering recovery mode: stuck_conf={stuck_confidence:.2f}, primitive_stuck={is_stuck_by_primitive}")
+            
+            # Choose an action we HAVEN'T tried recently
+            recent_actions = getattr(self, '_action_history', [])[-10:]
+            available_actions = [1, 2, 3, 4, 5, 6, 7]  # All action types
+            
+            # Remove recently used actions
+            untried_actions = [a for a in available_actions if a not in recent_actions]
+            if not untried_actions:
+                # All tried - pick the LEAST recent
+                from collections import Counter
+                action_counts = Counter(recent_actions)
+                untried_actions = [a for a in available_actions if action_counts.get(a, 0) <= 1]
+                if not untried_actions:
+                    untried_actions = available_actions
+            
+            # Pick random untried action for exploration
+            import random
+            recovery_action = random.choice(untried_actions)
+            
+            # Set recovery mode flag (prevents repeated triggers)
+            self._recovery_mode_active = True
+            self._recovery_action_count = 0
+            self._recovery_max_actions = 10  # Try 10 recovery actions before exiting
+            
+            # Clear contradicted actions to give fresh start
+            if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                self.metacognitive_engine._contradicted_actions = {}
+            
+            reasoning = f"[RECOVERY MODE] Breaking stuck pattern (conf={stuck_confidence:.2f}). Trying underexplored ACTION{recovery_action}"
+            logger.info(f"[FIX5] {reasoning}")
+            return _finalize_ladder_and_return(f"ACTION{recovery_action}", reasoning, 'heuristic')
+        
+        # Track recovery mode duration
+        if getattr(self, '_recovery_mode_active', False):
+            self._recovery_action_count = getattr(self, '_recovery_action_count', 0) + 1
+            if self._recovery_action_count >= getattr(self, '_recovery_max_actions', 10):
+                # Exit recovery mode
+                logger.info(f"[FIX5] Recovery mode complete after {self._recovery_action_count} actions")
+                self._recovery_mode_active = False
+                self._recovery_action_count = 0
+        
         # === ESCAPE MODE: Force escape action if stuck ===
         # When stuck detection triggers escape mode, override normal action selection
         if hasattr(self, '_forced_escape_action'):
@@ -9105,6 +9489,45 @@ class GameplayEngine:
                         logger.debug(f"[PEER] {len(peer_insights)} insights available: {peer_insights[0].get('insight_text', '')[:40]}...")
                     if peer_failures:
                         logger.debug(f"[PEER] {len(peer_failures)} failures to avoid")
+                    
+                    # ===================================================================
+                    # FIX #6 (CHECKLIST): USE PEER FAILURES TO FILTER ACTIONS
+                    # ===================================================================
+                    # Problem: 732 failure hypotheses are queried but never used
+                    # Solution: Store them so action selection can avoid failed actions
+                    # ===================================================================
+                    if peer_failures:
+                        # Store for later use in action selection
+                        self._peer_failures_to_avoid = []
+                        for failure in peer_failures:
+                            failure_text = failure.get('failure_reason', '') or ''
+                            failure_lower = failure_text.lower()
+                            
+                            # Extract action numbers from failure text
+                            import re
+                            action_matches = re.findall(r'action\s*(\d+)', failure_lower)
+                            for match in action_matches:
+                                action_num = int(match)
+                                if 1 <= action_num <= 7:
+                                    self._peer_failures_to_avoid.append({
+                                        'action': action_num,
+                                        'reason': failure_text[:50],
+                                        'confidence': failure.get('confidence', 0.5)
+                                    })
+                            
+                            # Also parse direction-based failures
+                            direction_actions = {'up': 1, 'down': 2, 'left': 3, 'right': 4}
+                            for direction, action_num in direction_actions.items():
+                                if direction in failure_lower and ('fail' in failure_lower or 'stuck' in failure_lower or 'death' in failure_lower):
+                                    self._peer_failures_to_avoid.append({
+                                        'action': action_num,
+                                        'reason': f"{direction} leads to failure",
+                                        'confidence': failure.get('confidence', 0.5)
+                                    })
+                        
+                        if self._peer_failures_to_avoid:
+                            logger.info(f"[FIX6] Will avoid {len(self._peer_failures_to_avoid)} actions based on peer failures")
+                    
             except Exception as e:
                 logger.debug(f"Peer insight query failed: {e}")
 
@@ -9994,6 +10417,53 @@ class GameplayEngine:
                 logger.debug(f"Failure hypothesis query error: {e}")
         
         # ===================================================================
+        # FIX #17: NETWORK OBJECT CONTROL HYPOTHESES
+        # Query discovered control patterns from network_object_control_hypotheses
+        # This integrates object control knowledge into action selection
+        # ===================================================================
+        if current_game_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+            try:
+                game_type = current_game_id.split('-')[0] if '-' in str(current_game_id) else str(current_game_id)
+                control_hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                    game_type=game_type,
+                    level=current_level,
+                    min_reliability=0.3  # Include even low-confidence discoveries
+                )
+                
+                if control_hypotheses:
+                    for hyp in control_hypotheses[:5]:  # Top 5 by reliability
+                        try:
+                            action_map_str = hyp.get('action_response_map', '{}')
+                            action_map = json.loads(action_map_str) if isinstance(action_map_str, str) else action_map_str
+                            reliability = hyp.get('reliability', 0.5)
+                            validated = hyp.get('validated_by_win', False)
+                            
+                            # Boost confidence for validated hypotheses
+                            effective_reliability = reliability * (1.5 if validated else 1.0)
+                            
+                            # Extract action biases from the action-response map
+                            for action_name, response in action_map.items():
+                                if not action_name.startswith('ACTION'):
+                                    continue
+                                action_num = int(action_name.replace('ACTION', ''))
+                                
+                                # Boost actions that have known control effects
+                                # (agent knows "ACTION1 moves my object up")
+                                bias_amount = 0.25 * effective_reliability
+                                hypothesis_biases[action_num] = hypothesis_biases.get(action_num, 0) + bias_amount
+                                
+                            if not hypothesis_reasoning:
+                                hypothesis_reasoning = f"Object control: color_{hyp.get('controlled_color', '?')} [r={reliability:.2f}]"
+                        except Exception as parse_err:
+                            logger.debug(f"Control hypothesis parse error: {parse_err}")
+                    
+                    if control_hypotheses:
+                        logger.debug(f"[FIX17] Applied {len(control_hypotheses)} control hypotheses to action biases")
+                        
+            except Exception as e:
+                logger.debug(f"Network control hypotheses query error: {e}")
+        
+        # ===================================================================
         # COGNITIVE STAGE-AWARE BEHAVIOR
         # Agents at different developmental stages act differently:
         # - Preoperational: Random exploration, no sequence following
@@ -10556,6 +11026,16 @@ class GameplayEngine:
                         cods_selected = True
                         return _finalize_ladder_and_return(f"ACTION{action_num}", reasoning, 'cods')
                     else:
+                        # FIX #13: Even below threshold, add CODS candidates to Stream B
+                        # (network-derived intelligence should be considered)
+                        cods_candidates = cods_suggestion.get('candidates', [])
+                        for cand in cods_candidates[:3]:
+                            stream_b_proposals.append({
+                                'action': f"ACTION{cand.get('action')}",
+                                'confidence': cand.get('confidence', 0.1),
+                                'source': f"cods_{cand.get('operator', 'unknown')[:10]}"
+                            })
+                        
                         # Still log but at debug level
                         logger.debug(f"[CODS] Below threshold ({confidence:.2f} < {cods_threshold}): '{operator_name}' -> ACTION{action_num}")
                         ladder_trace['cods'] = {
@@ -10564,6 +11044,7 @@ class GameplayEngine:
                             'confidence': confidence,
                             'operator': operator_name,
                             'action': f"ACTION{action_num}",
+                            'candidates_added_to_stream': len(cods_candidates),  # FIX #13
                         }
             except Exception as e:
                 logger.debug(f"CODS suggestion failed (non-critical): {e}")
@@ -12897,6 +13378,26 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"METACOG eliminations query failed: {e}")
             
+            # === 1.6 THEORY CONTRADICTIONS: Penalize actions contradicted by failed theories ===
+            # Fix #4 (CHECKLIST): Theory revision must AFFECT behavior - penalize contradicted actions
+            try:
+                if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
+                    contradicted = self.metacognitive_engine.get_contradicted_actions()
+                    if contradicted:
+                        for action_str, contradiction_count in contradicted.items():
+                            if 'ACTION' in action_str.upper():
+                                try:
+                                    action_num = int(action_str.upper().replace('ACTION', ''))
+                                    if action_num in action_scores:
+                                        # Penalty scales with contradiction count
+                                        penalty = min(0.8, 0.3 * contradiction_count)
+                                        action_scores[action_num] -= penalty
+                                        reasoning_parts.append(f"Theory contradicted {action_str} ({contradiction_count}x)")
+                                except ValueError:
+                                    pass
+            except Exception as e:
+                logger.debug(f"Theory contradiction query failed: {e}")
+            
             # === 2. NETWORK FAILURE HYPOTHESES ===
             try:
                 hypotheses = self._get_network_failure_hypotheses(game_id, level, limit=5)
@@ -13281,9 +13782,21 @@ class GameplayEngine:
             return best_action, reasoning
             
         except Exception as e:
-            # Fallback to simple escape sequence if intelligent selection fails
-            # BUT still respect available actions
-            logger.debug(f"Intelligent escape failed, using fallback: {e}")
+            # ================================================================
+            # FIX #15: LOG WHY FALLBACK TRIGGERED (not just "failed")
+            # ================================================================
+            # Fallback should be RARE, not default. Track failures to fix them.
+            # ================================================================
+            import traceback
+            tb_str = ''.join(traceback.format_tb(e.__traceback__)[-2:])  # Last 2 frames
+            logger.warning(f"[FALLBACK-TRIGGERED] Intelligent escape failed: {type(e).__name__}: {e}")
+            logger.debug(f"[FALLBACK-TRACE] {tb_str}")
+            
+            # Track fallback frequency in game_config for diagnostics
+            fallback_count = self.game_config.get('_fallback_count', 0) + 1
+            self.game_config['_fallback_count'] = fallback_count
+            self.game_config['_last_fallback_error'] = f"{type(e).__name__}: {str(e)[:100]}"
+            
             fallback_actions = [5, 6, 7, 1, 2, 3, 4]
             
             # Filter fallback to available actions
@@ -13292,7 +13805,7 @@ class GameplayEngine:
                 available_fallback = [1]  # Ultimate fallback
             
             fallback_action = available_fallback[(escape_attempt - 1) % len(available_fallback)]
-            return fallback_action, f"ESCAPE #{escape_attempt}: ACTION{fallback_action} (fallback, available: {sorted(available_nums)})"
+            return fallback_action, f"ESCAPE #{escape_attempt}: ACTION{fallback_action} (fallback#{fallback_count}, err: {type(e).__name__})"
     
     def _build_self_model_context(
         self, 
@@ -14576,6 +15089,8 @@ class GameplayEngine:
         # not just recent action traces. If agent knows it controls toggleable
         # objects, Q1 should reflect that.
         # ===================================================================
+        # ENHANCED FIX #2 (CHECKLIST): Also incorporate _last_discovery from Fix #1
+        # ===================================================================
         if hasattr(self, 'agent_self_model') and self.agent_self_model:
             agent_id = self.game_config.get('agent_id')
             game_id = self.session_manager.current_game_id if self.session_manager else None
@@ -14587,6 +15102,30 @@ class GameplayEngine:
                     controlled_objects = self.agent_self_model.get_controlled_objects(
                         agent_id, game_id, current_level
                     ) or []
+                    
+                    # FIX #2 (CHECKLIST): Also check network hypotheses for this level
+                    # This ensures Q1 sees discoveries even if agent_object_control is empty
+                    game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                    network_hypotheses = self.db.execute_query("""
+                        SELECT control_pattern, reliability_score, action_response_map
+                        FROM network_object_control_hypotheses
+                        WHERE game_type = ? AND level_number = ?
+                        AND is_active = TRUE AND reliability_score >= 0.3
+                        ORDER BY reliability_score DESC
+                        LIMIT 5
+                    """, (game_type, current_level)) or []
+                    
+                    # Add network-discovered objects to controlled_objects
+                    for hyp in network_hypotheses:
+                        try:
+                            pattern = json.loads(hyp.get('control_pattern', '{}'))
+                            color = pattern.get('controlled_color')
+                            if color is not None:
+                                obj_id = f"color_{color}"
+                                if obj_id not in controlled_objects:
+                                    controlled_objects.append(obj_id)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
                     
                     if controlled_objects:
                         # Agent has discovered control! Update Q1 to reflect this
@@ -14603,6 +15142,10 @@ class GameplayEngine:
                         result['confidence'] = 0.7  # High confidence from discoveries
                         result['discovery_based'] = True
                         result['controlled_objects'] = controlled_objects
+                        
+                        # Also include network hypotheses in Q1 output
+                        if network_hypotheses:
+                            result['network_hypotheses'] = len(network_hypotheses)
                         
                         # Which actions work based on object types
                         if moveable_count:
@@ -15143,58 +15686,102 @@ class GameplayEngine:
         game_state: 'GameState'
     ) -> str:
         """
-        Classify the current stage of the working theory.
+        FIX #10: Compute theory stage from ACTUAL evidence, not heuristics.
         
         Stages:
-        - "speculating": Initial observations, no confirmed patterns
-        - "hypothesis": Pattern identified but not fully validated
-        - "confident": Pattern confirmed through repeated success
+        - "exploring": Low confidence (<0.3) OR no hypotheses
+        - "hypothesizing": Medium confidence OR unvalidated hypotheses exist
+        - "testing": Hypothesis exists with partial validation
+        - "revising": Contradictions detected
+        - "confident": High confidence (>0.7) AND validated
         - "stuck": Theory exists but making no progress
         
         Returns:
-            Theory stage string
+            Theory stage string computed from actual metrics
         """
         try:
-            if not working_theory or "NULL" in str(working_theory):
-                return "speculating"
+            # Get actual evidence from self_model
+            control_confidence = 0.0
+            validation_status = "UNVALIDATED"
+            has_contradictions = False
+            has_hypotheses = False
             
-            theory_lower = working_theory.lower()
-            
-            # Check for stuck indicators
-            if "stuck" in theory_lower or "no progress" in theory_lower:
-                return "stuck"
-            
-            # Check for confident indicators (explicit confirmation)
             if self_model:
+                # Extract control confidence
                 ctrl_objects = self_model.get('objects_agent_controls', [])
                 network_hypos = self_model.get('network_control_hypotheses', [])
                 
-                # Confident: Multiple controlled objects AND positive score
-                if ctrl_objects and game_state.score and float(game_state.score) > 0:
-                    return "confident"
+                if ctrl_objects:
+                    has_hypotheses = True
+                    # Get best reliability from hypotheses
+                    if network_hypos:
+                        best_reliability = max(h.get('reliability', 0) for h in network_hypos) if network_hypos else 0
+                        control_confidence = best_reliability
+                        
+                        # Check validation status
+                        best_hypo = network_hypos[0] if network_hypos else {}
+                        validation_attempts = best_hypo.get('validation_attempts', 0)
+                        validated_by_win = best_hypo.get('validated_by_win', False)
+                        
+                        if validated_by_win:
+                            validation_status = "VALIDATED"
+                        elif validation_attempts >= 3:
+                            validation_status = "TESTED"
+                        else:
+                            validation_status = "UNVALIDATED"
+                    else:
+                        control_confidence = 0.3  # Has controlled objects but no network backup
                 
-                # Confident: Network hypothesis with >80% reliability
-                if network_hypos:
-                    best = network_hypos[0] if network_hypos else {}
-                    if best.get('reliability', 0) > 0.8:
-                        return "confident"
+                # Check for contradictions from theory revision
+                if hasattr(self, '_contradicted_actions') and self._contradicted_actions:
+                    has_contradictions = True
             
-            # Check theory text for hypothesis indicators
-            if any(word in theory_lower for word in ["control", "move", "seeking", "approach"]):
-                return "hypothesis"
+            # Check theory text for stuck indicators
+            if working_theory and isinstance(working_theory, str):
+                theory_lower = working_theory.lower()
+                if "stuck" in theory_lower or "no progress" in theory_lower:
+                    return "stuck"
+                if "contradict" in theory_lower or "revision" in theory_lower:
+                    has_contradictions = True
             
-            # Still exploring
-            if "exploring" in theory_lower or "pattern" in theory_lower:
-                return "speculating"
+            # FIX #10: Compute stage from actual metrics (not heuristics)
             
-            # Default based on score
+            # Rule 1: No hypotheses = exploring
+            if not has_hypotheses and control_confidence < 0.3:
+                return "exploring"
+            
+            # Rule 2: Contradictions detected = revising
+            if has_contradictions and validation_status != "VALIDATED":
+                return "revising"
+            
+            # Rule 3: Unvalidated hypothesis = hypothesizing
+            if validation_status == "UNVALIDATED":
+                return "hypothesizing"
+            
+            # Rule 4: Partially tested = testing
+            if validation_status == "TESTED" and control_confidence < 0.7:
+                return "testing"
+            
+            # Rule 5: High confidence + validated = confident
+            if validation_status == "VALIDATED" and control_confidence > 0.7:
+                return "confident"
+            
+            # Rule 6: Medium confidence + tested = hypothesis
+            if control_confidence >= 0.3 and control_confidence <= 0.7:
+                return "hypothesizing"
+            
+            # Rule 7: High confidence but not validated = testing
+            if control_confidence > 0.7 and validation_status != "VALIDATED":
+                return "testing"
+            
+            # Default: If has some evidence, at least hypothesizing
             if game_state.score and float(game_state.score) > 0:
-                return "hypothesis"
+                return "hypothesizing"
             
-            return "speculating"
+            return "exploring"
             
         except Exception:
-            return "speculating"
+            return "exploring"
 
     def _generate_action_prediction(
         self,
@@ -15971,8 +16558,12 @@ class GameplayEngine:
                                 # Update self-model with this discovery
                                 delta['self_model_update'] = f"Learned: control color_{controlled_color}"
                                 
-                                # Store in agent_self_model database
-                                self.agent_self_model.learn_from_movement_correlation(
+                                # ================================================================
+                                # FIX #1 (CHECKLIST): Store discovery AND get it back for USE
+                                # Previously this returned None and was ignored.
+                                # Now we capture the discovery and store it for next action.
+                                # ================================================================
+                                discovery_result = self.agent_self_model.learn_from_movement_correlation(
                                     agent_id=agent_id,
                                     game_id=game_id,
                                     level=current_level,
@@ -15981,6 +16572,16 @@ class GameplayEngine:
                                     controlled_color=controlled_color,
                                     generation=generation or 0
                                 )
+                                
+                                # FIX #1 (CHECKLIST): Store discovery for IMMEDIATE exploitation
+                                # Next action selection will check this and USE the discovery!
+                                if discovery_result:
+                                    self._last_discovery = discovery_result
+                                    logger.info(
+                                        f"[DISCOVERY->ACTION] Stored discovery for immediate use: "
+                                        f"{discovery_result.get('action')} controls color_{discovery_result.get('controlled_color')} "
+                                        f"(reliability: {discovery_result.get('reliability_score', 0):.2f})"
+                                    )
                                 break  # Only process first match
             except Exception as e:
                 logger.debug(f"Frame changes self-model learning failed: {e}")
@@ -18881,6 +19482,43 @@ class GameplayEngine:
             coord_index = start_index  # Start from checkpoint for coordinates
             
             # ================================================================
+            # FIX #11: EXPECTED OUTCOME VALIDATION
+            # ================================================================
+            # Load frame_transitions to compare EXPECTED vs ACTUAL frames.
+            # Detect divergence EARLY (before getting stuck) and adapt.
+            # ================================================================
+            expected_frames = []
+            try:
+                frame_trans_raw = sequence.get('frame_transitions')
+                if frame_trans_raw:
+                    expected_frames = json.loads(frame_trans_raw) if isinstance(frame_trans_raw, str) else frame_trans_raw
+            except (json.JSONDecodeError, TypeError):
+                pass
+            
+            divergence_score = 0.0  # Accumulates when frames don't match
+            max_divergence = 3.0   # Threshold to trigger early adaptation
+            consecutive_matches = 0  # Reset divergence on consecutive matches
+            
+            def compare_frame_similarity(actual, expected):
+                """Compare frames, return similarity 0.0-1.0."""
+                if not actual or not expected:
+                    return 1.0  # No data = assume OK
+                try:
+                    # Flatten frames for comparison
+                    if isinstance(actual, list) and isinstance(expected, list):
+                        actual_flat = str(actual)
+                        expected_flat = str(expected)
+                        if actual_flat == expected_flat:
+                            return 1.0
+                        # Count matching characters for similarity
+                        matches = sum(1 for a, e in zip(actual_flat, expected_flat) if a == e)
+                        total = max(len(actual_flat), len(expected_flat))
+                        return matches / total if total > 0 else 1.0
+                    return 1.0
+                except Exception:
+                    return 1.0
+            
+            # ================================================================
             # RESET DETECTION: Track score to detect unexpected resets
             # ================================================================
             # If score drops (e.g., 3->0 game reset, or 3->2 level reset),
@@ -19090,6 +19728,37 @@ class GameplayEngine:
                     # Add foresight indicator to reasoning if action was changed
                     foresight_indicator = "" if action_to_execute == action_num else f" (foresight: avoided ACTION{action_num})"
                     game_state = await self._execute_action(action, game_state, foresight_indicator, actual_level)
+                
+                # ================================================================
+                # FIX #11: EXPECTED OUTCOME VALIDATION - Compare actual vs expected
+                # ================================================================
+                # Check if actual frame matches expected frame from sequence.
+                # If not, accumulate divergence score and trigger early adaptation.
+                # ================================================================
+                if adaptive_mode and expected_frames and action_count < len(expected_frames):
+                    expected_frame = expected_frames[action_count]
+                    similarity = compare_frame_similarity(game_state.frame, expected_frame)
+                    
+                    if similarity >= 0.95:
+                        # Frame matches expected - good!
+                        consecutive_matches += 1
+                        if consecutive_matches >= 3:
+                            divergence_score = max(0, divergence_score - 0.5)  # Decay divergence
+                    else:
+                        # Frame diverged from expected
+                        consecutive_matches = 0
+                        penalty = (1.0 - similarity) * 2.0  # Scale penalty by divergence
+                        divergence_score += penalty
+                        
+                        if divergence_score >= max_divergence:
+                            logger.info(f"[OUTCOME-VALIDATION] Replay diverged from expected outcome "
+                                       f"(divergence={divergence_score:.1f}, similarity={similarity:.1%}) - triggering early adaptation")
+                            # Force stuck mode to trigger variation
+                            actions_since_progress = stuck_threshold + 1
+                            divergence_score = 0.0  # Reset after triggering
+                        elif divergence_score >= max_divergence * 0.5:
+                            logger.debug(f"[OUTCOME-VALIDATION] Frame divergence detected at action {action_count} "
+                                        f"(similarity={similarity:.1%}, divergence={divergence_score:.1f}/{max_divergence})")
                 
                 # ================================================================
                 # FIX: REFRESH EMERGENT REASONING DURING SEQUENCE REPLAY

@@ -32,8 +32,11 @@ from primitive_unlock_manager import (
 from operator_composer import (
     OperatorComposer, ComposedOperator, CompositionType, OperatorStatus
 )
-from oracle_interface import OracleInterface, OracleVerdict, OracleDecision
-from cods_engine import CODSEngine, CODSGameContext, OperatorResult
+# FIX #12: Import Oracle types from cods_engine (Oracle is internal to CODS)
+from cods_engine import (
+    CODSEngine, CODSGameContext, OperatorResult,
+    OracleInterface, OracleVerdict, OracleDecision
+)
 
 
 # ============================================================================
