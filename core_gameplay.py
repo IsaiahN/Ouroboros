@@ -7756,13 +7756,28 @@ class GameplayEngine:
                     if interactables.get('available') and interactables.get('objects'):
                         # Pick an interactable object we haven't clicked recently
                         recent_clicks = getattr(self, '_recent_click_colors', set())
-                        for obj in interactables['objects']:
+                        failed_regions = getattr(self, '_failed_click_regions', {})
+                        FAILURE_THRESHOLD_PER_REGION = 5
+                        
+                        # FIX 2025-01-10: Sort objects by size (smaller = more likely to be buttons)
+                        sorted_objs = sorted(
+                            interactables['objects'], 
+                            key=lambda o: o.get('size', 999999)
+                        )
+                        
+                        for obj in sorted_objs:
                             color = obj.get('color', 0)
                             if color not in recent_clicks and color > 0:
                                 centroid = obj.get('centroid', (0, 0))
                                 x, y = int(centroid[0]), int(centroid[1])
+                                
+                                # FIX 2025-01-10: Skip failed regions
+                                region_key = (x // 8, y // 8)
+                                if failed_regions.get(region_key, 0) >= FAILURE_THRESHOLD_PER_REGION:
+                                    continue
+                                
                                 if 0 <= x < len(game_state.frame[0]) and 0 <= y < len(game_state.frame):
-                                    reason = f"Interactable object color {color}"
+                                    reason = f"Interactable object color {color} (size={obj.get('size', '?')})"
                                     window_id = f"primitive_{int(datetime.now().timestamp() * 1000)}"
                                     selected = {"x": x, "y": y, "reason": reason, "window_id": window_id}
                                     self._pending_action6_target = selected
@@ -7813,6 +7828,10 @@ class GameplayEngine:
     ) -> Optional[Tuple[int, int, str]]:
         """Find a click target based on self-model's knowledge of controlled objects.
         
+        FIX 2025-01-10: Tracks failed click positions to avoid stuck loops.
+        If we've clicked a region 5+ times with no frame change, we skip that region
+        and try different colors/positions instead.
+        
         Args:
             frame: Current game frame
             
@@ -7823,11 +7842,53 @@ class GameplayEngine:
             return None
         
         try:
+            import random
+            
+            # Initialize failed click tracking
+            if not hasattr(self, '_failed_click_regions'):
+                self._failed_click_regions = {}  # {(region_x, region_y): fail_count}
+            if not hasattr(self, '_last_frame_for_click_tracking'):
+                self._last_frame_for_click_tracking = None
+            
+            # Track if last click caused a frame change
+            current_frame_hash = hash(str(frame[:3])) if frame else 0
+            if hasattr(self, '_last_click_coords_for_tracking') and self._last_click_coords_for_tracking:
+                lx, ly = self._last_click_coords_for_tracking
+                region_key = (lx // 8, ly // 8)  # 8x8 regions
+                if self._last_frame_for_click_tracking == current_frame_hash:
+                    # Frame didn't change - mark this region as failed
+                    self._failed_click_regions[region_key] = self._failed_click_regions.get(region_key, 0) + 1
+                else:
+                    # Frame changed! Clear failure count for this region
+                    self._failed_click_regions[region_key] = 0
+            
+            self._last_frame_for_click_tracking = current_frame_hash
+            
+            # Count total failures to know when to give up on self-model
+            total_failures = sum(self._failed_click_regions.values())
+            FAILURE_THRESHOLD_PER_REGION = 5
+            TOTAL_FAILURE_THRESHOLD = 50  # After 50 total failed clicks, try visual exploration
+            
+            # If too many total failures, return None to force visual fallback
+            if total_failures > TOTAL_FAILURE_THRESHOLD:
+                logger.info(f"[SELF-MODEL] {total_failures} failed clicks - deferring to visual exploration")
+                # Reset counter every 100 failures to retry occasionally
+                if total_failures > 100:
+                    self._failed_click_regions = {}
+                return None
+            
             # Get controlled objects from self-model
+            # NOTE: This now includes network-discovered objects from ALL agents
             agent_id = self.game_config.get('agent_id')
             game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
             level = 1  # Default level for selection logic
             controlled = self.agent_self_model.get_controlled_objects(str(agent_id), str(game_id or ''), level) if agent_id and game_id else []
+            if controlled:
+                # Log sources: local vs network
+                local_count = sum(1 for c in controlled if 'moveable_' not in str(c).lower() and 'toggleable_' not in str(c).lower())
+                network_count = len(controlled) - local_count
+                if network_count > 0:
+                    logger.debug(f"[NETWORK-CONTROL] Using {network_count} network-discovered objects: {[c for c in controlled if 'color_' in str(c).lower()][:5]}")
             if not controlled:
                 return None
             
@@ -7866,12 +7927,19 @@ class GameplayEngine:
                     except (ValueError, IndexError):
                         pass
             
-            # If we have specific coordinates, use them first
+            # If we have specific coordinates, use them first (but filter failed regions)
             if target_coords:
-                # Pick a random one to avoid always clicking same spot
-                import random
-                x, y, reason = random.choice(target_coords)
-                if 0 <= y < len(frame) and 0 <= x < len(frame[0]):
+                # Filter out failed regions
+                valid_coords = []
+                for x, y, reason in target_coords:
+                    region_key = (x // 8, y // 8)
+                    if self._failed_click_regions.get(region_key, 0) < FAILURE_THRESHOLD_PER_REGION:
+                        if 0 <= y < len(frame) and 0 <= x < len(frame[0]):
+                            valid_coords.append((x, y, reason))
+                
+                if valid_coords:
+                    x, y, reason = random.choice(valid_coords)
+                    self._last_click_coords_for_tracking = (x, y)
                     return (x, y, reason)
             
             # If we have target colors, find pixels of those colors in frame
@@ -7880,12 +7948,22 @@ class GameplayEngine:
                 for y, row in enumerate(frame):
                     for x, pixel in enumerate(row):
                         if pixel in target_colors:
-                            candidates.append((x, y, f"Controlled color {pixel}"))
+                            region_key = (x // 8, y // 8)
+                            # Skip regions that have failed too many times
+                            if self._failed_click_regions.get(region_key, 0) < FAILURE_THRESHOLD_PER_REGION:
+                                candidates.append((x, y, f"Controlled color {pixel}"))
                 
                 if candidates:
                     # Pick a random candidate to vary exploration
-                    import random
-                    return random.choice(candidates)
+                    x, y, reason = random.choice(candidates)
+                    self._last_click_coords_for_tracking = (x, y)
+                    return (x, y, reason)
+                else:
+                    # All regions of controlled colors have failed - log this!
+                    logger.warning(
+                        f"[SELF-MODEL] All regions for colors {target_colors} have failed "
+                        f"{FAILURE_THRESHOLD_PER_REGION}+ times - need visual exploration"
+                    )
             
             return None
             
@@ -9343,6 +9421,18 @@ class GameplayEngine:
             logger.info(f"[FIX5-RECOVERY] Entering recovery mode: stuck_conf={stuck_confidence:.2f}, primitive_stuck={is_stuck_by_primitive}")
             
             # ===================================================================
+            # FIX 2025-01-10: CLEAR FAILED TRACKING WHEN ENTERING RECOVERY
+            # ===================================================================
+            # Problem: Agent keeps retrying same controlled objects that don't work.
+            # Solution: Clear failed regions but keep tracking recent colors, so we
+            # try the SAME regions with fresh expectations but still prefer NEW colors.
+            # ===================================================================
+            if hasattr(self, '_failed_click_regions'):
+                old_count = len(self._failed_click_regions)
+                self._failed_click_regions = {}
+                logger.info(f"[FIX5-RECOVERY] Cleared {old_count} failed click regions for fresh exploration")
+            
+            # ===================================================================
             # FIX #7: FORCE IMAGINATION BUDGET SPEND WHEN STUCK
             # ===================================================================
             # Problem: budget_total=1000, budget_spend=null for entire game.
@@ -9396,6 +9486,39 @@ class GameplayEngine:
             else:
                 recovery_action = random.choice(available_actions)
                 reasoning_source = "random fallback"
+            
+            # ===================================================================
+            # FIX 2025-01-10: FORCE NEW CLICK TARGET FOR ACTION6 IN RECOVERY
+            # ===================================================================
+            # If recovery chooses ACTION6, find an unexplored target using primitives
+            # ===================================================================
+            if recovery_action == 6 and game_state.frame:
+                try:
+                    # Use primitive to find interactable objects we haven't clicked
+                    if hasattr(self, 'primitive_helper') and self.primitive_helper.available:
+                        interactables = self.primitive_helper.find_all_interactable(game_state.frame)
+                        if interactables.get('available') and interactables.get('objects'):
+                            recent_clicks = getattr(self, '_recent_click_colors', set())
+                            # Sort by size (smaller = more likely to be buttons)
+                            sorted_objs = sorted(
+                                interactables['objects'],
+                                key=lambda o: o.get('size', 999999)
+                            )
+                            for obj in sorted_objs:
+                                color = obj.get('color', 0)
+                                if color not in recent_clicks and color > 0:
+                                    centroid = obj.get('centroid', (0, 0))
+                                    x, y = int(centroid[0]), int(centroid[1])
+                                    if 0 <= x < len(game_state.frame[0]) and 0 <= y < len(game_state.frame):
+                                        # Set as pending target so ACTION6 uses these coords
+                                        window_id = f"recovery_{int(datetime.now().timestamp() * 1000)}"
+                                        self._pending_action6_target = {"x": x, "y": y, "reason": f"Recovery: new color {color}", "window_id": window_id}
+                                        self._pending_action6_reason = f"Recovery exploration: trying color {color}"
+                                        self.game_config['current_attention_window_id'] = window_id
+                                        logger.info(f"[FIX5-RECOVERY] ACTION6 targeting NEW color {color} at ({x},{y})")
+                                        break
+                except Exception as e:
+                    logger.debug(f"Recovery primitive exploration failed: {e}")
             
             # Set recovery mode flag (prevents repeated triggers)
             self._recovery_mode_active = True
@@ -11848,6 +11971,16 @@ class GameplayEngine:
                     clicked_color = game_state.frame[y][x]
                     self._last_clicked_color = clicked_color
                     self._last_click_coords = (x, y)
+                    
+                    # FIX 2025-01-10: Track recent clicked colors to avoid re-trying same colors
+                    if not hasattr(self, '_recent_click_colors'):
+                        self._recent_click_colors = set()
+                    if clicked_color > 0:  # Skip background
+                        self._recent_click_colors.add(clicked_color)
+                        # Keep only last 20 colors to allow re-exploration eventually
+                        if len(self._recent_click_colors) > 20:
+                            self._recent_click_colors.pop()
+                    
                     # Also update visual_analyzer with successful clicks as they happen
                     if hasattr(self.action_handler, 'visual_analyzer'):
                         # If this color is rare (not background), note it
@@ -12053,6 +12186,20 @@ class GameplayEngine:
             # Execute regular action - convert ACTION1 to send_action_1 format
             # Extract number from ACTION string (e.g., "ACTION1" -> "1")
             action_num = action.replace("ACTION", "")
+            
+            # ACTION6 requires special handling with x,y coordinates - should not reach here
+            if action_num == "6":
+                logger.error(f"ACTION6 reached generic handler - this should not happen. Falling back to visual target.")
+                x, y, reason = self.action_handler.get_smart_coordinates(
+                    game_state.frame,
+                    strategy="visual"
+                )
+                return await self.action_handler.send_action_6(
+                    x, y, game_state.frame,
+                    reasoning=reasoning_json,
+                    level_number=current_level,
+                )
+            
             method_name = f"send_action_{action_num}"
             if hasattr(self.action_handler, method_name):
                 method = getattr(self.action_handler, method_name)

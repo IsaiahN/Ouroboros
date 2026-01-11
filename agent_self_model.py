@@ -1808,7 +1808,95 @@ class AgentSelfModel:
             if obj_id not in controlled_objects:
                 controlled_objects.append(obj_id)
         
+        # 6. NETWORK HYPOTHESES: Query ALL validated control hypotheses from network
+        # This includes movement-controlled objects, not just toggleables
+        # FIX 2025-01-10: Agents should inherit knowledge from other agents' discoveries
+        network_hypotheses = self._get_all_network_control_hypotheses(game_type, level)
+        for obj_id in network_hypotheses:
+            if obj_id not in controlled_objects:
+                controlled_objects.append(obj_id)
+        
         return controlled_objects if controlled_objects else None
+
+    def _get_all_network_control_hypotheses(
+        self,
+        game_type: str,
+        level: int
+    ) -> List[str]:
+        """
+        Get ALL controlled objects from network_object_control_hypotheses.
+        
+        This queries validated hypotheses from ALL agents and extracts
+        controlled colors for both moveable and toggleable objects.
+        
+        Unlike _get_network_toggleable_discoveries which filters for toggles,
+        this returns EVERYTHING the network knows is controllable.
+        
+        Args:
+            game_type: Game type (e.g., 'ft09')
+            level: Level number
+            
+        Returns:
+            List of unique controlled object identifiers from network
+        """
+        network_objects = []
+        
+        try:
+            # Query all validated hypotheses (3+ attempts OR validated by win)
+            result = self.db.execute_query("""
+                SELECT hypothesis_id, control_pattern, action_response_map,
+                       COALESCE(controlled_color, -1) as controlled_color,
+                       reliability_score
+                FROM network_object_control_hypotheses
+                WHERE game_type = ? AND level_number = ?
+                AND is_active = 1
+                AND (validation_attempts >= 3 OR validated_by_win = 1)
+                AND reliability_score >= 0.3
+                ORDER BY reliability_score DESC
+            """, (game_type, level))
+            
+            if result:
+                for row in result:
+                    # Try controlled_color column first (most reliable)
+                    if row['controlled_color'] and row['controlled_color'] > 0:
+                        color = row['controlled_color']
+                        # Check action_response_map for type hint
+                        is_toggle = False
+                        try:
+                            action_map = json.loads(row['action_response_map']) if row['action_response_map'] else {}
+                            if isinstance(action_map, dict):
+                                for action, response in action_map.items():
+                                    if isinstance(response, dict) and response.get('effect_type') == 'toggle':
+                                        is_toggle = True
+                                        break
+                        except:
+                            pass
+                        
+                        if is_toggle:
+                            obj_id = f"toggleable_color_{color}"
+                        else:
+                            obj_id = f"moveable_color_{color}"
+                        
+                        if obj_id not in network_objects:
+                            network_objects.append(obj_id)
+                    
+                    # Fallback to parsing control_pattern
+                    if row['control_pattern']:
+                        parsed_colors = self._parse_control_pattern_to_colors(row['control_pattern'])
+                        for color_id in parsed_colors:
+                            if color_id not in network_objects:
+                                network_objects.append(color_id)
+            
+            if network_objects:
+                logger.debug(
+                    f"[NETWORK-HYPOTHESES] {game_type} L{level}: "
+                    f"Found {len(network_objects)} controllable from network: {network_objects[:5]}..."
+                )
+                
+        except Exception as e:
+            logger.debug(f"Network hypotheses query failed: {e}")
+        
+        return network_objects
 
     def _get_network_toggleable_discoveries(
         self,

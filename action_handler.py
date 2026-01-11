@@ -488,7 +488,7 @@ class ActionHandler:
         """
         return await self._send_action_with_context("ACTION5", reasoning=reasoning, level_number=level_number, **kwargs)
 
-    async def send_action_6(self, x: int, y: int, frame: Optional[List[List[int]]] = None, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1) -> GameState:
+    async def send_action_6(self, x: int, y: int, frame: Optional[List[List[int]]] = None, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1, **kwargs) -> GameState:
         """Send ACTION6 (coordinate-based action) to the game.
 
         Args:
@@ -497,6 +497,7 @@ class ActionHandler:
             frame: Current frame for validation (optional)
             reasoning: Optional reasoning dict/JSON for the action (≤16 KB)
             level_number: Current level number for trace logging
+            **kwargs: Additional arguments (imagination budget, etc.) - absorbed but not used
 
         Returns:
             New game state
