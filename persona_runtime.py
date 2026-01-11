@@ -267,6 +267,145 @@ class PersonaManager:
         except Exception:
             return 0
     
+    def generate_proposals(
+        self,
+        game_state: Any,
+        available_actions: Optional[List[str]] = None,
+        context: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate diverse action proposals from multiple personas.
+        
+        Each persona has a different bias/personality that influences
+        its action preference:
+        - Explorer: prefers novel actions, high risk tolerance
+        - Cautious: prefers safe actions, avoids known dangers
+        - Optimizer: prefers efficient actions, follows proven paths
+        - Pioneer: prefers unknown territory, discovery-oriented
+        
+        This is the key function for Consciousness Theory CON-002.
+        
+        Returns:
+            List of proposals, each with:
+            - action: proposed action (ACTION1-7)
+            - confidence: 0.0-1.0
+            - persona_id: which persona proposed
+            - reasoning: why this action
+        """
+        # FIX: Don't require agent_id - use default personas if not available
+        # The agent_id check was causing ALL proposals to return empty
+        
+        proposals = []
+        available = available_actions or ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 
+                                          'ACTION5', 'ACTION6', 'ACTION7']
+        
+        # Get active personas for this agent (if agent_id available)
+        personas = []
+        if self.agent_id:
+            try:
+                rows = self.db.execute_query(
+                    """SELECT persona_id, persona_type, bias_risk, novelty_bias, reliability_global
+                       FROM persona_profiles WHERE agent_id=? ORDER BY reliability_global DESC LIMIT 5""",
+                    (self.agent_id,)
+                )
+                personas = list(rows) if rows else []
+            except Exception:
+                personas = []
+        
+        # If no personas from DB, create default ensemble
+        # This ensures we ALWAYS have proposals for deliberation
+        if not personas:
+            personas = [
+                {'persona_id': 'explorer', 'persona_type': 'explorer', 'bias_risk': 0.7, 'novelty_bias': 0.8, 'reliability_global': 0.5},
+                {'persona_id': 'cautious', 'persona_type': 'cautious', 'bias_risk': 0.2, 'novelty_bias': 0.3, 'reliability_global': 0.5},
+                {'persona_id': 'optimizer', 'persona_type': 'optimizer', 'bias_risk': 0.5, 'novelty_bias': 0.1, 'reliability_global': 0.5},
+            ]
+        
+        # Context for decision-making
+        ctx = context or {}
+        recent_actions = ctx.get('recent_actions', [])
+        failed_actions = ctx.get('failed_actions', [])
+        network_suggested = ctx.get('network_suggested', [])
+        
+        for persona in personas:
+            pid = persona.get('persona_id', 'unknown')
+            ptype = (persona.get('persona_type') or 'explorer').lower()
+            risk_bias = persona.get('bias_risk', 0.5) or 0.5
+            novelty_bias = persona.get('novelty_bias', 0.5) or 0.5
+            reliability = persona.get('reliability_global', 0.5) or 0.5
+            
+            # Each persona type has different action preferences
+            if ptype in ('explorer', 'pioneer', 'discovery'):
+                # Prefers novel actions, avoids recently tried
+                action_scores = {}
+                for action in available:
+                    score = 0.5
+                    if action not in recent_actions:
+                        score += 0.3 * novelty_bias  # Novel = good
+                    if action in failed_actions:
+                        score -= 0.2 * (1 - risk_bias)  # Less penalty if risk-tolerant
+                    action_scores[action] = score
+                best = max(action_scores, key=action_scores.get)
+                proposals.append({
+                    'action': best,
+                    'confidence': min(1.0, action_scores[best] * reliability),
+                    'persona_id': pid,
+                    'persona_type': ptype,
+                    'reasoning': f"Explorer persona prefers novel action {best}"
+                })
+            
+            elif ptype in ('cautious', 'validator'):
+                # Prefers safe actions, follows network
+                action_scores = {}
+                for action in available:
+                    score = 0.3
+                    if action in network_suggested:
+                        score += 0.4  # Network validated = safe
+                    if action in failed_actions:
+                        score -= 0.4 * (1 - risk_bias)  # Heavy penalty
+                    action_scores[action] = score
+                best = max(action_scores, key=action_scores.get)
+                proposals.append({
+                    'action': best,
+                    'confidence': min(1.0, action_scores[best] * reliability),
+                    'persona_id': pid,
+                    'persona_type': ptype,
+                    'reasoning': f"Cautious persona prefers safe action {best}"
+                })
+            
+            elif ptype in ('optimizer', 'network'):
+                # Follows network suggestions closely
+                action_scores = {}
+                for action in available:
+                    score = 0.2
+                    if action in network_suggested:
+                        score += 0.6  # Strongly prefer network
+                    if action in recent_actions[-3:] if len(recent_actions) >= 3 else recent_actions:
+                        score -= 0.1  # Slight penalty for repetition
+                    action_scores[action] = score
+                best = max(action_scores, key=action_scores.get)
+                proposals.append({
+                    'action': best,
+                    'confidence': min(1.0, action_scores[best] * reliability),
+                    'persona_id': pid,
+                    'persona_type': ptype,
+                    'reasoning': f"Optimizer persona follows network with {best}"
+                })
+            
+            else:
+                # Default: random selection with slight exploration bias
+                import random
+                action = random.choice(available)
+                proposals.append({
+                    'action': action,
+                    'confidence': 0.3 * reliability,
+                    'persona_id': pid,
+                    'persona_type': ptype,
+                    'reasoning': f"Default persona proposes {action}"
+                })
+        
+        return proposals
+    
     def allocate_attention(self) -> Dict[str, float]:
         """
         Allocate attention budget across active personas.

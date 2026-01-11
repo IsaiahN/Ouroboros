@@ -21,7 +21,7 @@ from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 import uuid
 
-from arc_api_client import ARCClient, GameState
+from arc_api_client import ARCClient, GameState, ARCError
 from database_interface import DatabaseInterface
 
 logger = logging.getLogger(__name__)

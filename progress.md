@@ -2,6 +2,192 @@
 
 ---
 
+## Session: January 11, 2026 - Self-Diagnostic System & Theory Alignment
+
+---
+
+### Overall Approach
+
+Created comprehensive self-diagnostic capability that cross-checks code against theory requirements and identifies misalignments automatically.
+
+**Session Timestamp**: 9:17 AM  
+**Status**: IN PROGRESS - Fixed cognitive stage bug, diagnostics running
+
+---
+
+## Critical Bug Found: Cognitive Stage String-to-Int Cast (FIXED)
+
+**Timestamp**: 9:22 AM
+
+### Problem
+`synthesis_enabled` and `allow_observers` ALWAYS false because:
+```python
+stage_numeric = int(self._current_stage)  # FAILS - stage is a STRING!
+```
+
+`_current_stage` is strings like `'preoperational'`, `'concrete_operational'` - cannot cast to int!
+
+### Root Cause
+Lines 8665-8670 in core_gameplay.py tried `int(self._current_stage)` which always raised an exception, falling back to `stage_numeric = 0`. This meant:
+- `allow_observers = False` (always)
+- `allow_synthesis = False` (always)
+- Synthesis, persona multi-proposals, counterfactual NEVER happened!
+
+### Fix Applied
+| File | Lines | Change |
+|------|-------|--------|
+| core_gameplay.py | L8665-8678 | Map strings to numeric: `{'preoperational': 0, 'concrete_operational': 1, 'formal_operational': 2}` |
+
+### Impact
+- 95 agents at `concrete_operational` can now use observers and counterfactuals
+- 168 agents at `preoperational` properly excluded (by design)
+- Synthesis enabled for future `formal_operational` agents
+
+---
+
+## Diagnostic Tools Created
+
+### 1. theory_alignment_checker.py (NEW)
+
+Cross-checks code behavior against 14 theory requirements:
+- **CON-001 to CON-004**: Consciousness (Two Streams, Personas, Synthesis, Theory-Gating)
+- **META-001 to META-004**: Metalearning (CODS, Primitives, Composition, Discovery)
+- **NET-001 to NET-003**: Network (Viral Packages, Database-as-Organism, Dual Economy)
+- **INT-001 to INT-003**: Integration (Stream B→CODS, Emergent Roles, Imagination Budget)
+
+**Usage**:
+```bash
+python theory_alignment_checker.py           # Report
+python theory_alignment_checker.py --fix-plan # Prioritized fixes
+python theory_alignment_checker.py --grade   # Letter grade
+```
+
+### 2. investigate_bugs.py (ENHANCED)
+
+Layer-based health diagnostics with auto-investigation.
+
+---
+
+## Theory Alignment Status (9:25 AM → 9:36 AM updates)
+
+| Layer | Alignment | Issue | Status |
+|-------|-----------|-------|--------|
+| Consciousness | 50% | PersonaManager lacked get_proposals() | FIXED |
+| Metalearning | 25% | Theories in agent_theories not working_theories | FIXED query |
+| Network | 67% | Viral packages exist, prestige working | OK |
+| Integration | 0% | budget_spend always 0 due to timing bug | FIXED |
+
+---
+
+## Fix 4: budget_spend Always 0 (INT-003) (COMPLETE)
+
+**Timestamp**: 9:38 AM
+
+### Problem
+`budget_spend` always 0 or None in action_traces, even when counterfactuals ran.
+
+### Root Cause
+`_compute_imagination_context()` computed `budget_spend` BEFORE action selection, using PREVIOUS action's telemetry values (`_last_persona_proposal_count`, etc.). By the time current action set these values, `budget_spend` was already computed with stale data.
+
+### Fixes Applied
+| File | Lines | Change |
+|------|-------|--------|
+| core_gameplay.py | ~L12072 | Recompute `budget_spend` right before ACTION6 send |
+| core_gameplay.py | ~L12310 | Recompute `budget_spend` right before ACTION1-5,7 send |
+
+---
+
+## Fix 2: Persona Ensemble Not Generating Proposals (COMPLETE)
+
+**Timestamp**: 9:26 AM  
+**Root Cause Found**: 1:08 PM
+
+### Problem
+PersonaManager had no method to generate action proposals. All persona-related code was logging/reliability, but no actual proposal generation.
+
+### Original Root Cause (Partial)
+- `persona_proposal_count` always None
+- No `generate_proposals()` method existed
+
+### Actual Root Cause (Found After Evolution)
+**CRITICAL FIX**: Even after adding `generate_proposals()`, it was returning empty list `[]` because:
+```python
+def generate_proposals(self, ...):
+    if not self.agent_id:  # <-- agent_id is None at init time!
+        return []          # <-- ALL PROPOSALS BLOCKED
+```
+
+The `PersonaManager.__init__` takes `agent_id` as optional parameter but core_gameplay.py at line 1376 initializes WITHOUT it:
+```python
+self.persona_manager = PersonaManager(self.db)  # agent_id=None by default
+```
+
+### Final Fix Applied
+| File | Lines | Change |
+|------|-------|--------|
+| persona_runtime.py | L295-320 | Removed early return, always use default personas if no agent_id |
+
+Changed from:
+```python
+if not self.agent_id:
+    return []
+```
+
+To:
+```python
+# FIX: Don't require agent_id - use default personas if not available
+personas = []
+if self.agent_id:
+    try:
+        rows = self.db.execute_query(...)
+        personas = list(rows) if rows else []
+    except Exception:
+        personas = []
+
+# Always create default ensemble if no DB personas
+if not personas:
+    personas = [
+        {'persona_id': 'explorer', ...},
+        {'persona_id': 'cautious', ...},
+        {'persona_id': 'optimizer', ...},
+    ]
+```
+
+### Verification
+```
+Before fix: generate_proposals() returns []
+After fix:  generate_proposals() returns 3 proposals (Explorer, Cautious, Optimizer)
+```
+
+---
+
+## Fix 3: Synthesis Never Enabled (COMPLETE)
+
+**Timestamp**: 9:26 AM
+
+### Problem
+`synthesis_enabled` always False because conflict detection didn't set it.
+
+### Root Cause
+Line 8620: Conflict was detected but `_last_synthesis_enabled` was not set True.
+
+### Fix Applied
+| File | Lines | Change |
+|------|-------|--------|
+| core_gameplay.py | ~L8638 | Set `self._last_synthesis_enabled = True` when conflict detected |
+
+---
+
+## Database Table Discovery
+
+Two theory tables exist:
+- `working_theories` (14 cols, 0 entries) - older system, unused
+- `agent_theories` (21 cols, 1942 entries) - ScientificMethodEngine, active
+
+Fixed `theory_alignment_checker.py` to query `agent_theories` instead.
+
+---
+
 ## Session: January 8, 2026 - Comprehensive Metacognitive & Self-Model Fixes
 
 ---

@@ -176,7 +176,8 @@ class CounterfactualAnalyzer:
             self.logger.error(f"Schema initialization error: {e}")
     
     def analyze_failure(self, agent_id: str, game_id: str, session_id: str,
-                       final_score: float, generation: int = 0) -> List[str]:
+                       final_score: float, generation: int = 0,
+                       max_counterfactuals: Optional[int] = None) -> List[str]:
         """
         Analyze a failed game and generate counterfactual scenarios.
         
@@ -186,10 +187,19 @@ class CounterfactualAnalyzer:
             session_id: Session ID
             final_score: Final score (< 20, indicating failure)
             generation: Agent generation
+            max_counterfactuals: Maximum scenarios to generate (cognitive mode gating).
+                                 If None, uses self.max_counterfactuals_per_game.
+                                 Theory-based limits:
+                                 - Surgeon mode: 3 (minimal "what if")
+                                 - Learner mode: 10 (balanced)
+                                 - Artist mode: 20 (heavy exploration)
             
         Returns:
             List of scenario_ids generated
         """
+        # Apply cognitive mode gating
+        effective_max = max_counterfactuals if max_counterfactuals is not None else self.max_counterfactuals_per_game
+        
         try:
             # Get actual action sequence from database
             # NOTE: Use action_traces table (has data) not arc_action_tracking (empty)
@@ -231,19 +241,24 @@ class CounterfactualAnalyzer:
                 return []
             
             # Generate counterfactual scenarios
+            # COGNITIVE MODE GATING: Use effective_max instead of fixed max
             scenarios = []
             
-            for decision_point in decision_points[:self.max_counterfactuals_per_game]:
+            for decision_point in decision_points[:effective_max]:
                 # Generate alternative scenarios for this decision point
                 alternatives = self._generate_alternatives(
                     decision_point, actual_actions, agent_id, game_id,
                     session_id, final_score, generation
                 )
                 scenarios.extend(alternatives)
+                
+                # Early exit if we've hit the limit
+                if len(scenarios) >= effective_max * 2:  # Each decision point can generate ~6 alternatives
+                    break
             
             self.logger.info(
-                f"Generated {len(scenarios)} counterfactual scenarios from "
-                f"{len(decision_points)} decision points"
+                f"[COGNITIVE-GATING] Generated {len(scenarios)} counterfactual scenarios from "
+                f"{len(decision_points)} decision points (limit: {effective_max})"
             )
             
             # Extract learnings from scenarios

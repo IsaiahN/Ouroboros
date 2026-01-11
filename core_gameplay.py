@@ -1393,6 +1393,15 @@ class GameplayEngine:
         self._recent_action_traces = []
         self._recent_actions: List[str] = []
         
+        # NOVELTY DETECTOR: Track prediction accuracy to detect novel situations
+        # When accuracy drops below threshold, boost wA (trust self over network)
+        # This implements fluid adaptation from improvements_for_theory.md
+        self._prediction_accuracy_history: List[float] = []  # Rolling window of recent accuracies
+        self._novelty_window_size = 20  # Track last N predictions
+        self._novelty_threshold = 0.4  # Below this = novel situation
+        self._novelty_boost_active = False  # Flag for current novelty state
+        self._novelty_wA_boost = 0.2  # How much to boost wA when novel
+        
         # Two-Streams: Weaving reporter for self-reflection in every action
         self.weaving_reporter = WeavingReporter(self.db)
         
@@ -2353,6 +2362,26 @@ class GameplayEngine:
                             )
                             consciousness_state['surprise_level'] = observation.get('surprise', 0.0)
                             consciousness_state['prediction_accuracy'] = observation.get('prediction_accuracy', 0.0)
+                            
+                            # NOVELTY DETECTOR: Track prediction accuracy for fluid adaptation
+                            # When predictions consistently fail, we're in novel territory
+                            pred_acc = observation.get('prediction_accuracy', 0.5)
+                            self._prediction_accuracy_history.append(pred_acc)
+                            # Keep only recent window
+                            if len(self._prediction_accuracy_history) > self._novelty_window_size:
+                                self._prediction_accuracy_history = self._prediction_accuracy_history[-self._novelty_window_size:]
+                            
+                            # Calculate rolling average and detect novelty
+                            if len(self._prediction_accuracy_history) >= 5:  # Need minimum samples
+                                avg_accuracy = sum(self._prediction_accuracy_history) / len(self._prediction_accuracy_history)
+                                was_novel = self._novelty_boost_active
+                                self._novelty_boost_active = avg_accuracy < self._novelty_threshold
+                                
+                                # Log novelty state changes
+                                if self._novelty_boost_active and not was_novel:
+                                    logger.info(f"[NOVELTY] Novel situation detected: avg_accuracy={avg_accuracy:.2f} < {self._novelty_threshold}, boosting wA")
+                                elif not self._novelty_boost_active and was_novel:
+                                    logger.info(f"[NOVELTY] Situation normalized: avg_accuracy={avg_accuracy:.2f} >= {self._novelty_threshold}")
                             
                             # Spawn competing beliefs on high surprise
                             if observation.get('surprise', 0) > 0.5:
@@ -3926,25 +3955,40 @@ class GameplayEngine:
                 logger.debug(f"Semantic impression formation failed (non-critical): {e}")
 
         # ===================================================================
-        # FIX #13: COUNTERFACTUAL ANALYSIS FOR FAILURES
+        # FIX #13: COUNTERFACTUAL ANALYSIS FOR FAILURES (WITH COGNITIVE GATING)
         # ===================================================================
         # Run "what if?" analysis on failed games to learn alternative strategies.
         # This enables structured learning beyond trial and error.
+        # COGNITIVE MODE GATING: Limit counterfactuals based on agent's cognitive mode
+        # - Surgeon mode: 3 max (focus on execution)
+        # - Learner mode: 10 max (balanced)
+        # - Artist mode: 20 max (heavy exploration)
         # ===================================================================
         if mode_for_spine == 'LIVE' and not results['win'] and hasattr(self, 'counterfactual_analyzer') and self.counterfactual_analyzer:
             try:
+                # Determine cognitive mode for gating
+                game_type = game_id.split('-')[0] if game_id and '-' in game_id else game_id
+                cognitive_mode = self._get_cognitive_mode(
+                    game_state=game_state,
+                    stuck_confidence=0.0,  # Not stuck, just failed
+                    game_type=game_type
+                )
+                cf_limit = self._get_counterfactual_limit(cognitive_mode)
+                
                 cf_scenarios = self.counterfactual_analyzer.analyze_failure(
                     agent_id=agent_id or 'unknown',
                     game_id=game_id,
                     session_id=self.session_manager.current_session_id if self.session_manager else 'unknown',
                     final_score=float(game_state.score),
-                    generation=self.game_config.get('generation', 0)
+                    generation=self.game_config.get('generation', 0),
+                    max_counterfactuals=cf_limit
                 )
                 
                 if cf_scenarios:
                     results['counterfactual_scenarios'] = cf_scenarios
                     logger.info(
-                        f"[COUNTERFACTUAL] Generated {len(cf_scenarios)} 'what if' scenarios for failed game {game_id[:12]}"
+                        f"[COUNTERFACTUAL] Generated {len(cf_scenarios)} 'what if' scenarios for failed game {game_id[:12]} "
+                        f"(mode: {cognitive_mode}, limit: {cf_limit})"
                     )
             except Exception as e:
                 logger.debug(f"Counterfactual analysis failed (non-critical): {e}")
@@ -4500,6 +4544,11 @@ class GameplayEngine:
         self._previous_level = 1  # Starting level
         self._recent_action_traces = []  # Reset action traces for Q1-Q5
         self._q1_trace_logged = False  # Reset debug flag
+        
+        # NOVELTY DETECTOR: Reset for new game
+        # Each game starts fresh - novelty state shouldn't carry over
+        self._prediction_accuracy_history = []
+        self._novelty_boost_active = False
         
         # ACTION AVAILABILITY TRACKING: Initialize for change detection
         # Changes in available_actions = hints about object control
@@ -8522,9 +8571,21 @@ class GameplayEngine:
         except Exception:
             wA_decision, wB_decision = 0.5, 0.5
         
+        # NOVELTY DETECTOR: Boost wA when in novel situation
+        # This implements fluid adaptation - trust self more when network wisdom doesn't apply
+        novelty_applied = False
+        if getattr(self, '_novelty_boost_active', False):
+            original_wA = wA_decision
+            novelty_boost = getattr(self, '_novelty_wA_boost', 0.2)
+            wA_decision = min(0.95, wA_decision + novelty_boost)  # Cap at 0.95
+            wB_decision = 1.0 - wA_decision
+            novelty_applied = True
+            logger.debug(f"[NOVELTY] Applied wA boost: {original_wA:.2f} -> {wA_decision:.2f}")
+        
         # Store for use throughout action selection
         self._current_wA = wA_decision
         self._current_wB = wB_decision
+        self._novelty_applied_this_action = novelty_applied
         
         # ===================================================================
         # FIX #8: I-THREAD STREAM WEAVER - COLLECT STREAM PROPOSALS
@@ -8591,6 +8652,55 @@ class GameplayEngine:
                     'source': 'peer_failure'
                 })
         
+        # ===================================================================
+        # FIX CON-002: PERSONA ENSEMBLE - MULTI-PROPOSAL GENERATION
+        # ===================================================================
+        # Per Consciousness Theory: Multiple personas generate diverse proposals
+        # This is the key deliberation mechanism before I-Thread synthesis
+        # ===================================================================
+        persona_proposals = []
+        try:
+            if hasattr(self, 'persona_manager') and self.persona_manager:
+                # Build context for persona decision-making
+                persona_ctx = {
+                    'recent_actions': getattr(self, '_recent_actions', [])[-10:],
+                    'failed_actions': list(getattr(self, '_failed_actions_set', set())),
+                    'network_suggested': [p['action'] for p in stream_b_proposals if p.get('confidence', 0) > 0],
+                }
+                
+                # Get proposals from persona ensemble
+                persona_proposals = self.persona_manager.generate_proposals(
+                    game_state=game_state,
+                    available_actions=getattr(game_state, 'available_actions', None),
+                    context=persona_ctx
+                )
+                
+                if persona_proposals:
+                    self._last_persona_proposal_count = len(persona_proposals)
+                    
+                    # Add persona proposals to appropriate stream based on persona type
+                    for prop in persona_proposals:
+                        ptype = (prop.get('persona_type') or '').lower()
+                        if ptype in ('optimizer', 'network', 'validator', 'cautious'):
+                            # Network-oriented personas -> Stream B
+                            stream_b_proposals.append({
+                                'action': prop['action'],
+                                'confidence': prop.get('confidence', 0.3),
+                                'source': f"persona_{ptype}"
+                            })
+                        else:
+                            # Exploration-oriented personas -> Stream A
+                            stream_a_proposals.append({
+                                'action': prop['action'],
+                                'confidence': prop.get('confidence', 0.3),
+                                'source': f"persona_{ptype}"
+                            })
+                    
+                    logger.debug(f"[CON-002] Persona ensemble generated {len(persona_proposals)} proposals")
+        except Exception as persona_err:
+            logger.debug(f"Persona proposal generation failed: {persona_err}")
+            self._last_persona_proposal_count = 0
+        
         # I-Thread: Detect conflicts and log
         stream_a_actions = {p['action'] for p in stream_a_proposals if p.get('confidence', 0) > 0}
         stream_b_actions = {p['action'] for p in stream_b_proposals if p.get('confidence', 0) > 0}
@@ -8599,6 +8709,8 @@ class GameplayEngine:
         if stream_conflict:
             logger.info(f"[I-THREAD] Conflict detected: StreamA suggests {stream_a_actions}, "
                        f"StreamB suggests {stream_b_actions}, wA={wA_decision:.2f} wB={wB_decision:.2f}")
+            # FIX CON-003: Enable synthesis when conflict detected
+            self._last_synthesis_enabled = True
         
         # Store for later use in weaving
         self._stream_a_proposals = stream_a_proposals
@@ -8619,6 +8731,16 @@ class GameplayEngine:
             'selected_by_scorer': None,
             'best_alternative': None,
             'two_streams': {'wA': wA_decision, 'wB': wB_decision},  # Fix #7: Track in trace
+            'novelty_detector': {  # Fluid adaptation: detect novel situations
+                'active': getattr(self, '_novelty_boost_active', False),
+                'boost_applied': novelty_applied,
+                'avg_prediction_accuracy': (
+                    sum(self._prediction_accuracy_history) / len(self._prediction_accuracy_history)
+                    if hasattr(self, '_prediction_accuracy_history') and self._prediction_accuracy_history
+                    else None
+                ),
+                'samples': len(getattr(self, '_prediction_accuracy_history', [])),
+            },
             'imagination': {  # FIX #19: Include imagination context in ladder trace
                 'budget': imagination_budget,
                 'mode': imagination_mode,
@@ -8646,12 +8768,20 @@ class GameplayEngine:
                 self._current_stage = None
         except Exception:
             self._current_stage = None
-        try:
-            stage_numeric = int(self._current_stage) if self._current_stage is not None else 0
-        except Exception:
-            stage_numeric = 0
-        allow_observers = stage_numeric >= 2
-        allow_synthesis = stage_numeric >= 3
+        
+        # FIX: Cognitive stages are STRINGS not ints - convert properly
+        # Piaget stages: preoperational=0, concrete_operational=1, formal_operational=2
+        STAGE_TO_NUMERIC = {
+            'preoperational': 0,
+            'concrete_operational': 1,
+            'formal_operational': 2,
+        }
+        stage_numeric = STAGE_TO_NUMERIC.get(self._current_stage, 0) if self._current_stage else 0
+        
+        # Allow observers at concrete_operational (stage >= 1)
+        # Allow synthesis at formal_operational (stage >= 2)
+        allow_observers = stage_numeric >= 1
+        allow_synthesis = stage_numeric >= 2
         self._last_synthesis_enabled = allow_synthesis
         if allow_synthesis:
             ladder_trace['synthesis'] = {'status': 'pending', 'reason': 'synthesis candidate', 'persona_type': 'synthesis'}
@@ -9438,6 +9568,11 @@ class GameplayEngine:
             # Problem: budget_total=1000, budget_spend=null for entire game.
             # Imagination features (counterfactual, persona) aren't being triggered.
             # Solution: When stuck, force counterfactual analysis regardless of stage.
+            # 
+            # COGNITIVE MODE: Stuck = Artist mode (2.0x counterfactual weight)
+            # Micro-rollouts are lightweight heuristics, not heavy analysis,
+            # so they're always allowed. Full counterfactual analysis (analyze_failure)
+            # respects cognitive mode gating.
             # ===================================================================
             imagination_guided_action = None
             if hasattr(self, 'counterfactual_analyzer') and self.counterfactual_analyzer and game_state.frame:
@@ -11989,13 +12124,34 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Click color tracking failed: {e}")
             
-            # Send ACTION6 with reasoning JSON
+            # FIX INT-003: Recompute budget_spend with CURRENT values (not previous action's values)
+            # This fixes the issue where budget_spend was always 0 or None because it was
+            # computed before action selection set the telemetry values
+            budget_spend = self._estimate_imagination_spend(
+                budget_total=budget_total,
+                persona_count=getattr(self, '_last_persona_proposal_count', None),
+                cf_rollouts=getattr(self, '_last_counterfactual_rollouts_used', None),
+                synthesis_enabled=getattr(self, '_last_synthesis_enabled', None),
+            )
+            
+            # Send ACTION6 with reasoning JSON and telemetry
+            # CRITICAL FIX: Pass imagination telemetry to session_manager for action trace logging
             new_state = await self.action_handler.send_action_6(
                 x,
                 y,
                 game_state.frame,
                 reasoning=reasoning_json,
                 level_number=current_level,
+                budget_total=budget_total,
+                budget_spend=budget_spend,
+                context_mode=context_mode,
+                grounding_score=grounding_score,
+                question_tier=question_tier,
+                persona_proposal_count=getattr(self, '_last_persona_proposal_count', None),
+                counterfactual_rollouts_used=getattr(self, '_last_counterfactual_rollouts_used', None),
+                synthesis_enabled=getattr(self, '_last_synthesis_enabled', None),
+                existential_mode_active=getattr(self, '_last_existential_mode_active', None),
+                imagination_unlock_event=getattr(self, '_last_imagination_unlock_event', None),
             )
             
             # ================================================================
@@ -12205,6 +12361,14 @@ class GameplayEngine:
                 method = getattr(self.action_handler, method_name)
                 # Store frame before for selection verification
                 frame_before = game_state.frame
+                
+                # FIX INT-003: Recompute budget_spend with CURRENT telemetry values
+                budget_spend = self._estimate_imagination_spend(
+                    budget_total=budget_total,
+                    persona_count=getattr(self, '_last_persona_proposal_count', None),
+                    cf_rollouts=getattr(self, '_last_counterfactual_rollouts_used', None),
+                    synthesis_enabled=getattr(self, '_last_synthesis_enabled', None),
+                )
                 
                 # Pass reasoning JSON and level_number to action handler
                 new_state = await method(
@@ -18404,6 +18568,108 @@ class GameplayEngine:
             logger.debug(f"Error getting agent operating mode: {e}")
         
         return None
+
+    def _get_cognitive_mode(
+        self,
+        game_state: Optional[Any] = None,
+        stuck_confidence: float = 0.0,
+        game_type: Optional[str] = None
+    ) -> str:
+        """
+        Determine current cognitive mode based on context.
+        
+        Three cognitive modes from Unified Consciousness Theory:
+        
+        1. SURGEON MODE (Exploitation - known problems):
+           - Counterfactuals: 0.3x (minimal "what if")
+           - Focus on execution, not theorizing
+           - Trigger: Known problem + high reliability
+        
+        2. ARTIST MODE (Exploration - novel/stuck):
+           - Counterfactuals: 2.0x (heavy "what if")
+           - Try new approaches, build understanding
+           - Trigger: Novel problem OR stuck
+        
+        3. LEARNER MODE (Skill Acquisition - building competence):
+           - Counterfactuals: 1.0x (balanced)
+           - Deep world building
+           - Trigger: Building new world model
+        
+        Args:
+            game_state: Current game state
+            stuck_confidence: How stuck the agent is (0.0-1.0)
+            game_type: Game type for experience lookup
+            
+        Returns:
+            'surgeon', 'artist', or 'learner'
+        """
+        # Check for stuck condition -> Artist mode
+        if stuck_confidence > 0.6:
+            return 'artist'
+        
+        # Check for novel game type -> Artist mode
+        if game_type:
+            try:
+                # How many times have we seen this game type?
+                experience = self.db.execute_query("""
+                    SELECT COUNT(*) as count, 
+                           AVG(final_score) as avg_score,
+                           MAX(final_score) as max_score
+                    FROM game_results
+                    WHERE game_type = ?
+                """, (game_type,))
+                
+                if experience and experience[0]:
+                    count = experience[0].get('count', 0)
+                    avg_score = experience[0].get('avg_score', 0) or 0
+                    max_score = experience[0].get('max_score', 0) or 0
+                    
+                    # Novel game type (< 10 attempts) -> Artist mode
+                    if count < 10:
+                        return 'artist'
+                    
+                    # High success rate (> 15 avg score) -> Surgeon mode
+                    if avg_score > 15 and max_score >= 20:
+                        return 'surgeon'
+                    
+                    # Moderate experience, building competence -> Learner mode
+                    if count >= 10 and avg_score < 15:
+                        return 'learner'
+                        
+            except Exception as e:
+                logger.debug(f"Error checking game experience: {e}")
+        
+        # Check game state for winning sequences -> Surgeon mode
+        if game_state and hasattr(game_state, 'score'):
+            current_score = getattr(game_state, 'score', 0)
+            # Near-win situation with known path -> Surgeon mode
+            if current_score >= 15:
+                return 'surgeon'
+        
+        # Default: Learner mode (balanced approach)
+        return 'learner'
+
+    def _get_counterfactual_limit(self, cognitive_mode: str) -> int:
+        """
+        Get maximum counterfactual scenarios based on cognitive mode.
+        
+        From Unified Consciousness Theory:
+        - Surgeon mode: 0.3x -> ~3 counterfactuals max
+        - Learner mode: 1.0x -> ~10 counterfactuals max
+        - Artist mode:  2.0x -> ~20 counterfactuals max
+        
+        Args:
+            cognitive_mode: 'surgeon', 'learner', or 'artist'
+            
+        Returns:
+            Maximum number of counterfactual scenarios to generate
+        """
+        if cognitive_mode == 'surgeon':
+            return 3  # Minimal "what if" - focus on execution
+        elif cognitive_mode == 'artist':
+            return 20  # Heavy "what if" - explore possibilities
+        else:  # learner
+            return 10  # Balanced approach
 
     def _analyze_situation_with_primitives(
         self,

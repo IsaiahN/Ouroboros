@@ -497,7 +497,7 @@ class ActionHandler:
             frame: Current frame for validation (optional)
             reasoning: Optional reasoning dict/JSON for the action (≤16 KB)
             level_number: Current level number for trace logging
-            **kwargs: Additional arguments (imagination budget, etc.) - absorbed but not used
+            **kwargs: Imagination telemetry (budget_total, context_mode, etc.)
 
         Returns:
             New game state
@@ -530,11 +530,27 @@ class ActionHandler:
             logger.warning(f"Invalid coordinates ({x}, {y}) for frame size {len(frame)}x{len(frame[0]) if frame else 0}")
             raise ValueError(f"Coordinates ({x}, {y}) are outside frame bounds")
 
-        # Include reasoning and level_number if provided
-        kwargs = {'x': x, 'y': y, 'coordinates': [x, y], 'level_number': level_number}
+        # Include reasoning, level_number, and imagination telemetry
+        action_kwargs = {
+            'x': x, 
+            'y': y, 
+            'coordinates': [x, y], 
+            'level_number': level_number,
+            # Pass through imagination telemetry for action_traces logging
+            'budget_total': kwargs.get('budget_total'),
+            'budget_spend': kwargs.get('budget_spend'),
+            'context_mode': kwargs.get('context_mode'),
+            'grounding_score': kwargs.get('grounding_score'),
+            'question_tier': kwargs.get('question_tier'),
+            'persona_proposal_count': kwargs.get('persona_proposal_count'),
+            'counterfactual_rollouts_used': kwargs.get('counterfactual_rollouts_used'),
+            'synthesis_enabled': kwargs.get('synthesis_enabled'),
+            'existential_mode_active': kwargs.get('existential_mode_active'),
+            'imagination_unlock_event': kwargs.get('imagination_unlock_event'),
+        }
         if reasoning:
-            kwargs['reasoning'] = reasoning
-        return await self._send_action_with_context("ACTION6", **kwargs)
+            action_kwargs['reasoning'] = reasoning
+        return await self._send_action_with_context("ACTION6", **action_kwargs)
 
     async def send_action_7(self, reasoning: Optional[Dict[str, Any]] = None, level_number: int = 1, **kwargs) -> GameState:
         """Send ACTION7 to the game.
