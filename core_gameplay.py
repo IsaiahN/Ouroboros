@@ -9305,7 +9305,20 @@ class GameplayEngine:
         is_stuck_by_primitive = getattr(self, '_is_stuck', False)
         stuck_confidence = 0.0
         
-        # Check metacognitive stuck confidence if available
+        # ================================================================
+        # FIX #3 (COGNITION): STUCK DETECTION WITHOUT BEHAVIORAL ADAPTATION
+        # Problem: stuck_detection belief showed 0.9 confidence for 298 frames
+        # but agent kept using "Random ACTION" with no strategy change.
+        # Solution: Factor in _no_frame_change_count as a PRIMARY stuck signal.
+        # ================================================================
+        no_frame_change_count = getattr(self, '_no_frame_change_count', 0)
+        
+        # Frame-based stuck detection: If no frame changes for 50+ actions, we're stuck
+        if no_frame_change_count >= 50:
+            stuck_confidence = min(1.0, 0.7 + (no_frame_change_count - 50) * 0.01)
+            logger.debug(f"[COGNITION-FIX] Frame-based stuck detection: {no_frame_change_count} frames -> conf={stuck_confidence:.2f}")
+        
+        # Also check metacognitive stuck confidence if available
         if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
             try:
                 summary = self.metacognitive_engine.get_metacognitive_summary()
@@ -9314,18 +9327,49 @@ class GameplayEngine:
                 eliminated_count = summary.get('actions_eliminated', 0)
                 failures_count = summary.get('failures_recorded', 0)
                 
-                # Calculate stuck confidence: 0.0 = not stuck, 1.0 = definitely stuck
-                stuck_confidence = min(1.0, 
+                # Calculate metacognitive stuck confidence
+                meta_stuck_conf = min(1.0, 
                     (revision_count * 0.15) +       # Each revision adds 0.15
                     (eliminated_count * 0.1) +       # Each elimination adds 0.1
                     (failures_count * 0.05)          # Each failure adds 0.05
                 )
+                # Take max of frame-based and metacognitive stuck confidence
+                stuck_confidence = max(stuck_confidence, meta_stuck_conf)
             except Exception:
-                stuck_confidence = 0.0
+                pass
         
         # If stuck confidence > 0.7 OR primitive detected stuck, force recovery
         if (stuck_confidence > 0.7 or is_stuck_by_primitive) and not hasattr(self, '_recovery_mode_active'):
             logger.info(f"[FIX5-RECOVERY] Entering recovery mode: stuck_conf={stuck_confidence:.2f}, primitive_stuck={is_stuck_by_primitive}")
+            
+            # ===================================================================
+            # FIX #7: FORCE IMAGINATION BUDGET SPEND WHEN STUCK
+            # ===================================================================
+            # Problem: budget_total=1000, budget_spend=null for entire game.
+            # Imagination features (counterfactual, persona) aren't being triggered.
+            # Solution: When stuck, force counterfactual analysis regardless of stage.
+            # ===================================================================
+            imagination_guided_action = None
+            if hasattr(self, 'counterfactual_analyzer') and self.counterfactual_analyzer and game_state.frame:
+                try:
+                    # Force counterfactual analysis to find a way out
+                    cf_proposals = self.counterfactual_analyzer.generate_micro_rollouts(
+                        frame_before=getattr(self, '_previous_frame', None),
+                        frame_after=game_state.frame,
+                        available_actions=getattr(game_state, 'available_actions', None),
+                    )
+                    
+                    if cf_proposals:
+                        # Consume imagination budget
+                        spend = 0.02 * len(cf_proposals)
+                        self._consume_imagination(spend)
+                        self._last_counterfactual_rollouts_used = len(cf_proposals)
+                        
+                        best_cf = cf_proposals[0]
+                        imagination_guided_action = best_cf.get('action')
+                        logger.info(f"[FIX7-IMAGINATION] Spent {spend:.3f} budget on {len(cf_proposals)} counterfactuals -> ACTION{imagination_guided_action}")
+                except Exception as e:
+                    logger.debug(f"Forced counterfactual failed: {e}")
             
             # Choose an action we HAVEN'T tried recently
             recent_actions = getattr(self, '_action_history', [])[-10:]
@@ -9341,9 +9385,17 @@ class GameplayEngine:
                 if not untried_actions:
                     untried_actions = available_actions
             
-            # Pick random untried action for exploration
+            # PREFER imagination-guided action if available, else random untried
             import random
-            recovery_action = random.choice(untried_actions)
+            if imagination_guided_action is not None:
+                recovery_action = imagination_guided_action
+                reasoning_source = "imagination-guided"
+            elif untried_actions:
+                recovery_action = random.choice(untried_actions)
+                reasoning_source = "untried exploration"
+            else:
+                recovery_action = random.choice(available_actions)
+                reasoning_source = "random fallback"
             
             # Set recovery mode flag (prevents repeated triggers)
             self._recovery_mode_active = True
@@ -9354,8 +9406,8 @@ class GameplayEngine:
             if hasattr(self, 'metacognitive_engine') and self.metacognitive_engine:
                 self.metacognitive_engine._contradicted_actions = {}
             
-            reasoning = f"[RECOVERY MODE] Breaking stuck pattern (conf={stuck_confidence:.2f}). Trying underexplored ACTION{recovery_action}"
-            logger.info(f"[FIX5] {reasoning}")
+            reasoning = f"[RECOVERY MODE] Breaking stuck pattern (conf={stuck_confidence:.2f}, {reasoning_source}). Trying ACTION{recovery_action}"
+            logger.info(f"[FIX5+7] {reasoning}")
             return _finalize_ladder_and_return(f"ACTION{recovery_action}", reasoning, 'heuristic')
         
         # Track recovery mode duration
@@ -10477,6 +10529,12 @@ class GameplayEngine:
         # - Preoperational: Random exploration, no sequence following
         # - Concrete Operational: Prefer proven sequences, literal matching
         # - Formal Operational: Hypothesize, experiment, abstract patterns
+        # ================================================================
+        # FIX #4 (COGNITION): CODS->ACTION DISCONNECT
+        # Problem: Preoperational agents bypassed ALL cognition including CODS.
+        # CODS operators ran but actions were "Random" with no connection.
+        # Solution: Even preoperational agents should use CODS when available,
+        # and ALWAYS respect stuck detection to avoid 300+ frame loops.
         # ===================================================================
         cognitive_stage_action = None
         cognitive_stage_reasoning = None
@@ -10487,9 +10545,28 @@ class GameplayEngine:
                 capabilities = self.cognitive_stage_system.get_stage_capabilities(agent_id)
                 
                 if stage == 'preoperational':
-                    # Preoperational agents explore randomly - skip deterministic strategies
-                    # They cannot follow sequences or use hypotheses yet
-                    if random.random() < 0.5:  # 50% chance of random action
+                    # FIX #4: Preoperational agents CAN still use basic pattern detection
+                    # They just can't follow complex sequences or form abstract hypotheses.
+                    # Check CODS first - even babies can detect patterns!
+                    cods_preop_action = None
+                    if self.cods_engine and game_state.frame:
+                        try:
+                            cods_result = self.cods_engine.suggest_action(game_state.frame)
+                            if cods_result and cods_result.get('action'):
+                                conf = cods_result.get('confidence', 0.0)
+                                if conf >= 0.4:  # Lower threshold for preoperational
+                                    cods_preop_action = cods_result['action']
+                                    self._last_cods_operators_used = cods_result.get('operators', [])
+                        except Exception:
+                            pass
+                    
+                    # Use CODS if available, otherwise random
+                    if cods_preop_action:
+                        cognitive_stage_action = f"ACTION{cods_preop_action}"
+                        cognitive_stage_reasoning = f"Preoperational pattern: CODS ACTION{cods_preop_action}"
+                        logger.debug(f"[STAGE] {cognitive_stage_reasoning}")
+                        return _finalize_ladder_and_return(cognitive_stage_action, cognitive_stage_reasoning, 'heuristic')
+                    elif random.random() < 0.5:  # 50% chance of random action
                         random_action = random.randint(1, 6)  # Skip ACTION7 (submit)
                         cognitive_stage_action = f"ACTION{random_action}"
                         cognitive_stage_reasoning = f"Preoperational exploration: Random ACTION{random_action}"
@@ -15715,6 +15792,47 @@ class GameplayEngine:
             Theory stage string computed from actual metrics
         """
         try:
+            # ===================================================================
+            # FIX #6: DETECT STAGE STAGNATION AND FORCE PROGRESSION
+            # ===================================================================
+            # Problem: theory_stage stays "hypothesizing" for 300+ frames without
+            # ever progressing to "testing" or detecting it's stuck.
+            # Solution: Track last stage change and force progression after N actions.
+            # ===================================================================
+            action_counter = getattr(self, '_action_counter', 0)
+            last_stage = getattr(self, '_last_theory_stage', 'exploring')
+            last_stage_change_action = getattr(self, '_last_stage_change_action', 0)
+            actions_in_same_stage = action_counter - last_stage_change_action
+            
+            # If stuck in same stage for 100+ actions, something is wrong
+            STAGNATION_THRESHOLD = 100
+            if actions_in_same_stage > STAGNATION_THRESHOLD:
+                # Force progression based on current stage
+                if last_stage == 'hypothesizing':
+                    # Too long hypothesizing without validation = need to test or we're stuck
+                    if game_state.score and float(game_state.score) > 0:
+                        logger.debug(f"[THEORY] Forcing hypothesizing->testing after {actions_in_same_stage} actions")
+                        self._last_theory_stage = 'testing'
+                        self._last_stage_change_action = action_counter
+                        return "testing"
+                    else:
+                        logger.debug(f"[THEORY] Forcing hypothesizing->stuck after {actions_in_same_stage} actions (no score progress)")
+                        self._last_theory_stage = 'stuck'
+                        self._last_stage_change_action = action_counter
+                        return "stuck"
+                elif last_stage == 'exploring':
+                    # Exploring for too long = force to hypothesizing
+                    logger.debug(f"[THEORY] Forcing exploring->hypothesizing after {actions_in_same_stage} actions")
+                    self._last_theory_stage = 'hypothesizing'
+                    self._last_stage_change_action = action_counter
+                    return "hypothesizing"
+                elif last_stage == 'testing' and actions_in_same_stage > STAGNATION_THRESHOLD * 2:
+                    # Testing for too long without resolution = stuck
+                    logger.debug(f"[THEORY] Forcing testing->stuck after {actions_in_same_stage} actions")
+                    self._last_theory_stage = 'stuck'
+                    self._last_stage_change_action = action_counter
+                    return "stuck"
+            
             # Get actual evidence from self_model
             control_confidence = 0.0
             validation_status = "UNVALIDATED"
@@ -15761,40 +15879,50 @@ class GameplayEngine:
                     has_contradictions = True
             
             # FIX #10: Compute stage from actual metrics (not heuristics)
+            # All paths set computed_stage, then we track changes at the end
+            computed_stage = None
             
             # Rule 1: No hypotheses = exploring
             if not has_hypotheses and control_confidence < 0.3:
-                return "exploring"
+                computed_stage = "exploring"
             
             # Rule 2: Contradictions detected = revising
-            if has_contradictions and validation_status != "VALIDATED":
-                return "revising"
+            elif has_contradictions and validation_status != "VALIDATED":
+                computed_stage = "revising"
             
             # Rule 3: Unvalidated hypothesis = hypothesizing
-            if validation_status == "UNVALIDATED":
-                return "hypothesizing"
+            elif validation_status == "UNVALIDATED":
+                computed_stage = "hypothesizing"
             
             # Rule 4: Partially tested = testing
-            if validation_status == "TESTED" and control_confidence < 0.7:
-                return "testing"
+            elif validation_status == "TESTED" and control_confidence < 0.7:
+                computed_stage = "testing"
             
             # Rule 5: High confidence + validated = confident
-            if validation_status == "VALIDATED" and control_confidence > 0.7:
-                return "confident"
+            elif validation_status == "VALIDATED" and control_confidence > 0.7:
+                computed_stage = "confident"
             
             # Rule 6: Medium confidence + tested = hypothesis
-            if control_confidence >= 0.3 and control_confidence <= 0.7:
-                return "hypothesizing"
+            elif control_confidence >= 0.3 and control_confidence <= 0.7:
+                computed_stage = "hypothesizing"
             
             # Rule 7: High confidence but not validated = testing
-            if control_confidence > 0.7 and validation_status != "VALIDATED":
-                return "testing"
+            elif control_confidence > 0.7 and validation_status != "VALIDATED":
+                computed_stage = "testing"
             
             # Default: If has some evidence, at least hypothesizing
-            if game_state.score and float(game_state.score) > 0:
-                return "hypothesizing"
+            elif game_state.score and float(game_state.score) > 0:
+                computed_stage = "hypothesizing"
             
-            return "exploring"
+            else:
+                computed_stage = "exploring"
+            
+            # Track stage changes for stagnation detection
+            if computed_stage != last_stage:
+                self._last_theory_stage = computed_stage
+                self._last_stage_change_action = action_counter
+            
+            return computed_stage
             
         except Exception:
             return "exploring"
@@ -16354,12 +16482,36 @@ class GameplayEngine:
                 merged_moveable = int(round(merged_counts.get('moveable', 0)))
                 merged_toggleable = int(round(merged_counts.get('toggleable', 0)))
                 
+                # ================================================================
+                # FIX #1 (COGNITION): SELF-MODEL CONTRADICTION
+                # Problem: working_theory said "I control 0 objects" but
+                # objects_agent_controls listed actual objects.
+                # Solution: When merged counts are zero but ctrl_objects exist,
+                # use actual ctrl_objects count. Never claim zero when we have objects.
+                # ================================================================
+                actual_moveable = len(moveable)
+                actual_toggleable = len(toggleable)
+                
+                # Use actual counts if merged counts are suspiciously zero
+                if merged_moveable == 0 and actual_moveable > 0:
+                    merged_moveable = actual_moveable
+                    logger.debug(f"[COGNITION-FIX] Merged moveable was 0 but actual is {actual_moveable}")
+                if merged_toggleable == 0 and actual_toggleable > 0:
+                    merged_toggleable = actual_toggleable
+                    logger.debug(f"[COGNITION-FIX] Merged toggleable was 0 but actual is {actual_toggleable}")
+                
                 if merged_moveable and merged_toggleable:
                     working_theory = f"I control {merged_moveable} moveable and {merged_toggleable} toggleable objects"
                 elif merged_toggleable:
-                    working_theory = f"I can toggle {merged_toggleable} objects by clicking"
-                else:
+                    working_theory = f"I can toggle {merged_toggleable} objects by clicking (ACTION6)"
+                elif merged_moveable:
                     working_theory = f"I control {merged_moveable} objects and move with directional actions"
+                else:
+                    # Fallback: If ctrl_objects exist but no counts, still acknowledge them
+                    if ctrl_objects:
+                        working_theory = f"Detected {len(ctrl_objects)} potential control targets - confirming mechanics"
+                    else:
+                        working_theory = "No confirmed object control yet - exploring mechanics"
                 
                 # Store theory in history
                 # FIX: Use calculate_control_confidence() instead of raw self_model value
@@ -17092,7 +17244,78 @@ class GameplayEngine:
             """, (agent_id,))
             
             if not agent_data:
-                return None
+                # ===================================================================
+                # FIX #5: GENERATE FALLBACK TWO-STREAMS FROM GAME EXPERIENCE
+                # ===================================================================
+                # Problem: Agents with 300+ generations show "No agent data" because 
+                # agent_id doesn't match DB (agent table was purged/reset).
+                # Solution: Build minimal context from game_results history.
+                # ===================================================================
+                game_id = self.game_config.get('current_game_id', '')
+                game_type = game_id[:4] if game_id else ''
+                current_level = int(game_state.score) + 1 if game_state.score else 1
+                
+                # Get historical performance even without agents table entry
+                history = self.db.execute_query("""
+                    SELECT COUNT(*) as games_played,
+                           SUM(CASE WHEN final_score > 0 THEN 1 ELSE 0 END) as wins,
+                           AVG(final_score) as avg_score,
+                           MAX(levels_completed) as best_level
+                    FROM game_results 
+                    WHERE game_type = ? AND timestamp > datetime('now', '-24 hours')
+                """, (game_type,))
+                
+                if history and history[0].get('games_played', 0) > 0:
+                    h = history[0]
+                    win_rate = h.get('wins', 0) / max(1, h.get('games_played', 1))
+                    avg_score = h.get('avg_score', 0) or 0
+                    best_level = h.get('best_level', 0) or 0
+                    
+                    # Build narrative from network experience
+                    if win_rate > 0.5:
+                        emotion = 'confident'
+                        narrative = f"Network has {win_rate:.0%} success on {game_type}, following proven paths"
+                    elif best_level >= current_level:
+                        emotion = 'curious'
+                        narrative = f"Network reached level {best_level} before, exploring known territory"
+                    else:
+                        emotion = 'cautious'
+                        narrative = f"Frontier level {current_level} (network best: {best_level}), careful exploration"
+                    
+                    return {
+                        'emotional_network': win_rate,
+                        'semantic_network': 0.5,
+                        'identity_network': 0.5,
+                        'private_memory': 0.3,  # No private memory for this agent
+                        'network_wisdom': min(0.8, win_rate + 0.2),  # Trust network if it has wins
+                        'self_trust_bias': 0.4,  # Lean toward network
+                        'decision_weight': 0.5,
+                        'conflict': False,
+                        'emotion': emotion,
+                        'narrative': narrative,
+                        'episodic_narrative': f"{game_type}: {h.get('games_played')} games, {h.get('wins')} wins",
+                        'stream_comparison': None,
+                        'cognitive_stage': 'concrete_operational',
+                        'can_hypothesize': True
+                    }
+                
+                # Truly no data - return minimal exploration mode
+                return {
+                    'emotional_network': 0.5,
+                    'semantic_network': 0.5,
+                    'identity_network': 0.5,
+                    'private_memory': 0.1,
+                    'network_wisdom': 0.1,
+                    'self_trust_bias': 0.5,
+                    'decision_weight': 0.5,
+                    'conflict': False,
+                    'emotion': 'curious',
+                    'narrative': f'New territory on {game_type or "unknown"} level {current_level}, pure exploration',
+                    'episodic_narrative': None,
+                    'stream_comparison': None,
+                    'cognitive_stage': 'preoperational',
+                    'can_hypothesize': False
+                }
             
             a = agent_data[0]
             self_network_bias = a.get('self_network_bias', 0.5) or 0.5
@@ -17957,6 +18180,22 @@ class GameplayEngine:
                         most_repeated = max(action_counts.keys(), key=lambda k: action_counts.get(k, 0))
                         if action_counts[most_repeated] >= 5:
                             actionable['avoid_actions'] = [most_repeated]
+        
+        # ================================================================
+        # FIX #2 (COGNITION): ACTIONABLE SELF-CONTRADICTION
+        # Problem: avoid_actions and prefer_actions contained same action,
+        # creating a logical paradox (avoid 6 AND prefer 6).
+        # Solution: Remove actions that appear in BOTH lists.
+        # Priority: avoid_actions takes precedence (safety first).
+        # ================================================================
+        avoid_set = set(actionable.get('avoid_actions', []))
+        prefer_set = set(actionable.get('prefer_actions', []))
+        contradictions = avoid_set & prefer_set  # Actions in BOTH lists
+        
+        if contradictions:
+            # Remove contradictions from prefer_actions (avoid takes precedence)
+            actionable['prefer_actions'] = [a for a in actionable.get('prefer_actions', []) if a not in contradictions]
+            logger.debug(f"[COGNITION-FIX] Removed contradictory actions from prefer_actions: {contradictions}")
         
         # Remove duplicates
         actionable['avoid_actions'] = list(set(actionable['avoid_actions']))
