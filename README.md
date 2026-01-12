@@ -370,3 +370,8 @@ See [.github/copilot-instructions.md](.github/copilot-instructions.md) for compl
 ---
 
 <img width="1325" height="545" alt="image" src="https://github.com/user-attachments/assets/f8b00168-0c93-4161-bc3d-88faa1689ce7" />
+
+---
+
+Example Gameplay (Level 4 as66):
+[https://three.arcprize.org/replay/as66-821a4dcad9c2/55d279d1-3f1e-416f-9024-c49e1b1df573](https://three.arcprize.org/replay/as66-821a4dcad9c2/55d279d1-3f1e-416f-9024-c49e1b1df573)
