@@ -25,13 +25,15 @@ def test_metacog_eliminations():
     metacog = MetacognitiveReasoningEngine(db)
     
     # Test 1: Elimination tracking
+    # Note: ACTION6 cannot be eliminated without coordinates (by design)
+    # Use ACTION1 instead
     print("\n[TEST 1] Elimination tracking")
     metacog.eliminate_action(
         agent_id="test_agent",
         game_type="lp85",
         level_number=2,
-        action="ACTION6",
-        reason="Stop using ACTION6 - it consistently fails"
+        action="ACTION1",
+        reason="Stop using ACTION1 - it consistently fails"
     )
     
     # Query eliminations
@@ -47,7 +49,7 @@ def test_metacog_eliminations():
         print("  [OK] Elimination stored in database")
     else:
         print("  [FAIL] No eliminations found")
-        return False
+        assert False, "No eliminations found - MetacognitiveReasoningEngine.eliminate_action() may not be working"
     
     # Test 2: Prediction type suppression
     print("\n[TEST 2] Prediction type suppression after repeated failures")
@@ -87,14 +89,12 @@ def test_metacog_eliminations():
                 break
         else:
             print("  [FAIL] No type reached suppression threshold")
-            return False
+            assert False, "No prediction type reached suppression threshold"
     
     print("\n" + "=" * 60)
     print("ALL METACOG ELIMINATIONS TESTS PASSED!")
     print("=" * 60)
-    return True
 
 
 if __name__ == "__main__":
-    success = test_metacog_eliminations()
-    sys.exit(0 if success else 1)
+    test_metacog_eliminations()

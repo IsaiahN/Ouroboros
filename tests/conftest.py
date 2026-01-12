@@ -8,6 +8,7 @@ without triggering the root __init__.py which uses relative imports.
 import os
 import sys
 from pathlib import Path
+import pytest
 
 # Disable pycache - per project rules
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -18,6 +19,33 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+
+# Path to the main database (NOT the empty tests/core_data.db!)
+# The main database is 15+ GB at project root
+MAIN_DB_PATH = Path(project_root) / "core_data.db"
+
+
+@pytest.fixture
+def db_path() -> Path:
+    """
+    Fixture providing path to the main core_data.db database.
+    
+    Use this in tests instead of Path(__file__).parent / "core_data.db"
+    which incorrectly points to an empty tests/core_data.db file.
+    """
+    return MAIN_DB_PATH
+
+
+@pytest.fixture
+def db_connection():
+    """
+    Fixture providing a database connection to core_data.db.
+    Automatically closes connection after test completes.
+    """
+    import sqlite3
+    conn = sqlite3.connect(str(MAIN_DB_PATH))
+    yield conn
+    conn.close()
 
 
 def _find_pycache(root: str):

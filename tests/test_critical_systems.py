@@ -21,11 +21,14 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
+# Path to main database (at project root, NOT the empty tests/core_data.db)
+MAIN_DB_PATH = Path(__file__).parent.parent / "core_data.db"
+
 
 class TestDatabaseIntegrity(unittest.TestCase):
     """Tests for database schema and data integrity."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def setUp(self):
         """Set up database connection."""
@@ -79,7 +82,7 @@ class TestDatabaseIntegrity(unittest.TestCase):
 class TestSequenceSystem(unittest.TestCase):
     """Tests for sequence storage and retrieval."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def setUp(self):
         """Set up database connection."""
@@ -162,7 +165,7 @@ class TestSequenceSystem(unittest.TestCase):
 class TestValidationRates(unittest.TestCase):
     """Tests for sequence validation success rates."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     MINIMUM_VALIDATION_RATE = 50.0  # Minimum acceptable rate
     
     def setUp(self):
@@ -255,7 +258,7 @@ class TestValidationRates(unittest.TestCase):
 class TestPioneerAssignment(unittest.TestCase):
     """Tests for pioneer role assignment logic."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def setUp(self):
         """Set up database connection."""
@@ -330,7 +333,7 @@ class TestPioneerAssignment(unittest.TestCase):
 class TestBudgetAllocation(unittest.TestCase):
     """Tests for action budget allocation and exhaustion."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def setUp(self):
         """Set up database connection."""
@@ -401,7 +404,7 @@ class TestBudgetAllocation(unittest.TestCase):
 class TestSequenceQuality(unittest.TestCase):
     """Tests for sequence quality and bloat detection."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     MAX_BLOAT_RATIO = 5.0  # Average should be within 5x of minimum
     MIN_VALID_ACTIONS = 6  # Sequences with <6 actions are likely junk
     
@@ -477,7 +480,7 @@ class TestSequenceQuality(unittest.TestCase):
 class TestRoleBalance(unittest.TestCase):
     """Tests for agent role distribution balance."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def setUp(self):
         """Set up database connection."""

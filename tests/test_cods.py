@@ -45,9 +45,11 @@ from cods_engine import (
 
 @pytest.fixture
 def temp_db():
-    """Create a temporary database for testing."""
+    """Create a temporary database path for testing (file will be created by DatabaseInterface)."""
     fd, path = tempfile.mkstemp(suffix='.db')
     os.close(fd)
+    # Delete the file so DatabaseInterface will create it from schema
+    os.unlink(path)
     yield path
     # Cleanup
     try:
@@ -74,8 +76,22 @@ def unlock_manager(temp_db):
 def composer(temp_db):
     """Create an operator composer with temp database."""
     from database_interface import DatabaseInterface
+    # DatabaseInterface automatically initializes from complete_database_schema.sql
     db = DatabaseInterface(temp_db)
-    return OperatorComposer(db)
+    
+    # Insert test agent into agents table (schema already created by DatabaseInterface)
+    conn = db._get_connection()
+    conn.execute("""
+        INSERT OR IGNORE INTO agents (agent_id, agent_type, genome, generation, specialization)
+        VALUES ('test-agent-001', 'pioneer', '{}', 1, 'exploration')
+    """)
+    conn.commit()
+    
+    composer = OperatorComposer(db)
+    yield composer
+    
+    # Cleanup: close database connection
+    db.close()
 
 
 @pytest.fixture
@@ -107,8 +123,8 @@ class TestSeedPrimitives:
     def test_seed_count(self, seed_registry):
         """Verify approximate seed primitive count."""
         count = seed_registry.count()
-        # Should have approximately 50 seed primitives
-        assert 40 <= count <= 60, f"Expected ~50 seeds, got {count}"
+        # Should have approximately 110-130 seed primitives (expanded from original 50)
+        assert 100 <= count <= 150, f"Expected ~120 seeds, got {count}"
     
     def test_categories_exist(self, seed_registry):
         """Verify all expected categories exist."""

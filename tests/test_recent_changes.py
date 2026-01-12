@@ -23,6 +23,9 @@ sys.dont_write_bytecode = True
 import unittest
 import sqlite3
 from pathlib import Path
+
+# Path to main database (at project root, NOT the empty tests/core_data.db)
+MAIN_DB_PATH = Path(__file__).parent.parent / "core_data.db"
 from typing import Dict, Any
 
 
@@ -95,7 +98,7 @@ class TestAbstractionConfig(unittest.TestCase):
 class TestSocialRuleAdherence(unittest.TestCase):
     """Tests for social_rule_adherence in agent_operating_mode_system.py."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def setUp(self):
         """Set up database connection."""
@@ -176,7 +179,7 @@ class TestSocialRuleAdherence(unittest.TestCase):
 class TestNewDatabaseTables(unittest.TestCase):
     """Tests for new database tables created for rule induction/symbolic learning."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     EXPECTED_TABLES = [
         'learned_rules',
         'rule_transfers', 
@@ -306,7 +309,7 @@ class TestNewDatabaseTables(unittest.TestCase):
 class TestMultiStagePipelineIntegration(unittest.TestCase):
     """Tests for multi-stage matching pipeline integration."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def test_pipeline_can_be_imported(self):
         """Verify multi_stage_matching_pipeline can be imported."""
@@ -358,7 +361,7 @@ class TestAbstractionEngineIntegration(unittest.TestCase):
 class TestRuleInductionIntegration(unittest.TestCase):
     """Tests for rule induction engine integration."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def test_rule_induction_can_be_imported(self):
         """Verify rule_induction_engine can be imported."""
@@ -389,7 +392,7 @@ class TestRuleInductionIntegration(unittest.TestCase):
 class TestSystemIntegrity(unittest.TestCase):
     """Integration tests for overall system integrity."""
     
-    DB_PATH = Path(__file__).parent / "core_data.db"
+    DB_PATH = MAIN_DB_PATH
     
     def setUp(self):
         """Set up database connection."""

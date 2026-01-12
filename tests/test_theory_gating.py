@@ -106,9 +106,7 @@ def test_theory_gating():
     print("=" * 60)
     
     conn.close()
-    return True
 
 
 if __name__ == '__main__':
-    success = test_theory_gating()
-    sys.exit(0 if success else 1)
+    test_theory_gating()

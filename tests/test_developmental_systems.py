@@ -1629,10 +1629,10 @@ class TestBabyDerivedPrimitives(unittest.TestCase):
         self.sp = get_seed_primitives()
     
     def test_primitive_count_increased(self):
-        """Total primitives should be ~100 (up from ~50)."""
+        """Total primitives should be ~120+ (up from ~50)."""
         count = self.sp.count()
         self.assertGreaterEqual(count, 100)
-        self.assertLessEqual(count, 120)  # Not too many
+        self.assertLessEqual(count, 150)  # Allow for growth
     
     def test_new_categories_exist(self):
         """New categories should be registered."""

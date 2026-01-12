@@ -8970,7 +8970,7 @@ class AgentSelfModel:
                  click_behavior_type, is_self_toggle, is_trigger, is_selectable,
                  is_moveable, is_button, is_reference, movement_verified, affects_objects,
                  state_changes_observed, movement_test_count, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 game_type, level, object_color,
                 behavior_type,
@@ -8983,7 +8983,8 @@ class AgentSelfModel:
                 1 if movement_verified else 0,
                 json.dumps(affects_colors) if affects_colors else None,
                 1 if is_self_toggle or is_trigger else 0,
-                1 if movement_verified else 0
+                1 if movement_verified else 0,
+                0.5  # initial confidence
             ))
     
     def get_click_behavior(

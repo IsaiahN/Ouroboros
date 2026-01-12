@@ -197,20 +197,20 @@ class TestSafeDatabaseCleaner(unittest.TestCase):
         self.assertEqual(self._get_count('score_history'), 100)
     
     # =========================================================================
-    # Test: System logs cleanup (keep 5000)
+    # Test: System logs cleanup (keep 50000)
     # =========================================================================
     
     def test_excess_system_logs_deleted(self):
-        """Excess system logs beyond 5000 should be deleted."""
-        self._insert_timestamped_data('system_logs', 'id', 'timestamp', 6000, days_old=0)
+        """Excess system logs beyond 50000 should be deleted."""
+        self._insert_timestamped_data('system_logs', 'id', 'timestamp', 55000, days_old=0)
         
         results = self.cleaner.cleanup(dry_run=False, verbose=False)
         
-        self.assertEqual(results['tables_cleaned']['system_logs']['deleted'], 1000)
-        self.assertEqual(self._get_count('system_logs'), 5000)
+        self.assertEqual(results['tables_cleaned']['system_logs']['deleted'], 5000)
+        self.assertEqual(self._get_count('system_logs'), 50000)
     
     def test_system_logs_under_limit_preserved(self):
-        """System logs under 5000 should all be preserved."""
+        """System logs under 50000 should all be preserved."""
         self._insert_timestamped_data('system_logs', 'id', 'timestamp', 3000, days_old=0)
         
         results = self.cleaner.cleanup(dry_run=False, verbose=False)
@@ -311,11 +311,12 @@ class TestSafeDatabaseCleaner(unittest.TestCase):
         """Total deleted should be sum of all table deletions."""
         self._insert_game_results(zero_count=50, positive_count=10)
         self._insert_timestamped_data('score_history', 'id', 'timestamp', 100, days_old=10)
-        self._insert_timestamped_data('system_logs', 'id', 'timestamp', 6000, days_old=0)
+        # System logs retention is 50000, so insert 55000 to get 5000 deleted
+        self._insert_timestamped_data('system_logs', 'id', 'timestamp', 55000, days_old=0)
         
         results = self.cleaner.cleanup(dry_run=False, verbose=False)
         
-        expected_total = 50 + 100 + 1000  # games + history + logs
+        expected_total = 50 + 100 + 5000  # games + history + logs
         self.assertEqual(results['total_deleted'], expected_total)
     
     # =========================================================================
@@ -333,13 +334,13 @@ class TestSafeDatabaseCleaner(unittest.TestCase):
         self.assertEqual(self._get_count('navigation_state_history'), 50000)
     
     def test_action_traces_retention(self):
-        """Action traces should keep 100,000 entries."""
-        self._insert_timestamped_data('action_traces', 'id', 'timestamp', 110000, days_old=0)
+        """Action traces should keep 50,000 entries."""
+        self._insert_timestamped_data('action_traces', 'id', 'timestamp', 60000, days_old=0)
         
         results = self.cleaner.cleanup(dry_run=False, verbose=False)
         
         self.assertEqual(results['tables_cleaned']['action_traces']['deleted'], 10000)
-        self.assertEqual(self._get_count('action_traces'), 100000)
+        self.assertEqual(self._get_count('action_traces'), 50000)
     
     def test_sensation_events_retention(self):
         """Sensation events should keep 200,000 entries."""
