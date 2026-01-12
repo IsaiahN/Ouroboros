@@ -1429,6 +1429,10 @@ class DatabaseInterface:
     def store_arc_reward_data(self, agent_id: str, reward_data: Dict[str, Any]):
         """Store ARC reward data for agent."""
         with self._get_connection() as conn:
+            # FIX (2025-01-11): session_id is NOT NULL in schema
+            # Generate a fallback session_id if not provided
+            session_id = reward_data.get('session_id') or str(uuid.uuid4())
+            
             conn.execute("""
                 INSERT INTO agent_arc_performance (
                     performance_id, agent_id, game_id, session_id, game_timestamp,
@@ -1441,7 +1445,7 @@ class DatabaseInterface:
                 str(uuid.uuid4()),
                 agent_id,
                 reward_data.get('game_id', ''),
-                reward_data.get('session_id', ''),
+                session_id,
                 datetime.now().isoformat(),
                 reward_data.get('arc_native_rewards', {}).get('final_score', 0.0),
                 reward_data.get('arc_native_rewards', {}).get('win_score_threshold', 0.0),

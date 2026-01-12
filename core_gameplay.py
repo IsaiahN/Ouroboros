@@ -8230,6 +8230,7 @@ class GameplayEngine:
         """Derive per-step imagination/mental-modeling context and cache for reasoning payloads."""
         context_mode = 'exploration'
         is_frontier_level = False
+        current_game_id = None
         try:
             current_game_id = getattr(self.session_manager, 'current_game_id', None)
             if current_game_id:
@@ -8246,7 +8247,13 @@ class GameplayEngine:
         grounding_score = None
         if hasattr(self, 'agent_self_model') and self.agent_self_model:
             try:
-                grounding_score = self.agent_self_model.compute_grounding_score()
+                # FIX CON-004: Pass game context for database-backed grounding score
+                agent_id = self.game_config.get('agent_id')
+                grounding_score = self.agent_self_model.compute_grounding_score(
+                    game_id=current_game_id,
+                    level=current_level,
+                    agent_id=agent_id
+                )
             except Exception:
                 grounding_score = None
 
@@ -8542,6 +8549,35 @@ class GameplayEngine:
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
         
         # ===================================================================
+        # FIX CON-002: PERSONA ENSEMBLE - GENERATE PROPOSALS EARLY
+        # ===================================================================
+        # Generate persona proposals at the START of _select_action so they
+        # are tracked even if early-return paths are taken. This ensures
+        # persona_proposal_count is recorded in action_traces for all actions.
+        # ===================================================================
+        try:
+            if hasattr(self, 'persona_manager') and self.persona_manager:
+                persona_ctx = {
+                    'recent_actions': getattr(self, '_recent_actions', [])[-10:],
+                    'failed_actions': list(getattr(self, '_failed_actions_set', set())),
+                }
+                early_persona_proposals = self.persona_manager.generate_proposals(
+                    game_state=game_state,
+                    available_actions=getattr(game_state, 'available_actions', None),
+                    context=persona_ctx
+                )
+                if early_persona_proposals:
+                    self._last_persona_proposal_count = len(early_persona_proposals)
+                    self._early_persona_proposals = early_persona_proposals
+                else:
+                    self._last_persona_proposal_count = 0
+                    self._early_persona_proposals = []
+        except Exception as e:
+            logger.debug(f"Early persona generation failed: {e}")
+            self._last_persona_proposal_count = 0
+            self._early_persona_proposals = []
+        
+        # ===================================================================
         # FIX #19 (CHECKLIST): POPULATE IMAGINATION CONTEXT EARLY
         # ===================================================================
         # Imagination budget data should flow to reasoning payload and decision-making.
@@ -8679,53 +8715,33 @@ class GameplayEngine:
                 })
         
         # ===================================================================
-        # FIX CON-002: PERSONA ENSEMBLE - MULTI-PROPOSAL GENERATION
+        # FIX CON-002: PERSONA ENSEMBLE - REUSE EARLY PROPOSALS
         # ===================================================================
-        # Per Consciousness Theory: Multiple personas generate diverse proposals
-        # This is the key deliberation mechanism before I-Thread synthesis
+        # Persona proposals were already generated at the start of _select_action
+        # to ensure they're tracked even on early-return paths. Reuse them here
+        # for stream routing.
         # ===================================================================
-        persona_proposals = []
-        try:
-            if hasattr(self, 'persona_manager') and self.persona_manager:
-                # Build context for persona decision-making
-                persona_ctx = {
-                    'recent_actions': getattr(self, '_recent_actions', [])[-10:],
-                    'failed_actions': list(getattr(self, '_failed_actions_set', set())),
-                    'network_suggested': [p['action'] for p in stream_b_proposals if p.get('confidence', 0) > 0],
-                }
-                
-                # Get proposals from persona ensemble
-                persona_proposals = self.persona_manager.generate_proposals(
-                    game_state=game_state,
-                    available_actions=getattr(game_state, 'available_actions', None),
-                    context=persona_ctx
-                )
-                
-                if persona_proposals:
-                    self._last_persona_proposal_count = len(persona_proposals)
-                    
-                    # Add persona proposals to appropriate stream based on persona type
-                    for prop in persona_proposals:
-                        ptype = (prop.get('persona_type') or '').lower()
-                        if ptype in ('optimizer', 'network', 'validator', 'cautious'):
-                            # Network-oriented personas -> Stream B
-                            stream_b_proposals.append({
-                                'action': prop['action'],
-                                'confidence': prop.get('confidence', 0.3),
-                                'source': f"persona_{ptype}"
-                            })
-                        else:
-                            # Exploration-oriented personas -> Stream A
-                            stream_a_proposals.append({
-                                'action': prop['action'],
-                                'confidence': prop.get('confidence', 0.3),
-                                'source': f"persona_{ptype}"
-                            })
-                    
-                    logger.debug(f"[CON-002] Persona ensemble generated {len(persona_proposals)} proposals")
-        except Exception as persona_err:
-            logger.debug(f"Persona proposal generation failed: {persona_err}")
-            self._last_persona_proposal_count = 0
+        persona_proposals = getattr(self, '_early_persona_proposals', [])
+        if persona_proposals:
+            # Add persona proposals to appropriate stream based on persona type
+            for prop in persona_proposals:
+                ptype = (prop.get('persona_type') or '').lower()
+                if ptype in ('optimizer', 'network', 'validator', 'cautious'):
+                    # Network-oriented personas -> Stream B
+                    stream_b_proposals.append({
+                        'action': prop['action'],
+                        'confidence': prop.get('confidence', 0.3),
+                        'source': f"persona_{ptype}"
+                    })
+                else:
+                    # Exploration-oriented personas -> Stream A
+                    stream_a_proposals.append({
+                        'action': prop['action'],
+                        'confidence': prop.get('confidence', 0.3),
+                        'source': f"persona_{ptype}"
+                    })
+            
+            logger.debug(f"[CON-002] Persona ensemble generated {len(persona_proposals)} proposals")
         
         # I-Thread: Detect conflicts and log
         stream_a_actions = {p['action'] for p in stream_a_proposals if p.get('confidence', 0) > 0}
@@ -8737,6 +8753,9 @@ class GameplayEngine:
                        f"StreamB suggests {stream_b_actions}, wA={wA_decision:.2f} wB={wB_decision:.2f}")
             # FIX CON-003: Enable synthesis when conflict detected
             self._last_synthesis_enabled = True
+        else:
+            # FIX CON-003: Explicitly set False when no conflict (ensures tracking)
+            self._last_synthesis_enabled = False
         
         # Store for later use in weaving
         self._stream_a_proposals = stream_a_proposals
@@ -19383,16 +19402,13 @@ class GameplayEngine:
                 except Exception:
                     pass  # scorecard_id is optional
                 
-                # Enforce single active sequence per game/level (matches partial unique index)
-                if source_mode == 'LIVE':
-                    self.db.execute_query(
-                        """
-                        UPDATE winning_sequences
-                        SET is_active = 0, flag_reason = 'replaced_by_new'
-                        WHERE game_id = ? AND level_number = ? AND is_active = 1
-                        """,
-                        (game_id, level_number),
-                    )
+                # NOTE: Removed blanket 'replaced_by_new' deactivation (2025-01-04)
+                # The auto_cleanup logic at the end of this function already maintains
+                # top 3 sequences ranked by success_rate, refs, and efficiency.
+                # The old logic deactivated ALL sequences before insert, causing:
+                # - Loss of high-performing sequences with 100% success rate
+                # - Level 4+ sequences being incorrectly deactivated
+                # Now we let auto_cleanup handle it intelligently.
 
                 attempt_id = (
                     self.game_config.get('attempt_id')

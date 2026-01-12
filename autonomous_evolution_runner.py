@@ -2076,7 +2076,7 @@ class AutonomousEvolutionRunner:
             print(f"\n[OPERATOR LIFECYCLE] Running operator survival selection for generation {self.current_generation}...")
             try:
                 from cods_engine import get_cods_engine
-                cods_engine = get_cods_engine(self.db_path)
+                cods_engine = get_cods_engine(self.db.db_path)
                 lifecycle_results = cods_engine.run_operator_lifecycle()
                 
                 if lifecycle_results.get('promoted', 0) > 0:

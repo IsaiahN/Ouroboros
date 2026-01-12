@@ -130,7 +130,9 @@ class SafeDatabaseCleaner:
         # OPERATIONAL DATA RETENTION (by count or age)
         # =================================================================
         self.score_history_retention_days = 7
-        self.system_logs_retention = 5000
+        # FIX (2025-01-11): Increased from 5,000 to 50,000 to match database_logger.py
+        # These logs are NOT used for reasoning - only for debugging
+        self.system_logs_retention = 50000
         self.navigation_retention = 50000
         self.action_traces_retention = 50000  # Reduced from 500K - old traces already captured in winning_sequences
         self.sensation_events_retention = 200000

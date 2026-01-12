@@ -43,7 +43,11 @@ class DatabaseLogHandler(logging.Handler):
         # Auto-cleanup settings
         self.auto_cleanup = auto_cleanup
         self.cleanup_threshold = cleanup_threshold
-        self.retention_keep = 5000  # Align with safe_cleanup retention target
+        # FIX (2025-01-11): Increased from 5,000 to 50,000 logs
+        # 5,000 was too aggressive - only covered 1-2 games of debugging
+        # 50,000 gives ~20-30 games of history while still being small (~25 MB)
+        # These are NOT used for reasoning, only for diagnostic debugging
+        self.retention_keep = 50000
         self._log_count = 0
         self._last_cleanup_check = 0
 

@@ -804,19 +804,34 @@ class OuroborosNetworkSteward:
     def _update_agent_performance(self, agent_id: str, agent_result: Dict[str, Any]):
         """Update agent performance metrics in database"""
         try:
+            # FIX (2025-01-11): Updated to match actual agent_arc_performance schema
+            # The schema requires: performance_id, agent_id, game_id, session_id, final_score,
+            # win_score_threshold, win_achieved, total_actions, score_efficiency, win_proximity,
+            # strategy_used, genome_config, base_reward, total_evolutionary_reward
+            import uuid
             self.db.execute_query("""
                 INSERT INTO agent_arc_performance
-                (agent_id, games_played, total_score, avg_score_per_game, 
-                 total_games_won, win_rate, performance_timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (performance_id, agent_id, game_id, session_id, game_timestamp,
+                 final_score, win_score_threshold, win_achieved, total_actions,
+                 score_efficiency, win_proximity, strategy_used, genome_config,
+                 base_reward, total_evolutionary_reward)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
+                str(uuid.uuid4()),
                 agent_id,
-                agent_result.get('games_played', 0),
+                agent_result.get('game_id', 'unknown'),
+                agent_result.get('session_id') or str(uuid.uuid4()),
+                datetime.now().isoformat(),
                 agent_result.get('total_score', 0.0),
+                agent_result.get('win_score', 1.0),
+                agent_result.get('wins', 0) > 0,
+                agent_result.get('games_played', 0),
                 agent_result.get('avg_score', 0.0),
-                agent_result.get('wins', 0),
                 agent_result.get('win_rate', 0.0),
-                datetime.now().isoformat()
+                'coordinator_update',
+                '{}',
+                agent_result.get('total_score', 0.0),
+                agent_result.get('total_score', 0.0)
             ))
         except Exception as e:
             self._log_coordinator_event("update_performance_error", {

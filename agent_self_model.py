@@ -2199,19 +2199,39 @@ class AgentSelfModel:
     def compute_grounding_score(
         self,
         control_confidence: Optional[float] = None,
-        selection_verification_rate: Optional[float] = None
+        selection_verification_rate: Optional[float] = None,
+        game_id: Optional[str] = None,
+        level: Optional[int] = None,
+        agent_id: Optional[str] = None
     ) -> float:
         """Compute a lightweight grounding score for imagination budgets.
 
         Uses available control/selection signals when present, otherwise
-        returns a neutral score of 1.0. Clamped to avoid runaway multipliers.
+        queries the database for actual control confidence data.
+        Returns a neutral score of 1.0 if no data available.
+        
+        FIX CON-004: Now actually queries control confidence from database
+        instead of always returning 1.0.
         """
 
         scores: List[float] = []
+        
+        # Use provided values if available
         if control_confidence is not None:
             scores.append(float(control_confidence))
         if selection_verification_rate is not None:
             scores.append(float(selection_verification_rate))
+
+        # If no values provided, try to compute from database
+        if not scores and game_id and level is not None:
+            try:
+                aid = agent_id or getattr(self, 'agent_id', None)
+                if aid:
+                    db_confidence = self.calculate_control_confidence(aid, game_id, level)
+                    if db_confidence > 0:
+                        scores.append(db_confidence)
+            except Exception:
+                pass
 
         if not scores:
             return 1.0
