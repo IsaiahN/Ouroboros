@@ -2335,6 +2335,17 @@ class GameplayEngine:
                     )
                     consciousness_state['active_questions'] = questions
                     
+                    # FIX: Store question tier for action trace telemetry
+                    if questions:
+                        tier_priority = {'existential': 5, 'identity': 4, 'meta': 3, 'strategic': 2, 'tactical': 1}
+                        highest_tier = None
+                        for q in questions:
+                            q_tier = q.get('tier', 'tactical')
+                            if highest_tier is None or tier_priority.get(q_tier, 0) > tier_priority.get(highest_tier, 0):
+                                highest_tier = q_tier
+                        if highest_tier:
+                            self._last_question_tier = highest_tier
+                    
                     # Check if any blocking questions exist
                     blocking = [q for q in questions if q.get('blocks_action')]
                     if blocking:
@@ -9234,6 +9245,17 @@ class GameplayEngine:
                     )
                     
                     if questions:
+                        # FIX: Store question tier for action trace telemetry
+                        # This enables the Questioning Engine to influence reasoning and tracking
+                        highest_tier = None
+                        tier_priority = {'existential': 5, 'identity': 4, 'meta': 3, 'strategic': 2, 'tactical': 1}
+                        for q in questions:
+                            q_tier = q.get('tier', 'tactical')
+                            if highest_tier is None or tier_priority.get(q_tier, 0) > tier_priority.get(highest_tier, 0):
+                                highest_tier = q_tier
+                        if highest_tier:
+                            self._last_question_tier = highest_tier
+                        
                         # Check if action is blocked
                         blocking_info = self.questioning_engine.get_blocking_info()
                         if blocking_info and blocking_info.get('is_blocked'):

@@ -4003,7 +4003,8 @@ class AgentSelfModel:
         self,
         game_id: str,
         level: int,
-        min_reliability: float = 0.3
+        min_reliability: float = 0.3,
+        include_unvalidated: bool = True
     ) -> List[Dict]:
         """
         Get network-validated "I am this object" hypotheses for a game/level.
@@ -4014,16 +4015,15 @@ class AgentSelfModel:
             game_id: Game identifier
             level: Level number
             min_reliability: Minimum reliability score to return
+            include_unvalidated: If True, include fresh hypotheses for bootstrapping
         
         Returns:
             List of hypothesis dictionaries with control patterns and reliability
         """
         game_type = game_id.split('-')[0] if '-' in game_id else game_id
         
-        # CORRELATION != CAUSATION FILTER
-        # Only return hypotheses that have been validated at least 3 times
-        # with consistent results. Single observations could be spurious.
         # TIER 5 - SELECTION: Order by outcome (best_score_achieved) not just validation
+        # First get validated hypotheses (high confidence)
         results = self.db.execute_query("""
             SELECT 
                 hypothesis_id,
@@ -4033,7 +4033,8 @@ class AgentSelfModel:
                 validation_attempts,
                 validation_successes,
                 validated_by_win,
-                COALESCE(best_score_achieved, 0) as best_score_achieved
+                COALESCE(best_score_achieved, 0) as best_score_achieved,
+                0 as is_bootstrap
             FROM network_object_control_hypotheses
             WHERE game_type = ? AND level_number = ? 
                   AND is_active = TRUE 
@@ -4044,6 +4045,38 @@ class AgentSelfModel:
                      reliability_score DESC
             LIMIT 5
         """, (game_type, level, min_reliability))
+        
+        # FIX: COLD-START BOOTSTRAP - Include fresh hypotheses that need validation
+        # Without this, new hypotheses never get used, so never get validated, so never get used...
+        # This breaks the deadlock by including up to 2 fresh hypotheses for testing
+        if include_unvalidated and (not results or len(results) < 3):
+            bootstrap_results = self.db.execute_query("""
+                SELECT 
+                    hypothesis_id,
+                    control_pattern,
+                    action_response_map,
+                    reliability_score,
+                    validation_attempts,
+                    validation_successes,
+                    validated_by_win,
+                    COALESCE(best_score_achieved, 0) as best_score_achieved,
+                    1 as is_bootstrap
+                FROM network_object_control_hypotheses
+                WHERE game_type = ? AND level_number = ? 
+                      AND is_active = TRUE 
+                      AND validation_attempts < 3
+                      AND validated_by_win = FALSE
+                ORDER BY reliability_score DESC, discovered_at DESC
+                LIMIT 2
+            """, (game_type, level))
+            
+            if bootstrap_results:
+                # Combine: validated first, then bootstrap candidates
+                existing_ids = {r['hypothesis_id'] for r in (results or [])}
+                for br in bootstrap_results:
+                    if br['hypothesis_id'] not in existing_ids:
+                        results = (results or []) + [br]
+                        logger.debug(f"[BOOTSTRAP] Including fresh hypothesis {br['hypothesis_id'][:12]} for validation")
         
         hypotheses = []
         for row in results or []:
@@ -4061,7 +4094,8 @@ class AgentSelfModel:
                 'validation_count': row['validation_attempts'],
                 'success_rate': row['validation_successes'] / max(1, row['validation_attempts']),
                 'validated_by_win': row['validated_by_win'],
-                'best_score_achieved': row['best_score_achieved']  # TIER 5 - competition by outcome
+                'best_score_achieved': row['best_score_achieved'],  # TIER 5 - competition by outcome
+                'is_bootstrap': row.get('is_bootstrap', 0) == 1  # Mark bootstrap hypotheses for special handling
             })
         
         # TIER 6 - SYNTHESIS: If we have multiple moderate-reliability hypotheses
