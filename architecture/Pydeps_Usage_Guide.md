@@ -156,11 +156,36 @@ spreads to all agents
 
 ## Part II: Setup Phase
 
+### Step 0: Activate Virtual Environment
+
+**CRITICAL**: ALL commands must run in the `.venv` virtual environment.
+
+**Windows (PowerShell)**:
+```powershell
+# Navigate to project root
+cd C:\Users\Admin\Documents\GitHub\BitterTruth-AI
+
+# Activate virtual environment
+& .venv/Scripts/Activate.ps1
+
+# Verify activation - should see (.venv) prefix in prompt
+# (.venv) PS C:\Users\Admin\Documents\GitHub\BitterTruth-AI>
+```
+
+**Linux/macOS**:
+```bash
+cd /path/to/BitterTruth-AI
+source .venv/bin/activate
+# Verify: should see (.venv) prefix
+```
+
+> **WARNING**: If you see "No module named pydeps" or similar errors, you likely forgot to activate the venv!
+
 ### Step 1: Install Dependencies
 
 **CRITICAL**: Always disable pycache (Rule 1)
 
-**Windows (PowerShell)**:
+**Windows (PowerShell)** (with venv activated):
 ```powershell
 # Set environment variable for current session
 $env:PYTHONDONTWRITEBYTECODE = "1"
@@ -168,10 +193,10 @@ $env:PYTHONDONTWRITEBYTECODE = "1"
 # Set permanently (user level)
 [Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "User")
 
-# Install pydeps
+# Install pydeps (into .venv)
 pip install pydeps
 
-# Install Graphviz (required for visualization)
+# Install Graphviz (required for visualization) - system-wide
 # Option 1: Download from https://graphviz.org/download/
 # Option 2: Use chocolatey: choco install graphviz
 # Option 3: Use winget: winget install graphviz
@@ -180,13 +205,13 @@ pip install pydeps
 pydeps --version
 ```
 
-**Linux/macOS**:
+**Linux/macOS** (with venv activated):
 ```bash
 # Set environment variable
 export PYTHONDONTWRITEBYTECODE=1
 echo "export PYTHONDONTWRITEBYTECODE=1" >> ~/.bashrc
 
-# Install pydeps and graphviz
+# Install pydeps (into venv) and graphviz (system)
 pip install pydeps
 sudo apt-get install graphviz -y  # Debian/Ubuntu
 # brew install graphviz           # macOS

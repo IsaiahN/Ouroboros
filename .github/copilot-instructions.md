@@ -18,7 +18,19 @@
 
 ---
 
-## 15 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
+## ENVIRONMENT SETUP
+
+### Virtual Environment (.venv)
+- **ALL Python execution** uses the `.venv` virtual environment in project root
+- **Activation** (PowerShell): `& .venv/Scripts/Activate.ps1`
+- **Activation** (bash): `source .venv/bin/activate`
+- **NEVER** use system Python - always verify `(.venv)` prefix in terminal
+- **Installing packages**: Always activate venv first, then `pip install <package>`
+- **Why**: Isolated dependencies, reproducible environment, no system conflicts
+
+---
+
+## 16 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
 
 ### **RULE 1: Always Disable Pycache**
 - `PYTHONDONTWRITEBYTECODE=1` in ALL environments
@@ -148,6 +160,16 @@
   - One-off debugging scripts (use `manual_tools/` instead)
   - Mock/simulated games (violates Rule 6)
   - Manual test files created during development
+
+### **RULE 16: Always Use .venv Virtual Environment**
+- **ALL Python execution** uses `.venv` in project root
+- **Activation** (PowerShell): `& .venv/Scripts/Activate.ps1`
+- **Activation** (bash): `source .venv/bin/activate`
+- **Verify**: Terminal prompt shows `(.venv)` prefix
+- **Install packages**: Only with venv activated: `pip install <package>`
+- **NEVER** run Python commands without venv activated
+- **Why**: Isolated dependencies, reproducible environment, prevents "module not found" errors
+- **Common Error**: If you see "No module named X", activate venv first!
 
 ---
 
