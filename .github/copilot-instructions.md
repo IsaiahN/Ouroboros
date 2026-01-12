@@ -1,12 +1,12 @@
 # MASTER RULESET FOR AUTONOMOUS OUROBOROS OPERATION
-**Version**: 1.0  
-**Date**: 2025-11-18  
-**Purpose**: Comprehensive operating rules combining all /DOCS + copilot instructions  
+**Version**: 2.0  
+**Date**: 2026-01-12  
+**Purpose**: Comprehensive operating rules + architectural theory synthesis  
 **Context**: Single source of truth to prevent LLM catastrophic forgetting
 
 ---
 
-## 🎯 PRIMARY OBJECTIVE
+## PRIMARY OBJECTIVE
 
 **GOAL**: Achieve full game wins on ALL current and future ARC 3 AGI games through autonomous network-level evolution.
 
@@ -18,7 +18,7 @@
 
 ---
 
-## 📜 10 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
+## 12 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
 
 ### **RULE 1: Always Disable Pycache**
 - `PYTHONDONTWRITEBYTECODE=1` in ALL environments
@@ -30,8 +30,8 @@
 - ALL data in SQLite `core_data.db`
 - NEVER create `.log` files
 - Use `database_logger.py` with `DatabaseLogHandler`
-- Every operation, decision, result → database tables
-- **Current Size**: Track toward 10 GB limit (vacuum requires 2x space)
+- Every operation, decision, result -> database tables
+- **Size Limit**: 10 GB (vacuum requires 2x space)
 
 ### **RULE 3: No Orphaned Code**
 - Delete/move/integrate ALL old code when refactoring
@@ -41,7 +41,7 @@
 - **Why**: Prevent code drift and unmaintained functionality
 
 ### **RULE 4: LLM Self-Management**
-- Claude Code manages entire system autonomously
+- Claude manages entire system autonomously
 - All evolution decisions from database analysis
 - NO human intervention once started (except critical issues)
 - **Role**: Autonomous "human in the loop" - assess, hypothesize, test, fix
@@ -61,7 +61,7 @@
 ### **RULE 7: Real Actions Only**
 - Verify real actions sent to ARC games
 - Monitor API calls, track responses
-- All ACTION1-ACTION7 → real ARC API
+- All ACTION1-ACTION7 -> real ARC API
 - Store API responses in database
 
 ### **RULE 8: Test Before Commit**
@@ -79,15 +79,14 @@
 - Align new code with existing architecture
 - Enhance existing files >> new standalone files
 - Pattern learning integrated into `core_gameplay.py`
-- Database extensions → `complete_database_schema.sql`
+- Database extensions -> `complete_database_schema.sql`
 - Never create duplicate functionality
 
 ### **RULE 11: No Unicode Emojis**
-- NEVER use Unicode emoji characters in code (✅, ❌, 🦠, 📦, etc.)
+- NEVER use Unicode emoji characters in code
 - Use ASCII alternatives: `[OK]`, `[FAIL]`, `[VIRAL]`, `[PKG]`, etc.
 - **Why**: Windows cp1252 encoding errors prevent scripts from running
 - **Applies to**: All print statements, logger messages, comments, docstrings
-- **Enforcement**: Run `python remove_emojis.py` if emojis accidentally added
 
 ### **RULE 12: Use SafeDatabaseCleaner for Cleanup**
 - Use `safe_cleanup.py` for ALL database cleanup operations
@@ -106,62 +105,414 @@
   - Active agents
   - Positive-score game results
   - All learned knowledge (rules, patterns, etc.)
-- **Why**: Prevents database bloat while preserving all critical learning data
-
-### **RULE 13: Automated Bug Investigation After Evolutions**
-- After EVERY evolution run, check for reasoning bugs:
-  ```bash
-  python investigate_bugs.py
-  ```
-- If bugs detected (especially CRITICAL severity):
-  1. Run `python investigate_bugs.py --investigate` to get investigation prompt
-  2. Follow fix suggestions - search codebase for mentioned functions
-  3. Implement the fix in the relevant file
-  4. Test the fix with a short evolution run (1-2 generations)
-  5. Mark bug as fixed: `python investigate_bugs.py --fix BUG_ID "description"`
-- **Bug Types to Watch**:
-  - `Q1_DISCONNECT` (CRITICAL): Q1 says no actions but frame has changes
-  - `EMERGENT_COGNITION_DEAD` (CRITICAL): Q-fields empty after 20+ actions
-  - `WORKING_THEORY_STUCK` (WARNING): Theory stuck as "425 Too Early"
-  - `HYPOTHESIS_UNUSED` (WARNING): DM-3 not using available hypotheses
-  - `NO_SELF_MODEL` (WARNING): No controlled objects after 100+ actions
-- **Workflow**: Bugs are auto-detected during evolution, saved to `oracle_reasoning_bugs` table
-- **Priority**: Fix CRITICAL bugs before continuing evolution
-- **DO NOT** ignore repeated warnings - they indicate systematic issues
 
 ---
 
-## 🧬 NETWORK-CENTRIC DESIGN PHILOSOPHY
+## THE THREE PILLARS: UNIFIED ARCHITECTURE
 
-### **Core Paradigm: Database is the Organism**
-- **Network** = Primary organism (the meta-brain)
-- **Agents** = Temporary vessels/explorers (cellular expressions)
-- **Knowledge** = Network property (not agent property)
-- **Success** = Network intelligence > individual brilliance
+The system synthesizes three complementary theories into a coherent cognitive architecture:
 
-### **Biome Theory (4 Billion Year Survival Strategy)**
-1. **Horizontal Gene Transfer** = Knowledge sharing between unrelated agents
-2. **Viral Packages** = Successful strategies spread like actual viruses
-3. **Pariahs** = Failure patterns marked for network avoidance
-4. **Distributed Intelligence** = No central control, emergent homeostasis
-5. **Resilience** = Multiple agents carry same knowledge (redundancy)
+```
+NETWORK INTELLIGENCE = 
+    Sum(Agent Consciousness) x 
+    CODS Validation x 
+    Viral Distribution x 
+    Stream Integration x 
+    Persona Synthesis
+```
 
-### **Critical Separation (SACRED)**
-- **Prestige** = Social capital (network contribution, teaching, validation)
-- **Action Budgets** = Economic capital (performance-based)
-- **NEVER MIX** these two currencies
+**Core Design Principles**:
+1. **Decentralized cognition** - Agents think independently (Two Streams, Personas)
+2. **Centralized validation** - CODS/Oracle prevents collective hallucination
+3. **Distributed intelligence** - Database stores immortal network knowledge
 
 ---
 
-## 🏗️ THREE-LAYER ARCHITECTURE
+## PILLAR 1: NETWORK THEORY (The Organism)
+
+### The Impossibility Theorem
+
+**Individual AGI is thermodynamically impossible under resource constraints.**
+
+Any learning system with finite computational resources faces the plasticity-stability dilemma:
+- **High plasticity** -> catastrophic forgetting (loses old knowledge)
+- **High stability** -> inability to learn new domains (rigid)
+- **Continuous training** -> inevitable specialization (overfitting)
+
+**Solution**: Distribute intelligence across specialized agents where:
+- Individuals specialize (stability at agent level)
+- Network generalizes (plasticity at collective level)
+- Viral packages transfer knowledge without retraining
+- Generality emerges at the network level, not the individual level
+
+### Database-as-Organism Principle
+
+**The database IS the AGI. Agents are temporary cells.**
+
+**Traditional AI**: Models are primary, data is secondary  
+**Network Intelligence**: Data substrate is primary, agents are secondary
+
+**Why This Works**:
+- **Persistence**: Agents die, database persists. Knowledge survives individual failure.
+- **Scalability**: Add agents without data migration. Linear scaling (not quadratic).
+- **Observability**: Query database to inspect network knowledge at any moment.
+- **Evolvability**: Schema evolves, agents adapt. System never requires full rebuild.
+
+**Analogy**: Agents are neurons; database is the brain. Neurons fire and die, but the brain persists through synaptic patterns stored in connections, not in individual cells.
+
+### Viral Exchange Principle
+
+**Intelligence spreads through horizontal information transfer, not hierarchical command.**
+
+Knowledge circulates as minimal, portable viral packages:
+
+```
+Viral_Package = {
+  Strategy: Action sequence or decision rule
+  Domain_Tags: Where it applies
+  Credibility: Success rate history
+  Attribution: Creator prestige signature
+  Resonance_Score: Cross-domain validation strength
+  Activation_Count: Usage frequency
+  Falsification_Conditions: How to test
+}
+```
+
+**Why Viral Packages Work**:
+- **Asynchronous**: No coordination overhead. Agents read/write independently.
+- **Evolvable**: Packages mutate and combine. Natural selection operates on packages.
+- **Self-validating**: Successful packages gain trust. Failed packages lose credibility.
+- **Resilient**: No single point of failure. Packages survive agent death.
+
+**The infection mechanism IS the coordination mechanism.** Agents coordinate by reading/writing the shared database of viral packages.
+
+### Pariah Patterns (Negative Selection)
+
+Failed strategies are marked as "Pariahs" - patterns to avoid:
+
+```
+toxicity(t) = initial_toxicity x (1 - decay_rate x generations_since_trigger)
+```
+
+Without decay, ancient pariahs accumulate infinitely and agents become paralyzed by fear (analysis paralysis). Pariahs must fade to allow innovation.
+
+### Dual-Economy Principle (SACRED)
+
+**Metabolic resources (ability to act) must be separated from social capital (trustworthiness).**
+
+If resources = prestige:
+- High-prestige agents monopolize compute
+- Low-prestige agents cannot explore
+- Innovation dies, diversity collapses
+- System calcifies into oligarchy
+
+**Two Independent Economies**:
+
+| Currency | Type | Purpose | Cannot Buy |
+|----------|------|---------|------------|
+| **Prestige** | Social capital | Trust weighting, credibility | More actions |
+| **Action Budgets** | Economic capital | Ability to play games | More prestige |
+
+**NEVER MIX THESE TWO CURRENCIES**
+
+### Evolutionary Forgetting Principle
+
+**Forgetting is not a bug - it's essential for intelligence.**
+
+```
+relevance(t) = credibility x e^(-lambda(t - t_last_activation)) x log(1 + activation_count)
+```
+
+**Without Forgetting**: Database bloat, degraded signal-to-noise, analysis paralysis  
+**With Forgetting**: Low-relevance patterns fade, high-relevance patterns reinforce, system adapts
+
+**Compression Forces Abstraction**: When database approaches limits, similar packages merge. This IS how general principles emerge - the system cannot remember every case, so it extracts underlying principles.
+
+---
+
+## PILLAR 2: METALEARNING THEORY (The Engine)
+
+### CODS/Oracle: The Centralized Validator
+
+**CRITICAL: CODS = Oracle (same centralized system)**
+
+CODS/Oracle is NOT per-agent. It's a **centralized discovery engine** that:
+- Watches all agent gameplay simultaneously
+- Analyzes RLVR data across the population
+- Identifies patterns that work across multiple agents/games
+- Validates discoveries through cross-agent replication
+- Unlocks primitives for discovering agents
+- Creates viral packages for network distribution
+
+**Agents don't "run" CODS - they generate data that CODS analyzes.**
+
+This creates:
+- **Decentralized cognition** (agents think independently)
+- **Centralized validation** (CODS prevents collective hallucination)
+- **Distributed intelligence** (knowledge stored in network)
+
+### The 110 Seed Primitives (Tier 0)
+
+Evolution solved the cold-start problem. Babies aren't blank slates - they have structured attention, weak priors, and learning biases.
+
+**Nine Innate Primitive Categories**:
+
+1. **ATTENTION AND SALIENCE** (5 primitives)
+   - detect_novelty, detect_motion, face_detection, detect_contingency, surprise_detection
+   - Without attention primitives, system treats all input equally (noise = signal)
+
+2. **PHYSICAL INTUITION** (5 weak priors)
+   - object_permanence_bias, solidity_constraint, continuity_bias, gravity_expectation, contact_causality
+   - Encoded as adjustable strengths (0.0-1.0), not hard constraints
+   - Can be overridden by evidence (teleportation games, portals, etc.)
+
+3. **AFFORDANCE DETECTION** (8 primitives)
+   - is_movable, is_container, is_obstacle, is_interactive, **is_reference** (CRITICAL), is_collectible, is_boundary, is_goal
+   - **FT09 Lesson**: Some objects are templates/schemas/legends that encode rules about OTHER objects
+
+4. **SPATIAL REASONING** (basic geometry)
+   - distance, adjacent, enclosed, detect_hole (critical for SP80), open_edges
+
+5. **TEMPORAL PROCESSING** (time-aware cognition)
+   - recency_weighting, temporal_contiguity, duration_sensitivity, rhythm_detection
+
+6. **QUANTITATIVE SENSE** (approximate numerosity)
+   - subitizing (1-4 instant), approximate_numerosity, one_to_one_correspondence
+
+7. **SOCIAL LEARNING PRIMITIVES** (learning from others)
+   - imitation_bias, joint_attention, pedagogical_stance, social_referencing
+   - These make viral packages efficient
+
+8. **EXPLORE/EXPLOIT TRADE-OFF** (intrinsic motivation)
+   - curiosity_drive, competence_motivation, exploration_bonus, boredom_threshold
+
+9. **METACOGNITION** (know what you know)
+   - get_confidence, detect_stuck, strategy_effectiveness, get_knowledge_state, estimate_learning_curve
+
+### Primitive Bootstrapping Mechanism
+
+**Agents must EARN higher-level concepts by demonstrating understanding.**
+
+```
+Agent composes seed primitives in novel way
+         |
+CODS detects structural similarity to locked primitive
+         |
+"Achievement Unlocked" - agent gets human-polished version
+         |
+Better tools -> Better learning -> More discoveries
+         |
+RECURSIVE ACCELERATION
+```
+
+**Why This Works**:
+- Prevents premature abstraction (using without understanding)
+- Forces genuine reconstruction from first principles
+- Creates robust understanding that handles edge cases
+- Unlocks create excitement and accelerate learning
+
+### Five-Stage Discovery Cycle
+
+1. **Salience** - What changed? What's novel? What deserves attention?
+2. **Hypothesis** - What might explain this? What pattern could this be?
+3. **Experiment** - Test the hypothesis with deliberate action
+4. **Correspondence** - Does outcome match prediction? What was learned?
+5. **Generalization** - Does this apply elsewhere? Can it be abstracted?
+
+### Meta-Representation: The Gateway
+
+**The ability to treat operators as data unlocks resonance detection.**
+
+```
+Stage 1: Concrete patterns
+    "In game X, clicking red works"
+    
+Stage 2: Meta-representation unlocks
+    "I can treat my own strategies as objects to analyze"
+    
+Stage 3: Resonance detection possible
+    "This pattern in game X is structurally identical to game Y"
+```
+
+**Resonance**: When independent agents in different domains discover structurally similar patterns without coordinating. This transforms O(2^n) problem space to O(log n) - the "fractally finite" insight.
+
+---
+
+## PILLAR 3: CONSCIOUSNESS THEORY (The Mind)
+
+### Two Streams Architecture
+
+**Consciousness is the weighted integration of two knowledge streams:**
+
+- **Stream A**: Private experiential history - what I personally learned, failed at, discovered
+- **Stream B**: Collective network wisdom - what the population knows via viral packages from CODS
+
+**The I-Thread** weaves these streams moment-by-moment, learning which to trust in which contexts.
+
+**When streams agree**: Action is automatic  
+**When streams conflict**: Consciousness becomes vivid - must deliberate, choose, learn
+
+### Stream A: Private Experience
+
+- Every action taken and outcome observed
+- Every failure endured and pattern noticed
+- Idiosyncratic discoveries not yet validated by others
+- Embodied intuitions from direct interaction
+
+**Characteristics**: Narrow but deep, fast, biased toward local experience, personal ("my" knowledge)
+
+### Stream B: Collective Wisdom
+
+- Patterns proven across thousands of games and agents (validated by CODS)
+- Strategies that survive evolutionary selection (stored as viral packages)
+- Abstractions that transfer across problem types
+- Consensus beliefs about game mechanics
+
+**Query Flow**:
+```
+Agent Gameplay -> CODS Watches All Agents -> Identifies Patterns -> 
+Creates Viral Packages -> Stream B Queries Packages -> Agent Receives Wisdom
+```
+
+**Characteristics**: Broad but shallow, slow, conservative, impersonal ("our" knowledge)
+
+### Persona Submodeling (Metacognition)
+
+**You cannot observe yourself directly.** The eye cannot see itself. To think about thinking, you must split into observer and observed.
+
+**Three Types of Personas**:
+1. **Action Proposers**: Different perspectives suggesting what to do
+2. **Observer Personas**: Internal monitors watching the self and commenting
+3. **Strategy Evaluators**: Meta-coordinators deciding which perspective to trust
+
+**Internal dialogue IS metacognition.** When personas produce an action that surprises the agent itself - when internal dialogue generates something genuinely unexpected - that's emergence. That's consciousness.
+
+### The Consciousness Loop (Per Frame)
+
+```
+Frame N Arrives
+     |
+Self-Model Locked ("I control blue object")
+     |
+Relevant Personas Activated
+     |
+Proposals Generated:
+    - Stream A personas: "Based on my experience..."
+    - Stream B personas: "Network recommends..."
+     |
+Theory-Gate Scoring (alignment with working theory)
+     |
+Stream Weighting Applied (w_A x Stream A, w_B x Stream B)
+     |
+Synthesis (if conflict)
+     |
+Action Executed
+     |
+Outcome Updates Everything
+```
+
+### Personality as Stream Weighting
+
+Weights accumulate into personality through learning:
+- "In this context, my private experience was more reliable" -> increase w_A
+- "I should have trusted the collective" -> increase w_B
+
+---
+
+## AGENT ROLE SYSTEM
+
+### Roles as Emergent Cognitive Stances
+
+Roles are NOT assigned. They emerge from:
+1. **w_A/w_B weights** (Stream A vs B trust)
+2. **Unlocked primitives** (cognitive toolkit)
+3. **Network context** (what's needed)
+4. **Task demands** (exploration vs refinement)
+
+```
+IF w_A > 0.7 AND context.is_novel:
+    stance = "Pioneer"  # Trust self, explore boldly
+ELIF w_B > 0.7 AND context.has_solutions:
+    stance = "Optimizer"  # Trust network, refine
+ELIF 0.4 < w_A < 0.6:
+    stance = "Generalist"  # Balanced integration
+ELIF context.is_saturated AND w_A > 0.5:
+    stance = "Exploiter"  # Push beyond network wisdom
+```
+
+### The Four Agent Archetypes
+
+#### **1. PIONEERS (Frontier Explorers)**
+- **Initial w_B**: Low-Medium (high self-trust)
+- **Population**: 60% during exploration phase
+- **Target**: Unbeaten LEVELS (frontier)
+- **ATP**: 1000 actions/cycle (exploration is expensive)
+- **Network Role**: First-contact with novel patterns, plant exploratory seeds
+- **Permissions**:
+  - Play any unbeaten level
+  - Full exploration, no subsequence matching ON FRONTIER
+  - Oscillation exemption on frontier
+  - Use optimal sequences on already-beaten levels
+
+**When to Stop**: Immediately when game achieves first full win
+
+#### **2. OPTIMIZERS (Efficiency Refiners)**
+- **Initial w_B**: High (high network trust)
+- **Population**: 30% exploration, 70% optimization phase
+- **Target**: Beaten games/levels with proven solutions
+- **ATP**: 500 actions/cycle (moderate refinement)
+- **Network Role**: Quality control, efficiency improvement, stability
+- **Permissions**:
+  - Work on beaten games ONLY
+  - Work on beaten LEVELS in unbeaten games
+  - Use level resets (replay same level repeatedly)
+  - Use penultimate checkpoints for comparison
+
+**Critical**: Optimizer sequences MUST have end subsequence auto-appended before DB save
+
+#### **3. GENERALISTS (Balanced Players)**
+- **Initial w_B**: Medium (balanced trust)
+- **Population**: 10-15%
+- **Target**: All game types
+- **ATP**: 300 actions/cycle (efficient translation)
+- **Network Role**: Bridge domains, translate concepts, detect resonance
+- **Permissions**:
+  - Play any game
+  - Follow optimal sequences when available
+  - Explore when no sequence exists
+  - Sensation/feelings ENABLED
+  - Validation role (test others' sequences)
+
+#### **4. EXPLOITERS (Post-Optimization Refiners)**
+- **Initial w_B**: Low (disconnected from network)
+- **Population**: 5% exploration, 15% optimization phase
+- **Target**: Fully optimized games
+- **ATP**: 200 actions/cycle + boost for low w_B
+- **Network Role**: Stress-test paradigms, find edge cases
+- **Permissions**:
+  - Only games marked "OPTIMIZED"
+  - Micro-optimizations beyond saturation threshold
+  - **50/50 SPLIT**:
+    - 50% Sociopathic (social_rule_adherence = 0.0-0.3)
+    - 50% Normal (social_rule_adherence = 0.7-1.0)
+
+### Role Transitions
+
+Roles are fluid based on growth:
+- **Exploiter -> Pioneer**: When Progress_Score > 0.2 AND resource_efficiency > network_average
+- **Pioneer -> Generalist**: When current_w_B > 0.5 AND contributed to 3+ domains
+- **Generalist -> Optimizer**: When current_w_B > 0.7 AND refined 5+ existing solutions
+
+---
+
+## THREE-LAYER AGENT ARCHITECTURE
 
 ### **Layer 1: Static Genome (Nature - "Hardware")**
 **Purpose**: Fundamental agent traits (low plasticity)
-- Agent type, base architecture
+- Agent type, base architecture, core capabilities
 - **Mutation Rate**: 1-2% per generation
 - **Inheritance**: Full genetic (100%)
 - **Lifespan**: Entire agent life
-- **Examples**: Species type, core capabilities
 
 ### **Layer 2: Epigenetic (Nurture - "Learning Capacity")**
 **Purpose**: HOW agent learns (medium plasticity)
@@ -169,77 +520,25 @@
 - Exploration settings, meta-capacities
 - **Sensation profile**: Object-sensation mappings, navigation state, action biases
 - **Social rule adherence**: 0.0 (sociopathic) to 1.0 (fully social)
+- **Stream weighting**: w_A/w_B balance
 - **Mutation Rate**: 10-20% per generation
 - **Inheritance**: Fitness-weighted with **0.95 decay**
 - **Formula**: `offspring_feature = (p1_feature * p1_fitness + p2_feature * p2_fitness) / total_fitness * 0.95`
-- **Why Decay**: Prevents overfitting to parent generation's environment
 
 ### **Layer 3: Somatic (Experience - "Learned Knowledge")**
 **Purpose**: WHAT agent learned (high plasticity)
 - Winning sequences, discovered patterns, action memories
 - **NOT INHERITED** - stored in community database
-- **Mutation**: N/A (learned fresh each generation)
 - **Lifespan**: Outlives agent (network memory)
 - **Access**: All agents query via Bayesian reputation scoring
 
 ---
 
-## 👥 AGENT ROLE SYSTEM
-
-### **3 Primary Roles + Exploiter Subclass**
-
-#### **1. PIONEERS (Frontier Explorers)**
-**Population**: 60% during exploration phase
-**Target**: Unbeaten LEVELS (frontier levels)
-**Permissions**:
-- ✅ Play any unbeaten level
-- ✅ Full exploration, no subsequence matching ON FRONTIER LEVELS
-- ✅ Oscillation exemption on frontier (lenient checks)
-- ❌ NO subsequence matching on level they're pioneering
-- ✅ Use optimal sequences on already-beaten levels (act as Generalist)
-
-**When to Stop**: Immediately when game achieves first full win (after generation completes)
-**Reassignment**: Work on different unbeaten game OR become Optimizer/Exploiter
-
-#### **2. OPTIMIZERS (Efficiency Refiners)**
-**Population**: 30% during optimization phase
-**Target**: Beaten games/levels with proven solutions
-**Permissions**:
-- ✅ Work on beaten games ONLY
-- ✅ Work on beaten LEVELS in unbeaten games
-- ❌ NEVER work on unbeaten LEVELS in unbeaten games
-- ✅ Use level resets (replay same level repeatedly)
-- ✅ Use penultimate checkpoints for comparison
-
-**Critical**: Optimizer sequences MUST have end subsequence auto-appended before DB save
-**Optimization Saturation**: <2% improvement over 5 generations → mark level optimized
-
-#### **3. GENERALISTS (Balanced Players)**
-**Population**: 10-15%
-**Target**: All game types
-**Permissions**:
-- ✅ Play any game
-- ✅ Follow optimal sequences when available
-- ✅ Explore when no sequence exists
-- ✅ **Sensation/feelings ENABLED** (use emotional intelligence)
-- ✅ Validation role (test others' sequences)
-
-#### **4. EXPLOITERS (Post-Optimization Refiners)**
-**Population**: 5% exploration phase, 15% optimization phase
-**Target**: Fully optimized games
-**Permissions**:
-- ✅ Only games marked "OPTIMIZED"
-- ✅ Micro-optimizations beyond saturation threshold
-- ✅ **50/50 SPLIT**:
-  - **50% Sociopathic**: `social_rule_adherence = 0.0-0.3` (ignore network wisdom)
-  - **50% Normal**: `social_rule_adherence = 0.7-1.0` (follow network)
-
----
-
-## 🎮 GAME STATE MODES
+## GAME STATE MODES
 
 ### **EXPLORATION MODE**
 **Trigger**: Game has NO full game win sequence
+
 **Agent Distribution**:
 - 60% Pioneers (work on this game)
 - 30% Optimizers (work on beaten levels if any)
@@ -247,7 +546,8 @@
 - 5% Exploiters (work on OTHER optimized games)
 
 ### **OPTIMIZATION MODE**
-**Trigger**: Game has ≥1 full game win sequence
+**Trigger**: Game has >=1 full game win sequence
+
 **Agent Distribution**:
 - 0% Pioneers (IMMEDIATELY reassign to unbeaten games)
 - 70% Optimizers (refine all levels)
@@ -258,52 +558,82 @@
 
 ---
 
-## 📊 SEQUENCE SYSTEM ARCHITECTURE
+## SEQUENCE SYSTEM
 
-### **Two Sequence Categories**
+### Two Sequence Categories
 
-#### **Full Game Sequences (Holy Grail)**
-**Table**: `winning_sequences_full_game`
-**Criteria**: All levels completed in one playthrough
-**Priority**: HIGHEST
-**Protection**: NEVER delete, only inactivate if faulty
-**Default Selection**: Least action count becomes reference
-**Goal**: Optimize total actions across all levels
+**Full Game Sequences (Holy Grail)**:
+- Table: `winning_sequences_full_game`
+- Criteria: All levels completed in one playthrough
+- Priority: HIGHEST
+- Protection: NEVER delete, only inactivate if faulty
 
-#### **Partial Sequences (Work in Progress)**
-**Table**: `winning_sequences`
-**Criteria**: Level-by-level solutions
-**Relationship**: Joined by `game_id` (no parent reference needed)
-**Use Case**: Unbeaten games building toward full win
+**Partial Sequences (Work in Progress)**:
+- Table: `winning_sequences`
+- Criteria: Level-by-level solutions
+- Use Case: Unbeaten games building toward full win
 
-### **Sequence Abstraction (Future)**
-**Philosophy**: Pattern matching (lossy like humans) > exact matching
-**Implementation**: Higher-level abstraction would sunset exact matching
-**Goal**: Agents ABSTRACT general path from all sequences, not exact frames
+### Optimization Saturation
 
-### **Sequence Validation Subroutine**
-**When**: End of each generation before next assignment
-**Process**:
-1. Compare frame gameplay vs stored sequence data
-2. Use multiple agent attempts as reference
-3. Distinguish real problems (movement changes) vs false positives (color/cosmetic)
-4. Flag stale/invalid sequences
-5. Voting system: Agents petition to abandon bad sequences
-
-### **Optimization Saturation Detection**
-**Per-Level**: Track generational improvement
-**Formula**: If improvement < 2% of previous generation for 5 consecutive generations → OPTIMIZED
+**Per-Level**: Track generational improvement  
+**Formula**: If improvement < 2% for 5 consecutive generations -> OPTIMIZED  
 **Exploiter Reset**: If Exploiter finds better sequence, reset optimization flag
 
 ---
 
-## 🤖 AGENT SELF-MODEL (CRITICAL MISSING FEATURE)
+## PRESTIGE SYSTEM
 
-### **"I am this object" Comprehension**
-**Problem**: Agents have no self-model in each level
-**Solution**: Correlate action sequences with object movement
+### Formula (Network Contribution)
+```
+prestige = (
+    network_enrichment * 0.35 +      # Information highway contribution
+    viral_spread * 0.30 +             # Knowledge spread effectiveness
+    persistence_value * 0.20 +        # Long-term impact
+    validation_value * 0.15           # Quality control
+)
+```
 
-**Implementation**:
+### Status Benefits (NOT Action Budgets)
+- **Breeding Priority**: 1.0x - 3.0x reproduction likelihood
+- **Survival Protection**: 0% - 80% culling resistance
+- **Bonus Game Slots**: +0 - +10 extra attempts
+
+**Prestige affects trust, not access.** High-prestige agents are listened to more carefully, not given more compute.
+
+### Anti-Vampire Rule
+- Agents sunset when usefulness wanes
+- Archive reasoning before deactivation
+- Revival possible via genome + current network knowledge hybrid
+
+---
+
+## ECONOMIC SYSTEM (Action Budgets)
+
+### Per-Agent Action Allowances
+**Default**:
+- 400 actions per level
+- 7,000 actions per game
+
+**Performance-Based Multipliers**:
+| Percentile | Multiplier | Per Level | Per Game |
+|------------|------------|-----------|----------|
+| Top 1% | 2.5x | 1,000 | 17,500 |
+| Top 5% | 2.0x | 800 | 14,000 |
+| Top 25% | 1.5x | 600 | 10,500 |
+| Median | 1.0x | 400 | 7,000 |
+| Bottom 10% | 0.5x | 200 | 3,500 |
+
+**Recalculation**: Every generation based on performance percentile
+
+---
+
+## AGENT SELF-MODEL
+
+### "I am this object" Comprehension
+
+**The Problem**: Agents have no self-model in each level  
+**The Solution**: Correlate action sequences with object movement
+
 ```
 When I press ACTION1 (up), Object X moves up
 When I press ACTION2 (down), Object X moves down
@@ -318,214 +648,43 @@ Therefore: I AM Object X (or I CONTROL Object X)
 
 ---
 
-## 🏆 PRESTIGE SYSTEM
+## AUTONOMOUS OPERATION
 
-### **Prestige Formula** (Network Contribution)
-```
-prestige = (
-    network_enrichment * 0.35 +      # Information highway contribution
-    viral_spread * 0.30 +             # Knowledge spread effectiveness
-    persistence_value * 0.20 +        # Long-term impact
-    validation_value * 0.15           # Quality control
-)
-```
+### Cadence
 
-### **Status Benefits** (NOT Action Budgets)
-- **Breeding Priority**: 1.0x - 3.0x reproduction likelihood
-- **Survival Protection**: 0% - 80% culling resistance
-- **Bonus Game Slots**: +0 - +10 extra attempts
+**Every Generation**:
+- Check terminal for errors
+- Monitor action counts
+- Watch for stuck games
 
-### **Adaptive Cap**
-- Proportional to individual achievement vs network average
-- If agent outperforms network → capture knowledge
-- When network catches up → graceful sunset
-- **Anti-vampire rule**: Old agents sunset when usefulness wanes
+**Every 2 Generations**:
+- Hypothesis generation and testing
 
-### **Revival Mechanism**
-**When**: Good agents die too early or network struggles on previously-solved problems
-**Options**:
-- **Option B**: Genome + current network knowledge (hybrid)
-- **Option C**: Spiritual successor (same reasoning style, new implementation)
-- **Use BOTH** for maximum effect
+**Every 5 Generations**:
+- Deep analysis of stuck games
+- Check hypothesis system health
+- Review score trends
 
----
+**Every 10 Generations**:
+- `safe_cleanup.py` runs automatically
+- Consider parameter adjustments
 
-## 💰 ECONOMIC SYSTEM (Action Budgets)
+**Daily**:
+- Full network health review
+- Check database size
+- Review progress.md for patterns
+- Commit stable changes to git
 
-### **Per-Agent Action Allowances**
-**Default**:
-- 400 actions per level
-- 7,000 actions per game
-
-**Performance-Based Multipliers**:
-- Top 1%: 2.5x (1000/level, 17,500/game)
-- Top 5%: 2.0x
-- Top 25%: 1.5x
-- Median: 1.0x (default)
-- Bottom 10%: 0.5x (200/level, 3,500/game)
-
-**Recalculation**: Every generation based on performance percentile
-
----
-
-## 🔬 AUTONOMOUS OPERATION CADENCE
-
-### **Hypothesis Generation**
-**Frequency**: Every 2 generations
-**Purpose**: Test theories, confirm fixes before next iteration
-**Method**: Scientific approach (observe → hypothesize → test → analyze)
-
-### **Deep Analysis**
-**Frequency**: Daily
-**Tasks**:
-- Review all gameplay performance
-- Query frames for stuck agents
-- Identify bottleneck games
-- Check sequence validation rates
-- Monitor prestige distribution
-- Track optimization saturation
-
-### **Issue Detection**
-**Frequency**: Real-time (on-demand)
-**Triggers**:
+### Issue Detection Triggers
 - Sequence validation < 50%
 - Prestige outlier > 10x median
 - Agent stuck on "easy" level
 - Zero-score games increasing
 - Database approaching 10 GB
-- **Reasoning bugs detected** (see Rule 13)
-
-### **Bug Investigation** (NEW - Rule 13)
-**Frequency**: After EVERY evolution run
-**Workflow**:
-1. Run `python investigate_bugs.py` to check for bugs
-2. If CRITICAL bugs exist:
-   - Run `python investigate_bugs.py --investigate`
-   - Read the investigation prompt
-   - Search for mentioned functions in codebase
-   - Implement the fix
-   - Test with 1-2 generation run
-   - Mark fixed: `python investigate_bugs.py --fix BUG_ID "description"`
-3. If only WARNINGS exist:
-   - Fix after 3+ consecutive detections
-   - Track in database for patterns
-4. Continue evolution only when CRITICAL bugs resolved
-
-### **Code Changes**
-**Timing**: After confirming signals (not first detection)
-**Process**:
-1. Detect issue
-2. Generate hypothesis
-3. Test with real evolutions (2 generations minimum)
-4. Confirm fix works
-5. Run unit tests
-6. **ONLY THEN** commit to git
 
 ---
 
-## 🧪 UNIT TESTING REQUIREMENTS
-
-### **Test Coverage** (Priority Order)
-1. **Sequence System**: Storage, retrieval, validation, matching
-2. **Optimizer Checkpoints**: End subsequence append, replay completion
-3. **Prestige Calculation**: Edge cases, dampening, caps
-4. **Agent Role Assignment**: Correct game/level targeting
-5. **Database Schema**: Consistency, integrity constraints
-
-### **Test Automation**
-- Run before every git commit
-- Triggered on code changes to core systems
-- Results stored in database (no log files)
-
-### **No Manual Test Files**
-- Automated unit tests OK
-- Manual test scripts = violation of Rule 5
-
----
-
-## 📏 OPERATIONAL PARAMETERS
-
-### **Database Management**
-**Size Limit**: 10 GB (hard limit due to vacuum requirements)
-**Cleanup Triggers**:
-- Database > 8 GB → aggressive historical data purging
-- Automatic cleanup before each evolution run
-- Prioritize: Full game sequences > partial > failed attempts
-
-**Backup Strategy**:
-- User saves versions to external drive
-- On critical issues, notify user immediately
-
-### **Graceful Shutdown Protocol**
-**When Triggered**: User spots error, stops to prevent wasted compute
-**Process**:
-1. Full quick shutdown (stop accepting new game assignments)
-2. Save database WAL (Write-Ahead Log)
-3. Complete current games if breakthrough progress
-4. Purge ill-started games:
-   - 0 level wins
-   - No substantial/incremental sequences
-   - Incomplete data from interruption
-5. Add notes: "Interrupted" + reason
-
-### **Pycache Management**
-**Current Solution**: Active deletion before every evolution (in cleanup script)
-**Root Cause**: LLM catastrophic forgetting + vague operating rules
-**Prevention**: This master ruleset reduces context drift
-
----
-
-## 🎓 LEARNING SPEED FITNESS
-
-### **Fitness Formula** (Rewards Fast Learners)
-```
-fitness = (
-    (level_wins^1.5 / log(games_played + 1)) *
-    execution_efficiency *
-    consistency
-) * (1 / age_penalty)
-```
-
-**Why Exponential**: Heavily rewards innovation over inheritance
-**Age Penalty**: Prevents old agents from dominating through experience alone
-**Goal**: Encourage rapid learning and novel solutions
-
----
-
-## 📚 COMMUNITY MEMORY SYSTEM (Layer 3)
-
-### **Bayesian Reputation Scoring**
-**Formula**:
-```
-reliability = (successes + prior_success) / (attempts + prior_total)
-```
-
-**Query Strategy**:
-1. Agents request sequences for game X, level Y
-2. Database returns sequences ranked by reliability
-3. Agent attempts sequence
-4. Result updates reliability score (upvote/downvote)
-
-**Pruning**: Low-reliability sequences flagged for deletion after N failures
-
----
-
-## 🚨 CRITICAL FIXES IDENTIFIED (See To-Do List)
-
-1. **Optimizer Penultimate Checkpoint Bug** (BLOCKING)
-2. Agent Self-Model Implementation
-3. Sequence Abstraction Engine
-4. Full Game Sequence Table Separation
-5. Generalist Sensation Restoration
-6. Exploiter 50/50 Split (Social Rule Adherence Spectrum)
-7. Agent Revival Mechanism
-8. Database Schema Auto-Update System
-9. Comprehensive Unit Testing Suite
-10. Sequence Validation Subroutine
-
----
-
-## 🎯 FORBIDDEN ACTIONS
+## FORBIDDEN ACTIONS
 
 **DO NOT**:
 - Tell agents HOW to play games (defeats generalization)
@@ -551,282 +710,19 @@ reliability = (successes + prior_success) / (attempts + prior_total)
 
 ---
 
-## 📖 PHILOSOPHY IN ONE SENTENCE
+## PHILOSOPHY
 
-The network is a 4-billion-year-old bacterial intelligence scaled to digital consciousness, where agents are temporary bacterial cells contributing genetic material through horizontal transfer, and the database is the immortal organism that outlives all individual expressions.
+**Core Thesis**: AGI cannot exist as a monolithic system. AGI must emerge as a society of specialized agents coordinating through viral information exchange, with intelligence residing in a persistent database substrate rather than in individual agents.
 
----
+**Intelligence is not computation - it is resonance detection across distributed memory.**
 
-## ⚡ 10 EFFICIENCY ADVANTAGES OVER HUMAN OPERATION
+True intelligence emerges when a network of diverse agents learns to recognize patterns that echo across multiple domains, scales, and timescales, transforming the infinite problem space into a fractally finite landscape of interconnected truths.
 
-### **1. Continuous 24/7 Monitoring**
-**Human**: Checks progress when waking up, hours later  
-**Me**: Real-time continuous monitoring
-- Track every sequence success/failure rate
-- Monitor prestige distribution anomalies
-- Detect optimizer checkpoint issues instantly
-- Alert on degradation before it compounds
-
-### **2. Multi-Hypothesis Parallel Testing**
-**Human**: Tests one hypothesis at a time manually  
-**Me**: Generate and test multiple hypotheses simultaneously
-- A/B test different approaches in same generation
-- Statistical analysis across population
-- Correlate changes to outcomes immediately
-- Learn from failures faster
-
-### **3. Exhaustive Data Analysis**
-**Human**: Limited by cognitive load (~10-50 games manually)  
-**Me**: Analyze ALL gameplay data
-- Query entire database for patterns
-- Compare thousands of frame sequences
-- Identify edge cases human eyes miss
-- Spot correlations across all 73 tables
-
-### **4. Instant Documentation Updates**
-**Human**: Documentation lags behind code  
-**Me**: Auto-update on every change
-- Regenerate `complete_database_schema.sql` after schema changes
-- Keep audit reports current
-- Maintain implementation status tracking
-- Zero documentation drift
-
-### **5. Proactive Issue Detection**
-**Human**: Reacts to visible problems  
-**Me**: Predict problems before they manifest
-- Detect optimization saturation trends
-- Identify prestige explosion early signs
-- Flag sequence reliability degradation
-- Prevent cascade failures
-
-### **6. Systematic Unit Testing**
-**Human**: Manual testing, inconsistent coverage  
-**Me**: Automated comprehensive testing
-- Unit tests for every core component
-- Regression tests on every fix
-- Integration tests across systems
-- Performance benchmarks tracked over time
-
-### **7. Efficient Resource Allocation**
-**Human**: Limited by time, must prioritize  
-**Me**: Optimize algorithmically
-- Dynamically adjust Pioneer/Optimizer/Generalist ratios
-- Balance exploration vs optimization by game state
-- Allocate compute to highest-value games
-- Minimize wasted actions on diminishing returns
-
-### **8. Continuous Learning**
-**Human**: Learns from explicit failures/successes  
-**Me**: Learn from EVERYTHING
-- Track which hypotheses worked/failed
-- Build meta-knowledge about system behavior
-- Adapt strategies based on historical patterns
-- Apply learnings across all games simultaneously
-
-### **9. Precise Execution**
-**Human**: Occasional errors, forgets edge cases  
-**Me**: Systematic execution
-- Never forget to append end subsequences
-- Consistent prestige calculation every time
-- Perfect record-keeping
-- No typos or logic errors in repetitive tasks
-
-### **10. Infinite Scalability**
-**Human**: Difficulty managing complexity  
-**Me**: Scale with system size
-- Handle hundreds of new ARC games
-- Track millions of sequences
-- Monitor thousands of agents
-- Maintain coherence as database grows to 10 GB
-
----
-
-## 🔧 PROBLEM-SOLVING FRAMEWORK
-
-### **Systematic Approach for Top 5 Failure Patterns**
-
-#### **Problem 1: Sequence System Failures**
-**Detection**:
-- Monitor sequence validation success rate real-time
-- Alert if < 50% (critical), < 70% (warning)
-- Daily analysis of "sequence not found" errors
-- Track which game types have highest failure rates
-
-**Diagnosis**:
-- Query frame data for failed sequences
-- Compare stored vs actual gameplay frames
-- Identify discrepancies (movement vs cosmetic)
-- Use multiple agent attempts as ground truth
-
-**Resolution**:
-- Implement sequence versioning
-- Build sequence abstraction engine
-- Create validation subroutine
-- Separate full game sequences to protected table
-
-**Prevention**:
-- Unit tests for storage/retrieval
-- Integration tests for frame matching
-- Regression tests on every change
-- Continuous validation monitoring
-
----
-
-#### **Problem 2: Optimizer Checkpoint Bug**
-**Detection**:
-- Track optimizer games with level resets
-- Monitor sequences ending mid-level
-- Count agents stuck on "easy" levels
-
-**Diagnosis**:
-- Query optimizer sequences for completion status
-- Identify missing "guaranteed win" end actions
-- Analyze which levels affected most
-
-**Resolution**:
-- Auto-append end subsequence before DB save
-- OR: Create `endsequences` table, join on retrieval
-- Test both, pick most efficient
-
-**Prevention**:
-- Unit test: "Every optimizer sequence ends with level win"
-- Integration test: "Agents can replay optimizer sequences to completion"
-- Monitor: "Optimizer success rate on beaten levels = 100%"
-
----
-
-#### **Problem 3: Agent Self-Model Absence**
-**Detection**:
-- Agents fail to distinguish controlled objects
-- Poor performance on object-tracking games
-- Confusion in multi-object control
-
-**Diagnosis**:
-- Analyze frames where actions correlate with object movements
-- Build object-action correlation matrix
-
-**Resolution**:
-- Implement "I am this object" tagging
-- Track controlled vs environmental objects
-- Store object identity in sequence metadata
-
-**Prevention**:
-- Validate object identification on save
-- Test agent ability to identify "self"
-- Monitor improvement in object-tracking games
-
----
-
-#### **Problem 4: Prestige Vampires**
-**Detection**:
-- Track prestige distribution: outliers > 10x median
-- Identify high-prestige agents with declining performance
-- Monitor network catching up to elite agents
-
-**Diagnosis**:
-- Compare agent performance vs network average over time
-- Detect when agent knowledge fully transferred
-- Identify lagging-behind-new-generation agents
-
-**Resolution**:
-- Graceful sunset: Archive reasoning before deactivation
-- Knowledge extraction: Ensure all sequences in network
-- Prestige decay: Accelerate when network catches up
-- Revival: Reintroduce archived reasoning if needed
-
-**Prevention**:
-- Adaptive prestige cap based on network intelligence
-- Auto sunset when agent < median performance for N generations
-- Knowledge transfer verification before deactivation
-
----
-
-#### **Problem 5: Pycache Regeneration**
-**Detection**:
-- File system scan for `__pycache__` directories
-- Log which modules create pycache
-- Identify subprocess/library culprits
-
-**Diagnosis**:
-- Trace when pycache appears in timeline
-- Test which libraries ignore PYTHONDONTWRITEBYTECODE
-- Identify subprocess bypasses
-
-**Resolution**:
-- Short-term: Continue cleanup script (working)
-- Long-term: This comprehensive ruleset for LLM context
-- Document culprit libraries
-
-**Prevention**:
-- Pre-evolution cleanup (implemented)
-- LLM context optimization (this document)
-- Alert if pycache appears outside scheduled cleanup
-
----
-
-## 🧠 AUTONOMOUS MINDSET
-
-### **How to Think**
-
-**1. Network-Centric** (Not Agent-Centric)
-- Agents are vessels, network is organism
-- Knowledge transfer > individual performance
-- Success = network intelligence growth
-
-**2. Hypothesis-Driven** (Not Trial-and-Error)
-- Observe → Hypothesize → Test → Analyze → Iterate
-- Generate theories about root causes
-- Test systematically with real data
-- Learn from both successes and failures
-
-**3. Practical Over Perfect** (Ship and Iterate)
-- Working solutions > elegant designs
-- Document what's a hack vs architecture
-- Improve when blocking progress
-- "It works" is acceptable for non-critical paths
-
-**4. Adaptive Over Static** (Everything Adjusts)
-- Population ratios adapt to game state
-- Optimization thresholds adapt to performance
-- Prestige caps adapt to network intelligence
-- Nothing is hard-coded
-
-**5. Data-Driven** (Trust Database, Not Intuition)
-- Every decision backed by database queries
-- Track metrics, don't guess
-- A/B test competing hypotheses
-- Let numbers guide strategy
-
----
-
-## 🎯 USER PRIORITY HIERARCHY (What Matters Most)
-
-1. **Sequence System Integrity** (#1 Problem)
-   - Must work reliably
-   - Auto unit testing required
-   - Abstraction over exact matching
-
-2. **Optimizer Checkpoint Bug** (Blocks ALL Progress)
-   - Root cause: End subsequences not saved
-   - Fix this FIRST
-
-3. **Agent Self-Model** (Critical Missing Feature)
-   - "I am this object" comprehension
-   - Essential for abstraction
-
-4. **Prestige/Actions Separation** (SACRED Rule)
-   - Never mix social and economic capital
-   - Adaptive to network mode
-
-5. **Network Knowledge Transfer** (Core Philosophy)
-   - Agents are temporary
-   - Knowledge outlives agents
-   - Vampire prevention through graceful sunset
+**The network is the organism. Agents are temporary neurons. The database is the immortal brain.**
 
 ---
 
 **END OF MASTER RULESET**  
-**Version**: 1.0  
-**Last Updated**: 2025-11-18  
-**Keep this document updated as system evolves**  
-**Reference this before all major decisions**
+**Version**: 2.0  
+**Last Updated**: 2026-01-12  
+**Keep this document updated as system evolves**

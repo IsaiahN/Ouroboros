@@ -19877,7 +19877,7 @@ class GameplayEngine:
                         ws.total_actions ASC,  -- Most efficient (fewest actions)
                         ws.total_score DESC    -- Highest score as tiebreaker
                 """
-                logger.debug(f"🦹 Sociopath exploiter mode: ignoring community validation")
+                logger.debug(f"[SOCIOPATH] Exploiter mode: ignoring community validation")
             else:
                 # Social exploiters, generalists, pioneers: RESPECT community validation
                 order_by_clause = """
@@ -22878,7 +22878,7 @@ class GameplayEngine:
                     datetime.now().isoformat()
                 ))
                 
-                logger.info(f"🆕 Stored meta-learned pattern: {pattern_name}")
+                logger.info(f"[NEW] Stored meta-learned pattern: {pattern_name}")
         
         except Exception as e:
             logger.error(f"Error storing discovered pattern: {e}")
@@ -23000,7 +23000,7 @@ class GameplayEngine:
                         # 30% chance sociopath ignores network wisdom
                         import random
                         if random.random() < 0.3:
-                            logger.debug(f"🦹 Sociopath agent ignoring network wisdom (adherence: {social_adherence:.2f})")
+                            logger.debug(f"[SOCIOPATH] Agent ignoring network wisdom (adherence: {social_adherence:.2f})")
                             return None
                     
                     reasoning = f"Network history: ACTION{best_action} has {action_analysis[0]['success_rate']:.1%} success rate at L{level_number} ({action_analysis[0]['total_attempts']} attempts)"
