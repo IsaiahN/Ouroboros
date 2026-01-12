@@ -22,7 +22,7 @@ Three integrated subsystems:
 
 **Key Collaborators & Influences:**
 
-- **Patrick Cox** - Tetrahedral Object architecture (Math-based Storytelling for characters)
+- **Patrick Cox** - Math-based Storytelling for characters
 - **RLVR** - [Reinforcement Learning with Verifiable Rewards](https://arxiv.org/abs/2506.14245)
   - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
 
