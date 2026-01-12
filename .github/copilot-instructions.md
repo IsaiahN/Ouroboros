@@ -18,7 +18,7 @@
 
 ---
 
-## 12 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
+## 15 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
 
 ### **RULE 1: Always Disable Pycache**
 - `PYTHONDONTWRITEBYTECODE=1` in ALL environments
@@ -50,7 +50,7 @@
 - NEVER create test files (waste of tokens)
 - Use LIVE ARC AGI 3 data only
 - Real game results for ALL validation
-- **Exception**: Unit tests for core components (automated, not manual)
+- **Exception**: See Rule 15 - tests in `tests/` folder are preserved
 
 ### **RULE 6: No Simulated Games**
 - NEVER mock/simulate ARC games
@@ -105,6 +105,49 @@
   - Active agents
   - Positive-score game results
   - All learned knowledge (rules, patterns, etc.)
+
+### **RULE 13: Regular Dependency Analysis (PyDeps)**
+- Run `python analyze_dependencies.py --stats --orphans` before major changes
+- Check for circular imports with `--cycles` option
+- Follow `architecture/Pydeps_Usage_Guide.md` for detailed procedures
+- **When to Run**:
+  - Before every major refactor
+  - After adding new modules
+  - When debugging import errors or logic flow breaks
+  - Every 10 generations as part of system health check
+- **What to Check**:
+  - Zero circular imports (should pass)
+  - No new orphaned modules (all code integrated)
+  - Import chain matches theoretical architecture
+- **Fix Priority**:
+  - Cross-layer cycles (CRITICAL - fix immediately)
+  - Orphaned modules (HIGH - integrate or mark deprecated)
+  - Redundant imports (LOW - optimize when convenient)
+
+### **RULE 14: Keep Diagrams Updated**
+- Update architecture diagrams when codebase structure changes
+- Regenerate pydeps SVG files after major refactors
+- Keep `diagrams/` folder current with actual implementation
+- **Diagrams to Maintain**:
+  - `deps_core_gameplay.svg` - Core gameplay dependencies
+  - `deps_cods_engine.svg` - CODS engine dependencies
+  - `deps_seed_primitives.svg` - Primitives dependencies
+- **Regenerate Command**: `python analyze_dependencies.py --full --core --reasoning`
+- Diagrams should reflect reality, not aspirations
+
+### **RULE 15: Tests Folder Exception**
+- Tests in `tests/` folder are EXEMPT from "No Test Files" rule
+- **Do NOT delete** existing tests in `tests/` folder
+- Reusable or recurring test scenarios should be placed in `tests/`
+- **What belongs in tests/**:
+  - Unit tests for core components (`test_cods.py`, `test_primitives.py`)
+  - Integration tests for data flows
+  - Regression tests for fixed bugs
+  - Performance benchmarks
+- **What does NOT belong**:
+  - One-off debugging scripts (use `manual_tools/` instead)
+  - Mock/simulated games (violates Rule 6)
+  - Manual test files created during development
 
 ---
 

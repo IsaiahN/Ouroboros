@@ -3,6 +3,15 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
 
 """
+[DEPRECATED - UNREALIZED FEATURE]
+==================================
+This module was designed but never integrated into the active system.
+Related to the specialist_coordinator system which was disabled.
+Prestige + operating modes now handle game assignment instead.
+Kept for reference but not imported by any active code.
+Date: January 12, 2026
+
+Original Description:
 Game Diversity Preservation System
 
 Ensures every game has at least one active specialist at all times.

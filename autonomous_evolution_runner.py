@@ -727,12 +727,9 @@ class AutonomousEvolutionRunner:
             
             print(f"[OK] Created {len(agents_created)} agents")
             
-            # Initialize specialist assignments if in specialist mode
-            if self.specialist_mode and self.specialist_coordinator:
-                print(f"\n[>] Initializing specialist game assignments...")
-                # Specialist assignments disabled - prestige + modes handle selection
-                # Prestige system provides earned survival protection (0-80%)
-                # Operating modes (pioneer/optimizer/generalist) guide mutation rates
+            # NOTE: Specialist assignments disabled - prestige + operating modes handle selection
+            # Prestige system provides earned survival protection (0-80%)
+            # Operating modes (pioneer/optimizer/generalist) guide mutation rates
             
             return True
             
@@ -1466,20 +1463,7 @@ class AutonomousEvolutionRunner:
                 self._current_target_population = ADAPTIVE_TARGET_POPULATION
                 self._current_game_types = game_types  # Store game types for specialist protection
                 
-                # SPECIALIST MODE: Auto-assign games if not already assigned (for resumed checkpoints)
-                if self.specialist_mode and self.specialist_coordinator:
-                    # Check if assignments exist
-                    first_agent = selected_agents[0] if selected_agents else None
-                    if first_agent:
-                        assignments = self.specialist_coordinator.get_games_for_specialist(first_agent['agent_id'])
-                        if not assignments:
-                            print(f"\n[>] Auto-assigning specialists (resuming from checkpoint)...")
-                            self.specialist_coordinator.initialize_specialist_assignments(
-                                selected_agents,  # FIXED: Use selected_agents
-                                game_ids,
-                                games_per_specialist=2
-                            )
-                            print(f"[OK] Assigned {len(game_ids)} games across {len(selected_agents)} specialists")
+                # NOTE: Specialist mode disabled - prestige + operating modes handle game selection
                 
                 results = []
                 total_wins = 0

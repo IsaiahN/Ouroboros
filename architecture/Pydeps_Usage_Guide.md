@@ -1,0 +1,1249 @@
+# Master Guide: Using PyDeps with Claude Code for AGI System Debugging
+**System**: Unified AGI Architecture (Network + Metalearning + Consciousness Theories)  
+**Version**: 1.0  
+**Date**: January 12, 2026  
+**Purpose**: Fix circular dependencies, silent failures, and logic flow breaks in 100+ file Python codebase
+
+---
+
+## CRITICAL OPERATING RULES FOR THIS GUIDE
+
+### Rule 1: No Unicode Emojis
+- Use ASCII alternatives: `[OK]`, `[FAIL]`, `[WARN]`, `->`, `<->`
+- **Why**: Windows cp1252 encoding errors prevent scripts from running
+- **Applies to**: All commands, output examples, and documentation
+
+### Rule 2: Test Before Commit
+- Test all fixes on the actual codebase
+- Verify with pydeps after each fix
+- Run integration tests to confirm data flows
+- **Only commit to git when confirmed working**
+
+### Rule 3: No Orphaned Code
+- Every fix must integrate cleanly with existing architecture
+- Account for all imports and references
+- Delete old unused code when refactoring
+- Update all dependent files
+
+### Rule 4: Database-Only Storage
+- All analysis results go in database, not log files
+- Use `database_logger.py` for logging
+- Store pydeps reports in `analysis/` directory only for review
+
+### Rule 5: Real Testing Only
+- Never use mock/simulated data
+- Test fixes against actual ARC AGI 3 games
+- Verify data flows with live database queries
+
+### Rule 6: Diagrams Folder Convention
+- ALL generated SVG diagrams MUST be saved to `diagrams/` folder
+- NEVER save SVGs to `analysis/` or project root
+- Standard diagram names:
+  - `deps_core_gameplay.svg` - Core gameplay dependencies
+  - `deps_cods_engine.svg` - CODS engine dependencies
+  - `deps_seed_primitives.svg` - Primitives dependencies
+  - `full_dependencies.svg` - Complete system graph
+- **Why**: Centralized location for all architecture visualizations
+
+---
+
+## Executive Summary
+
+Your AGI system is already implemented but has three critical issues:
+1. **Circular dependencies** - Modules import each other creating cycles
+2. **Silent failures** - Logic breaks without error messages
+3. **Flow leaks** - Data not propagating through the architecture correctly
+
+This guide provides a systematic approach using **pydeps** (dependency analysis) and **Claude Code** (automated fixing) based on your unified theoretical architecture.
+
+---
+
+## Part I: Understanding Your System Architecture
+
+### The Three-Layer Architecture
+
+Based on the master ruleset, your system follows a three-layer agent architecture:
+
+**Layer 1: Static Genome (Nature - "Hardware")**
+- Agent type, base architecture, core capabilities
+- Mutation Rate: 1-2% per generation
+- Inheritance: Full genetic (100%)
+- Lifespan: Entire agent life
+
+**Layer 2: Epigenetic (Nurture - "Learning Capacity")**
+- Feature attention weights, learning rate modifiers
+- Sensation profile, social rule adherence
+- Stream weighting (w_A/w_B balance)
+- Mutation Rate: 10-20% per generation
+- Inheritance: Fitness-weighted with 0.95 decay
+
+**Layer 3: Somatic (Experience - "Learned Knowledge")**
+- Winning sequences, discovered patterns, action memories
+- NOT INHERITED - stored in community database
+- Lifespan: Outlives agent (network memory)
+
+**At the code architecture level**, this translates to:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  LAYER 1: CENTRAL INFRASTRUCTURE (Persistent)                   │
+│  - Database (core_data.db) - The immortal organism              │
+│  - CODS/Oracle - Centralized validator                          │
+│  - Regulatory Engine - Population management                    │
+└─────────────────────────────────────────────────────────────────┘
+                              <->
+┌─────────────────────────────────────────────────────────────────┐
+│  LAYER 2: KNOWLEDGE LAYER (Distributed)                         │
+│  - Viral Information Packages - Spreadable knowledge units      │
+│  - Resonance Patterns - Cross-domain validations               │
+│  - Composed Operators - Discovered primitives                   │
+└─────────────────────────────────────────────────────────────────┘
+                              <->
+┌─────────────────────────────────────────────────────────────────┐
+│  LAYER 3: AGENT LAYER (Temporary)                              │
+│  - Two-Stream Consciousness (Stream A/B)                        │
+│  - Persona Ensemble (Proposers/Observers/Evaluators)           │
+│  - Cognitive Roles (Pioneer/Optimizer/Generalist/Exploiter)    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Critical Data Flows (Where Leaks Likely Occur)
+
+**Flow 1: Gameplay -> CODS -> Validation -> Unlocking**
+```
+agent plays game -> generates RLVR data -> 
+CODS analyzes -> validates patterns -> 
+unlocks primitives -> creates viral packages
+```
+
+**Flow 2: Stream B Knowledge Retrieval**
+```
+agent queries Stream B -> 
+retrieves viral packages from database -> 
+integrates with Stream A -> 
+action selected
+```
+
+**Flow 3: Persona Synthesis**
+```
+streams conflict detected -> 
+personas generate proposals -> 
+synthesis proposal created -> 
+surprise measured -> 
+action executed
+```
+
+**Flow 4: Prestige -> Viral Spread**
+```
+agent discovers pattern -> 
+RLVR validates -> 
+prestige awarded -> 
+viral package created -> 
+spreads to all agents
+```
+
+---
+
+## Part II: Setup Phase
+
+### Step 1: Install Dependencies
+
+**CRITICAL**: Always disable pycache (Rule 1)
+```bash
+# Set environment variable
+export PYTHONDONTWRITEBYTECODE=1
+
+# Add to your shell profile for persistence
+echo "export PYTHONDONTWRITEBYTECODE=1" >> ~/.bashrc
+
+# Install pydeps
+pip install pydeps --break-system-packages
+
+# Install graphviz (required for visualization)
+sudo apt-get update
+sudo apt-get install graphviz -y
+
+# Verify installation
+pydeps --version
+```
+
+### Step 2: Create Project Structure Map
+
+```bash
+# Navigate to your project root
+cd /path/to/your/agi/system
+
+# Create required directories
+mkdir -p diagrams          # All pydeps SVG outputs go here
+mkdir -p analysis/fix_logs  # Text reports and logs
+
+# List all Python files
+find . -name "*.py" -type f > analysis/python_files.txt
+
+# Count files
+wc -l analysis/python_files.txt
+```
+
+### Step 3: Initial Dependency Scan
+
+**IMPORTANT**: All SVG diagrams MUST be saved to the `diagrams/` folder.
+
+```bash
+# Generate full dependency graph with cycle detection
+# Replace 'your_package_name' with your actual package name
+pydeps your_package_name \
+    --show-cycles \
+    --max-bacon=5 \
+    --cluster \
+    -o diagrams/full_dependencies.svg
+
+# Generate text report for Claude Code analysis
+pydeps your_package_name \
+    --show-cycles \
+    --cluster \
+    --max-bacon=5 \
+    > analysis/cycles_report.txt
+
+# Generate JSON for programmatic analysis (if supported)
+pydeps your_package_name \
+    --show-cycles \
+    --max-bacon=5 \
+    --pylib-all \
+    > analysis/dependencies.json
+```
+
+---
+
+## Part III: Theoretical Architecture Mapping
+
+### Critical Files by Theory (Expected Structure)
+
+Based on your three theories, your codebase likely has:
+
+#### **Network Theory Files** (Layer 1)
+```
+/database/
+  - core_data.db (SQLite database)
+  - schema.sql (table definitions)
+  
+/network/
+  - viral_packages.py (package management)
+  - prestige_system.py (social capital)
+  - regulatory_engine.py (population control)
+  - resonance_detector.py (cross-domain patterns)
+  - forgetting_system.py (relevance decay)
+  
+/database_managers/
+  - viral_package_manager.py
+  - agent_manager.py
+```
+
+#### **Metalearning Theory Files** (Layer 2)
+```
+/cods/
+  - oracle.py (centralized validator)
+  - pattern_validator.py (RLVR checking)
+  - primitive_unlocker.py (granting primitives)
+  - composition_engine.py (operator combining)
+  
+/primitives/
+  - innate_primitives.py (110 seed operations)
+  - locked_primitives.py (discoverable operations)
+  - primitive_registry.py (tracking unlocks)
+  
+/operators/
+  - composed_operators.py (discovered combinations)
+  - operator_evolution.py (mutation/crossover)
+```
+
+#### **Consciousness Theory Files** (Layer 3)
+```
+/consciousness/
+  - stream_a.py (private experience)
+  - stream_b.py (collective wisdom)
+  - i_thread.py (weaver/integrator)
+  - persona_ensemble.py (internal dialogue)
+  
+/agents/
+  - agent.py (main agent class)
+  - self_model.py (identity tracking)
+  - world_model.py (predictions)
+  - theory_gating.py (hypothesis filtering)
+  
+/gameplay/
+  - game_interface.py (ARC-AGI interaction)
+  - action_executor.py (executing decisions)
+  - core_gameplay.py (main loop)
+```
+
+### Expected Import Patterns (Clean Architecture)
+
+**CRITICAL**: The dual-economy principle (SACRED) must be maintained:
+- **Prestige** (social capital) = Trust weighting, credibility
+- **Action Budgets** (economic capital) = Ability to play games
+- **NEVER MIX THESE TWO CURRENCIES**
+
+**Correct Flow** (No cycles):
+```
+Layer 3 (Agents) -> imports -> Layer 2 (CODS/Operators)
+Layer 2 (CODS)   -> imports -> Layer 1 (Database)
+Layer 1 (Database) -> imports -> Nothing (base layer)
+```
+
+**Problematic Patterns** (Causes cycles):
+```
+[FAIL] Layer 1 -> Layer 2 -> Layer 1 (cycle)
+[FAIL] Layer 2 -> Layer 3 -> Layer 2 (cycle)
+[FAIL] Agent.py <- -> CODS.py (bidirectional)
+[FAIL] stream_b.py <- -> viral_packages.py (circular)
+```
+
+---
+
+## Part IV: Dependency Analysis Protocol
+
+### Phase 1: Identify All Cycles
+
+Create a Claude Code task file:
+
+**File**: `analysis/task_1_identify_cycles.md`
+```markdown
+# Task 1: Identify and Categorize Circular Dependencies
+
+## Context
+AGI system with 100+ files implementing:
+- Network Theory (viral packages, database)
+- Metalearning Theory (CODS/Oracle, primitives)
+- Consciousness Theory (streams, personas)
+
+## Input Files
+- analysis/cycles_report.txt
+- diagrams/full_dependencies.svg
+
+## Steps
+1. Read the pydeps cycle report
+2. Parse all circular dependency chains
+3. Categorize by layer:
+   - Layer 1 cycles (Database/Network)
+   - Layer 2 cycles (CODS/Operators)
+   - Layer 3 cycles (Agents/Consciousness)
+   - Cross-layer cycles (most dangerous)
+4. For each cycle, identify:
+   - Files involved
+   - Specific imports causing cycle
+   - Theoretical architectural violation
+   - Severity (1-5, based on data flow impact)
+5. Create priority-sorted list
+
+## Output
+File: analysis/cycles_analysis.json
+Format:
+{
+  "cycles": [
+    {
+      "id": 1,
+      "severity": 5,
+      "type": "cross_layer",
+      "files": ["stream_b.py", "viral_packages.py", "agent.py"],
+      "chain": "stream_b -> viral_packages -> agent -> stream_b",
+      "theoretical_issue": "Stream B should only READ from database, not trigger agent updates",
+      "suggested_fix": "Extract database query to separate module"
+    },
+    ...
+  ],
+  "summary": {
+    "total_cycles": 15,
+    "layer_1_cycles": 2,
+    "layer_2_cycles": 5,
+    "layer_3_cycles": 4,
+    "cross_layer_cycles": 4
+  }
+}
+```
+
+Run with Claude Code:
+```bash
+claude code --file analysis/task_1_identify_cycles.md
+```
+
+### Phase 2: Map Silent Failures
+
+**File**: `analysis/task_2_find_silent_failures.md`
+```markdown
+# Task 2: Find Silent Failure Points
+
+## Context
+System has logic breaks without error messages. Data isn't propagating correctly.
+
+## Critical Data Flows to Trace
+Based on unified architecture:
+
+### Flow 1: RLVR Validation -> Primitive Unlocking
+**Expected**: Agent performance -> CODS analyzes -> primitive unlocked
+**Files to check**:
+- gameplay files (generates RLVR data)
+- cods/pattern_validator.py (analyzes data)
+- primitives/primitive_unlocker.py (grants primitive)
+- database updates (logs unlock)
+
+**Check for**:
+- Is RLVR data being written to database?
+- Is CODS querying this data?
+- Are unlock conditions being checked?
+- Are primitives actually being added to agent's toolkit?
+
+### Flow 2: Stream B -> Viral Package Retrieval
+**Expected**: Agent queries Stream B -> retrieves packages -> integrates
+**Files to check**:
+- consciousness/stream_b.py (query logic)
+- database_managers/viral_package_manager.py (retrieval)
+- agents/agent.py (integration)
+
+**Check for**:
+- Is Stream B actually calling database?
+- Are viral packages being returned?
+- Is empty result handled (returns None vs [])?
+- Are packages filtered correctly by game_type?
+
+### Flow 3: Persona Synthesis -> Action Execution
+**Expected**: Conflict detected -> personas propose -> synthesis -> action
+**Files to check**:
+- consciousness/persona_ensemble.py (proposals)
+- agents/action_executor.py (execution)
+- gameplay/core_gameplay.py (main loop)
+
+**Check for**:
+- Are personas being invoked when streams conflict?
+- Are proposals being scored?
+- Is synthesis happening or defaulting to first option?
+- Are actions actually sent to ARC API?
+
+## Steps
+1. For each flow, add debug logging at every step
+2. Run a test game with logging enabled
+3. Identify where data stops propagating
+4. Create failure_points.json with:
+   - Flow name
+   - Last successful step
+   - First failing step
+   - Missing logic/function call
+   - Suggested fix
+
+## Output
+File: analysis/failure_points.json
+```
+
+Run with Claude Code:
+```bash
+claude code --file analysis/task_2_find_silent_failures.md
+```
+
+### Phase 3: Logic Flow Verification
+
+**File**: `analysis/task_3_verify_logic_flows.md`
+```markdown
+# Task 3: Verify Critical Logic Flows
+
+## Context
+Verify that the theoretical architecture is actually implemented in code.
+
+## Theoretical Requirements to Verify
+
+### Requirement 1: CODS is Centralized (Not Per-Agent)
+**Theory states**: CODS watches ALL agent gameplay, is external validator
+**Code should show**: 
+- Single CODS instance
+- CODS receives data from all agents
+- Agents don't instantiate their own CODS
+**Check files**:
+- cods/oracle.py (should be singleton or global)
+- agents/agent.py (should NOT create CODS)
+
+### Requirement 2: Roles Are Emergent (Not Assigned)
+**Theory states**: Roles emerge from w_A/w_B weights + context
+**Code should show**:
+- agents.self_network_bias determines role
+- Role can change mid-game based on updates
+- No "role assignment" in agent creation
+**Check files**:
+- agents/agent.py (initialization)
+- network/regulatory_engine.py (population management)
+
+### Requirement 3: Stream B Queries Viral Packages
+**Theory states**: Stream B gets collective wisdom from database
+**Code should show**:
+- stream_b.py queries viral_information_packages table
+- Results filtered by relevance/credibility
+- Agent doesn't need to "know" other agents directly
+**Check files**:
+- consciousness/stream_b.py
+- database_managers/viral_package_manager.py
+
+### Requirement 4: Personas Create Internal Dialogue
+**Theory states**: Multiple personas argue, synthesize, surprise agent
+**Code should show**:
+- Multiple persona instances per agent
+- Personas generate competing proposals
+- Synthesis proposal when conflict high
+- Surprise measured (chosen action vs habit)
+**Check files**:
+- consciousness/persona_ensemble.py
+- agents/agent.py (persona invocation)
+
+## Steps
+1. For each requirement, trace through code
+2. Verify implementation matches theory
+3. Identify missing components
+4. Create verification_report.json
+
+## Output
+File: analysis/verification_report.json
+Format:
+{
+  "requirements": [
+    {
+      "name": "CODS is centralized",
+      "status": "IMPLEMENTED" | "PARTIAL" | "MISSING",
+      "issues": ["agents/agent.py creates local CODS instance"],
+      "suggested_fix": "Move CODS to global singleton pattern"
+    },
+    ...
+  ]
+}
+```
+
+Run with Claude Code:
+```bash
+claude code --file analysis/task_3_verify_logic_flows.md
+```
+
+---
+
+## Part V: Fixing Strategy
+
+### Fix Priority Matrix
+
+Based on severity and theoretical alignment:
+
+**Priority 1** (Fix immediately - system broken):
+- Cross-layer circular dependencies
+- CODS not centralized (if true)
+- Stream B not querying database
+- Silent failures in RLVR validation flow
+
+**Priority 2** (Fix soon - features incomplete):
+- Layer 2/3 circular dependencies
+- Persona synthesis not happening
+- Resonance detection not active
+- Prestige not awarding correctly
+
+**Priority 3** (Fix eventually - optimization):
+- Layer 1 internal cycles
+- Redundant imports
+- Missing type hints
+- Performance bottlenecks
+
+### Systematic Fix Approach
+
+#### Fix Template for Circular Dependencies
+
+For each cycle identified in Phase 1:
+
+**File**: `fixes/fix_cycle_[ID].md`
+```markdown
+# Fix Circular Dependency: [Cycle ID]
+
+## Cycle Description
+Files: [A.py, B.py, C.py]
+Chain: A -> B -> C -> A
+
+## Theoretical Issue
+[Why this violates architecture, e.g., "Stream B should not import Agent"]
+
+## Fix Strategy
+Choose one:
+1. **Dependency Injection**: Pass dependency as parameter
+2. **Extract Interface**: Create abstract base class
+3. **Late Import**: Import inside function (temporary fix)
+4. **Extract Module**: Move shared code to new module
+5. **Inversion**: Reverse dependency direction
+
+## Chosen Strategy
+[Strategy number and justification]
+
+## Implementation Steps
+1. [Specific code change 1]
+2. [Specific code change 2]
+3. [Run tests]
+4. [Verify cycle broken with pydeps]
+
+## Validation
+```bash
+# After fix, verify cycle is gone
+pydeps your_package_name --show-cycles | grep "[A.py|B.py|C.py]"
+# Should return no results
+```
+
+## Tests
+- [ ] Unit tests pass
+- [ ] Integration tests pass
+- [ ] pydeps confirms cycle broken
+- [ ] Theoretical architecture maintained
+```
+
+#### Example: Fixing Stream B <- -> Viral Packages Cycle
+
+**Problem**: `stream_b.py` imports `viral_packages.py`, which imports `agent.py`, which imports `stream_b.py`
+
+**Solution**: Extract database queries to separate module
+
+```python
+# OLD (circular):
+# stream_b.py
+from viral_packages import ViralPackageManager
+
+class StreamB:
+    def query_knowledge(self):
+        manager = ViralPackageManager()
+        return manager.get_packages()
+
+# viral_packages.py
+from agent import Agent
+
+class ViralPackageManager:
+    def spread_to_agents(self):
+        agents = Agent.get_all()  # This creates cycle!
+
+# NEW (no cycle):
+# database/queries.py (NEW FILE)
+def get_viral_packages(filters):
+    """Pure database query, no agent logic"""
+    conn = get_db_connection()
+    return conn.execute("SELECT * FROM viral_information_packages WHERE ...").fetchall()
+
+# stream_b.py
+from database.queries import get_viral_packages
+
+class StreamB:
+    def query_knowledge(self):
+        return get_viral_packages(self.filters)
+
+# viral_packages.py
+from database.queries import get_viral_packages
+
+class ViralPackageManager:
+    def spread_packages(self, agent_ids):
+        # Receives agent IDs as parameter, doesn't import Agent
+        packages = get_viral_packages()
+        # ... spread logic
+```
+
+---
+
+## Part VI: Claude Code Automation
+
+### Master Fix Script
+
+Create a comprehensive fix task:
+
+**File**: `fixes/master_fix_plan.md`
+```markdown
+# Master Fix Plan: AGI System Dependency Cleanup
+
+## Phase 1: Critical Fixes (Do First)
+
+### Fix 1: Centralize CODS
+**Issue**: If agents create their own CODS instances
+**Fix**: 
+1. Create `cods/cods_singleton.py`
+2. Implement singleton pattern
+3. Update all agent files to use singleton
+4. Test with 3 agents playing simultaneously
+
+### Fix 2: Extract Database Queries
+**Issue**: Circular imports through database access
+**Fix**:
+1. Create `database/queries.py`
+2. Move all SQL queries here
+3. Remove database imports from consciousness/ and agents/
+4. Update imports everywhere
+
+### Fix 3: Implement Late Imports (Temporary)
+**Issue**: Circular imports we can't fix immediately
+**Fix**:
+1. Identify unavoidable cycles
+2. Move imports inside functions
+3. Add TODO comments for proper fix
+4. Document in architecture_debt.md
+
+## Phase 2: Data Flow Verification
+
+### Verify 1: RLVR -> Primitive Unlocking
+**Test**: Create test agent, achieve 20% improvement, verify primitive unlocked
+**Files**: gameplay/*, cods/*, primitives/*
+**Success**: Primitive appears in agent's toolkit
+
+### Verify 2: Stream B Retrieval
+**Test**: Create agent, query Stream B, verify packages returned
+**Files**: consciousness/stream_b.py, database/*
+**Success**: Agent receives non-empty list of packages
+
+### Verify 3: Persona Synthesis
+**Test**: Create high-conflict scenario, verify synthesis proposal generated
+**Files**: consciousness/persona_ensemble.py, agents/*
+**Success**: Synthesis proposal has surprise_score > 0
+
+## Phase 3: Re-Architecture (If Needed)
+
+### If Major Issues Found
+Consider creating:
+- `core/` - Pure business logic (no imports from layers above)
+- `interfaces/` - Abstract base classes to break cycles
+- `utils/` - Shared utilities (no domain logic)
+
+## Validation After Each Fix
+```bash
+# 1. Check cycles removed
+pydeps your_package_name --show-cycles
+
+# 2. Run tests
+pytest tests/
+
+# 3. Verify data flows
+python scripts/test_data_flows.py
+
+# 4. Check performance
+python scripts/benchmark.py
+```
+
+## Success Criteria
+- [ ] Zero circular dependencies (pydeps clean)
+- [ ] All 4 critical data flows working (tests pass)
+- [ ] 100+ file tests complete successfully
+- [ ] No silent failures in logs
+- [ ] Architecture matches theoretical design
+```
+
+### Run Master Fix
+
+```bash
+# Execute master fix plan with Claude Code
+claude code --file fixes/master_fix_plan.md --max-iterations 50
+
+# Monitor progress
+tail -f fixes/fix_log.txt
+```
+
+---
+
+## Part VII: Continuous Monitoring
+
+### Daily Dependency Check
+
+**IMPORTANT**: Use `safe_cleanup.py` for all database cleanup operations
+- **Automatic**: Runs every 10 generations in `autonomous_evolution_runner.py`
+- **Manual**: `python safe_cleanup.py` (dry run) or `python safe_cleanup.py --execute`
+- **Preserves**: Winning sequences, active agents, positive scores, learned knowledge
+- **Cleans**: Zero-score results, old logs, excess navigation history
+
+**Script**: `scripts/check_dependencies.sh`
+```bash
+#!/bin/bash
+
+# Run pydeps and check for cycles
+pydeps your_package_name --show-cycles > /tmp/cycles_check.txt 2>&1
+
+# Check if cycles found
+if grep -q "Cycle" /tmp/cycles_check.txt; then
+    echo "[FAIL] CYCLES DETECTED!"
+    cat /tmp/cycles_check.txt
+    exit 1
+else
+    echo "[OK] No cycles detected"
+    exit 0
+fi
+```
+
+### Integration Tests
+
+**File**: `tests/test_critical_flows.py`
+```python
+"""Test critical data flows match theoretical architecture"""
+
+import pytest
+from agents.agent import Agent
+from cods.oracle import get_cods_instance
+from consciousness.stream_b import StreamB
+from database.queries import get_viral_packages
+
+def test_cods_is_centralized():
+    """Verify CODS is singleton, not per-agent"""
+    agent1 = Agent(agent_id=1)
+    agent2 = Agent(agent_id=2)
+    
+    cods1 = get_cods_instance()
+    cods2 = get_cods_instance()
+    
+    assert cods1 is cods2, "CODS should be singleton"
+    assert not hasattr(agent1, 'cods'), "Agent should not own CODS"
+
+def test_stream_b_queries_database():
+    """Verify Stream B gets data from database, not other agents"""
+    agent = Agent(agent_id=1)
+    stream_b = StreamB(agent_id=1)
+    
+    packages = stream_b.query_knowledge(game_type='symmetry')
+    
+    assert isinstance(packages, list), "Should return list of packages"
+    assert len(packages) >= 0, "Should handle empty results"
+    # Verify it came from database
+    db_packages = get_viral_packages({'game_type': 'symmetry'})
+    assert packages == db_packages, "Stream B should match direct DB query"
+
+def test_rlvr_to_unlock_flow():
+    """Verify RLVR validation unlocks primitives"""
+    agent = Agent(agent_id=1)
+    initial_primitives = len(agent.get_primitives())
+    
+    # Simulate high-performance gameplay
+    agent.play_game(game_id='test_001')
+    agent.record_performance(improvement=0.25)  # 25% improvement
+    
+    # CODS should analyze and unlock
+    cods = get_cods_instance()
+    cods.analyze_agent_performance(agent.agent_id)
+    
+    # Verify primitive unlocked
+    final_primitives = len(agent.get_primitives())
+    assert final_primitives > initial_primitives, "Should unlock primitive"
+
+def test_persona_synthesis_on_conflict():
+    """Verify personas synthesize when streams conflict"""
+    agent = Agent(agent_id=1)
+    agent.streams.A.prediction = "move_left"
+    agent.streams.B.prediction = "move_right"  # Conflict!
+    
+    proposals = agent.persona_ensemble.generate_proposals()
+    
+    # Should have synthesis proposal
+    synthesis_proposals = [p for p in proposals if p.is_synthesis]
+    assert len(synthesis_proposals) > 0, "Should generate synthesis on conflict"
+    
+    # Synthesis should have higher surprise potential
+    synthesis = synthesis_proposals[0]
+    assert synthesis.surprise_score > 0.3, "Synthesis should be surprising"
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
+```
+
+Run tests:
+```bash
+pytest tests/test_critical_flows.py -v
+```
+
+---
+
+## Part VIII: Emergency Procedures
+
+### If System Completely Broken
+
+**Emergency Fix Script**: `scripts/emergency_reset.sh`
+```bash
+#!/bin/bash
+
+echo "🚨 EMERGENCY SYSTEM RESET"
+
+# 1. Backup current state
+timestamp=$(date +%Y%m%d_%H%M%S)
+cp -r . "../backup_$timestamp"
+echo "[OK] Backup created: ../backup_$timestamp"
+
+# 2. Reset database
+sqlite3 database/core_data.db < database/schema.sql
+echo "[OK] Database reset"
+
+# 3. Clear compiled Python
+find . -type f -name "*.pyc" -delete
+find . -type d -name "__pycache__" -delete
+echo "[OK] Cleared Python cache"
+
+# 4. Verify imports work
+python -c "
+import sys
+sys.path.insert(0, '.')
+try:
+    from agents.agent import Agent
+    from cods.oracle import get_cods_instance
+    from consciousness.stream_b import StreamB
+    print('[OK] Core imports working')
+except ImportError as e:
+    print(f'[FAIL] Import error: {e}')
+    sys.exit(1)
+"
+
+# 5. Run minimal test
+python scripts/minimal_test.py
+
+echo "[OK] Emergency reset complete"
+```
+
+### Rollback to Working State
+
+```bash
+# If fix broke something, rollback
+git checkout HEAD~1  # Go back one commit
+git checkout -b emergency-rollback
+
+# Or restore from backup
+cp -r ../backup_TIMESTAMP/* .
+```
+
+---
+
+## Part IX: Success Metrics
+
+### How to Know It's Working
+
+**Metric 1: Zero Cycles**
+```bash
+pydeps your_package_name --show-cycles | wc -l
+# Should output: 0
+```
+
+**Metric 2: Data Flows Work**
+```bash
+python tests/test_critical_flows.py
+# All tests should pass
+```
+
+**Metric 3: Agents Actually Learn**
+```sql
+-- Check if primitives are being unlocked
+SELECT COUNT(*) FROM primitive_unlock_attempts WHERE status = 'SUCCESS';
+-- Should increase over time
+
+-- Check if viral packages are spreading
+SELECT COUNT(*) FROM agent_viral_infections WHERE infection_date > datetime('now', '-1 hour');
+-- Should be non-zero during gameplay
+```
+
+**Metric 4: Theoretical Alignment**
+```bash
+# Verify architecture matches theory
+python scripts/verify_architecture.py
+# Should output: "[OK] Architecture matches theoretical design"
+```
+
+---
+
+## Part X: Advanced Techniques
+
+### Using PyDeps for Architecture Enforcement
+
+**Script**: `scripts/enforce_architecture.py`
+```python
+"""Enforce architectural rules using pydeps output"""
+
+import subprocess
+import json
+import sys
+
+# Architectural rules
+RULES = {
+    "layer_1_files": ["database/", "network/"],
+    "layer_2_files": ["cods/", "primitives/", "operators/"],
+    "layer_3_files": ["agents/", "consciousness/", "gameplay/"],
+    "forbidden_imports": [
+        ("layer_1", "layer_2"),  # Layer 1 cannot import Layer 2
+        ("layer_1", "layer_3"),  # Layer 1 cannot import Layer 3
+        ("layer_2", "layer_3"),  # Layer 2 cannot import Layer 3
+    ]
+}
+
+def get_layer(filepath):
+    """Determine which layer a file belongs to"""
+    for layer_name, prefixes in [("layer_1", RULES["layer_1_files"]),
+                                   ("layer_2", RULES["layer_2_files"]),
+                                   ("layer_3", RULES["layer_3_files"])]:
+        for prefix in prefixes:
+            if filepath.startswith(prefix):
+                return layer_name
+    return "unknown"
+
+def check_architectural_violations():
+    """Check if any imports violate architectural layers"""
+    # Run pydeps to get import graph
+    result = subprocess.run(
+        ["pydeps", "your_package_name", "--show-deps"],
+        capture_output=True,
+        text=True
+    )
+    
+    violations = []
+    # Parse output and check for violations
+    # (Implementation details depend on pydeps output format)
+    
+    return violations
+
+if __name__ == "__main__":
+    violations = check_architectural_violations()
+    if violations:
+        print("[FAIL] ARCHITECTURAL VIOLATIONS DETECTED:")
+        for v in violations:
+            print(f"  - {v}")
+        sys.exit(1)
+    else:
+        print("[OK] Architecture is clean")
+        sys.exit(0)
+```
+
+### Pre-Commit Hook
+
+**File**: `.git/hooks/pre-commit`
+```bash
+#!/bin/bash
+
+echo "Checking for circular dependencies..."
+
+# Run pydeps
+pydeps your_package_name --show-cycles > /tmp/cycles_check.txt 2>&1
+
+# Check for cycles
+if grep -q "Cycle" /tmp/cycles_check.txt; then
+    echo "[FAIL] COMMIT BLOCKED: Circular dependencies detected"
+    cat /tmp/cycles_check.txt
+    echo ""
+    echo "Fix cycles before committing. See PYDEPS_CLAUDE_CODE_MASTER_GUIDE.md"
+    exit 1
+fi
+
+# Run architecture enforcement
+if ! python scripts/enforce_architecture.py; then
+    echo "[FAIL] COMMIT BLOCKED: Architectural violations detected"
+    exit 1
+fi
+
+echo "[OK] Dependency checks passed"
+exit 0
+```
+
+Make executable:
+```bash
+chmod +x .git/hooks/pre-commit
+```
+
+---
+
+## Part XI: Common Issues and Solutions
+
+### Issue 1: "Module not found" in pydeps
+
+**Symptom**: `pydeps` reports module not found errors
+
+**Solution**:
+```bash
+# Ensure PYTHONPATH is set
+export PYTHONPATH=$(pwd):$PYTHONPATH
+
+# Or specify Python path explicitly
+python -m pydeps your_package_name --show-cycles
+```
+
+### Issue 2: Too many cycles to visualize
+
+**Symptom**: SVG file is unreadable due to complexity
+
+**Solution**:
+```bash
+# Focus on specific subdirectory
+pydeps your_package_name.agents --show-cycles
+
+# Or increase max depth limit
+pydeps your_package_name --show-cycles --max-bacon=2
+```
+
+### Issue 3: Claude Code times out
+
+**Symptom**: Fix takes too long, Claude Code stops
+
+**Solution**:
+Break into smaller tasks:
+```bash
+# Instead of one big task
+claude code --file fixes/master_fix_plan.md
+
+# Do incremental fixes
+claude code --file fixes/fix_cycle_1.md
+claude code --file fixes/fix_cycle_2.md
+claude code --file fixes/fix_cycle_3.md
+```
+
+### Issue 4: Fixes break tests
+
+**Symptom**: After fixing cycle, tests fail
+
+**Solution**:
+```bash
+# Revert and analyze
+git checkout HEAD~1
+
+# Check what tests expect
+pytest tests/ -v --tb=long
+
+# Update tests to match new architecture
+claude code "Update tests in tests/ to work with new import structure where database/queries.py is now the central query module"
+```
+
+---
+
+## Part XII: Documentation Maintenance
+
+### Update After Each Major Fix
+
+**File**: `docs/ARCHITECTURE_CHANGELOG.md`
+```markdown
+# Architecture Changelog
+
+## 2026-01-12: Dependency Cleanup
+- **Fixed**: Circular dependency between stream_b.py and viral_packages.py
+- **Method**: Extracted database queries to database/queries.py
+- **Impact**: Stream B now cleanly queries database without agent imports
+- **Tests**: test_stream_b_queries_database() passes
+
+## 2026-01-12: CODS Centralization
+- **Fixed**: Agents were creating individual CODS instances
+- **Method**: Implemented singleton pattern in cods/cods_singleton.py
+- **Impact**: All agents now share single CODS validator
+- **Tests**: test_cods_is_centralized() passes
+```
+
+### Architecture Diagram
+
+Update as system evolves:
+
+**File**: `docs/CURRENT_ARCHITECTURE.md`
+```markdown
+# Current System Architecture (As-Implemented)
+
+## Layer 1: Database (No imports from above)
+- database/core_data.db
+- database/schema.sql
+- database/queries.py (NEW: Central query module)
+
+## Layer 2: Knowledge Management (Imports Layer 1 only)
+- cods/cods_singleton.py (NEW: Centralized validator)
+- cods/pattern_validator.py
+- cods/primitive_unlocker.py
+- network/viral_package_manager.py
+- primitives/primitive_registry.py
+
+## Layer 3: Agent Cognition (Imports Layers 1-2)
+- agents/agent.py
+- consciousness/stream_a.py
+- consciousness/stream_b.py (NOW USES: database/queries.py)
+- consciousness/persona_ensemble.py
+- gameplay/core_gameplay.py
+
+## Key Design Decisions
+1. **Database queries centralized**: All SQL in database/queries.py
+2. **CODS is singleton**: Single instance for entire population
+3. **Roles are emergent**: Based on agents.self_network_bias
+4. **Personas create synthesis**: Implements internal dialogue
+```
+
+---
+
+## Part XIII: Final Checklist
+
+### Forbidden Actions During Fixes
+
+**DO NOT**:
+- Mix prestige and action budgets in any fix
+- Create test/mock games or simulated data
+- Use file-based logging (use database_logger.py)
+- Allow .pyc files to persist
+- Commit to git before real evolution testing
+- Create orphaned/duplicate code
+- Hard-code game solutions
+- Tell agents HOW to play games (defeats generalization)
+
+**ALWAYS**:
+- Use real ARC AGI 3 API
+- Store everything in database
+- Test with live data
+- Update documentation on changes
+- Think network-centrically
+- Maintain three-layer separation (Genome/Epigenetic/Somatic)
+- Respect agent role permissions
+
+### Before Declaring Victory
+
+- [ ] **Zero cycles confirmed**: `pydeps --show-cycles` returns clean
+- [ ] **All 4 critical flows working**: Tests in `test_critical_flows.py` pass
+- [ ] **CODS is centralized**: Only one instance exists
+- [ ] **Stream B queries database**: No agent-to-agent imports
+- [ ] **Personas synthesize**: Conflict detection -> synthesis generation
+- [ ] **RLVR flow complete**: Performance -> CODS -> unlocking -> database
+- [ ] **Prestige awarded**: Discoveries tracked in `agents.discovery_prestige`
+- [ ] **Viral packages spread**: `agent_viral_infections` table populates
+- [ ] **Resonance detection**: Cross-domain patterns logged
+- [ ] **Architecture documented**: `CURRENT_ARCHITECTURE.md` accurate
+- [ ] **Tests passing**: `pytest tests/ -v` shows 100% pass rate
+- [ ] **Performance acceptable**: Benchmark shows expected throughput
+- [ ] **Logs are clean**: No silent failures in error logs
+
+### Success Signature
+
+You'll know the system is working when:
+1. **Agents play games** -> You see RLVR data in database
+2. **CODS validates** -> Primitive unlock attempts logged
+3. **Knowledge spreads** -> Viral packages appear in other agents
+4. **Streams integrate** -> Conflict logs show A/B weighting
+5. **Personas argue** -> Synthesis proposals generated
+6. **System learns** -> Performance improves over generations
+
+---
+
+## Appendix A: Quick Reference Commands
+
+```bash
+# Analyze dependencies (output to diagrams/ folder)
+pydeps your_package_name --show-cycles -o diagrams/report.svg
+
+# Check specific cycle
+pydeps your_package_name --show-cycles | grep "cycle_file.py"
+
+# Run architecture enforcement
+python scripts/enforce_architecture.py
+
+# Test critical flows
+pytest tests/test_critical_flows.py -v
+
+# Check database state
+sqlite3 database/core_data.db "SELECT COUNT(*) FROM viral_information_packages;"
+
+# Monitor real-time
+tail -f logs/system.log | grep "FLOW:"
+
+# Emergency reset
+bash scripts/emergency_reset.sh
+```
+
+---
+
+## Appendix B: Contact and Support
+
+If you encounter issues not covered here:
+
+1. **Check logs**: `logs/system.log`, `logs/error.log`
+2. **Review theory**: Re-read integration points in theoretical docs
+3. **Test in isolation**: Create minimal reproduction script
+4. **Document issue**: Add to `docs/KNOWN_ISSUES.md`
+5. **Ask Claude Code**: Create specific task file for the issue
+
+---
+
+**END OF MASTER GUIDE**
+
+*This guide is living documentation. Update it as you fix issues and learn more about your system's behavior.*

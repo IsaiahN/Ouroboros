@@ -3,6 +3,17 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Must be FIRST before other imports
 
 """
+[DEPRECATED - DISABLED FEATURE]
+================================
+This module was designed but disabled in favor of prestige + operating modes.
+The specialist assignment system was replaced by:
+- Prestige system: Provides earned survival protection (0-80%)
+- Operating modes: Pioneer/Optimizer/Generalist guide game selection
+Never imported by active code. References in autonomous_evolution_runner.py
+were cleaned up on January 12, 2026.
+Date: January 12, 2026
+
+Original Description:
 Specialist Coordinator - Matches games to specialist agents
 ===========================================================
 

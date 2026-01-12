@@ -3,6 +3,14 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 #!/usr/bin/env python3
 """
+[DEPRECATED - REDUNDANT MODULE]
+================================
+This module is only imported by emotional_gameplay_mixin.py which is itself orphaned.
+The sensation_engine.py provides the same functionality and IS actively used.
+Kept for reference but should not be used.
+Date: January 12, 2026
+
+Original Description:
 Somatic Profile System
 ======================
 

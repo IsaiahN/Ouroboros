@@ -2,6 +2,14 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 """
+[DEPRECATED - UNREALIZED FEATURE]
+==================================
+This module was designed but never integrated into the active system.
+Part of the planned "Societal Metrics System" which was not implemented.
+Kept for reference but not imported by any active code.
+Date: January 12, 2026
+
+Original Description:
 MetricConfidenceTracker - Track confidence in metrics themselves.
 
 Part of the Societal Metrics System.

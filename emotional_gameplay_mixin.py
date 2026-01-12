@@ -3,6 +3,15 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 #!/usr/bin/env python3
 """
+[DEPRECATED - REDUNDANT MODULE]
+================================
+This module was designed but never integrated into the active system.
+The sensation_engine.py provides the same functionality and IS actively used.
+This mixin wrapper was never imported by any code.
+Kept for reference but should not be used.
+Date: January 12, 2026
+
+Original Description:
 Gameplay Engine with Somatic Profiles
 ======================================
 

@@ -128,61 +128,68 @@ except ImportError:
 try:
     from cods_engine import CODSEngine, CODSGameContext
     CODS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     CODS_AVAILABLE = False
     CODSEngine = None
     CODSGameContext = None
+    print(f"[IMPORT-WARN] cods_engine not available: {e}")
 
 # Seed Primitives - Baby-derived cognitive primitives for perception and decision-making
 try:
     from seed_primitives import get_seed_primitives, SeedPrimitiveRegistry
     PRIMITIVES_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     PRIMITIVES_AVAILABLE = False
     get_seed_primitives = None
     SeedPrimitiveRegistry = None
+    print(f"[IMPORT-WARN] seed_primitives not available: {e}")
 
 # Terminal Pattern Detector - Foresight to avoid game_over
 try:
     from terminal_pattern_detector import TerminalPatternDetector
     TERMINAL_DETECTOR_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     TERMINAL_DETECTOR_AVAILABLE = False
     TerminalPatternDetector = None
+    print(f"[IMPORT-WARN] terminal_pattern_detector not available: {e}")
 
 # Scientific Method Engine - theory formation/testing
 try:
     from scientific_method_engine import ScientificMethodEngine, QuestioningEngineWithTeeth
     SCIENTIFIC_METHOD_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     SCIENTIFIC_METHOD_AVAILABLE = False
     ScientificMethodEngine = None
     QuestioningEngineWithTeeth = None
+    print(f"[IMPORT-WARN] scientific_method_engine not available: {e}")
 
 # Reasoning Log Capture - For Oracle to detect reasoning bugs
 try:
     from console_metrics_capture import record_reasoning, get_reasoning_capture
     REASONING_CAPTURE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     REASONING_CAPTURE_AVAILABLE = False
     record_reasoning = None
     get_reasoning_capture = None
+    print(f"[IMPORT-WARN] console_metrics_capture not available: {e}")
 
 # Sequence Miner - Retroactive learning from winning sequences
 try:
     from sequence_miner import SequenceMiner
     SEQUENCE_MINER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     SEQUENCE_MINER_AVAILABLE = False
     SequenceMiner = None
+    print(f"[IMPORT-WARN] sequence_miner not available: {e}")
 
 # Network Knowledge Synthesis - network-level insights
 try:
     from network_knowledge_synthesis import NetworkKnowledgeSynthesis
     KNOWLEDGE_SYNTHESIS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     KNOWLEDGE_SYNTHESIS_AVAILABLE = False
     NetworkKnowledgeSynthesis = None
+    print(f"[IMPORT-WARN] network_knowledge_synthesis not available: {e}")
 
 logger = logging.getLogger(__name__)
 

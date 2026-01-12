@@ -2,3 +2,9 @@ python-dotenv>=1.0.0
 aiohttp>=3.9.0
 numpy>=1.24.0
 pandas>=2.0.0
+pydeps>=1.12.0
+
+# Optional: Install Graphviz separately to view dependency graphs as SVG
+# Windows: https://graphviz.org/download/ (add to PATH)
+# Linux: sudo apt-get install graphviz
+# macOS: brew install graphviz
