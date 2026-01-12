@@ -1,32 +1,76 @@
-## Ouroboros: Generalized learning via distributed networks
+# Ouroboros: Distributed Multi-Agent Learning System
 
-**Paradigm Shift - The Network is the Organism.**
+**Architecture**: Database-centric multi-agent evolution with horizontal knowledge transfer
 
-- Thesis: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
+- Paper: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 
-### The Process of Discovery
-**The Nature of the Problem**
+---
 
-Taming Alignment is a matter of understanding the **<ins>Nested [Observer Paradox](https://en.wikipedia.org/wiki/Observer%27s_paradox).</ins>**
-This system explains some of the underlying mechanisms behind the butterfly effect.
+## System Architecture
 
-Here are some of the bigger collaborators/influences for the project:
+Three integrated subsystems:
 
-- **Patrick Cox - Tetrahedral Object architecture (Math based Storytelling for characters)**
+| Subsystem | Function | Implementation |
+|-----------|----------|----------------|
+| **Network Layer** | Persistent storage, viral package distribution | SQLite + horizontal transfer |
+| **Validation Layer** | Pattern validation, primitive unlocking | CODS engine |
+| **Agent Layer** | Dual-stream reasoning, action selection | Two Streams + Persona ensemble |
 
-- **RLVR - Reinforcement Learning with Verifiable Rewards Implicitly Incentivizes Correct Reasoning in Base LLMs](https://arxiv.org/abs/2506.14245)**
-   - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
+---
 
+## Acknowledgments
 
-- We are grateful to our collaborators, acquaintences, friends, family and all connections (past/present/future) who contribute.
+**Key Collaborators & Influences:**
 
-## Project that encapsulated the work to get the theory
-Ouroboros is an evolutionary system designed to solve the [ARC-AGI-3 challenge](https://arcprize.org/arc-agi/3/), an open source.
+- **Patrick Cox** - Tetrahedral Object architecture (Math-based Storytelling for characters)
+- **RLVR** - [Reinforcement Learning with Verifiable Rewards](https://arxiv.org/abs/2506.14245)
+  - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
+
+We are grateful to all collaborators, acquaintances, friends, family, and connections (past/present/future) who contribute.
+
+---
+
+## About the Project
+
+Ouroboros is an evolutionary system designed to solve the [ARC-AGI-3 challenge](https://arcprize.org/arc-agi/3/).
 Unlike traditional agents, it treats the entire population as a single learning network, preserving knowledge across generations through a centralized database.
+
+## Requirements
+
+- Python 3.10+
+- ARC API key (set in `.env`)
+
+```bash
+# Clone and setup
+git clone <repo>
+cd BitterTruth-AI
+
+# Create virtual environment
+python -m venv .venv
+
+# Activate (REQUIRED for all commands)
+& .venv/Scripts/Activate.ps1  # PowerShell
+source .venv/bin/activate      # bash
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure API key
+cp .env.example .env
+# Edit .env and set ARC_API_KEY=your_key
+```
+
+**Key dependencies** (see `requirements.txt`):
+- `requests` - ARC API communication
+- `python-dotenv` - Environment configuration
+- `numpy` - Numerical operations
 
 ## Quick Start
 
 ```bash
+# Activate virtual environment 
+& .venv/Scripts/Activate.ps1  # PowerShell
+
 # Start the autonomous evolution loop (Recommended)
 python run_evolution.py
 
@@ -36,6 +80,8 @@ python run_evolution.py --specialist
 # Run in "Diversity Mode" (Focus on generalization)
 python run_evolution.py --diversity
 ```
+
+> **Important**: Always verify `(.venv)` prefix in terminal before running commands.
 
 ### Command Line Arguments
 
@@ -51,158 +97,276 @@ python run_evolution.py --diversity
 
 ## Core Concepts
 
-### 1. Evolutionary Biome Architecture
+### 1. Distributed Learning Architecture
+
+Addresses the plasticity-stability tradeoff in continual learning:
+
+| Problem | Single-Agent | Multi-Agent Network |
+|---------|--------------|--------------------|
+| Catastrophic forgetting | High risk | Mitigated via specialization |
+| Domain adaptation | Requires retraining | Horizontal knowledge transfer |
+| Generalization | Limited by model capacity | Emerges from population diversity |
+
+**Design**: Agents specialize individually; network generalizes collectively via viral package exchange.
+
+### 2. Three-Layer Biome Architecture
+
 The system mimics biological evolution with three distinct layers of information:
--   **Layer 1: Static Genome (Nature)**. Hard-coded traits (e.g., neural architecture type). Low mutation, high stability.
--   **Layer 2: Epigenetic (Nurture)**. Learning rates and biases. Inherited but decays over generations of agents. Allows temporary adaptation to environmental stress.
--   **Layer 3: Somatic (Culture)**. Real-time knowledge (e.g., "Red pixels are dangerous"). High plasticity. **Not inherited** biologically but stored in the Community Database for all agents to access.
 
-Features derived from these layers:
+| Layer | Name | Plasticity | Inheritance | Purpose |
+|-------|------|------------|-------------|---------|
+| **Layer 1** | Static Genome (Nature) | Low (1-2% mutation) | Full genetic | Fundamental agent traits |
+| **Layer 2** | Epigenetic (Nurture) | Medium (10-20% mutation) | Fitness-weighted with 0.95 decay | HOW agent learns |
+| **Layer 3** | Somatic (Experience) | High | NOT inherited - stored in database | WHAT agent learned |
 
-- Horizontal Gene Transfer: Agents swapping strategies regardless of lineage.
-- Viral Packages: Successful strategies spreading rapidly through a network.
-- Pariahs: Failure patterns marked for avoidance.
+**Key Mechanisms**:
+- **Horizontal Gene Transfer**: Agents swap strategies regardless of lineage
+- **Viral Packages**: Successful strategies spread rapidly through the network
+- **Pariahs**: Failed patterns marked for avoidance (with decay to allow innovation)
 
-### 2. Sensation Engine of the Network
-Agents possess "Semantic Sensation" that biases their navigation (Actions 1-7):
--   **Perception**: Agents recognize objects (e.g., "Blue Square").
--   **Sensation**: Objects trigger emotional states (Frustrated, Cautious, Curious, Confident) based on history.
--   **Action Bias**: Emotions influence movement. "Fear" causes retreat; "Curiosity" drives exploration.
--   **Navigation State**: A floating-point value (-1.0 to +1.0) representing the agent's current mood.
+### 3. Dual-Stream Decision Architecture
 
-### 3. Agent Roles
-The workforce is divided into specialized roles:
--   **Pioneers**: Frontier explorers that seek novel solutions on unbeaten levels.
--   **Optimizers**: Efficiency experts that refine existing solutions on beaten games.
--   **Generalists**: Balanced validators that ensure solution robustness.
--   **Exploiters**: Post-optimization refiners
+Agents integrate two knowledge sources for action selection:
 
-### 4. Agent Self-Model & Perception
-Agents develop a concept of "Self" using Stream-aware perception (aligned with Two Streams Theory):
--   **Self-Recognition**: Tracks which pixels/objects move in response to agent actions.
--   **Confidence Maps**: Builds a probability map of controlled elements.
--   **Agency**: Distinguishes between agent actions and environmental physics.
--   **Self-Direction**: Agents balance private reasoning vs network wisdom based on w_A/w_B weighting.
--   **Stream-Aware Perception**: Each object perceived through 4 knowledge sources:
-    - **Stream A** (Private): What I personally observe (color, position, shape)
-    - **Stream B** (Collective): What the network knows about this object type
-    - **Hypothesis** (Theory): Current working theory from CODS about control
-    - **Synthesis** (Persona): Weighted integration (w_A * Stream A + w_B * Stream B)
--   **Cognitive State**: Calculated from stream conflict (automatic/deliberative/vivid/paralyzed) to modulate decisions.    
+| Stream | Source | Update Frequency | Scope |
+|--------|--------|------------------|-------|
+| **Stream A** | Agent's own gameplay history | Per-action | Local experience |
+| **Stream B** | Network viral packages (CODS-validated) | Per-generation | Population knowledge |
 
-### 5. Cross-Role Resonance Detection
-The system identifies objective truths through cross-role pattern agreement:
--   **Resonance Principle**: When Pioneers (blind), Generalists (network-guided), and Exploiters (micro-optimizers) independently discover the same abstract pattern, that's **resonance** - evidence of objective truth.
--   **Pattern Hashing**: Sequences are fingerprinted by cognitive structure (theory type, complexity, strategy) not raw actions.
--   **Role Diversity Scoring**: Higher resonance when more different roles independently converge.
--   **Amplification Signals**: High-resonance patterns trigger network-wide exploration boosts.
+**Integration**: Weighted combination `action = w_A * stream_A + w_B * stream_B` where weights are learned from outcome feedback. Stream conflict triggers deliberative processing.
 
-### 6. Abstraction & Symbolic Reasoning
-To solve complex tasks, the system moves beyond pixel manipulation:
--   **Symbolic Reasoning**: Converts grid states into logical symbols (e.g., `Shape(Color.RED, Pos(0,0))`). Agents reason about relationships between these symbols rather than raw pixels.
--   **Rule Induction**: Derives abstract rules (e.g., "Fill all enclosed areas with blue") from symbolic relationships.
--   **Counterfactual Analysis**: "What if?" reasoning to test hypotheses before acting.
+### 4. CODS: Centralized Pattern Validator
 
-### 7. Sequence Abstraction
-The system learns and generalizes action sequences:
--   **Winning Sequences**: Complete solutions stored in the database.
--   **Sequence Abstraction**: Identifies reusable *patterns* within sequences (e.g., "Move to corner" is a reusable sub-sequence).
--   **Replay & Refinement**: Agents replay abstract sequences to reach the "frontier" (unsolved levels), allowing them to focus compute on the unknown levels.
+CODS (Cognitive Operator Discovery System) is a population-level analyzer, not per-agent:
 
-### 8. Prestige vs. Action Allowances (The "Sacred Separation")
-The system strictly separates Social Capital from Economic Capital, unlike human societies where they often mix:
+| Function | Description |
+|----------|-------------|
+| Pattern detection | Analyzes gameplay across all agents |
+| Cross-validation | Requires pattern replication across multiple agents |
+| Primitive unlocking | Grants optimized operators when understanding demonstrated |
+| Package creation | Converts validated patterns to viral packages |
 
-| Feature | Prestige (Social Capital) | Action Allowance (Economic Capital) |
-| :--- | :--- | :--- |
-| **Definition** | Respect earned by contributing to the network (teaching, validating). | The computational budget (actions/currency) an agent can spend. |
-| **Source** | Earned by **helping others** (e.g., uploading useful sequences). | Earned by **personal performance** (high scores, efficiency). |
-| **Function** | Determines **influence** (breeding rights, sequence priority). | Determines **lifespan** (how long they can play/explore). |
-| **Philosophy** | "What value do you contribute to the collective?" | "What value do you earn for yourself?" |
-| **Separation** | **Prestige cannot buy Actions.** A great agent who plays poorly will still run out of energy. | **Actions cannot buy Prestige.** An agent with a large action allowance but is selfish, will have no influence/prestige. |
+**Architecture**: Decentralized exploration (agents), centralized validation (CODS), distributed storage (database).
 
-**Adaptive Action Allowances**:
-Action allowances are not static, but adaptively meritocratic. The system dynamically adjusts allowances based performance. High-performing agents receive larger allowances, allowing them to tackle deeper, more complex problems.
+### 5. Seed Primitives (110 Operations)
 
-### 9. Game State Modes
-The system dynamically shifts its strategy based on the state of each game:
--   **Exploration Mode** (Unbeaten Games):
-    -   **60% Pioneers**: Aggressively search for *any* solution.
-    -   **Target**: Frontier levels (unsolved).
--   **Optimization Mode** (Beaten Games):
-    -   **70% Optimizers**: Refine existing solutions to reduce action counts.
-    -   **Target**: Efficiency and robustness.
-    -   **Transition**: Happens  when the first full game win is achieved for that game type.
+Bootstrap operators available at initialization:
 
+| Category | Count | Examples |
+|----------|-------|----------|
+| Attention/Salience | 5 | `detect_novelty`, `detect_motion`, `surprise_detection` |
+| Physical Priors | 5 | `object_permanence`, `solidity`, `continuity` |
+| Affordance Detection | 8 | `is_movable`, `is_container`, `is_reference` |
+| Spatial Reasoning | 5 | `distance`, `adjacent`, `enclosed`, `detect_hole` |
+| Temporal Processing | 4 | `recency_weighting`, `temporal_contiguity` |
+| Quantitative | 3 | `subitizing`, `approximate_numerosity` |
+| Social Learning | 4 | `imitation_bias`, `joint_attention` |
+| Explore/Exploit | 4 | `curiosity_drive`, `exploration_bonus` |
+| Metacognition | 5 | `get_confidence`, `detect_stuck` |
 
-### 10. System Maintenance & Safety
-The system includes autonomous maintenance to ensure long-term stability:
--   **Database Vacuuming**: Automatically optimizes the SQLite database to prevent bloat.
--   **Sequence Pruning**: Aggressively removes "dead" sequences (low success rate, excessive actions) to keep the knowledge base clean.
--   **Agent Sunsetting**: Agents are automatically retired after a set number of generations or if performance stagnates, ensuring the population remains fresh and competitive.
--   **Semantic Forgetting**: Unused knowledge and weak object-sensation mappings decay over time (Generational Forgetting), preventing the accumulation of obsolete data.
--   **Disk Monitoring**: Enforces a 10GB hard limit on database size.
--   **Pycache Prevention**: Strictly enforces `PYTHONDONTWRITEBYTECODE=1` to keep the file system clean.
--   **Graceful Shutdown**: Handles `Ctrl+C` signals to ensure WAL (Write-Ahead Log) checkpoints are written before exiting, preventing data corruption.
+Additional primitives unlock via CODS validation when agents demonstrate compositional understanding.
 
-### 11. Societal Metrics & Autopoiesis
-The system implements self-regulating metrics inspired by autopoiesis (self-maintaining systems) with anti-Goodhart safeguards:
+### 6. Agent Role Specialization
 
--   **Emergence Gain**: Measures whether network intelligence grows faster than individual learning. Target: > 1.0 (network outpaces individuals).
--   **Control Error**: Deviation between intended vs actual system behavior. Target: < 0.30 (system responds predictably).
--   **Identity Drift**: Tracks system coherence over time. Target: < 0.25 (maintains core identity while adapting).
--   **Loop Detection**: Identifies stuck agents repeating futile action patterns. Triggers intervention when detected.
--   **Role Saturation**: Monitors agent role distribution health. Alerts when roles become imbalanced.
+Roles emerge from stream weights and context:
 
-**Anti-Goodhart Protections**:
--   **Trigger Controller**: Prevents feedback resonance with cooldowns, damping, and corroboration requirements.
--   **Metric Rotation**: Periodically rotates which metrics are "active" to prevent gaming.
--   **Metric Confidence**: Meta-metric tracking contradiction rates and predictive power.
--   **Noise Injection**: Random perturbations prevent overfitting to exact thresholds.
+| Role | w_B Range | Action Budget | Assignment |
+|------|-----------|---------------|------------|
+| **Pioneer** | 0.2-0.5 | 1000/cycle | Unbeaten levels |
+| **Optimizer** | 0.7-1.0 | 500/cycle | Beaten games |
+| **Generalist** | 0.4-0.6 | 300/cycle | Cross-domain validation |
+| **Exploiter** | 0.0-0.3 | 200/cycle | Optimized games |
 
-## 📂 Key Files
--   `run_evolution.py`: Main entry point.
--   `core_data.db`: The "network" (SQLite database storing ALL knowledge).
+Role transitions based on performance metrics (`Progress_Score`, `resource_efficiency`, domain contributions).
 
-**Core Modules**:
--   `core_gameplay.py`: Main gameplay loop and action execution.
--   `network_intelligence_engine.py`: Network-level learning and emergence tracking.
--   `cods_engine.py`: Composed Operator Discovery System - failure-driven primitive learning.
--   `concept_discovery_engine.py`: Semantic concept discovery across games.
--   `terminal_pattern_detector.py`: Game-over foresight - learns fatal action patterns.
--   `seed_primitives.py`: derived cognitive primitives (attention, affordance, physics priors, metacognition).
--   `regulatory_signal_engine.py`: Adaptive signals for population control.
--   `autopoiesis_monitor.py`: System health metrics and self-regulation.
+### 7. Persona Ensemble (Multi-Perspective Reasoning)
 
-## 📊 Analysis Tools
+Agents use an ensemble of internal models for action proposal and evaluation:
 
-Reusable tools for monitoring and debugging the system:
+| Persona Type | Function | Example |
+|--------------|----------|--------|
+| **Proposers** | Generate candidate actions | "Explore", "Exploit", "Retreat" |
+| **Observers** | Monitor state and predict outcomes | Confidence estimation |
+| **Evaluators** | Score and select proposals | Theory alignment check |
+
+Persona disagreement triggers explicit deliberation. Synthesis can produce novel action combinations not proposed by any single persona.
+
+### 8. Dual-Currency Resource System
+
+Two independent resource types prevent feedback loops:
+
+| Currency | Earned By | Controls | Isolation |
+|----------|-----------|----------|-----------|
+| **Prestige** | Network contributions (teaching, validation) | Viral package priority, breeding weight | Cannot purchase actions |
+| **Action Budget** | Gameplay performance | Actions per game/level | Cannot purchase prestige |
+
+Separation prevents high-prestige agents from monopolizing compute, maintaining population diversity.
+
+### 9. Cross-Domain Pattern Detection
+
+System identifies structurally similar patterns discovered independently across different game types:
+
+- **Pattern hashing**: Fingerprint sequences by structure, not raw actions
+- **Resonance scoring**: Higher weight when multiple agent roles converge on same pattern
+- **Complexity reduction**: Validated cross-domain patterns reduce search space for new games
+
+### 10. Game State Modes
+
+| Mode | Trigger | Distribution |
+|------|---------|-------------|
+| **Exploration** | No full win exists | 60% Pioneer, 30% Optimizer, 10% Generalist |
+| **Optimization** | ≥1 full win exists | 70% Optimizer, 15% Generalist, 15% Exploiter |
+
+Transition on first full win; Pioneers reassign to remaining unbeaten games.
+
+### 11. System Maintenance
+
+| Component | Behavior |
+|-----------|----------|
+| Database cleanup | Automatic every 10 generations (`safe_cleanup.py`) |
+| Database Size limit | 10 GB default (configurable in `disk_space_monitor.py:MAX_DB_SIZE_GB`) |
+| Logging | SQLite only (no `.log` files) |
+| Pycache | Disabled (`PYTHONDONTWRITEBYTECODE=1`) |
+| Shutdown | `Ctrl+C` triggers WAL checkpoint |
+
+### 12. System Health Metrics
+
+| Metric | Target | Warning | Critical |
+|--------|--------|---------|----------|
+| Emergence Gain | > 1.0 | 0.8-1.0 | < 0.8 |
+| Control Error | < 0.05 | 0.05-0.10 | > 0.10 |
+| Loop Detection | < 0.10 | 0.10-0.20 | > 0.20 |
+| Positive Score Rate | > 50% | 30-50% | < 30% |
+
+**Anti-gaming measures**: Trigger cooldowns, metric rotation, confidence tracking, noise injection
+
+---
+
+## 📂 Project Structure
+
+### Entry Points
+- `run_evolution.py` - Main entry point for autonomous evolution
+- `core_data.db` - The "network brain" (SQLite database storing ALL knowledge)
+
+### Core Modules
+
+| Module | Purpose |
+|--------|---------|
+| `core_gameplay.py` | Main gameplay loop and action execution |
+| `agent_self_model.py` | Two Streams consciousness, self-recognition, Stream A/B integration |
+| `cods_engine.py` | Centralized Operator Discovery System - pattern validation |
+| `network_intelligence_engine.py` | Network-level learning and emergence tracking |
+| `seed_primitives.py` | 110 innate cognitive primitives (attention, affordance, physics, metacognition) |
+| `persona_runtime.py` | Internal persona dialogue and metacognition |
+| `viral_package_engine.py` | Viral knowledge exchange system |
+| `prestige_engine.py` | Social capital and contribution tracking |
+| `sensation_engine.py` | Emotional gameplay and navigation state |
+| `resonance_detector.py` | Cross-domain pattern resonance |
+
+### Supporting Systems
+
+| Module | Purpose |
+|--------|---------|
+| `regulatory_signal_engine.py` | Adaptive signals for population control |
+| `autopoiesis_monitor.py` | System health metrics and self-regulation |
+| `primitive_unlock_manager.py` | Manages primitive bootstrapping and unlocks |
+| `concept_discovery_engine.py` | Semantic concept discovery across games |
+| `terminal_pattern_detector.py` | Game-over foresight - learns fatal patterns |
+| `safe_cleanup.py` | Database maintenance (runs every 10 generations) |
+
+### Architecture Documentation
+
+Located in `architecture/`:
+
+| Folder | Contents |
+|--------|----------|
+| `Concept - Agent Self & World Model/` | Consciousness theory, Two Streams, persona submodeling |
+| `Concept - MetaLearning System/` | CODS/Oracle, primitives, bootstrapping mechanisms |
+| `Concept - Network Model/` | Network theory, viral exchange, database-as-organism |
+| `Concept Integration/` | Unified theory synthesis, integration architecture |
+| `ARC-API-DOCUMENTATION/` | ARC-AGI-3 API reference |
+
+---
+
+## 📊 Analysis & Monitoring Tools
+
+Located in `manual_tools/`:
 
 ```bash
 # Gameplay progression analysis
 python manual_tools/gameplay_analyzer.py --hours 3 --compare
 
-# Network health diagnostics
-python network_health_report.py
+# Check CODS status
+python manual_tools/check_cods_status.py
 
-# Automated reasoning bug detection
-python investigate_bugs.py
+# Database validation
+python manual_tools/db_validation.py
 
-# Database schema inspection  
-python manual_tools/schema_inspector.py --table agents --sample
-python manual_tools/schema_inspector.py --counts
+# Schema inspection  
+python manual_tools/database/schema_inspector.py --table agents --sample
 ```
 
 | Tool | Purpose |
-|------|--------|
-| `gameplay_analyzer.py` | Analyze game results, scores, level completions, baseline comparison |
-| `network_health_report.py` | Population stats, emergence gain, cognitive stages, sequence health |
-| `investigate_bugs.py` | Detect and investigate reasoning disconnects automatically |
-| `schema_inspector.py` | Inspect database tables, columns, row counts, sample data |
-
-## 🛠️ Configuration
--   **Environment**: Copy `.env.example` to `.env`, set `ARC_API_KEY`, then `pip install -r requirements.txt` (includes `python-dotenv` for automatic loading).
--   **Logs**: All logs are stored in `core_data.db` (No log files!).
--   **Shutdown**: Press `Ctrl+C` ONCE for graceful shutdown (saves state & closes scorecard(s)).
+|------|---------|
+| `gameplay_analyzer.py` | Game results, scores, level completions |
+| `check_cods_status.py` | CODS health and discovery status |
+| `check_primitives.py` | Primitive unlock status |
+| `observer_dashboard.py` | Real-time system observation |
+| `db_validation.py` | Database integrity checks |
 
 ---
+
+## 🧪 Testing
+
+Tests are located in `tests/` folder (exception to "No Test Files" rule):
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run specific test
+pytest tests/test_cods.py -v
+```
+
+---
+
+## 🛠️ Configuration
+
+1. **Environment**: Copy `.env.example` to `.env`, set `ARC_API_KEY`
+2. **Dependencies**: 
+   ```bash
+   & .venv/Scripts/Activate.ps1  # Activate venv first!
+   pip install -r requirements.txt
+   ```
+3. **Logs**: All logs stored in `core_data.db` (NO log files!)
+4. **Shutdown**: Press `Ctrl+C` ONCE for graceful shutdown
+
+---
+
+## 16 Critical Operating Rules
+
+See [.github/copilot-instructions.md](.github/copilot-instructions.md) for complete ruleset. Key rules:
+
+1. **Always use `.venv`** - All Python execution in virtual environment
+2. **Database-only storage** - ALL data in SQLite `core_data.db`
+3. **No pycache** - `PYTHONDONTWRITEBYTECODE=1` always
+4. **No test files** (except `tests/` folder) - Use LIVE ARC data
+5. **No simulated games** - Real API only: `https://three.arcprize.org/api/`
+6. **Test before commit** - Verify real actions sent
+7. **No Unicode emojis** - ASCII only (Windows encoding)
+8. **SafeDatabaseCleaner** - Every 10 generations automatically
+
+---
+
+## Design Rationale
+
+**Core architecture decision**: Persistent database as primary intelligence substrate, with transient agents as data generators and pattern validators.
+
+**Key tradeoffs**:
+- Agent mortality enables population-level adaptation without catastrophic forgetting
+- Centralized validation (CODS) prevents collective hallucination while allowing decentralized exploration
+- Dual-currency system maintains diversity under evolutionary pressure
+
+---
+
 <img width="1325" height="545" alt="image" src="https://github.com/user-attachments/assets/f8b00168-0c93-4161-bc3d-88faa1689ce7" />
