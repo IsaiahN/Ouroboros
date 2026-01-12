@@ -1,8 +1,9 @@
-# Master Guide: Using PyDeps with Claude Code for AGI System Debugging
+# Master Guide: Using PyDeps for AGI System Debugging
 **System**: Unified AGI Architecture (Network + Metalearning + Consciousness Theories)  
-**Version**: 1.0  
+**Version**: 1.1  
 **Date**: January 12, 2026  
 **Purpose**: Fix circular dependencies, silent failures, and logic flow breaks in 100+ file Python codebase
+**Environment**: Windows + VS Code + Copilot
 
 ---
 
@@ -28,7 +29,8 @@
 ### Rule 4: Database-Only Storage
 - All analysis results go in database, not log files
 - Use `database_logger.py` for logging
-- Store pydeps reports in `analysis/` directory only for review
+- Store pydeps reports in `architecture/analysis/` directory only for review
+- Store pydeps diagrams (svgs) in `diagrams/` directory only for review
 
 ### Rule 5: Real Testing Only
 - Never use mock/simulated data
@@ -54,7 +56,15 @@ Your AGI system is already implemented but has three critical issues:
 2. **Silent failures** - Logic breaks without error messages
 3. **Flow leaks** - Data not propagating through the architecture correctly
 
-This guide provides a systematic approach using **pydeps** (dependency analysis) and **Claude Code** (automated fixing) based on your unified theoretical architecture.
+This guide provides a systematic approach using **pydeps** (dependency analysis) and **VS Code with Copilot** (automated fixing) based on your unified theoretical architecture.
+
+> **NOTE**: This guide contains both **actual tools** (that exist in the codebase) and **template scripts** (example code you can implement). Actual tools are marked with `[EXISTS]`. Template scripts are provided as reference implementations.
+>
+> **Actual Tools Available**:
+> - `analyze_dependencies.py` - PyDeps wrapper with stats, orphan detection, cycle checking
+> - `theory_alignment_checker.py` - Theory alignment verification
+> - `safe_cleanup.py` - Database cleanup utility
+> - `tests/` folder - Existing test suite
 
 ---
 
@@ -149,67 +159,91 @@ spreads to all agents
 ### Step 1: Install Dependencies
 
 **CRITICAL**: Always disable pycache (Rule 1)
-```bash
-# Set environment variable
-export PYTHONDONTWRITEBYTECODE=1
 
-# Add to your shell profile for persistence
-echo "export PYTHONDONTWRITEBYTECODE=1" >> ~/.bashrc
+**Windows (PowerShell)**:
+```powershell
+# Set environment variable for current session
+$env:PYTHONDONTWRITEBYTECODE = "1"
+
+# Set permanently (user level)
+[Environment]::SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", "User")
 
 # Install pydeps
-pip install pydeps --break-system-packages
+pip install pydeps
 
-# Install graphviz (required for visualization)
-sudo apt-get update
-sudo apt-get install graphviz -y
+# Install Graphviz (required for visualization)
+# Option 1: Download from https://graphviz.org/download/
+# Option 2: Use chocolatey: choco install graphviz
+# Option 3: Use winget: winget install graphviz
 
 # Verify installation
 pydeps --version
 ```
 
+**Linux/macOS**:
+```bash
+# Set environment variable
+export PYTHONDONTWRITEBYTECODE=1
+echo "export PYTHONDONTWRITEBYTECODE=1" >> ~/.bashrc
+
+# Install pydeps and graphviz
+pip install pydeps
+sudo apt-get install graphviz -y  # Debian/Ubuntu
+# brew install graphviz           # macOS
+```
+
 ### Step 2: Create Project Structure Map
 
-```bash
-# Navigate to your project root
-cd /path/to/your/agi/system
+**Windows (PowerShell)**:
+```powershell
+# Navigate to project root
+cd C:\Users\Admin\Documents\GitHub\BitterTruth-AI
 
-# Create required directories
-mkdir -p diagrams          # All pydeps SVG outputs go here
-mkdir -p analysis/fix_logs  # Text reports and logs
+# Create required directories (diagrams/ already exists)
+New-Item -ItemType Directory -Path "diagrams" -Force
 
 # List all Python files
-find . -name "*.py" -type f > analysis/python_files.txt
+Get-ChildItem -Recurse -Filter "*.py" | Select-Object FullName
 
 # Count files
-wc -l analysis/python_files.txt
+(Get-ChildItem -Recurse -Filter "*.py").Count
+```
+
+**Linux/macOS**:
+```bash
+cd /path/to/BitterTruth-AI
+mkdir -p diagrams
+find . -name "*.py" -type f | wc -l
 ```
 
 ### Step 3: Initial Dependency Scan
 
 **IMPORTANT**: All SVG diagrams MUST be saved to the `diagrams/` folder.
 
-```bash
-# Generate full dependency graph with cycle detection
-# Replace 'your_package_name' with your actual package name
-pydeps your_package_name \
-    --show-cycles \
-    --max-bacon=5 \
-    --cluster \
-    -o diagrams/full_dependencies.svg
+Use the wrapper script `analyze_dependencies.py` which handles all pydeps configuration:
 
-# Generate text report for Claude Code analysis
-pydeps your_package_name \
-    --show-cycles \
-    --cluster \
-    --max-bacon=5 \
-    > analysis/cycles_report.txt
+```powershell
+# Generate dependency diagrams for key modules (saves to diagrams/ folder)
+python analyze_dependencies.py --full --core --reasoning
 
-# Generate JSON for programmatic analysis (if supported)
-pydeps your_package_name \
-    --show-cycles \
-    --max-bacon=5 \
-    --pylib-all \
-    > analysis/dependencies.json
+# Check for circular dependencies
+python analyze_dependencies.py --cycles
+
+# Get stats and check for orphaned modules
+python analyze_dependencies.py --stats --orphans
+
+# Generate specific module diagrams
+python analyze_dependencies.py --module core_gameplay
+python analyze_dependencies.py --module cods_engine
+```
+
+**Direct pydeps usage** (if needed):
+```powershell
+# Generate diagram for specific module
+pydeps core_gameplay --max-bacon=3 -o diagrams/deps_core_gameplay.svg
+
+# Show cycles for a module
+pydeps cods_engine --show-cycles
 ```
 
 ---
@@ -221,59 +255,72 @@ pydeps your_package_name \
 Based on your three theories, your codebase likely has:
 
 #### **Network Theory Files** (Layer 1)
+> **Note**: This project uses a FLAT structure (no subdirectories). Files are in project root.
+
 ```
-/database/
-  - core_data.db (SQLite database)
-  - schema.sql (table definitions)
-  
-/network/
-  - viral_packages.py (package management)
-  - prestige_system.py (social capital)
-  - regulatory_engine.py (population control)
-  - resonance_detector.py (cross-domain patterns)
-  - forgetting_system.py (relevance decay)
-  
-/database_managers/
-  - viral_package_manager.py
-  - agent_manager.py
+# Database Layer
+core_data.db                    # SQLite database (the immortal organism)
+complete_database_schema.sql    # Table definitions
+database_interface.py           # Database access layer
+enhanced_database_interface.py  # Extended database operations
+database_logger.py              # Database-backed logging
+
+# Network/Viral System
+viral_package_engine.py         # Viral package management
+prestige_engine.py              # Social capital system
+prestige_vampire_detector.py    # Prestige abuse detection
+regulatory_signal_engine.py     # Population control signals
+resonance_detector.py           # Cross-domain pattern detection
+horizontal_transfer_engine.py   # Knowledge transfer between agents
+network_intelligence_engine.py  # Network-level learning
+network_knowledge_synthesis.py  # Knowledge aggregation
 ```
 
 #### **Metalearning Theory Files** (Layer 2)
 ```
-/cods/
-  - oracle.py (centralized validator)
-  - pattern_validator.py (RLVR checking)
-  - primitive_unlocker.py (granting primitives)
-  - composition_engine.py (operator combining)
-  
-/primitives/
-  - innate_primitives.py (110 seed operations)
-  - locked_primitives.py (discoverable operations)
-  - primitive_registry.py (tracking unlocks)
-  
-/operators/
-  - composed_operators.py (discovered combinations)
-  - operator_evolution.py (mutation/crossover)
+# CODS/Oracle System
+cods_engine.py                  # Centralized Oracle/Discovery System
+oracle_interface.py             # Oracle access interface
+oracle_health_monitor.py        # Oracle system health
+oracle_stuck_game_diagnostics.py # Stuck game analysis
+
+# Primitives & Operators  
+seed_primitives.py              # 110 innate primitive operations
+primitive_unlock_manager.py     # Granting discovered primitives
+operator_composer.py            # Operator combination/composition
+
+# Scientific Method
+scientific_method_engine.py     # Hypothesis formation
+rule_induction_engine.py        # Pattern -> rule extraction
+concept_discovery_engine.py     # New concept identification
 ```
 
 #### **Consciousness Theory Files** (Layer 3)
 ```
-/consciousness/
-  - stream_a.py (private experience)
-  - stream_b.py (collective wisdom)
-  - i_thread.py (weaver/integrator)
-  - persona_ensemble.py (internal dialogue)
-  
-/agents/
-  - agent.py (main agent class)
-  - self_model.py (identity tracking)
-  - world_model.py (predictions)
-  - theory_gating.py (hypothesis filtering)
-  
-/gameplay/
-  - game_interface.py (ARC-AGI interaction)
-  - action_executor.py (executing decisions)
-  - core_gameplay.py (main loop)
+# Two-Stream Architecture (integrated into core modules)
+# Stream A (private experience): Tracked in agent_operating_mode_system.py
+# Stream B (network wisdom): Queries viral_package_engine.py via database
+
+# Persona System
+persona_runtime.py              # Persona ensemble management
+                                # - Action proposers
+                                # - Observer personas  
+                                # - Strategy evaluators
+
+# Agent Identity & Self-Model
+agent_self_model.py             # "I am this object" comprehension
+agent_factory.py                # Agent creation
+agent_lifecycle_manager.py      # Agent birth/death/evolution
+agent_operating_mode_system.py  # Role emergence, stream weighting (w_A/w_B)
+
+# Gameplay (Main Loop)
+core_gameplay.py                # Main game loop, consciousness step
+                                # - _consciousness_step() method
+                                # - Two-stream integration
+                                # - Persona invocation
+action_handler.py               # Action execution
+arc_api_client.py               # ARC-AGI API interaction
+game_session_manager.py         # Game state management
 ```
 
 ### Expected Import Patterns (Clean Architecture)
@@ -294,8 +341,8 @@ Layer 1 (Database) -> imports -> Nothing (base layer)
 ```
 [FAIL] Layer 1 -> Layer 2 -> Layer 1 (cycle)
 [FAIL] Layer 2 -> Layer 3 -> Layer 2 (cycle)
-[FAIL] Agent.py <- -> CODS.py (bidirectional)
-[FAIL] stream_b.py <- -> viral_packages.py (circular)
+[FAIL] core_gameplay.py <-> cods_engine.py (bidirectional)
+[FAIL] agent_operating_mode_system.py <-> viral_package_engine.py (circular)
 ```
 
 ---
@@ -304,11 +351,23 @@ Layer 1 (Database) -> imports -> Nothing (base layer)
 
 ### Phase 1: Identify All Cycles
 
-Create a Claude Code task file:
+Use VS Code with Copilot to analyze dependencies. First run the actual analysis tools:
 
-**File**: `analysis/task_1_identify_cycles.md`
+```powershell
+# Run cycle detection
+python analyze_dependencies.py --cycles
+
+# Get full stats
+python analyze_dependencies.py --stats --orphans
+```
+
+Then ask Copilot to analyze the results. Example prompt:
+
+> "Analyze the circular dependencies found by analyze_dependencies.py and categorize them by architectural layer (Database/Network, CODS/Operators, Agents/Consciousness). Identify cross-layer cycles which are most dangerous."
+
+**Analysis Template** (for reference):
 ```markdown
-# Task 1: Identify and Categorize Circular Dependencies
+# Task: Identify and Categorize Circular Dependencies
 
 ## Context
 AGI system with 100+ files implementing:
@@ -361,16 +420,13 @@ Format:
 }
 ```
 
-Run with Claude Code:
-```bash
-claude code --file analysis/task_1_identify_cycles.md
-```
+Use VS Code Copilot Chat to help analyze and fix identified cycles.
 
 ### Phase 2: Map Silent Failures
 
-**File**: `analysis/task_2_find_silent_failures.md`
+**Reference Prompt Template** (use with VS Code Copilot):
 ```markdown
-# Task 2: Find Silent Failure Points
+# Task: Find Silent Failure Points
 
 ## Context
 System has logic breaks without error messages. Data isn't propagating correctly.
@@ -430,19 +486,16 @@ Based on unified architecture:
    - Suggested fix
 
 ## Output
-File: analysis/failure_points.json
+File: manual_tools/analysis/failure_points.json [TEMPLATE]
 ```
 
-Run with Claude Code:
-```bash
-claude code --file analysis/task_2_find_silent_failures.md
-```
+Use VS Code Copilot to help trace data flows and identify failure points.
 
 ### Phase 3: Logic Flow Verification
 
-**File**: `analysis/task_3_verify_logic_flows.md`
+**Reference Prompt Template** (use with VS Code Copilot):
 ```markdown
-# Task 3: Verify Critical Logic Flows
+# Task: Verify Critical Logic Flows
 
 ## Context
 Verify that the theoretical architecture is actually implemented in code.
@@ -497,7 +550,7 @@ Verify that the theoretical architecture is actually implemented in code.
 4. Create verification_report.json
 
 ## Output
-File: analysis/verification_report.json
+File: manual_tools/analysis/verification_report.json [TEMPLATE]
 Format:
 {
   "requirements": [
@@ -512,9 +565,10 @@ Format:
 }
 ```
 
-Run with Claude Code:
-```bash
-claude code --file analysis/task_3_verify_logic_flows.md
+Use the existing theory alignment checker:
+```powershell
+python theory_alignment_checker.py --grade
+python theory_alignment_checker.py --fix-plan
 ```
 
 ---
@@ -578,10 +632,11 @@ Choose one:
 4. [Verify cycle broken with pydeps]
 
 ## Validation
-```bash
+```powershell
 # After fix, verify cycle is gone
-pydeps your_package_name --show-cycles | grep "[A.py|B.py|C.py]"
-# Should return no results
+python analyze_dependencies.py --cycles
+# Or direct pydeps:
+pydeps module_name --show-cycles
 ```
 
 ## Tests
@@ -640,13 +695,13 @@ class ViralPackageManager:
 
 ---
 
-## Part VI: Claude Code Automation
+## Part VI: VS Code Copilot Workflow
 
-### Master Fix Script
+### Master Fix Strategy
 
-Create a comprehensive fix task:
+Use VS Code with Copilot for automated fixes. For large refactoring tasks, break them into focused prompts.
 
-**File**: `fixes/master_fix_plan.md`
+**Fix Plan Template** (for reference):
 ```markdown
 # Master Fix Plan: AGI System Dependency Cleanup
 
@@ -703,17 +758,17 @@ Consider creating:
 
 ## Validation After Each Fix
 ```bash
-# 1. Check cycles removed
-pydeps your_package_name --show-cycles
+# 1. Check cycles removed [EXISTS]
+python analyze_dependencies.py --cycles
 
-# 2. Run tests
-pytest tests/
+# 2. Run tests [EXISTS]
+pytest tests/ -v
 
-# 3. Verify data flows
-python scripts/test_data_flows.py
+# 3. Verify theory alignment [EXISTS]
+python theory_alignment_checker.py --grade
 
-# 4. Check performance
-python scripts/benchmark.py
+# 4. Check for orphaned modules [EXISTS]
+python analyze_dependencies.py --orphans
 ```
 
 ## Success Criteria
@@ -724,15 +779,19 @@ python scripts/benchmark.py
 - [ ] Architecture matches theoretical design
 ```
 
-### Run Master Fix
+### Using VS Code Copilot for Fixes
 
-```bash
-# Execute master fix plan with Claude Code
-claude code --file fixes/master_fix_plan.md --max-iterations 50
+Instead of running a CLI tool, use VS Code Copilot Chat:
 
-# Monitor progress
-tail -f fixes/fix_log.txt
-```
+1. **Open the file** with the circular dependency issue
+2. **Ask Copilot** to fix it with context, e.g.:
+   > "This file has a circular import with X. Extract the shared functionality to break the cycle."
+3. **Verify the fix**:
+   ```powershell
+   python analyze_dependencies.py --cycles
+   pytest tests/ -v
+   ```
+4. **Commit only when verified working**
 
 ---
 
@@ -746,27 +805,37 @@ tail -f fixes/fix_log.txt
 - **Preserves**: Winning sequences, active agents, positive scores, learned knowledge
 - **Cleans**: Zero-score results, old logs, excess navigation history
 
-**Script**: `scripts/check_dependencies.sh`
+**Script**: `scripts/check_dependencies.ps1` [TEMPLATE - Create if needed]
+```powershell
+# PowerShell script to check for circular dependencies
+
+# Use the wrapper script
+$result = python analyze_dependencies.py --cycles --quiet 2>&1
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] CYCLES DETECTED!"
+    Write-Host $result
+    exit 1
+} else {
+    Write-Host "[OK] No cycles detected"
+    exit 0
+}
+```
+
+**Linux/macOS Alternative** (`scripts/check_dependencies.sh`):
 ```bash
 #!/bin/bash
-
-# Run pydeps and check for cycles
-pydeps your_package_name --show-cycles > /tmp/cycles_check.txt 2>&1
-
-# Check if cycles found
-if grep -q "Cycle" /tmp/cycles_check.txt; then
+# Use the wrapper script
+if ! python analyze_dependencies.py --cycles --quiet; then
     echo "[FAIL] CYCLES DETECTED!"
-    cat /tmp/cycles_check.txt
     exit 1
-else
-    echo "[OK] No cycles detected"
-    exit 0
 fi
+echo "[OK] No cycles detected"
 ```
 
 ### Integration Tests
 
-**File**: `tests/test_critical_flows.py`
+**File**: `tests/test_critical_flows.py` [TEMPLATE - Create if needed]
 ```python
 """Test critical data flows match theoretical architecture"""
 
@@ -839,7 +908,11 @@ if __name__ == "__main__":
 
 Run tests:
 ```bash
-pytest tests/test_critical_flows.py -v
+# Run existing tests [EXISTS]
+pytest tests/ -v
+
+# Or run specific test file if created
+# pytest tests/test_critical_flows.py -v
 ```
 
 ---
@@ -848,7 +921,7 @@ pytest tests/test_critical_flows.py -v
 
 ### If System Completely Broken
 
-**Emergency Fix Script**: `scripts/emergency_reset.sh`
+**Emergency Fix Script**: `scripts/emergency_reset.sh` [TEMPLATE - Create if needed]
 ```bash
 #!/bin/bash
 
@@ -882,8 +955,8 @@ except ImportError as e:
     sys.exit(1)
 "
 
-# 5. Run minimal test
-python scripts/minimal_test.py
+# 5. Run a quick syntax check
+python -m py_compile core_gameplay.py
 
 echo "[OK] Emergency reset complete"
 ```
@@ -906,19 +979,22 @@ cp -r ../backup_TIMESTAMP/* .
 ### How to Know It's Working
 
 **Metric 1: Zero Cycles**
-```bash
-pydeps your_package_name --show-cycles | wc -l
-# Should output: 0
+```powershell
+# Use the wrapper script
+python analyze_dependencies.py --cycles
+# Should output: "No circular dependencies found"
 ```
 
 **Metric 2: Data Flows Work**
 ```bash
-python tests/test_critical_flows.py
+# Run existing tests [EXISTS]
+pytest tests/ -v
 # All tests should pass
 ```
 
 **Metric 3: Agents Actually Learn**
 ```sql
+-- Run in: sqlite3 core_data.db
 -- Check if primitives are being unlocked
 SELECT COUNT(*) FROM primitive_unlock_attempts WHERE status = 'SUCCESS';
 -- Should increase over time
@@ -930,9 +1006,9 @@ SELECT COUNT(*) FROM agent_viral_infections WHERE infection_date > datetime('now
 
 **Metric 4: Theoretical Alignment**
 ```bash
-# Verify architecture matches theory
-python scripts/verify_architecture.py
-# Should output: "[OK] Architecture matches theoretical design"
+# Verify architecture matches theory [EXISTS]
+python theory_alignment_checker.py --grade
+# Should output score and any issues found
 ```
 
 ---
@@ -941,7 +1017,7 @@ python scripts/verify_architecture.py
 
 ### Using PyDeps for Architecture Enforcement
 
-**Script**: `scripts/enforce_architecture.py`
+**Script**: `scripts/enforce_architecture.py` [TEMPLATE - Create if needed]
 ```python
 """Enforce architectural rules using pydeps output"""
 
@@ -973,9 +1049,9 @@ def get_layer(filepath):
 
 def check_architectural_violations():
     """Check if any imports violate architectural layers"""
-    # Run pydeps to get import graph
+    # Use analyze_dependencies.py which wraps pydeps
     result = subprocess.run(
-        ["pydeps", "your_package_name", "--show-deps"],
+        ["python", "analyze_dependencies.py", "--cycles", "--quiet"],
         capture_output=True,
         text=True
     )
@@ -1000,27 +1076,33 @@ if __name__ == "__main__":
 
 ### Pre-Commit Hook
 
-**File**: `.git/hooks/pre-commit`
+**Option 1: PowerShell** (`.git/hooks/pre-commit.ps1`):
+```powershell
+Write-Host "Checking for circular dependencies..."
+
+# Run cycle check using wrapper
+$result = python analyze_dependencies.py --cycles --quiet 2>&1
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[FAIL] COMMIT BLOCKED: Circular dependencies detected"
+    Write-Host $result
+    exit 1
+}
+
+Write-Host "[OK] Dependency checks passed"
+exit 0
+```
+
+**Option 2: Bash** (`.git/hooks/pre-commit`):
 ```bash
 #!/bin/bash
 
 echo "Checking for circular dependencies..."
 
-# Run pydeps
-pydeps your_package_name --show-cycles > /tmp/cycles_check.txt 2>&1
-
-# Check for cycles
-if grep -q "Cycle" /tmp/cycles_check.txt; then
+# Run architecture enforcement using wrapper script
+if ! python analyze_dependencies.py --cycles --quiet; then
     echo "[FAIL] COMMIT BLOCKED: Circular dependencies detected"
-    cat /tmp/cycles_check.txt
-    echo ""
-    echo "Fix cycles before committing. See PYDEPS_CLAUDE_CODE_MASTER_GUIDE.md"
-    exit 1
-fi
-
-# Run architecture enforcement
-if ! python scripts/enforce_architecture.py; then
-    echo "[FAIL] COMMIT BLOCKED: Architectural violations detected"
+    echo "Fix cycles before committing. See architecture/Pydeps_Usage_Guide.md"
     exit 1
 fi
 
@@ -1028,10 +1110,12 @@ echo "[OK] Dependency checks passed"
 exit 0
 ```
 
-Make executable:
+Make executable (Linux/macOS only):
 ```bash
 chmod +x .git/hooks/pre-commit
 ```
+
+> **Windows Note**: Git hooks work on Windows without chmod. Just save the file with no extension for bash, or use `.ps1` extension for PowerShell hooks.
 
 ---
 
@@ -1042,12 +1126,21 @@ chmod +x .git/hooks/pre-commit
 **Symptom**: `pydeps` reports module not found errors
 
 **Solution**:
-```bash
-# Ensure PYTHONPATH is set
-export PYTHONPATH=$(pwd):$PYTHONPATH
+```powershell
+# Windows: Ensure PYTHONPATH includes project root
+$env:PYTHONPATH = "$(Get-Location);$env:PYTHONPATH"
 
-# Or specify Python path explicitly
-python -m pydeps your_package_name --show-cycles
+# Or run with python -m
+python -m pydeps core_gameplay --show-cycles
+
+# Best: Use the wrapper script which handles paths
+python analyze_dependencies.py --module core_gameplay
+```
+
+```bash
+# Linux/macOS
+export PYTHONPATH=$(pwd):$PYTHONPATH
+python -m pydeps core_gameplay --show-cycles
 ```
 
 ### Issue 2: Too many cycles to visualize
@@ -1055,28 +1148,35 @@ python -m pydeps your_package_name --show-cycles
 **Symptom**: SVG file is unreadable due to complexity
 
 **Solution**:
-```bash
-# Focus on specific subdirectory
-pydeps your_package_name.agents --show-cycles
+```powershell
+# Focus on specific module
+python analyze_dependencies.py --module cods_engine
 
-# Or increase max depth limit
-pydeps your_package_name --show-cycles --max-bacon=2
+# Or limit depth with direct pydeps
+pydeps core_gameplay --max-bacon=2 -o diagrams/core_limited.svg
+
+# Generate focused diagrams for key subsystems
+python analyze_dependencies.py --core      # Core gameplay only
+python analyze_dependencies.py --reasoning # Reasoning engines only
 ```
 
-### Issue 3: Claude Code times out
+### Issue 3: Large refactoring overwhelms context
 
-**Symptom**: Fix takes too long, Claude Code stops
+**Symptom**: Copilot loses track during complex multi-file refactoring
 
 **Solution**:
-Break into smaller tasks:
-```bash
-# Instead of one big task
-claude code --file fixes/master_fix_plan.md
+Break into smaller, focused tasks:
+```powershell
+# Instead of one big refactor, do incremental fixes:
 
-# Do incremental fixes
-claude code --file fixes/fix_cycle_1.md
-claude code --file fixes/fix_cycle_2.md
-claude code --file fixes/fix_cycle_3.md
+# Step 1: Fix one cycle
+# Ask Copilot: "Fix the circular import between stream_b.py and viral_packages.py"
+
+# Step 2: Verify
+python analyze_dependencies.py --cycles
+
+# Step 3: Fix next cycle
+# Repeat until all cycles resolved
 ```
 
 ### Issue 4: Fixes break tests
@@ -1084,15 +1184,15 @@ claude code --file fixes/fix_cycle_3.md
 **Symptom**: After fixing cycle, tests fail
 
 **Solution**:
-```bash
+```powershell
 # Revert and analyze
 git checkout HEAD~1
 
 # Check what tests expect
 pytest tests/ -v --tb=long
 
-# Update tests to match new architecture
-claude code "Update tests in tests/ to work with new import structure where database/queries.py is now the central query module"
+# Ask Copilot to update tests:
+# "Update tests in tests/ to work with new import structure where database queries are now centralized"
 ```
 
 ---
@@ -1179,8 +1279,8 @@ Update as system evolves:
 
 ### Before Declaring Victory
 
-- [ ] **Zero cycles confirmed**: `pydeps --show-cycles` returns clean
-- [ ] **All 4 critical flows working**: Tests in `test_critical_flows.py` pass
+- [ ] **Zero cycles confirmed**: `python analyze_dependencies.py --cycles` returns clean
+- [ ] **All critical flows working**: Tests in `tests/` folder pass
 - [ ] **CODS is centralized**: Only one instance exists
 - [ ] **Stream B queries database**: No agent-to-agent imports
 - [ ] **Personas synthesize**: Conflict detection -> synthesis generation
@@ -1188,10 +1288,10 @@ Update as system evolves:
 - [ ] **Prestige awarded**: Discoveries tracked in `agents.discovery_prestige`
 - [ ] **Viral packages spread**: `agent_viral_infections` table populates
 - [ ] **Resonance detection**: Cross-domain patterns logged
-- [ ] **Architecture documented**: `CURRENT_ARCHITECTURE.md` accurate
-- [ ] **Tests passing**: `pytest tests/ -v` shows 100% pass rate
-- [ ] **Performance acceptable**: Benchmark shows expected throughput
-- [ ] **Logs are clean**: No silent failures in error logs
+- [ ] **Architecture documented**: `progress.md` updated with changes
+- [ ] **Tests passing**: `pytest tests/ -v` shows pass rate
+- [ ] **Performance acceptable**: Evolution runs complete without errors
+- [ ] **No orphaned modules**: `python analyze_dependencies.py --orphans` returns clean
 
 ### Success Signature
 
@@ -1207,27 +1307,43 @@ You'll know the system is working when:
 
 ## Appendix A: Quick Reference Commands
 
+### Actual Tools [EXISTS]
 ```bash
-# Analyze dependencies (output to diagrams/ folder)
-pydeps your_package_name --show-cycles -o diagrams/report.svg
+# Dependency analysis with stats
+python analyze_dependencies.py --stats
 
-# Check specific cycle
-pydeps your_package_name --show-cycles | grep "cycle_file.py"
+# Check for orphaned modules
+python analyze_dependencies.py --orphans
 
-# Run architecture enforcement
-python scripts/enforce_architecture.py
+# Check for circular imports
+python analyze_dependencies.py --cycles
 
-# Test critical flows
-pytest tests/test_critical_flows.py -v
+# Generate dependency diagrams (saves to diagrams/ folder)
+python analyze_dependencies.py --full --core --reasoning
+
+# Theory alignment verification
+python theory_alignment_checker.py --grade      # Self-grade (quick score)
+python theory_alignment_checker.py              # Full report
+python theory_alignment_checker.py --fix-plan   # Prioritized fixes
+
+# Database cleanup
+python safe_cleanup.py                          # Dry run
+python safe_cleanup.py --execute                # Execute cleanup
+
+# Run existing tests
+pytest tests/ -v
 
 # Check database state
-sqlite3 database/core_data.db "SELECT COUNT(*) FROM viral_information_packages;"
+sqlite3 core_data.db "SELECT COUNT(*) FROM viral_information_packages;"
+```
 
-# Monitor real-time
-tail -f logs/system.log | grep "FLOW:"
+### Template Commands (implement if needed)
+```bash
+# Direct pydeps usage (output to diagrams/ folder)
+pydeps module_name --show-cycles -o diagrams/report.svg
 
-# Emergency reset
-bash scripts/emergency_reset.sh
+# Check specific cycle
+pydeps module_name --show-cycles | grep "cycle_file.py"
 ```
 
 ---
@@ -1236,11 +1352,11 @@ bash scripts/emergency_reset.sh
 
 If you encounter issues not covered here:
 
-1. **Check logs**: `logs/system.log`, `logs/error.log`
+1. **Check database logs**: Query `system_logs` table in `core_data.db`
 2. **Review theory**: Re-read integration points in theoretical docs
 3. **Test in isolation**: Create minimal reproduction script
-4. **Document issue**: Add to `docs/KNOWN_ISSUES.md`
-5. **Ask Claude Code**: Create specific task file for the issue
+4. **Document issue**: Add to `progress.md`
+5. **Use analysis tools**: Run `python analyze_dependencies.py --stats --orphans`
 
 ---
 
