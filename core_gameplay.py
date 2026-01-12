@@ -5869,9 +5869,11 @@ class GameplayEngine:
                                 frame_changed = False
                             frame_changed_for_step = frame_changed
                             
+                            # FIX: Use self._previous_frame (captured BEFORE action) not action_handler.last_frame
+                            # The action_handler.last_frame is updated AFTER the action, making comparison meaningless
                             self._recent_action_traces.append({
                                 'action_type': action,
-                                'frame_before': self.action_handler.last_frame,
+                                'frame_before': self._previous_frame if hasattr(self, '_previous_frame') else self.action_handler.last_frame,
                                 'frame_after': game_state.frame,
                                 'score_change': score_change,  # Q5: score delta
                                 'outcome_type': outcome_type,  # Q5: neutral/score_increase/game_over
@@ -5879,6 +5881,23 @@ class GameplayEngine:
                             })
                             # Keep last 10 actions for control detection
                             self._recent_action_traces = self._recent_action_traces[-10:]
+                            
+                            # FIX (2025-01-08): Progress theory_validation_state based on outcomes
+                            # Theory states: UNTESTED -> TESTING -> VALIDATED/REFUTED
+                            # This was identified as a critical gap - state never progressed from UNTESTED
+                            current_theory_state = self.game_config.get('theory_validation_state', 'UNTESTED')
+                            if score_change > 0 and frame_changed:
+                                # Positive outcome + frame change = theory VALIDATED
+                                self.game_config['theory_validation_state'] = 'VALIDATED'
+                                logger.debug(f"[CONSCIOUSNESS] Theory VALIDATED: score+{score_change}, frame changed")
+                            elif frame_changed and current_theory_state == 'UNTESTED':
+                                # Frame changed but no score = theory being TESTED
+                                self.game_config['theory_validation_state'] = 'TESTING'
+                                logger.debug(f"[CONSCIOUSNESS] Theory TESTING: frame changed, awaiting score")
+                            elif game_state.state == 'GAME_OVER' and current_theory_state in ('TESTING', 'VALIDATED'):
+                                # Game over after testing = theory REFUTED for this context
+                                self.game_config['theory_validation_state'] = 'REFUTED'
+                                logger.debug(f"[CONSCIOUSNESS] Theory REFUTED: game over during test")
                         except Exception as e:
                             logger.debug(f"Action trace recording failed: {e}")
                             frame_changed_for_step = False
@@ -8193,6 +8212,13 @@ class GameplayEngine:
         if self._imagination_budget_remaining is None:
             return
         self._imagination_budget_remaining = max(0.0, self._imagination_budget_remaining - amount)
+        
+        # FIX (2025-01-08) GAP 8: Update loop_state reference so reasoning log shows actual consumption
+        if hasattr(self, '_loop_state_imagination_ref') and self._loop_state_imagination_ref:
+            self._loop_state_imagination_ref['remaining'] = self._imagination_budget_remaining
+            self._loop_state_imagination_ref['used_this_step'] = (
+                self._loop_state_imagination_ref.get('used_this_step', 0.0) + amount
+            )
 
     def _imagination_budget_used(self) -> Optional[float]:
         """Return how much budget has been spent this step."""
@@ -8744,11 +8770,16 @@ class GameplayEngine:
             'imagination': {  # FIX #19: Include imagination context in ladder trace
                 'budget': imagination_budget,
                 'mode': imagination_mode,
+                # FIX (2025-01-08) GAP 8: Store reference to update after consumption
+                # Initial value - will be updated at end of action selection
                 'remaining': getattr(self, '_imagination_budget_remaining', None),
+                'used_this_step': 0.0,  # Track consumption within this step
             },
         }
         action_source = None
         self.loop_state = loop_state
+        # Store reference for updating remaining after consumption
+        self._loop_state_imagination_ref = loop_state.get('imagination', {})
         persona_context = self._build_persona_context(game_state)
         self._last_persona_context = persona_context
         self._last_persona_decision = None
@@ -13848,6 +13879,43 @@ class GameplayEngine:
             except Exception:
                 pass
             
+            # === 2.3. NETWORK CONTROL HYPOTHESES: Object control theories from network ===
+            # FIX (2025-01-08): Added for GAP 7 - stuck detection escape didn't query control hypotheses
+            # These are successful object control patterns discovered by other agents
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+            try:
+                control_hypotheses = self.db.execute_query("""
+                    SELECT hypothesis_id, control_action, reliability_score, best_score_achieved,
+                           object_type, source_agent_id
+                    FROM network_object_control_hypotheses
+                    WHERE game_type = ? AND is_active = 1
+                    AND reliability_score > 0.3
+                    ORDER BY best_score_achieved DESC, reliability_score DESC
+                    LIMIT 5
+                """, (game_type,))
+                
+                if control_hypotheses:
+                    for hyp in control_hypotheses:
+                        control_action = hyp.get('control_action')
+                        reliability = hyp.get('reliability_score', 0.5)
+                        best_score = hyp.get('best_score_achieved', 0)
+                        
+                        # Parse control_action to get action number (e.g., "ACTION1" -> 1)
+                        if control_action and 'ACTION' in str(control_action).upper():
+                            try:
+                                action_num = int(str(control_action).upper().replace('ACTION', ''))
+                                if action_num in action_scores and action_num not in recent_actions[-3:]:
+                                    # Boost based on reliability and past scores
+                                    boost = 0.2 * reliability
+                                    if best_score > 0:
+                                        boost += 0.1 * min(1.0, best_score / 3.0)
+                                    action_scores[action_num] += boost
+                            except ValueError:
+                                pass
+                    reasoning_parts.append(f"ControlHyp: {len(control_hypotheses)}")
+            except Exception as e:
+                logger.debug(f"Control hypothesis query failed: {e}")
+            
             # === 2.5. NETWORK KNOWLEDGE SYNTHESIS: Collective Intelligence Query ===
             # Agent queries for death zones, dangerous objects, theories
             # This is PULL (agent asks when stuck), not PUSH (assigned tasks)
@@ -15063,6 +15131,12 @@ class GameplayEngine:
             queried_hypotheses = getattr(self, '_queried_hypothesis_ids', [])
             if queried_hypotheses:
                 context['decision_contributors']['failure_hypotheses'] = len(queried_hypotheses)
+            
+            # FIX (2025-01-08): Track persona proposals contribution
+            # This was identified as GAP 5 - persona proposals generated but not tracked
+            persona_proposal_count = getattr(self, '_last_persona_proposal_count', 0)
+            if persona_proposal_count:
+                context['decision_contributors']['persona_proposals'] = persona_proposal_count
             
         except Exception as e:
             logger.debug(f"Error building primitives context: {e}")
@@ -17582,6 +17656,32 @@ class GameplayEngine:
                     avg_score = h.get('avg_score', 0) or 0
                     best_level = h.get('best_level', 0) or 0
                     
+                    # FIX (2025-01-08): Query network hypothesis tables for Stream B
+                    # This was identified as GAP 1 - network_wisdom always 0 because
+                    # only game_results was queried, not the actual network knowledge tables
+                    network_hypotheses_count = 0
+                    network_wisdom_strength = 0.0
+                    try:
+                        hyp_data = self.db.execute_query("""
+                            SELECT COUNT(*) as hyp_count,
+                                   AVG(reliability_score) as avg_reliability,
+                                   MAX(best_score_achieved) as max_score
+                            FROM network_object_control_hypotheses
+                            WHERE game_type = ? AND is_active = 1
+                        """, (game_type,))
+                        if hyp_data and hyp_data[0]:
+                            network_hypotheses_count = hyp_data[0].get('hyp_count', 0) or 0
+                            avg_reliability = hyp_data[0].get('avg_reliability', 0) or 0
+                            max_score = hyp_data[0].get('max_score', 0) or 0
+                            # Network wisdom = blend of hypothesis count, reliability, and scores
+                            network_wisdom_strength = min(0.9, (
+                                (min(network_hypotheses_count, 20) / 20) * 0.3 +  # More hypotheses = more wisdom
+                                avg_reliability * 0.4 +                            # Higher reliability = trusted
+                                (min(max_score, 10) / 10) * 0.3                   # Higher scores achieved = proven
+                            ))
+                    except Exception:
+                        pass
+                    
                     # Build narrative from network experience
                     if win_rate > 0.5:
                         emotion = 'confident'
@@ -17593,12 +17693,16 @@ class GameplayEngine:
                         emotion = 'cautious'
                         narrative = f"Frontier level {current_level} (network best: {best_level}), careful exploration"
                     
+                    # Add network hypothesis info to narrative
+                    if network_hypotheses_count > 0:
+                        narrative += f" [{network_hypotheses_count} network theories available]"
+                    
                     return {
                         'emotional_network': win_rate,
                         'semantic_network': 0.5,
                         'identity_network': 0.5,
                         'private_memory': 0.3,  # No private memory for this agent
-                        'network_wisdom': min(0.8, win_rate + 0.2),  # Trust network if it has wins
+                        'network_wisdom': max(network_wisdom_strength, min(0.8, win_rate + 0.2)),  # Use network hypotheses
                         'self_trust_bias': 0.4,  # Lean toward network
                         'decision_weight': 0.5,
                         'conflict': False,
@@ -17607,7 +17711,8 @@ class GameplayEngine:
                         'episodic_narrative': f"{game_type}: {h.get('games_played')} games, {h.get('wins')} wins",
                         'stream_comparison': None,
                         'cognitive_stage': 'concrete_operational',
-                        'can_hypothesize': True
+                        'can_hypothesize': True,
+                        'network_hypotheses_count': network_hypotheses_count  # NEW: Track available hypotheses
                     }
                 
                 # Truly no data - return minimal exploration mode
@@ -22499,7 +22604,7 @@ class GameplayEngine:
     
     def _meta_detect_symmetry_completion(self, frame: np.ndarray) -> Optional[Dict]:
         """Detects if pattern requires symmetry completion."""
-        height, width = frame.shape[:2]
+        _height, width = frame.shape[:2]
         
         left_half = frame[:, :width//2]
         right_half = frame[:, width//2:]

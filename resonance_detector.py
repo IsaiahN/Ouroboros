@@ -52,10 +52,12 @@ logger = logging.getLogger(__name__)
 # From harmonies theory - role-specific probability gates
 
 RESONANCE_QUERY_THRESHOLDS = {
-    'pioneer': 0.01,      # 1% - Only on high-novelty patterns
-    'optimizer': 0.10,    # 10% - When stuck or seeking inspiration
+    # FIX (2025-01-08): Increased pioneer rate from 1% to 15%
+    # GAP 3 showed resonance never finding patterns because pioneers were blocked
+    'pioneer': 0.15,      # 15% - Frontier exploration needs network patterns
+    'optimizer': 0.20,    # 20% - When stuck or seeking inspiration
     'generalist': 0.30,   # 30% - Consistency checks
-    'exploiter': 0.05,    # 5% - Occasional sanity checks
+    'exploiter': 0.10,    # 10% - Occasional sanity checks
 }
 
 # Novelty boost for pioneers (when pattern is "interesting")
@@ -584,12 +586,18 @@ def should_query_resonance(agent_role: str, pattern_novelty: float = 0.0, is_stu
     
     Can be imported directly without instantiating ResonanceDetector.
     """
+    # FIX (2025-01-08): Always query resonance when stuck (GAP 3)
+    # Stuck agents desperately need network wisdom - don't block them
+    if is_stuck:
+        return True
+    
     base_threshold = RESONANCE_QUERY_THRESHOLDS.get(agent_role.lower(), 0.10)
     
     if agent_role.lower() == 'pioneer' and pattern_novelty > 0.7:
         base_threshold = PIONEER_NOVELTY_BOOST_THRESHOLD
     
-    if agent_role.lower() == 'optimizer' and is_stuck:
-        base_threshold = min(0.30, base_threshold * 2.0)
+    if agent_role.lower() == 'optimizer':
+        # Optimizers should query more often to find proven patterns
+        base_threshold = min(0.40, base_threshold * 2.0)
     
     return random.random() < base_threshold
