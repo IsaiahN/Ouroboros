@@ -170,6 +170,10 @@ cd C:\Users\Admin\Documents\GitHub\BitterTruth-AI
 
 # Verify activation - should see (.venv) prefix in prompt
 # (.venv) PS C:\Users\Admin\Documents\GitHub\BitterTruth-AI>
+
+# Programmatic verification (recommended)
+python -c "import sys; print(sys.prefix)"
+# Should output: C:\Users\Admin\Documents\GitHub\BitterTruth-AI\.venv
 ```
 
 **Linux/macOS**:
@@ -177,9 +181,13 @@ cd C:\Users\Admin\Documents\GitHub\BitterTruth-AI
 cd /path/to/BitterTruth-AI
 source .venv/bin/activate
 # Verify: should see (.venv) prefix
+python -c "import sys; print(sys.prefix)"
+# Should show .venv path, NOT system Python
 ```
 
 > **WARNING**: If you see "No module named pydeps" or similar errors, you likely forgot to activate the venv!
+> 
+> **DIAGNOSTIC**: Run `python -c "import sys; print(sys.prefix)"` - if it shows system Python (e.g., `C:\Python313`), activate venv first!
 
 ### Step 1: Install Dependencies
 

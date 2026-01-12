@@ -28,6 +28,13 @@
 - **Installing packages**: Always activate venv first, then `pip install <package>`
 - **Why**: Isolated dependencies, reproducible environment, no system conflicts
 
+**Verify venv is active**:
+```powershell
+python -c "import sys; print(sys.prefix)"
+# Should output: C:\Users\Admin\Documents\GitHub\BitterTruth-AI\.venv
+# If it shows system Python path, venv is NOT active!
+```
+
 ---
 
 ## 16 CRITICAL OPERATING RULES (NON-NEGOTIABLE)
