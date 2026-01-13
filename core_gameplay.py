@@ -5082,11 +5082,16 @@ class GameplayEngine:
                 
                 # BUGFIX: Check for TRUE full win, not premature WIN after level completion
                 # Some games (like sp80, ls20) report WIN after each level, not just the final one
+                # ENHANCED: Also use reached_frontier from replay result if available
+                replay_says_frontier = replay_result.get('reached_frontier', False) if replay_result else False
+                replay_says_true_win = replay_result.get('is_true_full_win', False) if replay_result else False
+                
                 is_full_win = (
                     game_state.state == "WIN" and 
                     game_state.win_score > 0 and 
-                    game_state.score >= game_state.win_score
-                )
+                    game_state.score >= game_state.win_score and
+                    not replay_says_frontier  # Trust replay's frontier detection
+                ) or replay_says_true_win  # Or trust replay's explicit win detection
                 
                 if is_full_win:
                     # Full win from replay! Finish and return
@@ -5148,6 +5153,14 @@ class GameplayEngine:
                 # No sequences available at all - pure exploration
                 logger.info(f"[EXPLORATION] No sequences available, pure exploration mode")
                 # Continue to game loop for exploration
+
+            # ================================================================
+            # CRITICAL: Log that we're entering the game loop
+            # This helps debug cases where game ends prematurely after replay
+            # ================================================================
+            max_total_actions = self.game_config.get('max_total_actions', 0)
+            logger.info(f"[GAME-LOOP-ENTRY] Entering game loop with {max_total_actions} action budget, "
+                       f"game_state.state={game_state.state}, score={game_state.score}")
 
             action_count = 0
             level_action_count = 0  # Track actions per level
@@ -21090,8 +21103,23 @@ class GameplayEngine:
             replay_success = (game_state.state == "WIN" or 
                             current_level >= target_level)
             
+            # Determine if this is a TRUE full win vs just level completion
+            # CRITICAL: Some games report WIN after each level, not just the final one
+            # A TRUE full win requires: state=WIN AND score >= win_score AND win_score > 0
+            is_true_full_win = (
+                game_state.state == "WIN" and
+                game_state.win_score > 0 and
+                game_state.score >= game_state.win_score
+            )
+            
+            # If replay succeeded but game isn't fully won, we've reached the frontier
+            # The caller should continue exploration instead of ending the game
+            reached_frontier = replay_success and not is_true_full_win
+            frontier_level = current_level if reached_frontier else None
+            
             logger.debug(f"Sequence validation: target_level={target_level}, current_level={current_level}, "
-                        f"score={game_state.score}, success={replay_success}")
+                        f"score={game_state.score}, success={replay_success}, "
+                        f"is_true_full_win={is_true_full_win}, reached_frontier={reached_frontier}")
             
             # Record validation attempt for community memory (Task 4)
             failure_reason = None
@@ -21402,8 +21430,19 @@ class GameplayEngine:
                                 
                 except Exception as e:
                     logger.debug(f"Replay learning finalization failed (non-critical): {e}")
+            
+            # Log frontier status for debugging
+            if reached_frontier:
+                logger.info(f"[REPLAY-FRONTIER] Sequence completed, game NOT fully won - at frontier Level {frontier_level}")
                         
-            return {'game_state': game_state, 'success': replay_success, 'reset_detected': reset_detected}
+            return {
+                'game_state': game_state, 
+                'success': replay_success, 
+                'reset_detected': reset_detected,
+                'reached_frontier': reached_frontier,
+                'frontier_level': frontier_level,
+                'is_true_full_win': is_true_full_win
+            }
 
 
     async def _try_replay_sequence(self, game_id: str, sequence: Dict) -> Optional[Dict[str, Any]]:

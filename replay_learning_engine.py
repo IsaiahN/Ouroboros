@@ -26,13 +26,11 @@ import json
 import uuid
 import hashlib
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field, asdict
 
-try:
+if TYPE_CHECKING:
     from database_interface import DatabaseInterface
-except ImportError:
-    DatabaseInterface = None
 
 
 @dataclass
@@ -405,6 +403,9 @@ class ReplayLearningEngine:
             most_common = max(set(effects), key=effects.count)
             prediction.predicted_object_effect = most_common
             prediction.confidence = effects.count(most_common) / len(effects)
+            # Generate hypothesis for cached effect (don't leave empty!)
+            action_name = self.ACTION_NAMES.get(action_type, f'ACTION{action_type}')
+            prediction.hypothesized_rule = f"{action_name} causes '{most_common}' effect (observed {len(effects)}x)"
         
         # 2. Use known patterns from game type (previous replays)
         elif context.game_type in self._game_type_patterns:
@@ -412,6 +413,9 @@ class ReplayLearningEngine:
             if str(action_key) in known.get('action_effects', {}):
                 prediction.predicted_object_effect = known['action_effects'][str(action_key)]
                 prediction.confidence = 0.5  # Moderate confidence for transferred knowledge
+                # Generate hypothesis for transferred knowledge
+                action_name = self.ACTION_NAMES.get(action_type, f'ACTION{action_type}')
+                prediction.hypothesized_rule = f"{action_name} causes '{prediction.predicted_object_effect}' (learned from prior games)"
         
         # 3. Default predictions based on action type
         if prediction.predicted_object_effect == "unknown":

@@ -2,6 +2,102 @@
 
 ---
 
+## Session: January 13, 2026 - Fix Game Ending Prematurely After Replay
+
+---
+
+### Approach: Add reached_frontier flag to replay return
+
+**Timestamp**: 10:15 AM  
+**Status**: COMPLETE
+
+---
+
+### Problem Statement
+
+Games were ending immediately after replay sequence completed instead of continuing to explore frontier levels. The vc33 reasoning log showed:
+- 53 actions total (matching sequence length)
+- Game showed "55 / 55" (score/win_score) but wasn't fully won
+- Agent stayed on Level 1 the whole game - should have continued exploring
+
+**Root Causes Identified**:
+1. `_replay_sequence_inline_impl_body` returned `success=True` but no `reached_frontier` flag
+2. Caller couldn't distinguish "sequence worked, continue exploring" from "full game win"
+3. Prediction hypotheses were empty when using cached effects (monotonous logs)
+
+---
+
+### Fixes Applied
+
+| Fix | Description | File | Lines |
+|-----|-------------|------|-------|
+| 1 | Added `reached_frontier` and `is_true_full_win` to replay return | `core_gameplay.py` | ~21090-21095, ~21410 |
+| 2 | Updated is_full_win check to use `replay_says_frontier` | `core_gameplay.py` | ~5085-5095 |
+| 3 | Fixed prediction hypothesis generation for cached effects | `replay_learning_engine.py` | ~400-415 |
+| 4 | Added GAME-LOOP-ENTRY debug logging | `core_gameplay.py` | ~5158 |
+
+---
+
+### Technical Details
+
+**1. Replay Return Now Includes Frontier Detection**:
+```python
+# Before:
+return {'game_state': game_state, 'success': replay_success, 'reset_detected': reset_detected}
+
+# After:
+return {
+    'game_state': game_state, 
+    'success': replay_success, 
+    'reset_detected': reset_detected,
+    'reached_frontier': reached_frontier,  # NEW
+    'frontier_level': frontier_level,       # NEW
+    'is_true_full_win': is_true_full_win    # NEW
+}
+```
+
+**2. Enhanced is_full_win Check**:
+```python
+# Before: Only checked game_state values
+is_full_win = (game_state.state == "WIN" and game_state.win_score > 0 and ...)
+
+# After: Also respects replay's frontier detection
+replay_says_frontier = replay_result.get('reached_frontier', False)
+is_full_win = (...) and not replay_says_frontier
+```
+
+**3. Fixed Empty Hypothesis Bug**:
+```python
+# Before: Section 1 cached effects didn't set hypothesized_rule
+prediction.predicted_object_effect = most_common
+# hypothesized_rule remained ""
+
+# After: Always generate a hypothesis
+prediction.hypothesized_rule = f"{action_name} causes '{most_common}' effect (observed {len(effects)}x)"
+```
+
+---
+
+### Expected Behavior After Fix
+
+1. When sequence completes but game isn't fully won, `reached_frontier=True` is returned
+2. Caller sees this flag and does NOT exit early
+3. Game state forced to NOT_FINISHED
+4. Control falls through to game loop for frontier exploration
+5. Agent continues playing until action budget exhausted
+6. Reasoning logs show actual predictions instead of "(possibly redundant - repeated action)"
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `core_gameplay.py` | Added reached_frontier detection, fixed is_full_win check, added debug logging |
+| `replay_learning_engine.py` | Fixed hypothesis generation for cached effects |
+
+---
+
 ## Session: January 13, 2026 - Replay Learning Engine Implementation
 
 ---
