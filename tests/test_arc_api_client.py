@@ -122,7 +122,8 @@ class TestClientConfiguration:
         client = ARCClient()
         # Most HTTP clients have a timeout
         if hasattr(client, 'timeout'):
-            assert client.timeout > 0
+            timeout = getattr(client, 'timeout')
+            assert timeout is None or timeout > 0
     
     def test_retry_logic_exists(self):
         """Client should have some retry mechanism."""

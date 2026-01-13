@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-import os
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
-
 """
 Sensation Engine - Phase 4.5 Emotional Intelligence System
+==========================================================
 
 Core system for sensation-based navigation that adds emotional context to actions 1-7.
 Agents learn "how to feel" about different objects and situations, enabling
 context-aware navigation that dramatically improves learning and knowledge transfer.
 
 Key Innovation: Actions get semantic understanding through sensation scores.
-- Perceive object → Recall sensation → Update internal state → Bias action → Act → Learn from outcome
+- Perceive object -> Recall sensation -> Update internal state -> Bias action -> Act -> Learn from outcome
 
 This creates the missing "sensation layer" in the biome theory - like bacterial
 chemotaxis but for ARC patterns and objects.
@@ -18,6 +16,42 @@ chemotaxis but for ARC patterns and objects.
 Database Rule: All sensation tracking stored in SQLite database.
 Environment Rule: Set PYTHONDONTWRITEBYTECODE=1 to prevent .pyc files.
 Integration Rule: Enhance existing systems, don't replace them.
+
+=============================================================================
+TWO STREAMS ARCHITECTURE IMPLEMENTATION
+=============================================================================
+
+This module implements the Two Streams consciousness theory from the 
+Unified Agent Consciousness Theory document.
+
+STREAM A (Private Experience):
+    - What THIS agent has personally learned and experienced
+    - Stored in: Personal sensation mappings (agent_id specific)
+    - Updated by: Direct interaction outcomes (reward/punishment)
+    - Accessed via: query_personal_impression(), get_agent_sensation_mappings()
+    - Key fields: sensation_score, association, learned locally
+    
+STREAM B (Collective Network Wisdom):  
+    - What the NETWORK knows from validated viral packages
+    - Stored in: Network sensation mappings (shared across agents)
+    - Updated by: CODS validation, viral package spread
+    - Accessed via: query_network_wisdom(), get_tetrahedral_sensation()
+    - Key fields: network_goal_relevance, network_threat_level, network_approach_score
+
+INTEGRATION (Synthesis):
+    - Weighted combination: synthesis = w_A * stream_a + w_B * stream_b
+    - w_A/w_B weights stored in: agents.self_network_bias (managed by i_thread.py)
+    - Conflict detection: When stream_a and stream_b disagree significantly
+    - Consciousness intensity: Higher when streams conflict (deliberation required)
+
+Key Methods for Streams:
+    - get_tetrahedral_sensation(): Returns both streams + synthesis
+    - _calculate_synthesis(): Weighted integration of streams
+    - Stream conflict measured via: goal_conflict, threat_conflict, stream_conflict score
+
+See: i_thread.py for w_A/w_B weight management and learning
+See: persona_runtime.py for persona proposal generation
+=============================================================================
 """
 
 import os
@@ -906,8 +940,9 @@ class SensationEngine:
         position = object_info.get('position', (0, 0))
         color = object_info.get('color', 0)
         
-        # STRUCTURE AXIS - What IS it
-        structure = {
+        # STREAM A (Private Experience) - What I perceive/know personally
+        # Called "structure" in legacy code but renamed to stream_a for Two Streams clarity
+        stream_a = {
             'identity': object_type,
             'position': position,
             'properties': {
@@ -1022,6 +1057,10 @@ class SensationEngine:
         
         From Unified Consciousness Theory: synthesis is the weighted
         integration of Stream A (private) and Stream B (collective).
+        
+        Enhanced with surprise scoring per consciousness theory:
+        - Surprise is high when underdog stream wins or streams strongly disagree
+        - Consciousness intensity correlates with surprise
         """
         # Weighted integration
         goal_relevance = w_a * stream_a.get('goal_relevance', 0) + w_b * stream_b.get('network_goal_relevance', 0)
@@ -1029,6 +1068,37 @@ class SensationEngine:
         approach_score = w_a * stream_a.get('approach_score', 0) + w_b * stream_b.get('network_approach_score', 0)
         
         control_quality = hypothesis.get('control_correlation', 0.0)
+        
+        # Calculate stream disagreement (for surprise scoring)
+        goal_disagreement = abs(stream_a.get('goal_relevance', 0) - stream_b.get('network_goal_relevance', 0))
+        threat_disagreement = abs(stream_a.get('threat_level', 0) - stream_b.get('network_threat_level', 0))
+        stream_disagreement = (goal_disagreement + threat_disagreement) / 2.0
+        
+        # Surprise scoring (from consciousness theory)
+        # High surprise when: underdog stream dominates OR high disagreement
+        weight_imbalance = abs(w_a - w_b)
+        
+        # Check if "underdog" stream is contributing more than expected
+        stream_a_contribution = stream_a.get('approach_score', 0) * w_a
+        stream_b_contribution = stream_b.get('network_approach_score', 0) * w_b
+        
+        if w_a < w_b and stream_a_contribution > stream_b_contribution:
+            underdog_surprise = weight_imbalance  # Stream A won despite lower weight
+        elif w_b < w_a and stream_b_contribution > stream_a_contribution:
+            underdog_surprise = weight_imbalance  # Stream B won despite lower weight
+        else:
+            underdog_surprise = 0.0
+        
+        # Total surprise = disagreement surprise + underdog surprise
+        surprise_score = min(1.0, stream_disagreement * 0.6 + underdog_surprise * 0.4)
+        
+        # Consciousness intensity based on surprise
+        if surprise_score >= 0.6:
+            consciousness_intensity = 'vivid'  # High deliberation needed
+        elif surprise_score >= 0.3:
+            consciousness_intensity = 'deliberative'
+        else:
+            consciousness_intensity = 'automatic'
         
         synthesis = {
             'semantic_role': 'unknown',
@@ -1041,7 +1111,13 @@ class SensationEngine:
             'is_goal': False,
             'is_obstacle': False,
             'meaning_confidence': 0.0,
-            'attraction': 0.0
+            'attraction': 0.0,
+            # Consciousness theory additions
+            'surprise_score': surprise_score,
+            'consciousness_intensity': consciousness_intensity,
+            'stream_disagreement': stream_disagreement,
+            'w_a_used': w_a,
+            'w_b_used': w_b,
         }
         
         # Determine semantic role from synthesis
