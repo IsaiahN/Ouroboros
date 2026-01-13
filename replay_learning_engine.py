@@ -87,6 +87,23 @@ class ReplayLearningContext:
     # For rule induction
     frame_before_first_action: Optional[List] = None
     consecutive_no_change_count: int = 0
+    
+    # ================================================================
+    # INSIGHT TRACKING: Only record learning when insights are NEW
+    # ================================================================
+    # Track prior learning state to avoid redundant storage on replays.
+    # First replay: Full learning recorded
+    # Subsequent replays: Only if accuracy improved or new rules found
+    # ================================================================
+    is_first_replay: bool = True  # First time replaying this sequence?
+    prior_accuracy: float = 0.0   # Previous best accuracy for this sequence
+    prior_rules_count: int = 0    # Previously known rules for this game type
+    prior_rule_hashes: set = field(default_factory=set)  # Hash of known rules
+    
+    # Insight detection results
+    new_insight_gained: bool = False  # Did we learn something new?
+    accuracy_improved: bool = False   # Did prediction accuracy improve?
+    new_rules_found: int = 0          # Count of genuinely new rules
 
 
 class ReplayLearningEngine:
@@ -268,8 +285,15 @@ class ReplayLearningEngine:
         Initialize a learning context for a replay session.
         
         Call this BEFORE starting sequence replay.
+        
+        Loads prior learning state to enable insight detection:
+        - If this is first replay: Full learning mode
+        - If replayed before: Only record if new insights gained
         """
         game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Check prior learning state for this sequence
+        prior_state = self._load_prior_learning_state(sequence_id, game_type, agent_id)
         
         context = ReplayLearningContext(
             sequence_id=sequence_id,
@@ -277,7 +301,12 @@ class ReplayLearningEngine:
             game_type=game_type,
             level_number=level_number,
             agent_id=agent_id,
-            frame_before_first_action=initial_frame
+            frame_before_first_action=initial_frame,
+            # Insight tracking
+            is_first_replay=prior_state['is_first_replay'],
+            prior_accuracy=prior_state['prior_accuracy'],
+            prior_rules_count=prior_state['prior_rules_count'],
+            prior_rule_hashes=prior_state['prior_rule_hashes']
         )
         
         # Pre-load any known patterns for this game type
@@ -289,6 +318,59 @@ class ReplayLearningEngine:
             }
         
         return context
+    
+    def _load_prior_learning_state(
+        self,
+        sequence_id: str,
+        game_type: str,
+        agent_id: str
+    ) -> Dict[str, Any]:
+        """
+        Load prior learning state to detect if new insights are gained.
+        
+        Returns dict with:
+        - is_first_replay: True if agent never replayed this sequence
+        - prior_accuracy: Best accuracy achieved on previous replays
+        - prior_rules_count: Number of rules already known for this game type
+        - prior_rule_hashes: Set of rule hashes to detect duplicates
+        """
+        result = {
+            'is_first_replay': True,
+            'prior_accuracy': 0.0,
+            'prior_rules_count': 0,
+            'prior_rule_hashes': set()
+        }
+        
+        try:
+            # Check if this agent has replayed this sequence before
+            prior = self.db.execute_query("""
+                SELECT MAX(prediction_accuracy) as best_accuracy, COUNT(*) as replay_count
+                FROM replay_learning_sessions
+                WHERE sequence_id = ? AND agent_id = ?
+            """, (sequence_id, agent_id))
+            
+            if prior and prior[0].get('replay_count', 0) > 0:
+                result['is_first_replay'] = False
+                result['prior_accuracy'] = prior[0].get('best_accuracy', 0.0) or 0.0
+            
+            # Get existing rules for this game type
+            rules = self.db.execute_query("""
+                SELECT pattern_description
+                FROM replay_inferred_patterns
+                WHERE game_type = ? AND pattern_type = 'rule'
+            """, (game_type,))
+            
+            if rules:
+                result['prior_rules_count'] = len(rules)
+                result['prior_rule_hashes'] = {
+                    hashlib.md5(r['pattern_description'].encode()).hexdigest()[:12]
+                    for r in rules if r.get('pattern_description')
+                }
+                
+        except Exception:
+            pass  # Use defaults if DB query fails
+        
+        return result
     
     def generate_prediction(
         self,
@@ -670,31 +752,90 @@ class ReplayLearningEngine:
         Finalize learning session and store aggregated patterns.
         
         Call this AFTER sequence replay completes.
+        
+        INSIGHT-BASED STORAGE:
+        - First replay: Always store full learning
+        - Subsequent replays: Only store if new insights gained
+          - Accuracy improved by >= 10%
+          - New rules discovered (not in prior_rule_hashes)
+          - New wasted actions identified
+        
         Returns summary of what was learned.
         """
+        current_accuracy = (
+            context.correct_predictions / context.total_predictions 
+            if context.total_predictions > 0 else 0.0
+        )
+        
+        # ================================================================
+        # INSIGHT DETECTION: Did we learn something new?
+        # ================================================================
+        accuracy_improved = current_accuracy > context.prior_accuracy + 0.10  # 10% improvement threshold
+        
+        # Check for genuinely new rules (not seen before)
+        new_rules = []
+        for rule in context.inferred_rules:
+            rule_text = rule.get('rule', '')
+            rule_hash = hashlib.md5(rule_text.encode()).hexdigest()[:12]
+            if rule_hash not in context.prior_rule_hashes:
+                new_rules.append(rule)
+        
+        new_wasted_actions = len(context.wasted_action_indices) > 0
+        
+        # Determine if we have new insights worth storing
+        has_new_insight = (
+            context.is_first_replay or  # First replay always stores
+            accuracy_improved or          # Got significantly better at predicting
+            len(new_rules) > 0 or         # Discovered new rules
+            new_wasted_actions             # Found optimization opportunities
+        )
+        
+        # Update context with insight detection results
+        context.new_insight_gained = has_new_insight
+        context.accuracy_improved = accuracy_improved
+        context.new_rules_found = len(new_rules)
+        
         summary = {
             'sequence_id': context.sequence_id,
             'game_type': context.game_type,
             'level_number': context.level_number,
             'total_actions': context.total_predictions,
-            'prediction_accuracy': (
-                context.correct_predictions / context.total_predictions 
-                if context.total_predictions > 0 else 0.0
-            ),
+            'prediction_accuracy': current_accuracy,
             'wasted_actions': len(context.wasted_action_indices),
             'wasted_action_indices': context.wasted_action_indices,
             'inferred_rules': context.inferred_rules,
             'inferred_primitives': context.inferred_primitives,
-            'action_effect_map': context.action_effect_map
+            'action_effect_map': context.action_effect_map,
+            # Insight metadata
+            'is_first_replay': context.is_first_replay,
+            'new_insight_gained': has_new_insight,
+            'accuracy_improved': accuracy_improved,
+            'accuracy_delta': current_accuracy - context.prior_accuracy,
+            'new_rules_found': len(new_rules),
+            'skipped_storage': not has_new_insight  # True if we didn't store (no new insights)
         }
         
-        # Store aggregated patterns for future replays
-        self._store_aggregated_patterns(context)
+        # ================================================================
+        # CONDITIONAL STORAGE: Only persist if new insights gained
+        # ================================================================
+        if has_new_insight:
+            # Store aggregated patterns for future replays (UPSERT)
+            self._store_aggregated_patterns(context)
+            
+            # Store wasted actions for optimizer use (UPSERT)
+            self._store_wasted_actions(context)
+            
+            # Log that we learned something new
+            if not context.is_first_replay:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(
+                    f"[REPLAY-LEARN] New insight on re-replay: "
+                    f"accuracy {context.prior_accuracy:.0%} -> {current_accuracy:.0%}, "
+                    f"{len(new_rules)} new rules"
+                )
         
-        # Store wasted actions for optimizer use
-        self._store_wasted_actions(context)
-        
-        # Update cache
+        # Update cache (always, for session performance)
         if context.game_type not in self._game_type_patterns:
             self._game_type_patterns[context.game_type] = {
                 'action_effects': {},
@@ -702,7 +843,7 @@ class ReplayLearningEngine:
                 'rules': []
             }
         
-        # Merge action effects
+        # Merge action effects into cache
         for action, effects in context.action_effect_map.items():
             if effects:
                 most_common = max(set(effects), key=effects.count)

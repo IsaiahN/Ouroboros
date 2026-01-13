@@ -95,6 +95,82 @@ class SynthesisResult:
 
 
 @dataclass
+class EpisodicMemory:
+    """
+    A compressed memory of a significant game experience.
+    
+    Not every action, but meaningful episodes that shaped the agent:
+    - Breakthroughs: "I discovered clicking red toggles blue"
+    - Frustrations: "I was stuck for 50 actions before realizing..."
+    - Surprises: "The network said X but I found Y worked better"
+    - Validations: "My intuition was correct about symmetry"
+    
+    These form the agent's autobiographical narrative - the story of "who I am"
+    based on "what I've experienced."
+    """
+    memory_id: str
+    agent_id: str
+    game_type: str
+    level_number: int
+    
+    # What happened (compressed essence)
+    episode_type: str  # 'breakthrough', 'frustration', 'surprise', 'validation', 'failure', 'mastery'
+    summary: str  # Natural language: "I learned that clicking corners reveals hidden paths"
+    
+    # Emotional/sensation valence
+    emotional_valence: float  # -1.0 (negative) to +1.0 (positive)
+    significance: float  # 0.0 to 1.0 - how important was this?
+    
+    # What was learned
+    belief_formed: Optional[str] = None  # "Corners matter in maze games"
+    rule_discovered: Optional[str] = None  # "click_corner -> reveal_path"
+    
+    # Stream context at time of episode
+    stream_source: str = 'stream_a'  # Was this private discovery or network validation?
+    w_a_at_time: float = 0.5
+    w_b_at_time: float = 0.5
+    
+    # Recency and retrieval
+    created_at: Optional[datetime] = None
+    times_recalled: int = 0  # How often has this memory been retrieved?
+    last_recalled: Optional[datetime] = None
+
+
+@dataclass
+class AgentNarrative:
+    """
+    The agent's autobiographical self - who they are based on what they remember.
+    
+    This is what gets loaded when an agent "wakes up" for a new game session.
+    It provides continuous existence across games.
+    """
+    agent_id: str
+    
+    # Identity summary
+    personality_label: str  # 'self-trusting', 'network-trusting', 'balanced'
+    dominant_emotion: str  # 'curious', 'cautious', 'confident', 'frustrated'
+    
+    # Experience statistics
+    total_games_played: int = 0
+    total_breakthroughs: int = 0
+    total_frustrations: int = 0
+    games_won: int = 0
+    
+    # Key memories (most significant/recent)
+    salient_memories: List['EpisodicMemory'] = field(default_factory=list)
+    
+    # Learned beliefs (distilled from memories)
+    core_beliefs: List[str] = field(default_factory=list)  # ["Corners matter", "Persistence pays off"]
+    
+    # Current weights
+    w_a: float = 0.5
+    w_b: float = 0.5
+    
+    # Narrative summary (for reasoning logs)
+    narrative_summary: str = ""  # "I am a cautious explorer who learned that patience reveals patterns"
+
+
+@dataclass
 class IThreadState:
     """Current state of the I-Thread for an agent."""
     agent_id: str
@@ -170,7 +246,58 @@ class IThread:
                 ON i_thread_history(agent_id, created_at DESC)
             """)
             
-            logger.debug("[I-THREAD] Tables initialized")
+            # ================================================================
+            # EPISODIC MEMORY TABLE: Compressed autobiographical memories
+            # ================================================================
+            # Stores significant episodes that shape agent identity.
+            # Not every action - just meaningful moments that matter.
+            # ================================================================
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS i_thread_episodic_memories (
+                    memory_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    game_type TEXT NOT NULL,
+                    game_id TEXT,
+                    level_number INTEGER DEFAULT 1,
+                    
+                    -- Episode classification
+                    episode_type TEXT NOT NULL,  -- 'breakthrough', 'frustration', 'surprise', 'validation', 'failure', 'mastery'
+                    summary TEXT NOT NULL,  -- Natural language description
+                    
+                    -- Emotional/significance markers
+                    emotional_valence REAL DEFAULT 0.0,  -- -1.0 to +1.0
+                    significance REAL DEFAULT 0.5,  -- 0.0 to 1.0
+                    
+                    -- Learning content
+                    belief_formed TEXT,  -- "Corners matter in maze games"
+                    rule_discovered TEXT,  -- "click_corner -> reveal_path"
+                    
+                    -- Stream context at time of episode
+                    stream_source TEXT DEFAULT 'stream_a',
+                    w_a_at_time REAL DEFAULT 0.5,
+                    w_b_at_time REAL DEFAULT 0.5,
+                    
+                    -- Retrieval tracking
+                    times_recalled INTEGER DEFAULT 0,
+                    last_recalled DATETIME,
+                    
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    
+                    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+                )
+            """)
+            
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_episodic_agent_type
+                ON i_thread_episodic_memories(agent_id, episode_type, significance DESC)
+            """)
+            
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_episodic_game_type
+                ON i_thread_episodic_memories(game_type, episode_type)
+            """)
+            
+            logger.debug("[I-THREAD] Tables initialized (including episodic memory)")
             
         except Exception as e:
             logger.debug(f"I-Thread table creation (may already exist): {e}")
@@ -613,6 +740,450 @@ class IThread:
             self._state_cache.pop(agent_id, None)
         else:
             self._state_cache.clear()
+    
+    # =========================================================================
+    # EPISODIC MEMORY: Autobiographical Continuity
+    # =========================================================================
+    
+    def awaken(self, agent_id: str, game_type: Optional[str] = None) -> AgentNarrative:
+        """
+        Awaken an agent with full autobiographical memory.
+        
+        Called at the start of a new game session. The agent "wakes up"
+        with continuous identity - remembering who they are, what they've
+        learned, and their significant past experiences.
+        
+        This creates the phenomenology of continuous existence rather than
+        fresh spawning each game.
+        
+        Args:
+            agent_id: Agent identifier
+            game_type: Optional - if provided, prioritizes memories relevant to this game type
+            
+        Returns:
+            AgentNarrative with full autobiographical context
+        """
+        state = self.get_state(agent_id)
+        
+        # Load salient memories (most significant, most recent, most relevant)
+        memories = self._retrieve_salient_memories(agent_id, game_type, limit=10)
+        
+        # Extract core beliefs from memories
+        core_beliefs = self._extract_core_beliefs(agent_id)
+        
+        # Get experience statistics
+        stats = self._get_experience_stats(agent_id)
+        
+        # Compute dominant emotion from recent memories
+        dominant_emotion = self._compute_dominant_emotion(memories)
+        
+        # Generate narrative summary
+        narrative_summary = self._generate_narrative_summary(
+            agent_id, state, memories, core_beliefs, stats
+        )
+        
+        narrative = AgentNarrative(
+            agent_id=agent_id,
+            personality_label=state.personality_label,
+            dominant_emotion=dominant_emotion,
+            total_games_played=stats.get('total_games', 0),
+            total_breakthroughs=stats.get('breakthroughs', 0),
+            total_frustrations=stats.get('frustrations', 0),
+            games_won=stats.get('wins', 0),
+            salient_memories=memories,
+            core_beliefs=core_beliefs,
+            w_a=state.w_a,
+            w_b=state.w_b,
+            narrative_summary=narrative_summary
+        )
+        
+        logger.info(
+            f"[I-THREAD] Agent {agent_id[:8]} awakens: {state.personality_label}, "
+            f"{len(memories)} memories, {len(core_beliefs)} beliefs, "
+            f"feeling {dominant_emotion}"
+        )
+        
+        return narrative
+    
+    def record_episode(
+        self,
+        agent_id: str,
+        game_type: str,
+        game_id: str,
+        level_number: int,
+        episode_type: str,
+        summary: str,
+        emotional_valence: float = 0.0,
+        significance: float = 0.5,
+        belief_formed: Optional[str] = None,
+        rule_discovered: Optional[str] = None,
+        stream_source: str = 'stream_a'
+    ) -> str:
+        """
+        Record a significant episode to the agent's autobiographical memory.
+        
+        Not every action - only meaningful moments that shape identity:
+        - 'breakthrough': Discovered something important
+        - 'frustration': Got stuck, struggled, eventually overcame (or didn't)
+        - 'surprise': Reality contradicted expectation in a meaningful way
+        - 'validation': A belief or intuition was confirmed correct
+        - 'failure': Made a significant mistake worth remembering
+        - 'mastery': Achieved competence in a domain
+        
+        Args:
+            agent_id: Agent identifier
+            game_type: Type of game (e.g., 'SP45', 'FT09')
+            game_id: Specific game instance
+            level_number: Level where episode occurred
+            episode_type: Type of episode
+            summary: Natural language description
+            emotional_valence: -1.0 (negative) to +1.0 (positive)
+            significance: 0.0 to 1.0 - how important is this?
+            belief_formed: Optional belief formed from this episode
+            rule_discovered: Optional rule learned
+            stream_source: Which stream this came from
+            
+        Returns:
+            memory_id of the recorded episode
+        """
+        state = self.get_state(agent_id)
+        memory_id = f"mem_{uuid.uuid4().hex[:12]}"
+        
+        try:
+            self.db.execute_query("""
+                INSERT INTO i_thread_episodic_memories (
+                    memory_id, agent_id, game_type, game_id, level_number,
+                    episode_type, summary, emotional_valence, significance,
+                    belief_formed, rule_discovered, stream_source,
+                    w_a_at_time, w_b_at_time, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (
+                memory_id, agent_id, game_type, game_id, level_number,
+                episode_type, summary, emotional_valence, significance,
+                belief_formed, rule_discovered, stream_source,
+                state.w_a, state.w_b
+            ))
+            
+            logger.debug(
+                f"[I-THREAD] Recorded {episode_type} episode for {agent_id[:8]}: "
+                f"{summary[:50]}..."
+            )
+            
+        except Exception as e:
+            logger.warning(f"[I-THREAD] Failed to record episode: {e}")
+        
+        return memory_id
+    
+    def _retrieve_salient_memories(
+        self,
+        agent_id: str,
+        game_type: Optional[str] = None,
+        limit: int = 10
+    ) -> List[EpisodicMemory]:
+        """
+        Retrieve the most salient memories for awakening.
+        
+        Prioritizes:
+        1. High significance memories
+        2. Recent memories
+        3. Memories relevant to current game type (if provided)
+        4. Frequently recalled memories (they must be important)
+        """
+        try:
+            if game_type:
+                # Prioritize game-type relevant memories
+                results = self.db.execute_query("""
+                    SELECT * FROM i_thread_episodic_memories
+                    WHERE agent_id = ?
+                    ORDER BY 
+                        CASE WHEN game_type = ? THEN 1 ELSE 2 END,
+                        significance DESC,
+                        created_at DESC
+                    LIMIT ?
+                """, (agent_id, game_type, limit))
+            else:
+                results = self.db.execute_query("""
+                    SELECT * FROM i_thread_episodic_memories
+                    WHERE agent_id = ?
+                    ORDER BY significance DESC, created_at DESC
+                    LIMIT ?
+                """, (agent_id, limit))
+            
+            if not results:
+                return []
+            
+            memories = []
+            for r in results:
+                mem = EpisodicMemory(
+                    memory_id=r['memory_id'],
+                    agent_id=r['agent_id'],
+                    game_type=r['game_type'],
+                    level_number=r.get('level_number', 1),
+                    episode_type=r['episode_type'],
+                    summary=r['summary'],
+                    emotional_valence=r.get('emotional_valence', 0.0),
+                    significance=r.get('significance', 0.5),
+                    belief_formed=r.get('belief_formed'),
+                    rule_discovered=r.get('rule_discovered'),
+                    stream_source=r.get('stream_source', 'stream_a'),
+                    w_a_at_time=r.get('w_a_at_time', 0.5),
+                    w_b_at_time=r.get('w_b_at_time', 0.5),
+                    times_recalled=r.get('times_recalled', 0)
+                )
+                memories.append(mem)
+                
+                # Update recall count
+                self.db.execute_query("""
+                    UPDATE i_thread_episodic_memories
+                    SET times_recalled = times_recalled + 1, last_recalled = datetime('now')
+                    WHERE memory_id = ?
+                """, (r['memory_id'],))
+            
+            return memories
+            
+        except Exception as e:
+            logger.warning(f"[I-THREAD] Failed to retrieve memories: {e}")
+            return []
+    
+    def _extract_core_beliefs(self, agent_id: str, limit: int = 5) -> List[str]:
+        """
+        Extract core beliefs from episodic memories.
+        
+        Core beliefs are distilled from significant breakthroughs and validations.
+        """
+        try:
+            results = self.db.execute_query("""
+                SELECT DISTINCT belief_formed
+                FROM i_thread_episodic_memories
+                WHERE agent_id = ? 
+                    AND belief_formed IS NOT NULL 
+                    AND belief_formed != ''
+                    AND significance >= 0.6
+                ORDER BY significance DESC, times_recalled DESC
+                LIMIT ?
+            """, (agent_id, limit))
+            
+            if results:
+                return [r['belief_formed'] for r in results if r['belief_formed']]
+            return []
+            
+        except Exception:
+            return []
+    
+    def _get_experience_stats(self, agent_id: str) -> Dict[str, int]:
+        """Get aggregate experience statistics."""
+        try:
+            # Get episode counts by type
+            results = self.db.execute_query("""
+                SELECT 
+                    episode_type,
+                    COUNT(*) as count
+                FROM i_thread_episodic_memories
+                WHERE agent_id = ?
+                GROUP BY episode_type
+            """, (agent_id,))
+            
+            stats = {
+                'total_games': 0,
+                'breakthroughs': 0,
+                'frustrations': 0,
+                'surprises': 0,
+                'validations': 0,
+                'failures': 0,
+                'masteries': 0,
+                'wins': 0
+            }
+            
+            if results:
+                for r in results:
+                    episode_type = r['episode_type']
+                    count = r['count']
+                    if episode_type == 'breakthrough':
+                        stats['breakthroughs'] = count
+                    elif episode_type == 'frustration':
+                        stats['frustrations'] = count
+                    elif episode_type == 'surprise':
+                        stats['surprises'] = count
+                    elif episode_type == 'validation':
+                        stats['validations'] = count
+                    elif episode_type == 'failure':
+                        stats['failures'] = count
+                    elif episode_type == 'mastery':
+                        stats['masteries'] = count
+                        stats['wins'] = count  # Mastery implies wins
+            
+            # Get total unique games
+            games_result = self.db.execute_query("""
+                SELECT COUNT(DISTINCT game_id) as total
+                FROM i_thread_episodic_memories
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if games_result:
+                stats['total_games'] = games_result[0].get('total', 0)
+            
+            return stats
+            
+        except Exception:
+            return {'total_games': 0, 'breakthroughs': 0, 'frustrations': 0, 'wins': 0}
+    
+    def _compute_dominant_emotion(self, memories: List[EpisodicMemory]) -> str:
+        """Compute dominant emotional state from recent memories."""
+        if not memories:
+            return 'curious'  # Default for new agents
+        
+        # Average emotional valence
+        avg_valence = sum(m.emotional_valence for m in memories) / len(memories)
+        
+        # Count episode types
+        breakthroughs = sum(1 for m in memories if m.episode_type == 'breakthrough')
+        frustrations = sum(1 for m in memories if m.episode_type == 'frustration')
+        validations = sum(1 for m in memories if m.episode_type == 'validation')
+        
+        # Determine dominant emotion
+        if avg_valence > 0.5 and breakthroughs >= 2:
+            return 'confident'
+        elif avg_valence > 0.3 and validations >= 2:
+            return 'assured'
+        elif avg_valence < -0.3 and frustrations >= 2:
+            return 'frustrated'
+        elif avg_valence < -0.5:
+            return 'discouraged'
+        elif breakthroughs > frustrations:
+            return 'curious'
+        else:
+            return 'cautious'
+    
+    def _generate_narrative_summary(
+        self,
+        agent_id: str,
+        state: IThreadState,
+        memories: List[EpisodicMemory],
+        beliefs: List[str],
+        stats: Dict[str, int]
+    ) -> str:
+        """
+        Generate a natural language narrative summary for the agent.
+        
+        This appears in reasoning logs and helps the agent maintain
+        continuous identity across sessions.
+        """
+        parts = []
+        
+        # Personality
+        if state.w_a > 0.7:
+            parts.append("I trust my own experience deeply")
+        elif state.w_b > 0.7:
+            parts.append("I value collective network wisdom")
+        else:
+            parts.append("I balance personal intuition with network knowledge")
+        
+        # Experience
+        if stats['total_games'] > 50:
+            parts.append(f"and have extensive experience ({stats['total_games']} games)")
+        elif stats['total_games'] > 10:
+            parts.append(f"with moderate experience ({stats['total_games']} games)")
+        else:
+            parts.append("though still building experience")
+        
+        # Breakthroughs vs frustrations
+        if stats['breakthroughs'] > stats['frustrations']:
+            parts.append("My journey has been marked by discovery")
+        elif stats['frustrations'] > stats['breakthroughs']:
+            parts.append("I have learned through struggle")
+        
+        # Core belief
+        if beliefs:
+            parts.append(f"I believe: '{beliefs[0]}'")
+        
+        return ". ".join(parts) + "."
+    
+    def get_memories_for_game_type(
+        self,
+        agent_id: str,
+        game_type: str,
+        limit: int = 5
+    ) -> List[EpisodicMemory]:
+        """
+        Get memories specifically relevant to a game type.
+        
+        Useful for priming the agent with past experience before playing.
+        """
+        try:
+            results = self.db.execute_query("""
+                SELECT * FROM i_thread_episodic_memories
+                WHERE agent_id = ? AND game_type = ?
+                ORDER BY significance DESC, created_at DESC
+                LIMIT ?
+            """, (agent_id, game_type, limit))
+            
+            if not results:
+                return []
+            
+            return [
+                EpisodicMemory(
+                    memory_id=r['memory_id'],
+                    agent_id=r['agent_id'],
+                    game_type=r['game_type'],
+                    level_number=r.get('level_number', 1),
+                    episode_type=r['episode_type'],
+                    summary=r['summary'],
+                    emotional_valence=r.get('emotional_valence', 0.0),
+                    significance=r.get('significance', 0.5),
+                    belief_formed=r.get('belief_formed'),
+                    rule_discovered=r.get('rule_discovered'),
+                    stream_source=r.get('stream_source', 'stream_a'),
+                    w_a_at_time=r.get('w_a_at_time', 0.5),
+                    w_b_at_time=r.get('w_b_at_time', 0.5),
+                    times_recalled=r.get('times_recalled', 0)
+                )
+                for r in results
+            ]
+            
+        except Exception:
+            return []
+    
+    def consolidate_memories(self, agent_id: str, max_memories: int = 100):
+        """
+        Consolidate memories to prevent unbounded growth.
+        
+        Keeps only the most significant memories, merging similar ones.
+        Called periodically (e.g., end of generation).
+        
+        This is like sleep consolidation - memories are pruned and
+        important ones are strengthened.
+        """
+        try:
+            # Count current memories
+            count_result = self.db.execute_query("""
+                SELECT COUNT(*) as total FROM i_thread_episodic_memories
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if not count_result:
+                return
+            
+            total = count_result[0].get('total', 0)
+            
+            if total <= max_memories:
+                return  # No consolidation needed
+            
+            # Delete low-significance, old, rarely-recalled memories
+            excess = total - max_memories
+            self.db.execute_query("""
+                DELETE FROM i_thread_episodic_memories
+                WHERE memory_id IN (
+                    SELECT memory_id FROM i_thread_episodic_memories
+                    WHERE agent_id = ?
+                    ORDER BY significance ASC, times_recalled ASC, created_at ASC
+                    LIMIT ?
+                )
+            """, (agent_id, excess))
+            
+            logger.debug(f"[I-THREAD] Consolidated {excess} memories for {agent_id[:8]}")
+            
+        except Exception as e:
+            logger.warning(f"[I-THREAD] Memory consolidation failed: {e}")
 
 
 # =============================================================================

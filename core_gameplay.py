@@ -20418,7 +20418,37 @@ class GameplayEngine:
             
             # Execute actions starting from checkpoint
             for idx, action_num in enumerate(actions[start_index:], start=start_index):
-                if game_state.state != "NOT_FINISHED":
+                # ================================================================
+                # FIX: Handle premature WIN during replay
+                # ================================================================
+                # Some games report WIN after each level completion, not just the final one.
+                # We should only stop if it's a TRUE full win (score >= win_score).
+                # Otherwise, override to NOT_FINISHED and continue replay.
+                # ================================================================
+                if game_state.state == "WIN":
+                    is_true_full_win = (
+                        game_state.win_score > 0 and 
+                        game_state.score >= game_state.win_score
+                    )
+                    if is_true_full_win:
+                        logger.info(f"[REPLAY] True full WIN detected during replay (score {game_state.score}/{game_state.win_score})")
+                        break
+                    else:
+                        # Premature WIN - override and continue replay
+                        logger.debug(f"[REPLAY] Premature WIN detected (score {game_state.score}/{game_state.win_score}) - continuing replay")
+                        game_state.state = "NOT_FINISHED"
+                elif game_state.state == "GAME_OVER":
+                    # GAME_OVER with positive score might be premature too (level reset)
+                    if game_state.score > 0:
+                        logger.debug(f"[REPLAY] GAME_OVER with positive score {game_state.score} - treating as level reset, continuing")
+                        game_state.state = "NOT_FINISHED"
+                    else:
+                        # True game over with zero score
+                        logger.info(f"[REPLAY] True GAME_OVER during replay (score 0)")
+                        break
+                elif game_state.state != "NOT_FINISHED":
+                    # Unknown state - break to be safe
+                    logger.warning(f"[REPLAY] Unknown game state '{game_state.state}' - breaking replay loop")
                     break
                 
                 # ================================================================
@@ -21301,6 +21331,10 @@ class GameplayEngine:
             # 2. Inferred game rules (e.g., "clicking toggles objects")
             # 3. Wasted actions (for optimizer improvement suggestions)
             # 4. Primitive discoveries (e.g., "causality between click and effect")
+            #
+            # INSIGHT-BASED STORAGE: Only stores when new insights are gained:
+            # - First replay: Full learning recorded
+            # - Subsequent replays: Only if accuracy improved or new rules found
             # ================================================================
             if replay_learning_context and hasattr(self, 'replay_learning_engine') and self.replay_learning_engine:
                 try:
@@ -21311,19 +21345,37 @@ class GameplayEngine:
                         wasted = learning_summary.get('wasted_actions', 0)
                         rules_count = len(learning_summary.get('inferred_rules', []))
                         primitives_count = len(learning_summary.get('inferred_primitives', []))
+                        new_insight = learning_summary.get('new_insight_gained', True)
+                        is_first = learning_summary.get('is_first_replay', True)
+                        skipped = learning_summary.get('skipped_storage', False)
                         
-                        # Log meaningful summary (not monotonous "replaying sequence" spam)
-                        if accuracy > 0 or rules_count > 0:
+                        # Log meaningful summary (different for first vs repeat replays)
+                        if is_first:
+                            # First replay - full learning
                             logger.info(
-                                f"[REPLAY-LEARN] Session complete for {sequence_id[:12]}: "
+                                f"[REPLAY-LEARN] First replay of {sequence_id[:12]}: "
                                 f"{accuracy:.0%} prediction accuracy, "
                                 f"{rules_count} rules inferred, "
-                                f"{primitives_count} primitives discovered, "
                                 f"{wasted} wasted actions detected"
                             )
+                        elif new_insight:
+                            # Repeat replay with new insight
+                            accuracy_delta = learning_summary.get('accuracy_delta', 0)
+                            new_rules = learning_summary.get('new_rules_found', 0)
+                            logger.info(
+                                f"[REPLAY-LEARN] New insight on {sequence_id[:12]}: "
+                                f"accuracy +{accuracy_delta:.0%} (now {accuracy:.0%}), "
+                                f"{new_rules} new rules discovered"
+                            )
+                        elif skipped:
+                            # No new insight - just log debug (not info spam)
+                            logger.debug(
+                                f"[REPLAY-LEARN] No new insight on {sequence_id[:12]} "
+                                f"(accuracy {accuracy:.0%}, already knew {rules_count} rules)"
+                            )
                         
-                        # Store learning quality metrics for evolution tracking
-                        if accuracy > 0.5 and rules_count > 0:
+                        # Store learning session (only if we have new insights worth tracking)
+                        if new_insight and (accuracy > 0.5 or rules_count > 0):
                             try:
                                 agent_id = self.game_config.get('agent_id', 'unknown')
                                 self.db.execute_query("""
