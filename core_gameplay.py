@@ -182,6 +182,16 @@ except ImportError as e:
     SequenceMiner = None
     print(f"[IMPORT-WARN] sequence_miner not available: {e}")
 
+# Replay Learning Engine - Learn rules/primitives during sequence replay
+try:
+    from replay_learning_engine import ReplayLearningEngine, ReplayLearningContext
+    REPLAY_LEARNING_AVAILABLE = True
+except ImportError as e:
+    REPLAY_LEARNING_AVAILABLE = False
+    ReplayLearningEngine = None
+    ReplayLearningContext = None
+    print(f"[IMPORT-WARN] replay_learning_engine not available: {e}")
+
 # Network Knowledge Synthesis - network-level insights
 try:
     from network_knowledge_synthesis import NetworkKnowledgeSynthesis
@@ -1446,6 +1456,18 @@ class GameplayEngine:
                 logger.warning(f"Failed to initialize rule induction engine: {e}")
         else:
             self.rule_engine = None
+        
+        # Replay Learning Engine - Learn rules/primitives during sequence replay
+        # Transforms passive replay into active learning through prediction/comparison
+        if REPLAY_LEARNING_AVAILABLE:
+            try:
+                self.replay_learning_engine = ReplayLearningEngine(self.db)  # type: ignore[misc]
+                logger.info("Replay learning engine initialized (prediction-based learning)")
+            except Exception as e:
+                self.replay_learning_engine = None
+                logger.debug(f"Replay learning engine init failed: {e}")
+        else:
+            self.replay_learning_engine = None
         
         # Symbolic Reasoning Engine - World model (lazy init per game)
         self.symbolic_engine = None  # Initialized per game in play_single_game
@@ -20232,6 +20254,34 @@ class GameplayEngine:
             coordinates = json.loads(sequence.get('coordinate_sequence', '[]'))
             
             # ================================================================
+            # REPLAY LEARNING: Prediction-based learning during replay
+            # ================================================================
+            # Instead of blindly replaying, agents now LEARN during replay:
+            # 1. PREDICT what each action will do (before seeing outcome)
+            # 2. EXECUTE the action
+            # 3. COMPARE prediction vs actual outcome
+            # 4. LEARN rules, primitives, and identify wasted actions
+            # 
+            # This transforms passive replay into active understanding.
+            # Agents learn WHY sequences work, not just that they work.
+            # ================================================================
+            replay_learning_context = None
+            if hasattr(self, 'replay_learning_engine') and self.replay_learning_engine:
+                try:
+                    agent_id = self.game_config.get('agent_id', 'unknown')
+                    game_id = self.session_manager.current_game_id or ''
+                    replay_learning_context = self.replay_learning_engine.start_learning_session(
+                        sequence_id=sequence_id,
+                        game_id=game_id,
+                        level_number=level_number,
+                        agent_id=agent_id,
+                        initial_frame=game_state.frame
+                    )
+                    logger.debug(f"[REPLAY-LEARN] Started learning session for {sequence_id[:12]}")
+                except Exception as e:
+                    logger.debug(f"[REPLAY-LEARN] Failed to start learning session: {e}")
+            
+            # ================================================================
             # ADAPTIVE REPLAY MODE: Use sequence as REFERENCE, not script
             # ================================================================
             # Instead of blindly replaying, track progress and adapt:
@@ -20517,6 +20567,39 @@ class GameplayEngine:
                     except Exception as e:
                         logger.debug(f"Terminal foresight check during replay failed: {e}")
                 
+                # ================================================================
+                # REPLAY LEARNING: Generate prediction BEFORE action execution
+                # ================================================================
+                # Agent predicts what this action will do based on accumulated understanding
+                # This is compared to actual outcome to learn rules and primitives
+                # ================================================================
+                replay_prediction = None
+                frame_before_action = game_state.frame  # Store for comparison
+                score_before_action = game_state.score
+                current_coordinate = None
+                
+                if replay_learning_context and hasattr(self, 'replay_learning_engine') and self.replay_learning_engine:
+                    try:
+                        # Get coordinate if this is a click action
+                        if action_to_execute == 6 and coord_index < len(coordinates):
+                            coord = coordinates[coord_index]
+                            if isinstance(coord, dict):
+                                current_coordinate = (coord.get('x', 0), coord.get('y', 0))
+                            elif isinstance(coord, (list, tuple)) and len(coord) >= 2:
+                                current_coordinate = (coord[0], coord[1])
+                        
+                        # Generate prediction
+                        replay_prediction = self.replay_learning_engine.generate_prediction(
+                            context=replay_learning_context,
+                            action_index=idx,
+                            action_type=action_to_execute,
+                            current_frame=frame_before_action,
+                            sequence_actions=actions,
+                            coordinate=current_coordinate
+                        )
+                    except Exception as e:
+                        logger.debug(f"[REPLAY-LEARN] Prediction generation failed: {e}")
+                
                 # Execute action (possibly modified by foresight)
                 if action_to_execute == 6 and coord_index < len(coordinates):
                     coord = coordinates[coord_index]
@@ -20530,22 +20613,42 @@ class GameplayEngine:
                         coord_index += 1
                         continue
                     
-                    # Add reasoning for sequence replay with role-based context
+                    # Build reasoning - use rich learning-based reasoning if prediction available
                     agent_mode = self.game_config.get('agent_operating_mode', 'unknown')
                     target_level = self.game_config.get('optimizer_target_level', 'N/A')
                     
-                    replay_reasoning = {
-                        'action': 'ACTION6',
-                        'reasoning': f'{agent_mode.upper()} replaying proven sequence {sequence_id[:8]} (target: L{target_level})',
-                        'agent_role': agent_mode,
-                        'optimizer_target_level': target_level if agent_mode == 'optimizer' else None,
-                        'sequence_id': sequence_id,
-                        'replay_step': action_count + 1,
-                        'total_steps': len(actions),
-                        'coordinate': {'x': x, 'y': y},
-                        'checkpoint_validation': True,
-                        'role_compliance': f'{agent_mode} following sequence script'
-                    }
+                    if replay_prediction and replay_prediction.hypothesized_rule:
+                        # Rich prediction-based reasoning
+                        replay_reasoning = {
+                            'action': 'ACTION6',
+                            'reasoning': f'{agent_mode.upper()}: Predicting click at ({x},{y}) will {replay_prediction.predicted_object_effect} '
+                                        f'(hypothesis: {replay_prediction.hypothesized_rule[:60]})',
+                            'agent_role': agent_mode,
+                            'sequence_id': sequence_id,
+                            'replay_step': action_count + 1,
+                            'total_steps': len(actions),
+                            'coordinate': {'x': x, 'y': y},
+                            'prediction': {
+                                'expected_effect': replay_prediction.predicted_object_effect,
+                                'hypothesis': replay_prediction.hypothesized_rule,
+                                'confidence': round(replay_prediction.confidence, 2)
+                            },
+                            'learning_mode': True
+                        }
+                    else:
+                        # Fallback to simple reasoning
+                        replay_reasoning = {
+                            'action': 'ACTION6',
+                            'reasoning': f'{agent_mode.upper()} replaying proven sequence {sequence_id[:8]} (target: L{target_level})',
+                            'agent_role': agent_mode,
+                            'optimizer_target_level': target_level if agent_mode == 'optimizer' else None,
+                            'sequence_id': sequence_id,
+                            'replay_step': action_count + 1,
+                            'total_steps': len(actions),
+                            'coordinate': {'x': x, 'y': y},
+                            'checkpoint_validation': True,
+                            'role_compliance': f'{agent_mode} following sequence script'
+                        }
                     game_state = await self.action_handler.send_action_6(x, y, game_state.frame, reasoning=replay_reasoning, level_number=actual_level)
                     coord_index += 1
                 else:
@@ -20553,7 +20656,48 @@ class GameplayEngine:
                     # Use actual_level (score-based) not sequence's level_number
                     # Add foresight indicator to reasoning if action was changed
                     foresight_indicator = "" if action_to_execute == action_num else f" (foresight: avoided ACTION{action_num})"
-                    game_state = await self._execute_action(action, game_state, foresight_indicator, actual_level)
+                    
+                    # Build prediction-based reasoning for non-click actions too
+                    agent_mode = self.game_config.get('agent_operating_mode', 'unknown')
+                    if replay_prediction and replay_prediction.hypothesized_rule:
+                        # Rich prediction-based reasoning replaces monotonous "replaying sequence" spam
+                        action_name = {1: 'UP', 2: 'DOWN', 3: 'RIGHT', 4: 'LEFT', 5: 'SPECIAL', 7: 'UNDO'}.get(action_to_execute, 'MOVE')
+                        prediction_reasoning = (
+                            f'{agent_mode.upper()}: Predicting {action_name} will {replay_prediction.predicted_object_effect} '
+                            f'(rule: {replay_prediction.hypothesized_rule[:50]}){foresight_indicator}'
+                        )
+                    else:
+                        # Fallback reasoning (still better than monotonous "replaying sequence")
+                        prediction_reasoning = f'{agent_mode.upper()} step {action_count + 1}/{len(actions)}{foresight_indicator}'
+                    
+                    game_state = await self._execute_action(action, game_state, prediction_reasoning, actual_level)
+                
+                # ================================================================
+                # REPLAY LEARNING: Record outcome and compare to prediction
+                # ================================================================
+                # Compare what actually happened vs what agent predicted
+                # This drives rule induction and primitive discovery
+                # ================================================================
+                if replay_prediction and replay_learning_context and hasattr(self, 'replay_learning_engine') and self.replay_learning_engine:
+                    try:
+                        learning_result = self.replay_learning_engine.record_outcome(
+                            context=replay_learning_context,
+                            prediction=replay_prediction,
+                            frame_before=frame_before_action,
+                            frame_after=game_state.frame,
+                            score_before=score_before_action,
+                            score_after=game_state.score
+                        )
+                        
+                        # Log significant learning events
+                        if learning_result.get('inferred_rule'):
+                            logger.debug(f"[REPLAY-LEARN] Inferred: {learning_result['inferred_rule'][:80]}")
+                        if learning_result.get('wasted'):
+                            logger.debug(f"[REPLAY-LEARN] Action {idx} marked as potentially wasted (no effect)")
+                        if replay_prediction.prediction_correct:
+                            logger.debug(f"[REPLAY-LEARN] Prediction CORRECT at action {idx} (confidence now {replay_prediction.confidence:.2f})")
+                    except Exception as e:
+                        logger.debug(f"[REPLAY-LEARN] Outcome recording failed: {e}")
                 
                 # ================================================================
                 # FIX #11: EXPECTED OUTCOME VALIDATION - Compare actual vs expected
@@ -21146,6 +21290,66 @@ class GameplayEngine:
                             logger.warning(f"[SEQUENCE] Deactivated {sequence_id[:12]} after 3+ failures")
                     except Exception as e:
                         logger.debug(f"Failed to flag stuck sequence: {e}")
+            
+            # ================================================================
+            # FINALIZE REPLAY LEARNING SESSION
+            # ================================================================
+            # Store aggregated learning from predictions vs. actual outcomes.
+            # This enables agents to understand WHY sequences work, not just
+            # that they work. The engine extracts:
+            # 1. Prediction accuracy metrics (how well agent understood mechanics)
+            # 2. Inferred game rules (e.g., "clicking toggles objects")
+            # 3. Wasted actions (for optimizer improvement suggestions)
+            # 4. Primitive discoveries (e.g., "causality between click and effect")
+            # ================================================================
+            if replay_learning_context and hasattr(self, 'replay_learning_engine') and self.replay_learning_engine:
+                try:
+                    learning_summary = self.replay_learning_engine.finalize_session(replay_learning_context)
+                    
+                    if learning_summary:
+                        accuracy = learning_summary.get('prediction_accuracy', 0)
+                        wasted = learning_summary.get('wasted_actions', 0)
+                        rules_count = len(learning_summary.get('inferred_rules', []))
+                        primitives_count = len(learning_summary.get('inferred_primitives', []))
+                        
+                        # Log meaningful summary (not monotonous "replaying sequence" spam)
+                        if accuracy > 0 or rules_count > 0:
+                            logger.info(
+                                f"[REPLAY-LEARN] Session complete for {sequence_id[:12]}: "
+                                f"{accuracy:.0%} prediction accuracy, "
+                                f"{rules_count} rules inferred, "
+                                f"{primitives_count} primitives discovered, "
+                                f"{wasted} wasted actions detected"
+                            )
+                        
+                        # Store learning quality metrics for evolution tracking
+                        if accuracy > 0.5 and rules_count > 0:
+                            try:
+                                agent_id = self.game_config.get('agent_id', 'unknown')
+                                self.db.execute_query("""
+                                    INSERT INTO replay_learning_sessions 
+                                    (session_id, sequence_id, game_type, level_number, agent_id, 
+                                     prediction_accuracy, rules_inferred_count, 
+                                     primitives_discovered_count, wasted_actions_count,
+                                     learning_quality, created_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                                """, (
+                                    self.session_manager.current_session_id if self.session_manager else 'unknown',
+                                    sequence_id,
+                                    sequence.get('game_type', sequence.get('game_id', 'unknown')),
+                                    sequence.get('level_number', 1),
+                                    agent_id,
+                                    accuracy,
+                                    rules_count,
+                                    primitives_count,
+                                    wasted,
+                                    'high' if accuracy > 0.7 and rules_count >= 2 else 'medium'
+                                ))
+                            except Exception as db_err:
+                                logger.debug(f"Failed to store learning session: {db_err}")
+                                
+                except Exception as e:
+                    logger.debug(f"Replay learning finalization failed (non-critical): {e}")
                         
             return {'game_state': game_state, 'success': replay_success, 'reset_detected': reset_detected}
 
