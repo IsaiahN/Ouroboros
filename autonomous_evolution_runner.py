@@ -55,7 +55,7 @@ except ImportError:
 
 from database_logger import setup_database_logging
 from enhanced_database_interface import EnhancedDatabaseInterface as DatabaseInterface
-from evolution_with_vampires import check_for_vampires  # Vampire detection
+from prestige_parasite_detector import check_for_parasites  # Parasite detection
 from ouroboros_coordinator import OuroborosNetworkSteward
 from agent_factory import AgentFactory
 from performance_analyzer import PerformanceAnalyzer
@@ -1926,13 +1926,13 @@ class AutonomousEvolutionRunner:
             # Evolve new generation using EvolutionaryEngine
             print(f"\n[DNA] Evolving Generation {self.current_generation + 1}...")
             
-            # Check for prestige vampires before breeding
+            # Check for prestige parasites before breeding
             try:
-                vampires_sunset = check_for_vampires(self.current_generation, self.db.db_path)
-                if vampires_sunset > 0:
-                    print(f"  [VAMPIRE] Sunset {vampires_sunset} prestige vampires before breeding")
+                parasites_sunset = check_for_parasites(self.current_generation, self.db.db_path)
+                if parasites_sunset > 0:
+                    print(f"  [PARASITE] Sunset {parasites_sunset} prestige parasites before breeding")
             except Exception as e:
-                print(f"  [WARN] Vampire detection failed (non-critical): {e}")
+                print(f"  [WARN] Parasite detection failed (non-critical): {e}")
             
             evolution_engine = EvolutionaryEngine(self.db)
             
@@ -2036,7 +2036,7 @@ class AutonomousEvolutionRunner:
                 traceback.print_exc()
             
             # PARIAH VALIDATION: Detect and remove false pariahs
-            # False pariahs are as dangerous as prestige vampires - they block essential actions
+            # False pariahs are as dangerous as prestige parasites - they block essential actions
             print(f"\n[PARIAH VALIDATION] Checking for false pariahs in generation {self.current_generation}...")
             try:
                 pariah_results = run_pariah_validation(self.db, self.current_generation)

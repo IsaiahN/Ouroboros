@@ -3,11 +3,15 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # Rule 1: Disable pycache
 
 #!/usr/bin/env python3
 """
-Evolution Runner with Vampire Detection
-========================================
+Evolution Runner with Parasite Detection
+==========================================
 
-Wrapper that adds prestige vampire detection to the evolution cycle.
-Checks for vampires before breeding and applies graceful sunset.
+Wrapper that adds prestige parasite detection to the evolution cycle.
+Checks for parasites before breeding and applies graceful sunset.
+
+NOTE: The check_for_parasites() function has been moved to 
+prestige_parasite_detector.py to avoid circular imports.
+Import from there instead.
 """
 
 import os
@@ -15,35 +19,36 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 
 import sys
 import asyncio
-from prestige_vampire_detector import PrestigeVampireDetector
+from prestige_parasite_detector import PrestigeParasiteDetector
 from database_interface import DatabaseInterface
 import logging
 
 logger = logging.getLogger(__name__)
 
-async def run_evolution_with_vampire_detection(**config):
+async def run_evolution_with_parasite_detection(**config):
     """
-    Run evolution with vampire detection integrated.
+    Run evolution with parasite detection integrated.
     
-    This wraps the standard evolution runner and adds vampire detection
+    This wraps the standard evolution runner and adds parasite detection
     before each breeding cycle.
     """
+    # Import here to avoid circular dependency
     from autonomous_evolution_runner import AutonomousEvolutionRunner
     
     # Create standard evolution runner
     runner = AutonomousEvolutionRunner(**config)
     
-    # Add vampire detection hook
+    # Add parasite detection hook
     original_run = runner.run
     
-    async def run_with_vampires():
-        """Enhanced run method with vampire detection."""
+    async def run_with_parasites():
+        """Enhanced run method with parasite detection."""
         # Get current generation from database
         db = DatabaseInterface()
         
-        # Run evolution with vampire checks
+        # Run evolution with parasite checks
         logger.info("=" * 70)
-        logger.info("EVOLUTION WITH VAMPIRE DETECTION ENABLED")
+        logger.info("EVOLUTION WITH PARASITE DETECTION ENABLED")
         logger.info("=" * 70)
         
         # Call original run method
@@ -52,65 +57,30 @@ async def run_evolution_with_vampire_detection(**config):
         db.close()
     
     # Replace run method
-    runner.run = run_with_vampires
+    runner.run = run_with_parasites
     
     return runner
 
-def check_for_vampires(generation: int, db_path: str = "core_data.db"):
-    """
-    Check for and sunset vampire agents.
-    
-    Args:
-        generation: Current generation number
-        db_path: Path to database
-    
-    Returns:
-        Number of vampires sunset
-    """
-    detector = PrestigeVampireDetector(db_path)
-    
-    logger.info(f"\n{'='*70}")
-    logger.info(f"VAMPIRE DETECTION - Generation {generation}")
-    logger.info(f"{'='*70}")
-    
-    # Detect vampires
-    vampires = detector.detect_vampires(generation, threshold_multiplier=10.0)
-    
-    if vampires:
-        logger.info(f"[WARN]  Found {len(vampires)} prestige vampires")
-        
-        for v in vampires:
-            logger.info(f"  - {v['agent_id'][:12]}... "
-                       f"(Prestige: {v['prestige_ratio']:.1f}x, "
-                       f"Performance: {v['performance_ratio']:.1%})")
-        
-        # Sunset vampires
-        detector.sunset_vampires(vampires, generation, dry_run=False)
-        logger.info(f"[OK] Sunset {len(vampires)} vampire agents")
-        
-        return len(vampires)
-    else:
-        logger.info("[OK] No prestige vampires detected")
-        return 0
 
 if __name__ == "__main__":
     import argparse
+    from prestige_parasite_detector import check_for_parasites
     
-    parser = argparse.ArgumentParser(description='Run evolution with vampire detection')
+    parser = argparse.ArgumentParser(description='Run evolution with parasite detection')
     parser.add_argument('--generation', type=int, default=0, help='Current generation')
-    parser.add_argument('--check-only', action='store_true', help='Only check for vampires, don\'t run evolution')
+    parser.add_argument('--check-only', action='store_true', help='Only check for parasites, don\'t run evolution')
     
     args = parser.parse_args()
     
     if args.check_only:
-        # Just check for vampires
-        count = check_for_vampires(args.generation)
+        # Just check for parasites
+        count = check_for_parasites(args.generation)
         print(f"\n{'='*70}")
-        print(f"Vampire check complete: {count} vampires sunset")
+        print(f"Parasite check complete: {count} parasites sunset")
         print(f"{'='*70}")
     else:
-        # Run full evolution with vampire detection
+        # Run full evolution with parasite detection
         print("Use run_evolution.py for full evolution")
-        print("This script provides vampire detection utilities")
+        print("This script provides parasite detection utilities")
         print("\nUsage:")
-        print("  python evolution_with_vampires.py --generation 70 --check-only")
+        print("  python evolution_with_parasites.py --generation 70 --check-only")

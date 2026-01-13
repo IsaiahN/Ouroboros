@@ -290,7 +290,7 @@ class AutomatedAssessmentRunner:
             }
     
     def _assess_prestige_distribution(self) -> Dict[str, Any]:
-        """Check for prestige vampires and distribution health."""
+        """Check for prestige parasites and distribution health."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -306,26 +306,26 @@ class AutomatedAssessmentRunner:
             conn.close()
             
             if not result or result[0] is None:
-                return {'status': 'no_data', 'avg_prestige': 0, 'has_vampire': False}
+                return {'status': 'no_data', 'avg_prestige': 0, 'has_parasite': False}
             
             avg_prestige, max_prestige, min_prestige = result
             
-            # Check for vampires (>10x average)
-            has_vampire = max_prestige > (avg_prestige * 10) if avg_prestige > 0 else False
+            # Check for parasites (>10x average)
+            has_parasite = max_prestige > (avg_prestige * 10) if avg_prestige > 0 else False
             
             return {
                 'avg_prestige': avg_prestige,
                 'max_prestige': max_prestige,
                 'min_prestige': min_prestige,
-                'has_vampire': has_vampire,
-                'status': 'vampire_detected' if has_vampire else 'healthy'
+                'has_parasite': has_parasite,
+                'status': 'parasite_detected' if has_parasite else 'healthy'
             }
         except sqlite3.OperationalError as e:
             conn.close()
             return {
                 'status': 'no_data',
                 'avg_prestige': 0,
-                'has_vampire': False,
+                'has_parasite': False,
                 'error': str(e)
             }
     
@@ -406,9 +406,9 @@ class AutomatedAssessmentRunner:
         elif breakthrough_status == 'no_activity':
             recommendations.append("INFO: No breakthroughs yet. Run more generations to accumulate data.")
         
-        # Prestige vampires
-        if assessment['prestige_distribution'].get('has_vampire'):
-            recommendations.append("ACTION REQUIRED: Prestige vampire detected. Review prestige dampening system.")
+        # Prestige parasites
+        if assessment['prestige_distribution'].get('has_parasite'):
+            recommendations.append("ACTION REQUIRED: Prestige parasite detected. Review prestige dampening system.")
         
         # Subgoal planning
         if assessment['subgoal_planning']['status'] == 'inactive':
@@ -433,7 +433,7 @@ class AutomatedAssessmentRunner:
                 level_completion_rate REAL,
                 breakthrough_count INTEGER,
                 abstraction_active INTEGER,
-                prestige_has_vampire INTEGER,
+                prestige_has_parasite INTEGER,
                 recommendations TEXT,
                 full_data TEXT
             )
@@ -443,7 +443,7 @@ class AutomatedAssessmentRunner:
         cursor.execute("""
             INSERT INTO automated_assessments (
                 generation_number, timestamp, level_completion_rate,
-                breakthrough_count, abstraction_active, prestige_has_vampire,
+                breakthrough_count, abstraction_active, prestige_has_parasite,
                 recommendations, full_data
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -452,7 +452,7 @@ class AutomatedAssessmentRunner:
             assessment['level_completion'].get('completion_rate', 0),
             assessment['breakthrough_momentum'].get('breakthrough_detections', 0),
             1 if assessment['abstraction_usage']['status'] == 'active' else 0,
-            1 if assessment['prestige_distribution'].get('has_vampire') else 0,
+            1 if assessment['prestige_distribution'].get('has_parasite') else 0,
             '\n'.join(assessment['recommendations']),
             str(assessment)
         ))

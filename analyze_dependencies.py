@@ -190,7 +190,9 @@ def find_orphaned_modules():
         "automated_assessment_runner", "fix_sequences",
         "check_sequences", "check_all_sequences", "check_game_ids",
         "reactivate_sequences", "reactivate_best_sequences",
-        "cleanup_temp_files", "audit_cods",
+        "cleanup_temp_files", "audit_cods", "evolution_with_parasites",
+        "pycache_guard", "theory_alignment_checker",
+        "prestige_parasite_detector", "abstraction_schema",
     }
     
     true_orphans = orphans - entry_points

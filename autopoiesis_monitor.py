@@ -190,7 +190,7 @@ class AutopoiesisMonitor:
             frontier_progress = max(frontier_result[0]['count'] if frontier_result else 0, 1)
             
             # Negative signal 1: High prestige agents with low contributions
-            prestige_vampire_result = self.db.execute_query("""
+            prestige_parasite_result = self.db.execute_query("""
                 SELECT COUNT(*) as count
                 FROM agents a
                 WHERE a.is_active = 1
@@ -201,7 +201,7 @@ class AutopoiesisMonitor:
                         AND ws.discovered_at > datetime('now', '-7 days')
                   ) = 0
             """)
-            prestige_without_value = prestige_vampire_result[0]['count'] if prestige_vampire_result else 0
+            prestige_without_value = prestige_parasite_result[0]['count'] if prestige_parasite_result else 0
             
             # Negative signal 2: Games played with zero progress
             wasted_result = self.db.execute_query("""
@@ -230,7 +230,7 @@ class AutopoiesisMonitor:
             # Store metric
             self._store_metric('identity_drift', generation, drift, metadata={
                 'frontier_progress': frontier_progress,
-                'prestige_vampires': prestige_without_value,
+                'prestige_parasites': prestige_without_value,
                 'wasted_games': wasted_actions,
                 'orphan_sequences': orphan_sequences
             })

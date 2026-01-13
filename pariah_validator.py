@@ -4,7 +4,7 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 """
 Pariah Validator - Automatic False Pariah Detection and Cleanup
 
-A false pariah is as dangerous as a prestige vampire - it blocks network progress
+A false pariah is as dangerous as a prestige parasite - it blocks network progress
 by penalizing actions that are actually ESSENTIAL for winning.
 
 This module runs after each evolution to:

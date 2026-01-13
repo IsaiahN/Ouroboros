@@ -3,7 +3,7 @@
 Prestige System Audit Script
 
 Purpose: Diagnostic tool to audit prestige system health
-- Detects prestige outliers and "vampires"
+- Detects prestige outliers and "parasites"
 - Checks for unbounded growth or negative values
 - Validates dampening effectiveness
 - Identifies edge cases in calculation
@@ -104,8 +104,8 @@ class PrestigeAuditor:
 
         return sorted(outliers, key=lambda x: x["prestige"], reverse=True)
 
-    def find_vampires(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Identify 'vampires': High prestige but low recent performance."""
+    def find_parasites(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Identify 'parasites': High prestige but low recent performance."""
         stats = data["stats"]
         agents = data["agents"]
 
@@ -123,14 +123,14 @@ class PrestigeAuditor:
         # Calculate avg performance of population
         avg_wins = statistics.mean([a["wins"] for a in agents]) if agents else 0
 
-        vampires = []
+        parasites = []
         for agent in high_prestige_agents:
-            # Vampire criteria: High prestige but below average wins
+            # Parasite criteria: High prestige but below average wins
             if agent["wins"] < avg_wins * 0.5:
                 agent["performance_gap"] = avg_wins - agent["wins"]
-                vampires.append(agent)
+                parasites.append(agent)
 
-        return vampires
+        return parasites
 
     def generate_report(self) -> str:
         """Generate comprehensive prestige audit report."""
@@ -199,18 +199,18 @@ class PrestigeAuditor:
         else:
             report_lines.append("[OK] PASSED: No extreme outliers (>5x median)")
 
-        # Check 3: Vampires
-        vampires = self.find_vampires(data)
-        if vampires:
+        # Check 3: Parasites
+        parasites = self.find_parasites(data)
+        if parasites:
             report_lines.append(
-                f"🟡 WARNING: Found {len(vampires)} potential vampires (high prestige, low performance)"
+                f"[WARN] WARNING: Found {len(parasites)} potential parasites (high prestige, low performance)"
             )
-            for v in vampires[:3]:
+            for p in parasites[:3]:
                 report_lines.append(
-                    f"   - Agent {v['agent_id'][:8]}: Prestige {v['prestige']:.2f}, Wins {v['wins']}"
+                    f"   - Agent {p['agent_id'][:8]}: Prestige {p['prestige']:.2f}, Wins {p['wins']}"
                 )
         else:
-            report_lines.append("[OK] PASSED: No obvious vampires detected")
+            report_lines.append("[OK] PASSED: No obvious parasites detected")
 
         report_lines.append("")
         report_lines.append("=" * 80)

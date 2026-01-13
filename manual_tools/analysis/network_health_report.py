@@ -406,7 +406,7 @@ class NetworkHealthReport:
         }
     
     def get_prestige_distribution(self) -> Dict[str, Any]:
-        """Prestige distribution - vampire detection."""
+        """Prestige distribution - parasite detection."""
         self.cur.execute("""
             SELECT 
                 agent_id,
@@ -443,7 +443,7 @@ class NetworkHealthReport:
             'top_agents': top_agents,
             'gini_coefficient': round(gini, 3),
             'concentration': 'LOW' if gini < 0.3 else 'MODERATE' if gini < 0.5 else 'HIGH',
-            'vampire_risk': gini > 0.6
+            'parasite_risk': gini > 0.6
         }
     
     def get_identity_drift(self) -> Dict[str, Any]:
@@ -559,11 +559,11 @@ class NetworkHealthReport:
         
         # Check prestige concentration
         prestige = self.get_prestige_distribution()
-        if prestige['vampire_risk']:
+        if prestige['parasite_risk']:
             flags.append({
                 'severity': 'MEDIUM',
                 'issue': f"High prestige concentration (Gini: {prestige['gini_coefficient']})",
-                'action': 'Check for prestige vampires'
+                'action': 'Check for prestige parasites'
             })
         
         return flags
@@ -685,7 +685,7 @@ class NetworkHealthReport:
         # Prestige
         pres = self.get_prestige_distribution()
         print(f"\n--- PRESTIGE ({pres['concentration']}) ---")
-        print(f"  Gini: {pres['gini_coefficient']} | Vampire risk: {pres['vampire_risk']}")
+        print(f"  Gini: {pres['gini_coefficient']} | Parasite risk: {pres['parasite_risk']}")
         if pres['top_agents']:
             print(f"  Top: {pres['top_agents'][0]}")
         
