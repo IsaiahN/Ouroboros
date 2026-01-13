@@ -30,6 +30,20 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 from database_interface import DatabaseInterface
 
 
+@dataclass
+class ConsoleLogEntry:
+    """A warning or error log entry from system_logs."""
+    id: int
+    timestamp: str
+    level: str
+    logger_name: str
+    message: str
+    module: Optional[str] = None
+    function_name: Optional[str] = None
+    line_number: Optional[int] = None
+    game_id: Optional[str] = None
+
+
 class TheoryLayer(Enum):
     CONSCIOUSNESS = "consciousness"
     METALEARNING = "metalearning"
@@ -82,6 +96,298 @@ class TheoryAlignmentChecker:
         self.db = db
         self.requirements = self._load_theory_requirements()
         self.results: List[AlignmentResult] = []
+        self._ensure_log_tracking_table()
+    
+    def _ensure_log_tracking_table(self):
+        """Create table to track last-checked log timestamp."""
+        try:
+            self.db.execute_update("""
+                CREATE TABLE IF NOT EXISTS theory_alignment_log_tracking (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    last_checked_timestamp TEXT NOT NULL,
+                    last_checked_log_id INTEGER,
+                    logs_reviewed_count INTEGER DEFAULT 0,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            # Insert default row if not exists
+            self.db.execute_update("""
+                INSERT OR IGNORE INTO theory_alignment_log_tracking (id, last_checked_timestamp, last_checked_log_id, logs_reviewed_count, updated_at)
+                VALUES (1, '1970-01-01T00:00:00', 0, 0, datetime('now'))
+            """)
+        except Exception:
+            pass  # Table may already exist
+    
+    def get_last_checked_timestamp(self) -> str:
+        """Get the timestamp of the last log check."""
+        try:
+            result = self.db.execute_query("""
+                SELECT last_checked_timestamp, last_checked_log_id 
+                FROM theory_alignment_log_tracking WHERE id = 1
+            """)
+            if result:
+                return result[0].get('last_checked_timestamp', '1970-01-01T00:00:00')
+        except Exception:
+            pass
+        return '1970-01-01T00:00:00'
+    
+    def get_new_warnings_and_errors(self, hours: int = 24, limit: int = 100) -> List[ConsoleLogEntry]:
+        """
+        Retrieve warning and error logs that haven't been reviewed yet.
+        
+        Args:
+            hours: How far back to look for logs (max)
+            limit: Maximum number of logs to return
+            
+        Returns:
+            List of ConsoleLogEntry objects for new warnings/errors
+        """
+        last_checked = self.get_last_checked_timestamp()
+        
+        try:
+            # Get logs newer than last check AND within hours limit
+            results = self.db.execute_query(f"""
+                SELECT 
+                    id, timestamp, level, logger_name, message,
+                    module, function_name, line_number, game_id
+                FROM system_logs
+                WHERE level IN ('WARNING', 'ERROR', 'CRITICAL')
+                  AND timestamp > ?
+                  AND timestamp >= datetime('now', '-{hours} hours')
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (last_checked, limit))
+            
+            entries = []
+            for row in results or []:
+                entries.append(ConsoleLogEntry(
+                    id=row.get('id', 0),
+                    timestamp=row.get('timestamp', ''),
+                    level=row.get('level', 'ERROR'),
+                    logger_name=row.get('logger_name', ''),
+                    message=row.get('message', ''),
+                    module=row.get('module'),
+                    function_name=row.get('function_name'),
+                    line_number=row.get('line_number'),
+                    game_id=row.get('game_id'),
+                ))
+            return entries
+        except Exception as e:
+            print(f"[!] Failed to query system_logs: {e}")
+            return []
+    
+    def mark_logs_as_reviewed(self, logs: List[ConsoleLogEntry]):
+        """Update the last-checked timestamp after reviewing logs."""
+        if not logs:
+            return
+        
+        # Find the newest log timestamp
+        newest_timestamp = max(log.timestamp for log in logs)
+        max_log_id = max(log.id for log in logs)
+        
+        try:
+            # Get current count
+            result = self.db.execute_query("""
+                SELECT logs_reviewed_count FROM theory_alignment_log_tracking WHERE id = 1
+            """)
+            current_count = result[0].get('logs_reviewed_count', 0) if result else 0
+            
+            self.db.execute_update("""
+                UPDATE theory_alignment_log_tracking 
+                SET last_checked_timestamp = ?,
+                    last_checked_log_id = ?,
+                    logs_reviewed_count = ?,
+                    updated_at = datetime('now')
+                WHERE id = 1
+            """, (newest_timestamp, max_log_id, current_count + len(logs)))
+        except Exception as e:
+            print(f"[!] Failed to update log tracking: {e}")
+    
+    def categorize_errors(self, logs: List[ConsoleLogEntry]) -> Dict[str, List[ConsoleLogEntry]]:
+        """
+        Categorize error logs by likely root cause for self-healing.
+        
+        Returns:
+            Dict mapping category name to list of logs
+        """
+        categories = {
+            'database_errors': [],
+            'api_errors': [],
+            'coordinate_errors': [],
+            'sequence_errors': [],
+            'hypothesis_errors': [],
+            'other': [],
+        }
+        
+        for log in logs:
+            msg_lower = log.message.lower()
+            
+            if any(x in msg_lower for x in ['sqlite', 'database', 'db error', 'table', 'constraint']):
+                categories['database_errors'].append(log)
+            elif any(x in msg_lower for x in ['api', 'request', 'response', '429', '500', 'timeout', 'connection']):
+                categories['api_errors'].append(log)
+            elif any(x in msg_lower for x in ['coordinate', 'index', 'out of bounds', 'range', 'x=', 'y=']):
+                categories['coordinate_errors'].append(log)
+            elif any(x in msg_lower for x in ['sequence', 'replay', 'action', 'winning_sequence']):
+                categories['sequence_errors'].append(log)
+            elif any(x in msg_lower for x in ['hypothesis', 'control', 'discovery', 'object_control']):
+                categories['hypothesis_errors'].append(log)
+            else:
+                categories['other'].append(log)
+        
+        # Remove empty categories
+        return {k: v for k, v in categories.items() if v}
+    
+    def generate_error_report(self, hours: int = 6) -> Dict[str, Any]:
+        """
+        Generate a comprehensive error report for self-healing review.
+        
+        Args:
+            hours: How many hours of logs to include
+            
+        Returns:
+            Dict with categorized errors and recommendations
+        """
+        logs = self.get_new_warnings_and_errors(hours=hours, limit=500)
+        
+        if not logs:
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'status': 'healthy',
+                'new_logs_count': 0,
+                'message': 'No new warnings or errors since last check',
+                'last_checked': self.get_last_checked_timestamp(),
+            }
+        
+        categorized = self.categorize_errors(logs)
+        
+        # Generate recommendations
+        recommendations = []
+        
+        if 'coordinate_errors' in categorized and len(categorized['coordinate_errors']) > 5:
+            recommendations.append({
+                'priority': 'HIGH',
+                'issue': 'Frequent coordinate/bounds errors',
+                'suggestion': 'Check object_selection_state for stale coordinates from previous runs',
+                'count': len(categorized['coordinate_errors']),
+            })
+        
+        if 'api_errors' in categorized and len(categorized['api_errors']) > 3:
+            recommendations.append({
+                'priority': 'MEDIUM',
+                'issue': 'API communication errors',
+                'suggestion': 'Check network connectivity and rate limiting (429 errors)',
+                'count': len(categorized['api_errors']),
+            })
+        
+        if 'sequence_errors' in categorized and len(categorized['sequence_errors']) > 5:
+            recommendations.append({
+                'priority': 'HIGH',
+                'issue': 'Sequence replay/validation failures',
+                'suggestion': 'Run check_sequences.py and verify sequence integrity',
+                'count': len(categorized['sequence_errors']),
+            })
+        
+        if 'database_errors' in categorized:
+            recommendations.append({
+                'priority': 'CRITICAL',
+                'issue': 'Database errors detected',
+                'suggestion': 'Check database integrity and disk space',
+                'count': len(categorized['database_errors']),
+            })
+        
+        # Get top error messages
+        error_counts = {}
+        for log in logs:
+            # Extract first 100 chars as key
+            key = log.message[:100] if len(log.message) > 100 else log.message
+            error_counts[key] = error_counts.get(key, 0) + 1
+        
+        top_errors = sorted(error_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        
+        report = {
+            'timestamp': datetime.now().isoformat(),
+            'status': 'issues_found' if logs else 'healthy',
+            'new_logs_count': len(logs),
+            'last_checked': self.get_last_checked_timestamp(),
+            'by_level': {
+                'CRITICAL': sum(1 for l in logs if l.level == 'CRITICAL'),
+                'ERROR': sum(1 for l in logs if l.level == 'ERROR'),
+                'WARNING': sum(1 for l in logs if l.level == 'WARNING'),
+            },
+            'by_category': {k: len(v) for k, v in categorized.items()},
+            'top_errors': [{'message': msg, 'count': count} for msg, count in top_errors],
+            'recommendations': recommendations,
+            'sample_logs': [
+                {
+                    'timestamp': log.timestamp,
+                    'level': log.level,
+                    'module': log.module,
+                    'message': log.message[:200],
+                }
+                for log in logs[:20]  # First 20 as samples
+            ],
+        }
+        
+        return report
+    
+    def print_error_report(self, hours: int = 6, mark_reviewed: bool = True):
+        """Print a formatted error report to console."""
+        logs = self.get_new_warnings_and_errors(hours=hours)
+        
+        print("\n" + "=" * 70)
+        print("       CONSOLE LOG ERROR REPORT (Self-Healing)")
+        print("=" * 70)
+        print(f"  Timestamp: {datetime.now().isoformat()}")
+        print(f"  Last Checked: {self.get_last_checked_timestamp()}")
+        print(f"  New Logs: {len(logs)}")
+        print("=" * 70)
+        
+        if not logs:
+            print("\n  [OK] No new warnings or errors since last check")
+            print("=" * 70)
+            return
+        
+        # Counts by level
+        critical = sum(1 for l in logs if l.level == 'CRITICAL')
+        errors = sum(1 for l in logs if l.level == 'ERROR')
+        warnings = sum(1 for l in logs if l.level == 'WARNING')
+        
+        print(f"\n  CRITICAL: {critical}  |  ERROR: {errors}  |  WARNING: {warnings}")
+        
+        # Categorized
+        categorized = self.categorize_errors(logs)
+        if categorized:
+            print("\n  BY CATEGORY:")
+            for category, items in categorized.items():
+                icon = "[!]" if category in ['database_errors', 'sequence_errors'] else "[-]"
+                print(f"    {icon} {category.replace('_', ' ').title()}: {len(items)}")
+        
+        # Top errors
+        error_counts = {}
+        for log in logs:
+            key = log.message[:80]
+            error_counts[key] = error_counts.get(key, 0) + 1
+        
+        top_errors = sorted(error_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        if top_errors:
+            print("\n  TOP RECURRING ERRORS:")
+            for i, (msg, count) in enumerate(top_errors, 1):
+                print(f"    {i}. [{count}x] {msg}...")
+        
+        # Sample recent logs
+        print("\n  RECENT SAMPLES (last 10):")
+        for log in logs[:10]:
+            level_icon = "[X]" if log.level == 'ERROR' else ("[!]" if log.level == 'CRITICAL' else "[-]")
+            print(f"    {level_icon} {log.timestamp} | {log.module or 'unknown'}")
+            print(f"        {log.message[:100]}...")
+        
+        print("\n" + "=" * 70)
+        
+        if mark_reviewed:
+            self.mark_logs_as_reviewed(logs)
+            print(f"  [OK] Marked {len(logs)} logs as reviewed")
+            print("=" * 70)
         
     def _load_theory_requirements(self) -> List[TheoryRequirement]:
         """Load all theory requirements that should be validated."""
@@ -777,12 +1083,25 @@ def main():
     parser.add_argument('--fix-plan', action='store_true', help='Generate fix plan')
     parser.add_argument('--json', action='store_true', help='Output as JSON')
     parser.add_argument('--grade', action='store_true', help='Output letter grade')
+    parser.add_argument('--errors', action='store_true', help='Show console log errors/warnings for self-healing')
+    parser.add_argument('--errors-json', action='store_true', help='Output error report as JSON')
+    parser.add_argument('--hours', type=int, default=6, help='Hours of logs to include (default: 6)')
+    parser.add_argument('--no-mark-reviewed', action='store_true', help='Do not mark logs as reviewed')
     args = parser.parse_args()
     
     db = DatabaseInterface()
     checker = TheoryAlignmentChecker(db)
     
-    if args.fix_plan:
+    if args.errors:
+        checker.print_error_report(hours=args.hours, mark_reviewed=not args.no_mark_reviewed)
+    elif args.errors_json:
+        import json
+        report = checker.generate_error_report(hours=args.hours)
+        print(json.dumps(report, indent=2, default=str))
+        if not args.no_mark_reviewed:
+            logs = checker.get_new_warnings_and_errors(hours=args.hours)
+            checker.mark_logs_as_reviewed(logs)
+    elif args.fix_plan:
         checker.check_all()
         print(checker.generate_fix_plan())
     elif args.json:
