@@ -65,15 +65,18 @@ class ActionHandler:
         self.frame_size_warnings = 0
         
         # Action diversity tracking (similar to coordinate diversity)
-        self.recent_actions = []  # Track last N actions
-        self.max_action_history = 10
+        self.recent_actions = []  # Track all actions during game
+        # Full game memory - keep all actions (was 10 goldfish window)
+        self.max_action_history = 20000
         self.action_stagnation_count = 0  # How many times same action repeated
         self.last_action = None
         self.consecutive_same_action = 0
         
         # Coordinate diversity tracking for ACTION6
-        self.recent_coordinates = []  # Track last N coordinates
-        self.max_coordinate_history = 15
+        self.recent_coordinates = []  # Track coordinates during game
+        # Full game memory - keep all coordinates (was 15 goldfish window)
+        # Spam/oscillation detection needs broader context
+        self.max_coordinate_history = 20000
         self.coordinate_spam_threshold = 3  # Max times to click similar coordinates
         self.last_coordinates = None
         self.consecutive_similar_coordinate = 0

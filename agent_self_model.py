@@ -10537,9 +10537,11 @@ class MetacognitiveReasoningEngine:
             'timestamp': datetime.now().isoformat()
         })
         
-        # Keep last 20 failures
-        if len(self._failed_attempts) > 20:
-            self._failed_attempts = self._failed_attempts[-20:]
+        # Full game memory - keep all failures during game (was [-20:] goldfish window)
+        # Failure pattern analysis needs full history to detect commonalities
+        # Safety cap at 20000 for pathological cases only
+        if len(self._failed_attempts) > 20000:
+            self._failed_attempts = self._failed_attempts[-20000:]
     
     def analyze_failure_commonality(
         self,
@@ -12236,9 +12238,11 @@ class EpisodicMemorySystem:
             'outcome': outcome,
             'action': action
         })
-        # Keep last 50 entries
-        if len(session['stream_trust_history']) > 50:
-            session['stream_trust_history'] = session['stream_trust_history'][-50:]
+        # Full game memory - keep all stream trust history during game (was [-50:] goldfish window)
+        # Stream A/B trust learning needs full game context to calibrate properly
+        # Safety cap at 20000 for pathological cases only
+        if len(session['stream_trust_history']) > 20000:
+            session['stream_trust_history'] = session['stream_trust_history'][-20000:]
         
         # ================================================================
         # DYNAMIC wA/wB ADJUSTMENT
@@ -13264,7 +13268,10 @@ class AgentHypothesisSystem:
         existing_evidence = json.loads(h[evidence_key] or '[]')
         if observation:
             existing_evidence.append(observation)
-        evidence_json = json.dumps(existing_evidence[-10:])  # Keep last 10
+        # Full game memory - keep all evidence during game (was [-10:] goldfish window)
+        # Hypothesis validation needs full evidence history
+        # Safety cap at 500 for JSON storage efficiency
+        evidence_json = json.dumps(existing_evidence[-500:] if len(existing_evidence) > 500 else existing_evidence)
         
         # Determine status
         status = h['status']

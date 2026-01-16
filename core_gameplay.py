@@ -2985,7 +2985,10 @@ class GameplayEngine:
                     self._last_observer_flags = observer_flags
                     surprise_score = None
                     try:
-                        self._recent_actions = (self._recent_actions or [])[-9:]
+                        # Full game memory - keep all actions during game (was [-9:] goldfish window)
+                        # Safety cap at 20000 for pathological cases only
+                        if len(self._recent_actions or []) > 20000:
+                            self._recent_actions = self._recent_actions[-20000:]
                         counts = {}
                         for a in self._recent_actions:
                             counts[a] = counts.get(a, 0) + 1
@@ -6266,8 +6269,10 @@ class GameplayEngine:
                                         'frame_hash': hash(str(game_state.frame)[:100]) if game_state.frame else 0
                                     }
                                     self._action_availability_changes.append(change_record)
-                                    # Keep last 20 changes
-                                    self._action_availability_changes = self._action_availability_changes[-20:]
+                                    # Full game memory - keep all control proof evidence during game (was [-20:] goldfish window)
+                                    # Safety cap at 20000 for pathological cases only
+                                    if len(self._action_availability_changes) > 20000:
+                                        self._action_availability_changes = self._action_availability_changes[-20000:]
                                     
                                     # If movement actions (1-4) were unlocked, likely selected an object
                                     if new_actions & {1, 2, 3, 4}:
@@ -12878,12 +12883,16 @@ class GameplayEngine:
                         # Append current data
                         if hasattr(new_state, 'score'):
                             score_history.append(float(new_state.score))
-                            self._score_history = score_history[-20:]  # Keep last 20
+                            # Full game memory - keep all scores during game (was [-20:] goldfish window)
+                            # Safety cap at 20000 for pathological cases only
+                            self._score_history = score_history[-20000:] if len(score_history) > 20000 else score_history
                         
                         action_num = int(action_num) if action_num.isdigit() else 0
                         if action_num:
                             action_history.append(action_num)
-                            self._action_history = action_history[-20:]  # Keep last 20
+                            # Full game memory - keep all actions during game (was [-20:] goldfish window)
+                            # Safety cap at 20000 for pathological cases only
+                            self._action_history = action_history[-20000:] if len(action_history) > 20000 else action_history
                         
                         # Run primitive analysis
                         primitive_analysis = self._analyze_situation_with_primitives(

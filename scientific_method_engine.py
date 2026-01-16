@@ -160,7 +160,8 @@ class ScientificMethodEngine:
         
         # Observation buffer for pattern detection
         self._observation_buffer: List[Dict[str, Any]] = []
-        self._max_buffer_size = 50
+        # Full game memory - theories need full context (was 50 goldfish window)
+        self._max_buffer_size = 20000
         
         # Experimentation budget (fraction of actions for deliberate tests)
         self._experiment_budget_ratio = 0.20  # 20% of actions for experiments

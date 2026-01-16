@@ -54,8 +54,9 @@ class VisualAnalyzer:
         self.actions_since_decline = 0
         
         # Pattern oscillation detection
-        self.recent_targets = []  # Track last N targets to detect oscillation
-        self.max_target_history = 10
+        self.recent_targets = []  # Track all targets during game
+        # Full game memory - keep all targets (was 10 goldfish window)
+        self.max_target_history = 20000
         self.oscillation_detected = False
     
     def set_priority_color(self, color: int, reason: str = "learned from previous success"):
@@ -147,8 +148,9 @@ class VisualAnalyzer:
         """
         self.recent_scores.append(current_score)
         
-        # Keep only recent scores (last 10)
-        if len(self.recent_scores) > 10:
+        # Full game memory - keep all scores (was 10 goldfish window)
+        # Safety cap at 20000 for pathological cases only
+        if len(self.recent_scores) > 20000:
             self.recent_scores.pop(0)
         
         # Check if score improved

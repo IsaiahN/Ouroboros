@@ -1775,9 +1775,11 @@ class CODSEngine:
         self._latest_discovery = discovery
         self._pending_discoveries.append(discovery)
         
-        # Keep pending list bounded
-        if len(self._pending_discoveries) > 20:
-            self._pending_discoveries = self._pending_discoveries[-10:]
+        # Full game memory - keep all discoveries during game (was dropping 50% at 20!)
+        # CODS needs to see ALL discoveries to detect patterns across the full game
+        # Safety cap at 20000 for pathological cases only
+        if len(self._pending_discoveries) > 20000:
+            self._pending_discoveries = self._pending_discoveries[-20000:]
         
         logger.info(f"[CODS] Recorded discovery: {operator_name} ({discovery_type})")
     

@@ -2290,7 +2290,9 @@ class SeedPrimitiveRegistry:
             return 1.0  # First observation is maximally informative
         
         obs_sig = self._signature(observation)
-        history_sigs = [self._signature(h) for h in history[-50:]]  # Last 50
+        # Full game memory - use all history for information gain (was [-50:] goldfish window)
+        # Novelty detection is more accurate with complete history
+        history_sigs = [self._signature(h) for h in history]
         
         # Count how many times we've seen similar observations
         similar_count = sum(1 for h in history_sigs if h == obs_sig)
@@ -2528,8 +2530,9 @@ class SeedPrimitiveRegistry:
         
         state_sig = self._signature(state)
         
-        # Count similar states in history
-        similar = sum(1 for s in state_history[-100:] 
+        # Full game memory - count similar states in ALL history (was [-100:] goldfish window)
+        # Stuck detection needs complete game context
+        similar = sum(1 for s in state_history 
                      if self._signature(s) == state_sig)
         
         # Exponential decay with repetition
