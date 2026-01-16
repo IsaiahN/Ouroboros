@@ -623,3 +623,162 @@ finalize_session()
 ---
 
 **Last Updated**: 9:15:12 AM - January 13, 2026
+
+---
+
+## Session: January 13, 2026 - IThread Consolidation & Type Annotation Fixes
+
+---
+
+### Approach: Consolidate wA/wB Management into IThread as Single Source of Truth
+
+**Session Start**: ~5:00 PM  
+**Current Timestamp**: 6:29:20 PM  
+**Status**: COMPLETE - All phases implemented and verified
+
+---
+
+### Problem Statement
+
+Analysis revealed significant code duplication between `agent_self_model.py` and `i_thread.py`:
+
+1. **WeavingReporter** duplicated IThread's stream conflict/synthesis logging
+2. **EpisodicMemorySystem** duplicated IThread's wA/wB management
+3. **ROLE_DEFAULT_WEIGHTS** defined in multiple places
+4. Multiple files directly read/wrote `self_network_bias` from database instead of using IThread
+5. Type annotation issues causing Pylance errors in the workspace
+
+Per the unified consciousness theory:
+- **IThread** = "Which knowledge should I trust?" (consciousness weaver)
+- **AgentSelfModel** = "What do I control in this world?" (physical world model)
+
+These are complementary, not duplicative - but wA/wB management was scattered.
+
+---
+
+### Implementation Phases Completed
+
+#### Phase 1: Merge WeavingReporter → IThread ✅
+
+| Task | Status | Location |
+|------|--------|----------|
+| Add `generate_weaving_report()` to IThread | ✅ | `i_thread.py` line 1633 |
+| Add `format_weaving_for_api()` to IThread | ✅ | `i_thread.py` line 1780 |
+| WeavingReporter accepts `i_thread` in __init__ | ✅ | `agent_self_model.py` line 9160 |
+| WeavingReporter.generate_report() delegates to IThread | ✅ | `agent_self_model.py` lines 9251-9253 |
+| WeavingReporter.format_for_api() delegates to IThread | ✅ | `agent_self_model.py` lines 9404-9406 |
+
+#### Phase 2: Consolidate wA/wB Management ✅
+
+| Task | Status | Location |
+|------|--------|----------|
+| Add `initialize_for_role()` to IThread | ✅ | `i_thread.py` line 1835 |
+| Add `_persist_state()` to IThread | ✅ | `i_thread.py` line 1883 |
+| Add `boost_self_trust()` to IThread | ✅ | `i_thread.py` line 1920 |
+| Add `restore_self_trust()` to IThread | ✅ | `i_thread.py` line 1970 |
+| EpisodicMemorySystem accepts `i_thread` in __init__ | ✅ | `agent_self_model.py` line 11156 |
+| EpisodicMemorySystem.initialize_session_state() delegates | ✅ | `agent_self_model.py` line 12043 |
+| EpisodicMemorySystem.reset_wA_wB_for_role_change() delegates | ✅ | `agent_self_model.py` line 12164 |
+| Single ROLE_DEFAULT_WEIGHTS from IThread import | ✅ | `agent_self_model.py` line 29 |
+
+#### Phase 3: Wire Classes Together ✅
+
+| Task | Status | Location |
+|------|--------|----------|
+| core_gameplay.py creates IThread first | ✅ | `core_gameplay.py` line 1424 |
+| Passes IThread to WeavingReporter | ✅ | `core_gameplay.py` line 1430 |
+| Passes IThread to EpisodicMemorySystem | ✅ | `core_gameplay.py` line 1435 |
+| Escape mode uses `i_thread.boost_self_trust()` | ✅ | `core_gameplay.py` line 6749 |
+| Mode exit uses `i_thread.restore_self_trust()` | ✅ | `core_gameplay.py` line 6893 |
+| Frontier exploration uses `i_thread.boost_self_trust()` | ✅ | `core_gameplay.py` line 7027 |
+| Action scoring uses `i_thread.get_state()` | ✅ | `core_gameplay.py` line 14220 |
+
+---
+
+### Type Annotation Fixes ✅
+
+Fixed ~40 Pylance errors in `agent_self_model.py`:
+
+| Issue | Fix Applied |
+|-------|-------------|
+| `i_thread: 'IThread' = None` in type position | Changed to `Optional['IThreadType'] = None` with TYPE_CHECKING import |
+| `param: str = None` without Optional | Changed to `param: Optional[str] = None` |
+| `param: int = None` without Optional | Changed to `param: Optional[int] = None` |
+| `param: List[str] = None` without Optional | Changed to `param: Optional[List[str]] = None` |
+| Missing `time` import | Added `import time` |
+| `final_frame.get()` without null check | Added `if final_frame is None: return None` |
+| `grid[y, x]` numpy-style indexing on list | Changed to `grid[y][x]` |
+| `store_discovered_concept` method not found | Changed to `track_successful_operator_pattern` |
+| `get_generation` attribute not on type | Changed to `getattr(self.db, 'get_generation', lambda: 0)()` |
+| Return type mismatch `Tuple[str, str, str]` | Changed to `Tuple[Optional[str], str, str]` |
+| Variable shadowing `game_id` parameter | Renamed to `current_game_id` |
+
+Fixed 1 error in `core_gameplay.py`:
+- Renamed local `game_id` to `current_game_id` to avoid shadowing parameter
+
+---
+
+### README Updated ✅
+
+Added section 3.1 "IThread vs AgentSelfModel: Complementary Systems" explaining:
+- IThread = "Which knowledge should I trust?" (consciousness weaver)
+- AgentSelfModel = "What do I control in this world?" (physical world model)
+
+Updated Core Modules table with accurate descriptions.
+
+---
+
+### Architecture Analysis Updated ✅
+
+Updated `architecture/agent_self_model_vs_ithread_analysis.md`:
+- Marked all 3 phases as COMPLETE
+- Updated recommended refactoring plan with completion status
+- Updated conclusion to reflect IThread as single source of truth
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `i_thread.py` | Added generate_weaving_report(), format_weaving_for_api(), initialize_for_role(), _persist_state(), boost_self_trust(), restore_self_trust() |
+| `agent_self_model.py` | Fixed ~40 type annotations, added IThread delegation to WeavingReporter and EpisodicMemorySystem, added imports |
+| `core_gameplay.py` | Wired IThread to WeavingReporter/EpisodicMemorySystem, replaced direct DB access with IThread methods, fixed variable shadowing |
+| `README.md` | Added IThread vs AgentSelfModel comparison section, updated Core Modules table |
+| `architecture/agent_self_model_vs_ithread_analysis.md` | Marked all phases complete |
+
+---
+
+### Verification
+
+```powershell
+# All syntax verified
+python -m py_compile core_gameplay.py agent_self_model.py i_thread.py
+# Output: (no errors)
+
+# IThread properly initialized
+python -c "from core_gameplay import GameplayEngine; ge = GameplayEngine('core_data.db'); print('IThread initialized:', ge.i_thread is not None)"
+# Output: IThread initialized: True
+
+# Pylance errors
+# Before: 40+ errors
+# After: 0 errors
+```
+
+---
+
+### Current Status
+
+**NO ACTIVE FAILURES** - All refactoring complete and verified.
+
+IThread is now the single source of truth for:
+1. ✅ wA/wB state management
+2. ✅ Stream conflict detection  
+3. ✅ Synthesis decisions and learning
+4. ✅ Weaving report generation
+
+Ready for evolution testing to validate the consolidated architecture.
+
+---
+
+**Last Updated**: 6:29:20 PM - January 13, 2026

@@ -64,6 +64,15 @@ HIGH_CONFLICT_THRESHOLD = 0.6  # High conflict = vivid consciousness
 
 
 @dataclass
+class NoveltyConfig:
+    """Configuration for novelty-based wA boosting."""
+    boost_amount: float = 0.2  # How much to boost wA when novel
+    max_wA: float = 0.95  # Cap to prevent full network distrust
+    prediction_accuracy_threshold: float = 0.3  # Below this = novel situation
+    min_samples: int = 5  # Need this many samples to assess novelty
+
+
+@dataclass
 class StreamProposal:
     """A proposal from one of the streams."""
     action: str
@@ -182,6 +191,23 @@ class IThreadState:
     stream_b_wins: int = 0
     last_update: Optional[datetime] = None
     personality_label: str = 'balanced'  # 'self-trusting', 'network-trusting', 'balanced'
+    
+    # Novelty detection state (from core_gameplay)
+    novelty_boost_active: bool = False
+    novelty_boost_applied: bool = False
+    original_w_a: Optional[float] = None  # w_a before novelty boost
+
+
+@dataclass
+class MultiConflictResult:
+    """Result of conflict detection from multiple proposals."""
+    has_conflict: bool
+    stream_a_actions: set  # Set of actions proposed by Stream A
+    stream_b_actions: set  # Set of actions proposed by Stream B
+    overlap_actions: set   # Actions proposed by both streams
+    conflict_actions: set  # Actions unique to each stream
+    consciousness_intensity: str = 'automatic'  # 'automatic', 'deliberative', 'vivid'
+    synthesis_enabled: bool = False  # Should synthesis be attempted?
 
 
 class IThread:
@@ -742,6 +768,420 @@ class IThread:
             self._state_cache.clear()
     
     # =========================================================================
+    # TEMPORARY SELF-TRUST BOOST (Escape/Frontier Exploration)
+    # =========================================================================
+    # When agents break out of stuck states or reach frontiers, temporarily
+    # boost their self-trust (wA) to encourage exploration over network following.
+    # =========================================================================
+    
+    def boost_self_trust(
+        self,
+        agent_id: str,
+        boost_amount: float = 0.25,
+        max_wA: float = 1.0,
+        reason: str = 'exploration'
+    ) -> Tuple[float, float, float]:
+        """
+        Temporarily boost wA (self-trust) for exploration.
+        
+        Called when:
+        - Agent escapes stuck state independently
+        - Agent reaches frontier level with no sequences
+        - Agent needs to explore without network guidance
+        
+        Args:
+            agent_id: Agent identifier
+            boost_amount: How much to add to wA (default 0.25)
+            max_wA: Maximum wA after boost (default 1.0)
+            reason: Why boosting (for logging)
+            
+        Returns:
+            Tuple of (original_wA, boosted_wA, boosted_wB)
+        """
+        state = self.get_state(agent_id)
+        original_wA = state.w_a
+        
+        # Calculate boosted wA (capped at max)
+        boosted_wA = min(max_wA, state.w_a + boost_amount)
+        boosted_wB = 1.0 - boosted_wA
+        
+        if boosted_wA > state.w_a:
+            # Store original for restoration
+            state.original_w_a = original_wA
+            state.novelty_boost_active = True
+            
+            # Apply boost
+            state.w_a = boosted_wA
+            state.w_b = boosted_wB
+            state.personality_label = self._compute_personality_label(boosted_wA, boosted_wB)
+            
+            # Persist
+            self._save_state(agent_id, boosted_wB)
+            
+            # Log history
+            self._log_history(
+                agent_id=agent_id,
+                w_a_before=original_wA,
+                w_b_before=1.0 - original_wA,
+                w_a_after=boosted_wA,
+                w_b_after=boosted_wB,
+                event_type='self_trust_boost',
+                outcome=reason
+            )
+            
+            logger.info(
+                f"[I-THREAD] {agent_id[:8]} {reason} boost: "
+                f"w_A: {original_wA:.2f} -> {boosted_wA:.2f}"
+            )
+        
+        return original_wA, boosted_wA, boosted_wB
+    
+    def restore_self_trust(
+        self,
+        agent_id: str,
+        original_wA: Optional[float] = None
+    ) -> Tuple[float, float]:
+        """
+        Restore wA to original value after temporary boost.
+        
+        Called when:
+        - Agent exits self-directed mode
+        - Agent finds network sequences for new level
+        - Exploration phase ends
+        
+        Args:
+            agent_id: Agent identifier
+            original_wA: Original wA to restore (or use stored value)
+            
+        Returns:
+            Tuple of (restored_wA, restored_wB)
+        """
+        state = self.get_state(agent_id)
+        
+        # Determine what to restore to
+        if original_wA is not None:
+            restore_wA = original_wA
+        elif hasattr(state, 'original_w_a') and state.original_w_a is not None:
+            restore_wA = state.original_w_a
+        else:
+            # No original stored, nothing to restore
+            return state.w_a, state.w_b
+        
+        w_a_before = state.w_a
+        restore_wB = 1.0 - restore_wA
+        
+        # Restore state
+        state.w_a = restore_wA
+        state.w_b = restore_wB
+        state.original_w_a = None
+        state.novelty_boost_active = False
+        state.personality_label = self._compute_personality_label(restore_wA, restore_wB)
+        
+        # Persist
+        self._save_state(agent_id, restore_wB)
+        
+        # Log history
+        self._log_history(
+            agent_id=agent_id,
+            w_a_before=w_a_before,
+            w_b_before=1.0 - w_a_before,
+            w_a_after=restore_wA,
+            w_b_after=restore_wB,
+            event_type='self_trust_restore',
+            outcome='exploration_complete'
+        )
+        
+        logger.debug(
+            f"[I-THREAD] {agent_id[:8]} restored: "
+            f"w_A: {w_a_before:.2f} -> {restore_wA:.2f}"
+        )
+        
+        return restore_wA, restore_wB
+
+    # =========================================================================
+    # NOVELTY DETECTION AND wA BOOSTING
+    # =========================================================================
+    # When network wisdom doesn't apply (novel situation), boost self-trust.
+    # This implements fluid adaptation from core_gameplay.
+    # =========================================================================
+    
+    def apply_novelty_boost(
+        self,
+        state: IThreadState,
+        novelty_config: Optional[NoveltyConfig] = None
+    ) -> IThreadState:
+        """
+        Apply novelty boost to wA when in a novel situation.
+        
+        When prediction accuracy is low (network wisdom doesn't apply),
+        the agent should trust its own experience more.
+        
+        Args:
+            state: Current I-Thread state
+            novelty_config: Optional configuration (uses defaults if None)
+            
+        Returns:
+            Updated IThreadState with boosted wA (or unchanged if no boost needed)
+        """
+        if novelty_config is None:
+            novelty_config = NoveltyConfig()
+        
+        if not state.novelty_boost_active:
+            return state
+        
+        # Store original values before boost
+        original_w_a = state.w_a
+        
+        # Apply boost with cap
+        boosted_w_a = min(novelty_config.max_wA, state.w_a + novelty_config.boost_amount)
+        boosted_w_b = 1.0 - boosted_w_a
+        
+        # Update state
+        state.w_a = boosted_w_a
+        state.w_b = boosted_w_b
+        state.novelty_boost_applied = True
+        state.original_w_a = original_w_a
+        
+        logger.debug(
+            f"[I-THREAD] Novelty boost applied: wA {original_w_a:.2f} -> {boosted_w_a:.2f}"
+        )
+        
+        return state
+    
+    def set_novelty_active(
+        self,
+        agent_id: str,
+        is_active: bool,
+        prediction_accuracy: Optional[float] = None,
+        sample_count: int = 0
+    ):
+        """
+        Set novelty detection state for an agent.
+        
+        Called by core_gameplay when prediction accuracy drops below threshold,
+        indicating that network wisdom doesn't apply to the current situation.
+        
+        Args:
+            agent_id: Agent identifier
+            is_active: Whether novelty boost should be active
+            prediction_accuracy: Optional - current prediction accuracy (for logging)
+            sample_count: Number of samples used to compute accuracy
+        """
+        state = self.get_state(agent_id)
+        state.novelty_boost_active = is_active
+        
+        if is_active and prediction_accuracy is not None:
+            logger.debug(
+                f"[I-THREAD] Novelty detected for {agent_id[:8]}: "
+                f"accuracy={prediction_accuracy:.2f} ({sample_count} samples)"
+            )
+    
+    # =========================================================================
+    # STREAM PROPOSAL BUILDING
+    # =========================================================================
+    # Consolidates proposal building from multiple sources into IThread.
+    # This was previously scattered in core_gameplay._select_action()
+    # =========================================================================
+    
+    def build_stream_proposals(
+        self,
+        last_discovery: Optional[Dict] = None,
+        contradicted_actions: Optional[Dict[str, int]] = None,
+        network_hypotheses: Optional[List[Dict]] = None,
+        peer_failures: Optional[List[Dict]] = None,
+        persona_proposals: Optional[List[Dict]] = None
+    ) -> Tuple[List[StreamProposal], List[StreamProposal]]:
+        """
+        Build Stream A and Stream B proposals from all cognitive sources.
+        
+        Stream A (Private Experience):
+        - Recent discoveries from self-exploration
+        - Contradicted actions (negative evidence from personal experience)
+        - Explorer/pioneer persona proposals
+        
+        Stream B (Network Wisdom):
+        - Network control hypotheses (validated by CODS/Oracle)
+        - Peer failure avoidance (learn from others' mistakes)
+        - Optimizer/validator persona proposals
+        
+        Args:
+            last_discovery: Dict with 'action', 'reliability_score' from self-exploration
+            contradicted_actions: Dict mapping action -> contradiction count
+            network_hypotheses: List of network hypothesis dicts with 'action_response_map'
+            peer_failures: List of peer failure dicts with 'action', 'confidence'
+            persona_proposals: List of persona proposal dicts with 'action', 'confidence', 'persona_type'
+            
+        Returns:
+            Tuple of (stream_a_proposals, stream_b_proposals)
+        """
+        stream_a: List[StreamProposal] = []
+        stream_b: List[StreamProposal] = []
+        
+        # Stream A: Recent discovery from self-exploration
+        if last_discovery and last_discovery.get('action'):
+            stream_a.append(StreamProposal(
+                action=last_discovery['action'],
+                confidence=last_discovery.get('reliability_score', 0.3),
+                source='discovery',
+                reasoning=last_discovery.get('reasoning')
+            ))
+        
+        # Stream A: Contradicted actions (NEGATIVE proposals - avoid these)
+        if contradicted_actions:
+            for action, count in contradicted_actions.items():
+                if count >= 2:  # Only if contradicted multiple times
+                    stream_a.append(StreamProposal(
+                        action=action,
+                        confidence=-min(0.5, count * 0.1),  # Negative = avoid
+                        source='contradicted',
+                        reasoning=f'Contradicted {count} times'
+                    ))
+        
+        # Stream B: Network control hypotheses
+        if network_hypotheses:
+            for hyp in network_hypotheses:
+                if not hyp or not isinstance(hyp, dict):
+                    continue
+                action_map = hyp.get('action_response_map', {}) or {}
+                for action_str, response in action_map.items():
+                    if 'ACTION' in str(action_str).upper():
+                        stream_b.append(StreamProposal(
+                            action=action_str,
+                            confidence=hyp.get('reliability_score', 0.2),
+                            source=f"network_hyp_{hyp.get('hypothesis_id', '')[:8]}",
+                            reasoning=str(response)[:100] if response else None
+                        ))
+        
+        # Stream B: Peer failure avoidance (NEGATIVE proposals - avoid these)
+        if peer_failures:
+            for failure in peer_failures:
+                if not failure or not isinstance(failure, dict):
+                    continue
+                action_num = failure.get('action')
+                if action_num:
+                    stream_b.append(StreamProposal(
+                        action=f"ACTION{action_num}",
+                        confidence=-failure.get('confidence', 0.3),  # Negative = avoid
+                        source='peer_failure',
+                        reasoning=failure.get('reason')
+                    ))
+        
+        # Persona proposals - route to appropriate stream based on persona type
+        if persona_proposals:
+            for prop in persona_proposals:
+                if not prop or not isinstance(prop, dict):
+                    continue
+                ptype = (prop.get('persona_type') or '').lower()
+                
+                proposal = StreamProposal(
+                    action=prop.get('action', ''),
+                    confidence=prop.get('confidence', 0.3),
+                    source=f"persona_{ptype}",
+                    reasoning=prop.get('reasoning')
+                )
+                
+                # Network-oriented personas -> Stream B
+                if ptype in ('optimizer', 'network', 'validator', 'cautious'):
+                    stream_b.append(proposal)
+                else:
+                    # Exploration-oriented personas -> Stream A
+                    stream_a.append(proposal)
+        
+        return stream_a, stream_b
+    
+    def detect_multi_conflict(
+        self,
+        stream_a_proposals: List[StreamProposal],
+        stream_b_proposals: List[StreamProposal]
+    ) -> MultiConflictResult:
+        """
+        Detect conflict between multiple Stream A and Stream B proposals.
+        
+        Unlike detect_conflict() which compares single proposals,
+        this handles the realistic case of multiple proposals per stream.
+        
+        Conflict exists when:
+        - Stream A proposes actions that Stream B doesn't (and vice versa)
+        - Both streams have positive-confidence actions that differ
+        
+        Args:
+            stream_a_proposals: List of Stream A proposals
+            stream_b_proposals: List of Stream B proposals
+            
+        Returns:
+            MultiConflictResult with conflict analysis
+        """
+        # Extract positive-confidence actions from each stream
+        stream_a_actions = {
+            p.action for p in stream_a_proposals 
+            if p.confidence > 0 and p.action
+        }
+        stream_b_actions = {
+            p.action for p in stream_b_proposals 
+            if p.confidence > 0 and p.action
+        }
+        
+        # Calculate overlap and conflict
+        overlap = stream_a_actions & stream_b_actions
+        conflict_a = stream_a_actions - stream_b_actions  # Actions unique to A
+        conflict_b = stream_b_actions - stream_a_actions  # Actions unique to B
+        conflict_actions = conflict_a | conflict_b
+        
+        # Conflict exists if both streams have actions and they differ
+        has_conflict = bool(stream_a_actions) and bool(stream_b_actions) and stream_a_actions != stream_b_actions
+        
+        # Determine consciousness intensity based on conflict severity
+        if not has_conflict:
+            intensity = 'automatic'
+        elif len(overlap) > len(conflict_actions):
+            intensity = 'deliberative'  # Some agreement exists
+        else:
+            intensity = 'vivid'  # Strong disagreement
+        
+        # Synthesis should be enabled when conflict exists
+        synthesis_enabled = has_conflict
+        
+        return MultiConflictResult(
+            has_conflict=has_conflict,
+            stream_a_actions=stream_a_actions,
+            stream_b_actions=stream_b_actions,
+            overlap_actions=overlap,
+            conflict_actions=conflict_actions,
+            consciousness_intensity=intensity,
+            synthesis_enabled=synthesis_enabled
+        )
+    
+    def get_state_with_autobiography(
+        self,
+        agent_id: str,
+        autobiography: Optional[Dict] = None
+    ) -> IThreadState:
+        """
+        Get I-Thread state, incorporating dynamic wA/wB from autobiography session.
+        
+        This merges the persisted agent state with any dynamic session state
+        from the autobiography (e.g., wA/wB adjusted during gameplay).
+        
+        Args:
+            agent_id: Agent identifier
+            autobiography: Optional autobiography dict with session_state.wA/wB
+            
+        Returns:
+            IThreadState with current weights (static or dynamic)
+        """
+        state = self.get_state(agent_id)
+        
+        # Check autobiography for dynamic session wA/wB
+        if autobiography and isinstance(autobiography, dict):
+            session = autobiography.get('session_state', {}) or {}
+            if session.get('wA') is not None:
+                state.w_a = session.get('wA', state.w_a)
+                state.w_b = session.get('wB', state.w_b)
+                state.personality_label = self._compute_personality_label(state.w_a, state.w_b)
+        
+        return state
+    
+    # =========================================================================
     # EPISODIC MEMORY: Autobiographical Continuity
     # =========================================================================
     
@@ -1184,6 +1624,306 @@ class IThread:
             
         except Exception as e:
             logger.warning(f"[I-THREAD] Memory consolidation failed: {e}")
+
+
+    # =========================================================================
+    # WEAVING REPORTS (Merged from WeavingReporter)
+    # =========================================================================
+    
+    def generate_weaving_report(
+        self,
+        agent_id: str,
+        game_id: str,
+        level_number: int,
+        action_number: int,
+        chosen_action: str,
+        private_memory_strength: float,
+        network_recommendation_strength: float,
+        navigation_state: float = 0.0,
+        role_confidence: float = 0.5,
+        role_fit_score: float = 0.5,
+        sensation_profile: Optional[Dict] = None,
+        alternative_action: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate a weaving report for an action decision.
+        
+        This produces API-ready self-reflection data for every action.
+        Centralizes the Two Streams consciousness introspection.
+        
+        Args:
+            agent_id: Agent making the decision
+            game_id: Current game
+            level_number: Current level
+            action_number: Action counter in this game
+            chosen_action: The action being taken
+            private_memory_strength: How strong agent's own memory signal is (0-1)
+            network_recommendation_strength: How strong network's recommendation is (0-1)
+            navigation_state: Agent's emotional state (-1 to 1)
+            role_confidence: Agent's confidence in their role (0-1)
+            role_fit_score: How well agent fits their role (0-1)
+            sensation_profile: Agent's sensation mappings
+            alternative_action: What network recommended (if different)
+            
+        Returns:
+            Complete weaving report dictionary for API
+        """
+        import uuid
+        from datetime import datetime
+        
+        if sensation_profile is None:
+            sensation_profile = {}
+        
+        # Get current wA/wB state
+        state = self.get_state(agent_id)
+        self_network_bias = state.w_a  # wA is self-trust
+        
+        # Calculate internal network inputs
+        # Emotional: Map navigation_state from [-1,1] to [0,1]
+        emotional_input = (navigation_state + 1.0) / 2.0
+        
+        # Semantic: Average of top sensation scores (if any)
+        object_sensations = sensation_profile.get('object_sensations', {})
+        if object_sensations:
+            top_sensations = sorted(object_sensations.values(), reverse=True)[:3]
+            semantic_input = sum(top_sensations) / len(top_sensations) if top_sensations else 0.5
+            # Normalize to 0-1 range (sensations are -1 to 1)
+            semantic_input = (semantic_input + 1.0) / 2.0
+        else:
+            semantic_input = 0.5  # Neutral if no sensations
+        
+        # Identity: Average of role_confidence and role_fit_score
+        identity_input = (role_confidence + role_fit_score) / 2.0
+        
+        # Calculate final decision weight using Two-Streams formula
+        alpha = self_network_bias
+        final_decision_weight = (
+            private_memory_strength * alpha + 
+            network_recommendation_strength * (1.0 - alpha)
+        )
+        
+        # Detect conflict (significant difference between private and network)
+        conflict_detected = abs(private_memory_strength - network_recommendation_strength) > CONFLICT_THRESHOLD
+        
+        # Determine consciousness intensity
+        if conflict_detected:
+            if abs(private_memory_strength - network_recommendation_strength) > HIGH_CONFLICT_THRESHOLD:
+                consciousness = 'vivid'
+            else:
+                consciousness = 'deliberative'
+        else:
+            consciousness = 'automatic'
+        
+        # Build human-readable summary
+        emotion_label = self._get_emotion_label(navigation_state)
+        
+        report = {
+            'report_id': f"weave_{uuid.uuid4().hex[:12]}",
+            'agent_id': agent_id,
+            'game_id': game_id,
+            'level_number': level_number,
+            'action_number': action_number,
+            'timestamp': datetime.now().isoformat(),
+            
+            # Internal networks (Three Streams)
+            'emotional_input': round(emotional_input, 3),
+            'semantic_input': round(semantic_input, 3),
+            'identity_input': round(identity_input, 3),
+            
+            # Two-Streams weighting
+            'private_memory_strength': round(private_memory_strength, 3),
+            'network_recommendation_strength': round(network_recommendation_strength, 3),
+            'self_network_bias': round(self_network_bias, 3),
+            'final_decision_weight': round(final_decision_weight, 3),
+            
+            # Current wA/wB state
+            'w_a': round(state.w_a, 3),
+            'w_b': round(state.w_b, 3),
+            
+            # Decision
+            'chosen_action': chosen_action,
+            'alternative_action': alternative_action,
+            'conflict_detected': conflict_detected,
+            'consciousness_intensity': consciousness,
+            
+            # Narrative summary
+            'narrative': self._build_weaving_narrative(
+                emotion_label, private_memory_strength, network_recommendation_strength,
+                alpha, chosen_action, alternative_action, conflict_detected
+            ),
+            
+            # Outcome (to be filled in later)
+            'outcome_correct': None
+        }
+        
+        return report
+    
+    def _get_emotion_label(self, navigation_state: float) -> str:
+        """Get human-readable emotion label from navigation state."""
+        if navigation_state < -0.5:
+            return 'frustrated'
+        elif navigation_state < -0.1:
+            return 'cautious'
+        elif navigation_state < 0.1:
+            return 'neutral'
+        elif navigation_state < 0.5:
+            return 'curious'
+        else:
+            return 'confident'
+    
+    def _build_weaving_narrative(
+        self,
+        emotion: str,
+        private_strength: float,
+        network_strength: float,
+        alpha: float,
+        chosen_action: str,
+        alternative: Optional[str],
+        conflict: bool
+    ) -> str:
+        """Build human-readable narrative of decision."""
+        parts = []
+        
+        # Emotional state
+        parts.append(f"Feeling {emotion}")
+        
+        # Stream preference
+        if alpha > 0.6:
+            parts.append("trusting own experience")
+        elif alpha < 0.4:
+            parts.append("following network wisdom")
+        else:
+            parts.append("balancing self and network")
+        
+        # Conflict
+        if conflict:
+            if alternative:
+                parts.append(f"(conflicted: network suggested {alternative})")
+            else:
+                parts.append("(internal conflict detected)")
+        
+        # Decision
+        parts.append(f"-> {chosen_action}")
+        
+        return " | ".join(parts)
+    
+    def format_weaving_for_api(self, report: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Format weaving report for inclusion in API reasoning payload.
+        
+        Returns a compact version suitable for the 16KB limit.
+        """
+        return {
+            'emotional_network': report.get('emotional_input', 0.5),
+            'semantic_network': report.get('semantic_input', 0.5),
+            'identity_network': report.get('identity_input', 0.5),
+            'private_memory': report.get('private_memory_strength', 0.5),
+            'network_wisdom': report.get('network_recommendation_strength', 0.5),
+            'self_trust_bias': report.get('self_network_bias', 0.5),
+            'w_a': report.get('w_a', 0.5),
+            'w_b': report.get('w_b', 0.5),
+            'decision_weight': report.get('final_decision_weight', 0.5),
+            'conflict': report.get('conflict_detected', False),
+            'consciousness': report.get('consciousness_intensity', 'automatic'),
+            'narrative': report.get('narrative', '')
+        }
+    
+    # =========================================================================
+    # ROLE-BASED INITIALIZATION
+    # =========================================================================
+    
+    def initialize_for_role(
+        self,
+        agent_id: str,
+        role: str,
+        persist: bool = True
+    ) -> IThreadState:
+        """
+        Initialize or reset wA/wB state for an agent based on their role.
+        
+        This is the SINGLE SOURCE OF TRUTH for role-based weight initialization.
+        Called when:
+        - Agent is first created
+        - Agent changes role
+        - Agent starts a new session and needs role defaults
+        
+        Args:
+            agent_id: Agent identifier
+            role: Agent's role (pioneer, optimizer, generalist, exploiter)
+            persist: Whether to save to database immediately
+            
+        Returns:
+            Updated IThreadState
+        """
+        role_key = role.lower() if role else 'generalist'
+        w_a, w_b = ROLE_DEFAULT_WEIGHTS.get(role_key, (0.5, 0.5))
+        
+        # Create new state
+        state = IThreadState(
+            agent_id=agent_id,
+            w_a=w_a,
+            w_b=w_b,
+            total_conflicts=0,
+            stream_a_wins=0,
+            stream_b_wins=0,
+            personality_label=self._compute_personality_label(w_a, w_b)
+        )
+        
+        # Update cache
+        self._state_cache[agent_id] = state
+        
+        # Persist to database
+        if persist:
+            self._persist_state(agent_id, w_a, w_b, event_type='role_initialization', role=role)
+        
+        logger.debug(f"[I-THREAD] Initialized {agent_id[:8]} for role {role}: wA={w_a:.2f}, wB={w_b:.2f}")
+        
+        return state
+    
+    def _persist_state(
+        self,
+        agent_id: str,
+        w_a: float,
+        w_b: float,
+        event_type: str = 'state_update',
+        role: Optional[str] = None
+    ) -> bool:
+        """
+        Persist wA/wB state to the agents table.
+        
+        This is the SINGLE write path for wA/wB to the database.
+        self_network_bias in agents table stores wB (network trust).
+        
+        Args:
+            agent_id: Agent identifier
+            w_a: Stream A weight (self-trust)
+            w_b: Stream B weight (network-trust)
+            event_type: Type of update for history
+            role: Role if this is a role-based update
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Update agents table (self_network_bias = wB)
+            self.db.execute_query(
+                "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
+                (w_b, agent_id)
+            )
+            
+            # Record in history
+            import uuid
+            self.db.execute_query("""
+                INSERT INTO i_thread_history
+                (history_id, agent_id, w_a_after, w_b_after, event_type, created_at)
+                VALUES (?, ?, ?, ?, ?, datetime('now'))
+            """, (f"ith_{uuid.uuid4().hex[:12]}", agent_id, w_a, w_b, event_type))
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"[I-THREAD] Failed to persist state for {agent_id[:8]}: {e}")
+            return False
 
 
 # =============================================================================

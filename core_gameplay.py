@@ -67,6 +67,7 @@ from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
+from i_thread import IThread, IThreadState, StreamProposal, NoveltyConfig, MultiConflictResult
 from agent_self_model import (
     AgentSelfModel,
     WeavingReporter,
@@ -81,6 +82,12 @@ from counterfactual_analyzer import CounterfactualAnalyzer
 from object_detector import ObjectDetector
 from collections import Counter
 from dataclasses import dataclass, field
+
+# Constants for duplicate literals (SonarQube fix)
+ERROR_FRAME_CORRUPTION = "frame corruption"
+ERROR_BAD_REQUEST = 'bad request'
+QUERY_NAVIGATION_STATE = "SELECT navigation_state FROM agents WHERE agent_id = ?"
+
 try:
     from viral_package_engine import get_cohort_wisdom, update_sequence_role_reputation
     COHORT_WISDOM_AVAILABLE = True
@@ -990,7 +997,7 @@ class PrimitiveHelper:
                     opposite = opposite_map.get(action_num, action_num)
                     recommendations.append({
                         'action': f'ACTION{opposite}',
-                        'reason': f'Test opposite direction after movement detected',
+                        'reason': 'Test opposite direction after movement detected',
                         'confidence': 0.7
                     })
                 except ValueError:
@@ -1419,12 +1426,19 @@ class GameplayEngine:
         self._novelty_boost_active = False  # Flag for current novelty state
         self._novelty_wA_boost = 0.2  # How much to boost wA when novel
         
+        # I-Thread: The consciousness weaver - manages wA/wB and stream conflict
+        # This is the SINGLE SOURCE OF TRUTH for Two Streams consciousness
+        # All other systems delegate to IThread for wA/wB management
+        self.i_thread = IThread(self.db)
+        
         # Two-Streams: Weaving reporter for self-reflection in every action
-        self.weaving_reporter = WeavingReporter(self.db)
+        # DELEGATION: WeavingReporter now delegates to IThread for report generation
+        self.weaving_reporter = WeavingReporter(self.db, i_thread=self.i_thread)
         
         # Developmental Systems: Cognitive stages and episodic memory
+        # DELEGATION: EpisodicMemorySystem delegates wA/wB management to IThread
         self.cognitive_stage_system = CognitiveStageSystem(self.db)
-        self.episodic_memory = EpisodicMemorySystem(self.db)
+        self.episodic_memory = EpisodicMemorySystem(self.db, i_thread=self.i_thread)
         self.agent_hypothesis_system = AgentHypothesisSystem(self.db, self.cognitive_stage_system)
         
         # Metacognitive Reasoning: Scientific hypothesis testing and theory revision
@@ -2068,7 +2082,7 @@ class GameplayEngine:
                             logger.warning(f"[3-TRY] Game reset failed: {reset_error} - continuing anyway")
                         
             except ValueError as e:
-                if "frame corruption" in str(e).lower():
+                if ERROR_FRAME_CORRUPTION in str(e).lower():
                     self._flag_sequence_failure(sequence_id, "frame_corruption")
                     logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
                     
@@ -2099,7 +2113,7 @@ class GameplayEngine:
         # STAGE 2: Multi-stage matching pipeline
         if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
             try:
-                logger.info(f"[MULTI-STAGE] Trying multi-stage matching pipeline...")
+                logger.info("[MULTI-STAGE] Trying multi-stage matching pipeline...")
                 
                 try:
                     reset_data = await self.session_manager.reset_level()
@@ -2129,7 +2143,7 @@ class GameplayEngine:
                         'confidence': metadata.get('confidence', 0)
                     }
                 else:
-                    logger.info(f"[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+                    logger.info("[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
                     
             except Exception as e:
                 logger.debug(f"Multi-stage pipeline error: {e}")
@@ -2175,7 +2189,7 @@ class GameplayEngine:
         self,
         fallback_result: SequenceFallbackResult,
         game_id: str,
-        agent_id: Optional[str],
+        _agent_id: Optional[str],  # Unused but kept for API consistency
         agent_mode: Optional[str]
     ) -> Optional[Dict[str, Any]]:
         """Handle the result of sequence replay attempts.
@@ -2185,7 +2199,7 @@ class GameplayEngine:
         Args:
             fallback_result: Result from _handle_3_try_fallback
             game_id: Current game ID
-            agent_id: Agent ID
+            _agent_id: Agent ID (unused but kept for API consistency)
             agent_mode: Agent operating mode
             
         Returns:
@@ -2214,7 +2228,7 @@ class GameplayEngine:
                 # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
                 # to avoid race condition (must be called AFTER store_arc_reward_data)
                 
-                logger.info(f" COMPLETE WIN via cumulative sequence replay!")
+                logger.info(" COMPLETE WIN via cumulative sequence replay!")
                 return {
                     'game_id': game_id,
                     'final_state': game_state.state,
@@ -2273,10 +2287,10 @@ class GameplayEngine:
                 logger.info(f"[EXPLORATION FALLBACK] Using multi-stage {fallback_result.multi_stage_sequence['stage'].upper()} match")
                 self.game_config['multi_stage_guidance'] = fallback_result.multi_stage_sequence
             elif fallback_result.abstraction_guidance:
-                logger.info(f"[EXPLORATION FALLBACK] Using abstraction hints for guided exploration")
+                logger.info("[EXPLORATION FALLBACK] Using abstraction hints for guided exploration")
                 self.game_config['abstraction_hints'] = fallback_result.abstraction_guidance
             else:
-                logger.info(f"[EXPLORATION FALLBACK] Pure exploration mode (no guidance available)")
+                logger.info("[EXPLORATION FALLBACK] Pure exploration mode (no guidance available)")
         
         return None  # Continue to game loop
 
@@ -2692,6 +2706,37 @@ class GameplayEngine:
                             outcome=outcome
                         )
                         
+                        # ============================================================
+                        # I-THREAD LEARNING: Update wA/wB based on action outcome
+                        # ============================================================
+                        # This closes the learning loop: when streams conflict and
+                        # we chose one, learn from the outcome to update weights.
+                        # ============================================================
+                        if hasattr(self, 'i_thread') and self.i_thread and getattr(self, '_stream_conflict', False):
+                            try:
+                                agent_id = self.game_config.get('agent_id')
+                                # Determine which stream we followed
+                                # action_source tells us: 'network_hyp_*' = stream_b, 'discovery' = stream_a, etc.
+                                if 'network' in action_source.lower() or 'sequence' in action_source.lower():
+                                    chosen_source = 'stream_b'
+                                elif 'discovery' in action_source.lower() or 'explore' in action_source.lower():
+                                    chosen_source = 'stream_a'
+                                else:
+                                    chosen_source = 'synthesis'
+                                
+                                if agent_id:
+                                    current_game_id: Optional[str] = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                                    self.i_thread.learn_from_outcome(
+                                        agent_id=agent_id,
+                                        chosen_source=chosen_source,
+                                        outcome=outcome,
+                                        game_id=current_game_id,
+                                        action_taken=safe_action,
+                                        conflict_score=0.3 if getattr(self, '_stream_conflict', False) else 0.0
+                                    )
+                            except Exception as ithread_err:
+                                logger.debug(f"[I-THREAD] learn_from_outcome failed: {ithread_err}")
+                        
                         # Log significant wA/wB shifts
                         session = autobiography.get('session_state', {})
                         if session.get('actions_taken_this_game', 0) % 50 == 0 and session.get('actions_taken_this_game', 0) > 0:
@@ -3044,7 +3089,7 @@ class GameplayEngine:
         except Exception as action_error:
             error_msg = str(action_error).lower()
             is_api_error = any(indicator in error_msg for indicator in [
-                '400', 'bad_request', 'bad request',
+                '400', 'bad_request', ERROR_BAD_REQUEST,
                 '500', 'internal server error', 'non-json response',
                 'server disconnected', 'connection', 'timeout'
             ])
@@ -3053,9 +3098,9 @@ class GameplayEngine:
                 loop_state.consecutive_api_errors += 1
                 logger.warning(f"[WARN] API error #{loop_state.consecutive_api_errors}: {action_error}")
                 
-                is_session_dead = any(indicator in error_msg for indicator in ['400', 'bad_request', 'bad request'])
+                is_session_dead = any(indicator in error_msg for indicator in ['400', 'bad_request', ERROR_BAD_REQUEST])
                 if is_session_dead:
-                    logger.error(f"[STOP] Game session terminated (400 BAD_REQUEST)")
+                    logger.error("[STOP] Game session terminated (400 BAD_REQUEST)")
                     raise RuntimeError("Session dead")
                 
                 if loop_state.consecutive_api_errors >= loop_state.MAX_CONSECUTIVE_API_ERRORS:
@@ -3075,7 +3120,7 @@ class GameplayEngine:
         loop_state: GameLoopState,
         game_id: str,
         agent_id: Optional[str],
-        agent_mode: Optional[str]
+        _agent_mode: Optional[str]  # Unused but kept for API consistency
     ) -> None:
         """Handle level completion logic including sequence capture.
         
@@ -3084,7 +3129,7 @@ class GameplayEngine:
             loop_state: Mutable loop state
             game_id: Game ID
             agent_id: Agent ID
-            agent_mode: Agent operating mode
+            _agent_mode: Agent operating mode (unused but kept for API consistency)
         """
         loop_state.level_completions += 1
         mode_for_spine = self.game_config.get('mode', 'LIVE')
@@ -3445,7 +3490,7 @@ class GameplayEngine:
             try:
                 # Get navigation state from database
                 nav_result = self.db.execute_query(
-                    "SELECT navigation_state FROM agents WHERE agent_id = ?", (agent_id,)
+                    QUERY_NAVIGATION_STATE, (agent_id,)
                 )
                 navigation_state = nav_result[0]['navigation_state'] if nav_result else 0.0
                 
@@ -3971,7 +4016,7 @@ class GameplayEngine:
                 
                 # Get navigation state from database
                 nav_result = self.db.execute_query(
-                    "SELECT navigation_state FROM agents WHERE agent_id = ?", (agent_id,)
+                    QUERY_NAVIGATION_STATE, (agent_id,)
                 )
                 navigation_state = nav_result[0]['navigation_state'] if nav_result else 0.0
                 
@@ -4094,7 +4139,7 @@ class GameplayEngine:
                         try:
                             coord = json.loads(t['coordinates'])
                             failed_coords.append(tuple(coord))
-                        except:
+                        except (json.JSONDecodeError, TypeError):
                             pass
                 
                 pariah_id = viral_engine.create_pariah_from_failure(
@@ -4582,7 +4627,7 @@ class GameplayEngine:
         self._previous_score = game_state.score  # Start fresh for this game
         self._previous_frame = [row[:] for row in game_state.frame] if game_state.frame else None  # Deep copy
         self._previous_level = 1  # Starting level
-        self._recent_action_traces = []  # Reset action traces for Q1-Q5
+        self._recent_action_traces = []  # Reset action traces for Q1-Q5 (full game history)
         self._q1_trace_logged = False  # Reset debug flag
         
         # NOVELTY DETECTOR: Reset for new game
@@ -4967,7 +5012,7 @@ class GameplayEngine:
                                     logger.warning(f"[3-TRY] Game reset failed: {reset_error} - continuing anyway")
                             
                     except ValueError as e:
-                        if "frame corruption" in str(e).lower():
+                        if ERROR_FRAME_CORRUPTION in str(e).lower():
                             # Frame corruption - flag and reset game before next try
                             self._flag_sequence_failure(sequence_id, "frame_corruption")
                             logger.error(f"[3-TRY] Frame corruption on attempt {try_num}: {sequence_id[:12]}")
@@ -5003,7 +5048,7 @@ class GameplayEngine:
                     # This uses looser matching strategies (prefix, suffix, subsequence, conceptual)
                     if hasattr(self, 'matching_pipeline') and self.matching_pipeline:
                         try:
-                            logger.info(f"[MULTI-STAGE] Trying multi-stage matching pipeline...")
+                            logger.info("[MULTI-STAGE] Trying multi-stage matching pipeline...")
                             
                             # Reset level one more time for fresh start
                             try:
@@ -5036,7 +5081,7 @@ class GameplayEngine:
                                     'confidence': metadata.get('confidence', 0)
                                 }
                             else:
-                                logger.info(f"[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
+                                logger.info("[MULTI-STAGE] Pipeline exhausted, falling back to exploration")
                                 
                         except Exception as e:
                             logger.debug(f"Multi-stage pipeline error: {e}")
@@ -5102,7 +5147,7 @@ class GameplayEngine:
                     # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
                     # to avoid race condition (must be called AFTER store_arc_reward_data)
                     
-                    logger.info(f" COMPLETE WIN via cumulative sequence replay!")
+                    logger.info(" COMPLETE WIN via cumulative sequence replay!")
                     return {
                         'game_id': game_id,
                         'final_state': game_state.state,
@@ -5143,15 +5188,15 @@ class GameplayEngine:
                     self.game_config['multi_stage_guidance'] = multi_stage_sequence
                 elif abstraction_guidance:
                     # Use abstraction hints for guided exploration
-                    logger.info(f"[EXPLORATION FALLBACK] Using abstraction hints for guided exploration")
+                    logger.info("[EXPLORATION FALLBACK] Using abstraction hints for guided exploration")
                     self.game_config['abstraction_hints'] = abstraction_guidance
                 else:
-                    logger.info(f"[EXPLORATION FALLBACK] Pure exploration mode (no guidance available)")
+                    logger.info("[EXPLORATION FALLBACK] Pure exploration mode (no guidance available)")
                 # Continue to game loop for exploration
             
             elif not ranked_sequences:
                 # No sequences available at all - pure exploration
-                logger.info(f"[EXPLORATION] No sequences available, pure exploration mode")
+                logger.info("[EXPLORATION] No sequences available, pure exploration mode")
                 # Continue to game loop for exploration
 
             # ================================================================
@@ -5159,6 +5204,14 @@ class GameplayEngine:
             # This helps debug cases where game ends prematurely after replay
             # ================================================================
             max_total_actions = self.game_config.get('max_total_actions', 0)
+            
+            # SAFETY GUARD: Ensure max_total_actions is reasonable
+            # If it's 0 or missing, set a default to prevent game loop from never executing
+            if max_total_actions <= 0:
+                logger.warning(f"[SAFETY] max_total_actions was {max_total_actions}, setting to default 2000")
+                max_total_actions = 2000
+                self.game_config['max_total_actions'] = max_total_actions
+            
             logger.info(f"[GAME-LOOP-ENTRY] Entering game loop with {max_total_actions} action budget, "
                        f"game_state.state={game_state.state}, score={game_state.score}")
 
@@ -5246,9 +5299,24 @@ class GameplayEngine:
 
                 game_state = self._normalize_game_state(game_state)
 
-                live_level = int(game_state.score) + 1 if game_state else current_level
-                if self._struggle_guard_state.get('level') != live_level:
+                # DIAGNOSTIC: Track where AttributeError occurs
+                try:
+                    live_level = int(game_state.score) + 1 if game_state else current_level
+                except Exception as e:
+                    logger.error(f"[DIAG-1] game_state.score failed: game_state={game_state}, error={e}")
+                    live_level = current_level
+                
+                try:
+                    struggle_state = self._struggle_guard_state
+                    if struggle_state is None:
+                        logger.error("[DIAG-2] _struggle_guard_state is None - reinitializing")
+                        self._reset_struggle_guard_state(level=live_level, clear_fired=True)
+                    elif struggle_state.get('level') != live_level:
+                        self._reset_struggle_guard_state(level=live_level, clear_fired=True)
+                except Exception as e:
+                    logger.error(f"[DIAG-2] struggle guard check failed: {e}")
                     self._reset_struggle_guard_state(level=live_level, clear_fired=True)
+                    
                 current_level = live_level
 
                 # Metacog: log baseline control assumption once per level (instrumentation only)
@@ -5273,11 +5341,11 @@ class GameplayEngine:
                 # Check BOTH is_running AND is_shutting_down
                 # When shutdown is requested, we should exit immediately and save current state
                 if not self.session_manager.is_running:
-                    logger.info(f"[END] Session stopped, ending game gracefully")
+                    logger.info("[END] Session stopped, ending game gracefully")
                     break
                 
                 if self.session_manager.is_shutting_down:
-                    logger.info(f"[STOP] SHUTDOWN REQUESTED - ending game immediately to save state")
+                    logger.info("[STOP] SHUTDOWN REQUESTED - ending game immediately to save state")
                     logger.info(f"   Current score: {game_state.score}, Actions: {action_count}")
                     # Break immediately - the finally block will save results
                     break
@@ -5299,7 +5367,7 @@ class GameplayEngine:
                 elif game_state.state == "GAME_OVER":
                     if game_state.score == 0:
                         # True failure - no progress made
-                        logger.info(f"[GAME_OVER] Game ended with zero score")
+                        logger.info("[GAME_OVER] Game ended with zero score")
                         # Q5: Mark last action as causing game-over for learning
                         if hasattr(self, '_recent_action_traces') and self._recent_action_traces:
                             self._recent_action_traces[-1]['outcome_type'] = 'game_over'
@@ -5700,7 +5768,13 @@ class GameplayEngine:
                                 score_delta_for_action = (game_state.score or 0) - (pre_score or 0)
                                 if ambiguity_metrics is not None:
                                     ambiguity_metrics['score_delta'] = score_delta_for_action
-                                    ambiguity_metrics['accuracy_proxy'] = 1.0 if score_delta_for_action > 0 else 0.0 if score_delta_for_action < 0 else 0.5
+                                    # Extract nested ternary to independent statements
+                                    if score_delta_for_action > 0:
+                                        ambiguity_metrics['accuracy_proxy'] = 1.0
+                                    elif score_delta_for_action < 0:
+                                        ambiguity_metrics['accuracy_proxy'] = 0.0
+                                    else:
+                                        ambiguity_metrics['accuracy_proxy'] = 0.5
 
                             operator_hint_payload = self.game_config.get('cross_domain_operator') or {}
                             operator_domain = operator_hint_payload.get('pattern_type') or operator_hint_payload.get('operator_domain')
@@ -5741,8 +5815,9 @@ class GameplayEngine:
                                 except Exception as ev_err:
                                     logger.debug(f"Event publish ACTION_EXECUTED failed: {ev_err}")
                         
-                        # Action succeeded - reset error counter
+                        # Action succeeded - reset error counters
                         consecutive_api_errors = 0
+                        self._consecutive_attr_errors = 0  # Reset attribute error counter too
                         action_succeeded = True
 
                         # Lesson stub: record score deltas as teacher signals
@@ -5800,7 +5875,7 @@ class GameplayEngine:
                         # Check if this is an API error (400, 500, connection issue, etc.)
                         error_msg = str(action_error).lower()
                         is_api_error = any(indicator in error_msg for indicator in [
-                            '400', 'bad_request', 'bad request',  # Game session ended/invalid
+                            '400', 'bad_request', ERROR_BAD_REQUEST,  # Game session ended/invalid
                             '500', 'internal server error', 'non-json response',
                             'server disconnected', 'connection', 'timeout'
                         ])
@@ -5812,11 +5887,11 @@ class GameplayEngine:
                             # 400 BAD_REQUEST means game session is DEAD - exit immediately
                             # No point retrying, the game has ended on the server side
                             is_session_dead = any(indicator in error_msg for indicator in [
-                                '400', 'bad_request', 'bad request'
+                                '400', 'bad_request', ERROR_BAD_REQUEST
                             ])
                             
                             if is_session_dead:
-                                logger.error(f"[STOP] Game session terminated (400 BAD_REQUEST) - game has ended on server")
+                                logger.error("[STOP] Game session terminated (400 BAD_REQUEST) - game has ended on server")
                                 break  # Exit game loop immediately
                             
                             if consecutive_api_errors >= MAX_CONSECUTIVE_API_ERRORS:
@@ -5932,8 +6007,12 @@ class GameplayEngine:
                                 'outcome_type': outcome_type,  # Q5: neutral/score_increase/game_over
                                 'frame_changed': frame_changed
                             })
-                            # Keep last 10 actions for control detection
-                            self._recent_action_traces = self._recent_action_traces[-10:]
+                            # FULL GAME MEMORY: Keep ALL traces for duration of game
+                            # Agent needs complete history to reason about discoveries
+                            # Traces are cleared at game start, valuable learning goes to DB
+                            # Only cap for pathological cases (shouldn't happen with normal budgets)
+                            if len(self._recent_action_traces) > 20000:
+                                self._recent_action_traces = self._recent_action_traces[-20000:]
                             
                             # FIX (2025-01-08): Progress theory_validation_state based on outcomes
                             # Theory states: UNTESTED -> TESTING -> VALIDATED/REFUTED
@@ -5946,11 +6025,11 @@ class GameplayEngine:
                             elif frame_changed and current_theory_state == 'UNTESTED':
                                 # Frame changed but no score = theory being TESTED
                                 self.game_config['theory_validation_state'] = 'TESTING'
-                                logger.debug(f"[CONSCIOUSNESS] Theory TESTING: frame changed, awaiting score")
+                                logger.debug("[CONSCIOUSNESS] Theory TESTING: frame changed, awaiting score")
                             elif game_state.state == 'GAME_OVER' and current_theory_state in ('TESTING', 'VALIDATED'):
                                 # Game over after testing = theory REFUTED for this context
                                 self.game_config['theory_validation_state'] = 'REFUTED'
-                                logger.debug(f"[CONSCIOUSNESS] Theory REFUTED: game over during test")
+                                logger.debug("[CONSCIOUSNESS] Theory REFUTED: game over during test")
                         except Exception as e:
                             logger.debug(f"Action trace recording failed: {e}")
                             frame_changed_for_step = False
@@ -6217,7 +6296,7 @@ class GameplayEngine:
                                 # 2025-01-08: Changed from every 5 actions to every action
                                 # Consciousness loop should run every frame per checklist
                                 if len(self._recent_action_traces) >= 1:
-                                    action_sequence = [t for t in self._recent_action_traces]
+                                    action_sequence = list(self._recent_action_traces)
                                     frame_sequence = [{'grid': t.get('frame_before', [])} for t in self._recent_action_traces]
                                     frame_sequence.append({'grid': game_state.frame or []})
                                     
@@ -6290,15 +6369,15 @@ class GameplayEngine:
                             recommendation = progress.get('recommendation', 'continue')
                             if recommendation == 'query_peers':
                                 # Agent decides to check what others found
-                                logger.info(f"[SELF-ASSESS] Below network baseline - will query peer insights")
+                                logger.info("[SELF-ASSESS] Below network baseline - will query peer insights")
                                 self._should_query_peers = True
                             elif recommendation == 'share_insight':
                                 # Agent doing well - will share what works on next success
-                                logger.debug(f"[SELF-ASSESS] Above network - ready to share insights")
+                                logger.debug("[SELF-ASSESS] Above network - ready to share insights")
                                 self._should_share_on_success = True
                             elif recommendation == 'try_novel':
                                 # Frontier problem - everyone struggles
-                                logger.debug(f"[SELF-ASSESS] Frontier problem - trying novel approaches")
+                                logger.debug("[SELF-ASSESS] Frontier problem - trying novel approaches")
                         except Exception as e:
                             logger.debug(f"Self-progress check failed: {e}")
                     
@@ -6337,8 +6416,8 @@ class GameplayEngine:
                             
                             # If we were in escape mode and frame changed, escape worked!
                             if in_escape_mode:
-                                logger.info(f"[ESCAPE] Escape successful! Frame changed.")
-                                logger.info(f"[ESCAPE] Entering SELF-DIRECTED exploration mode (off-script)")
+                                logger.info("[ESCAPE] Escape successful! Frame changed.")
+                                logger.info("[ESCAPE] Entering SELF-DIRECTED exploration mode (off-script)")
                                 in_escape_mode = False
                                 escape_attempts = 0
                                 if hasattr(self, '_forced_escape_action'):
@@ -6644,7 +6723,7 @@ class GameplayEngine:
                                         remaining_budget = self.game_config['max_total_actions'] - action_count
                                         if remaining_budget < 100:
                                             # Very little budget left - OK to terminate
-                                            logger.info(f"   Frontier stuck with <100 actions remaining - ending game")
+                                            logger.info("   Frontier stuck with <100 actions remaining - ending game")
                                             break
                                         else:
                                             # Still have budget! Enter pure exploration mode
@@ -6679,26 +6758,17 @@ class GameplayEngine:
                                 
                                 # Temporarily boost self-trust for this session
                                 # The agent broke out on its own - it should explore on its own
-                                if agent_id:
+                                # DELEGATION: Use IThread.boost_self_trust() for centralized wA management
+                                if agent_id and self.i_thread:
                                     try:
-                                        # Get current bias
-                                        bias_result = self.db.execute_query(
-                                            "SELECT self_network_bias FROM agents WHERE agent_id = ?",
-                                            (agent_id,)
+                                        original, boosted, _ = self.i_thread.boost_self_trust(
+                                            agent_id,
+                                            boost_amount=0.25,
+                                            max_wA=1.0,
+                                            reason='self_directed_escape'
                                         )
-                                        if bias_result:
-                                            current_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
-                                            # Boost toward full self-trust (cap at 1.0 for self-directed mode)
-                                            boosted_bias = min(1.0, current_bias + 0.25)
-                                            if boosted_bias > current_bias:  # Only update/log if actual boost
-                                                self._original_self_bias = current_bias  # Store to restore later
-                                                self.db.execute_query(
-                                                    "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
-                                                    (boosted_bias, agent_id)
-                                                )
-                                                logger.info(f"[SELF-DIRECTED] Boosted self-trust: {current_bias:.2f} -> {boosted_bias:.2f}")
-                                            else:
-                                                logger.debug(f"[SELF-DIRECTED] Self-trust already at max: {current_bias:.2f}")
+                                        if boosted > original:
+                                            self._original_self_bias = original  # Store for later restoration
                                     except Exception as e:
                                         logger.debug(f"Failed to boost self-trust: {e}")
                     # NOTE: Removed the "elif not is_frontier_level" block that was resetting
@@ -6791,7 +6861,7 @@ class GameplayEngine:
                         # Reset meta-learning pattern tracker for new level
                         # Each level may have completely different patterns
                         if hasattr(self, '_meta_pattern_tracker'):
-                            logger.info(f"[META] Resetting pattern tracker for new level")
+                            logger.info("[META] Resetting pattern tracker for new level")
                             self._meta_pattern_tracker['current_pattern_id'] = None
                             self._meta_pattern_tracker['applications'] = 0
                             self._meta_pattern_tracker['no_progress_count'] = 0
@@ -6834,12 +6904,10 @@ class GameplayEngine:
                                 logger.info(f"[SELF-DIRECTED] Queuing sequence replay from L{next_level}")
                                 
                                 # Restore original self-network bias if we boosted it
-                                if agent_id and hasattr(self, '_original_self_bias'):
+                                # DELEGATION: Use IThread.restore_self_trust() for centralized wA management
+                                if agent_id and self.i_thread and hasattr(self, '_original_self_bias'):
                                     try:
-                                        self.db.execute_query(
-                                            "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
-                                            (self._original_self_bias, agent_id)
-                                        )
+                                        self.i_thread.restore_self_trust(agent_id, self._original_self_bias)
                                         del self._original_self_bias
                                     except Exception:
                                         pass
@@ -6894,7 +6962,7 @@ class GameplayEngine:
                                     logger.info(f" Captured level {level_for_storage} winning sequence (score={game_state.score}): {sequence_id}{discovery_tag}")
                                 
                                 if was_self_directed:
-                                    logger.info(f"[SELF-DIRECTED] Breakthrough sequence saved! Future agents won't need to break out - they'll have the escape path.")
+                                    logger.info("[SELF-DIRECTED] Breakthrough sequence saved! Future agents won't need to break out - they'll have the escape path.")
                         
                         # Agent Self-Model: Track controlled objects on level completion
                         # Query action_traces for frame_before/frame_after to build correlation
@@ -6973,21 +7041,16 @@ class GameplayEngine:
                                 self._self_directed_start_action = action_count
                                 
                                 # Boost self-trust for frontier exploration
-                                if agent_id:
+                                # DELEGATION: Use IThread.boost_self_trust() for centralized wA management
+                                if agent_id and self.i_thread:
                                     try:
-                                        bias_result = self.db.execute_query(
-                                            "SELECT self_network_bias FROM agents WHERE agent_id = ?",
-                                            (agent_id,)
+                                        original, _, _ = self.i_thread.boost_self_trust(
+                                            agent_id,
+                                            boost_amount=0.3,
+                                            max_wA=0.9,
+                                            reason='frontier_exploration'
                                         )
-                                        if bias_result:
-                                            current_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
-                                            boosted_bias = min(0.9, current_bias + 0.3)
-                                            self._original_self_bias = current_bias
-                                            self.db.execute_query(
-                                                "UPDATE agents SET self_network_bias = ? WHERE agent_id = ?",
-                                                (boosted_bias, agent_id)
-                                            )
-                                            logger.info(f"[FRONTIER] Boosted exploration confidence: {current_bias:.2f} -> {boosted_bias:.2f}")
+                                        self._original_self_bias = original
                                     except Exception as e:
                                         logger.debug(f"Failed to boost frontier exploration: {e}")
                             else:
@@ -7069,10 +7132,10 @@ class GameplayEngine:
                                         # Check for win
                                         if game_state.state == "WIN":
                                             if game_state.win_score > 0 and game_state.score >= game_state.win_score:
-                                                logger.info(f"[WIN] Full game win via mid-game replay!")
+                                                logger.info("[WIN] Full game win via mid-game replay!")
                                                 break
                                     else:
-                                        logger.warning(f"[MID-GAME REPLAY] Sequence replay failed, continuing exploration")
+                                        logger.warning("[MID-GAME REPLAY] Sequence replay failed, continuing exploration")
                                 else:
                                     logger.debug(f"[MID-GAME REPLAY] Best sequence only reaches L{seq_level}, need L{pending_level}+")
                             else:
@@ -7107,11 +7170,11 @@ class GameplayEngine:
                 except ValueError as e:
                     # Handle frame corruption - only breaks if recovery failed
                     error_msg = str(e).lower()
-                    if "frame corruption" in error_msg:
+                    if ERROR_FRAME_CORRUPTION in error_msg:
                         if "recovery failed" in error_msg:
-                            logger.error(f"[FAIL] FRAME CORRUPTION: Recovery attempted but failed - ending game")
+                            logger.error("[FAIL] FRAME CORRUPTION: Recovery attempted but failed - ending game")
                         else:
-                            logger.error(f"[FAIL] FRAME CORRUPTION detected - ending game")
+                            logger.error("[FAIL] FRAME CORRUPTION detected - ending game")
                         break
                     else:
                         logger.error(f"ValueError in action {action_count}: {e}")
@@ -7123,19 +7186,44 @@ class GameplayEngine:
                         "no active session" in error_msg or 
                         "no active" in error_msg or
                         "client session closed" in error_msg):
-                        logger.info(f" Session no longer running, ending game gracefully")
+                        logger.info(" Session no longer running, ending game gracefully")
                         break
                     else:
                         logger.error(f"Runtime error in action {action_count}: {e}")
                         break
                 except AttributeError as e:
-                    # Handle NoneType errors during shutdown (API client session is None)
-                    if "'NoneType' object has no attribute" in str(e):
-                        logger.info(f" API client unavailable (shutdown in progress), ending game gracefully")
+                    # DIAGNOSTIC FIX: Log the ACTUAL error before assuming it's shutdown
+                    # Many NoneType errors are bugs, not shutdown - we need to see them
+                    import traceback
+                    error_str = str(e)
+                    tb_str = traceback.format_exc()
+                    logger.warning(f"[ATTR-ERR] action={action_count}, error='{error_str}'")
+                    logger.warning(f"[ATTR-ERR-TB]\n{tb_str}")
+                    
+                    # Only treat as "shutdown" if it's specifically about session/client/send
+                    # NOT all NoneType errors - that was masking real bugs!
+                    is_client_error = (
+                        "'NoneType' object has no attribute" in error_str and
+                        any(kw in error_str.lower() for kw in ['session', 'client', 'send', 'connect'])
+                    )
+                    
+                    if is_client_error:
+                        logger.info("[SHUTDOWN] API client unavailable, ending game gracefully")
                         break
                     else:
-                        logger.error(f"Attribute error in action {action_count}: {e}")
-                        break
+                        # This is a real bug - log it with full traceback for debugging
+                        logger.error(f"[BUG] AttributeError in action {action_count}: {e}")
+                        # DON'T break - try to continue with next action (resilience)
+                        # Only break if we hit this error multiple times in a row
+                        consecutive_attr_errors = getattr(self, '_consecutive_attr_errors', 0) + 1
+                        self._consecutive_attr_errors = consecutive_attr_errors
+                        if consecutive_attr_errors >= 3:
+                            logger.error("[FAIL] 3+ consecutive AttributeErrors - ending game")
+                            break
+                        # Continue to next action
+                        action_count += 1
+                        level_action_count += 1
+                        continue
                 except Exception as e:
                     error_msg = str(e).lower()
                     # Check for shutdown-related errors
@@ -7143,7 +7231,7 @@ class GameplayEngine:
                         "session" in error_msg or 
                         "client" in error_msg or
                         "nonetype" in error_msg):
-                        logger.info(f" Session/client error detected, ending game gracefully")
+                        logger.info(" Session/client error detected, ending game gracefully")
                         break
                     # Critical errors that should stop
                     if "authentication" in error_msg or "api_key" in error_msg:
@@ -7215,7 +7303,7 @@ class GameplayEngine:
                             results['learned_sequence_id'] = sequence_id
                             logger.info(f" Captured full game winning sequence: {sequence_id}")
                     else:
-                        logger.info(f"[WARN] WIN state but no level_completions in this session - skipping sequence capture")
+                        logger.info("[WARN] WIN state but no level_completions in this session - skipping sequence capture")
                 
                 elif game_state.score > 0 and level_completions > 0:
                     # Partial progress - capture what we achieved
@@ -7327,7 +7415,7 @@ class GameplayEngine:
                                 try:
                                     coord = json.loads(t['coordinates'])
                                     failed_coords.append(tuple(coord))
-                                except:
+                                except (json.JSONDecodeError, TypeError):
                                     pass
                         
                         pariah_id = viral_engine.create_pariah_from_failure(
@@ -7534,7 +7622,7 @@ class GameplayEngine:
                 level_completions = int(game_state.score) if 'game_state' in locals() and game_state else 0
                 action_count_fallback = action_count if 'action_count' in locals() else 0
                 await self.session_manager.finish_game("ERROR", 0.0, level_completions, action_count_fallback)
-            except:
+            except Exception:
                 pass
             raise
 
@@ -8044,7 +8132,7 @@ class GameplayEngine:
                         match = re.search(r'x:(\d+),y:(\d+)', obj_str)
                         if match:
                             x, y = int(match.group(1)), int(match.group(2))
-                            target_coords.append((x, y, f"Known controlled position"))
+                            target_coords.append((x, y, "Known controlled position"))
                     except (ValueError, IndexError):
                         pass
             
@@ -8173,7 +8261,12 @@ class GameplayEngine:
                 if ambiguity and ambiguity > 0:
                     metrics['consensus_proxy'] = round(1.0 / ambiguity, 3)
             if score_delta is not None:
-                metrics['accuracy_proxy'] = 1.0 if score_delta > 0 else 0.0 if score_delta < 0 else 0.5
+                if score_delta > 0:
+                    metrics['accuracy_proxy'] = 1.0
+                elif score_delta < 0:
+                    metrics['accuracy_proxy'] = 0.0
+                else:
+                    metrics['accuracy_proxy'] = 0.5
             if frame_changed is not None:
                 metrics['frame_changed'] = bool(frame_changed)
         except Exception:
@@ -8200,8 +8293,19 @@ class GameplayEngine:
             stuckness = 1.0 if (not frame_changed and score_after <= score_before) else 0.0
             control_loss = 1.0 if (frame_changed and score_after < score_before) else 0.0
             # Simple confidence trend heuristic: stable unless score dropping with control loss
-            confidence_trend = 'falling' if control_loss else ('rising' if score_after > score_before else 'stable')
-            suggested_approach = 'cautious' if control_loss else ('radical_change' if stuckness else 'standard')
+            if control_loss:
+                confidence_trend = 'falling'
+            elif score_after > score_before:
+                confidence_trend = 'rising'
+            else:
+                confidence_trend = 'stable'
+            
+            if control_loss:
+                suggested_approach = 'cautious'
+            elif stuckness:
+                suggested_approach = 'radical_change'
+            else:
+                suggested_approach = 'standard'
             
             # FIX #7: Include cumulative stuckness for QuestioningEngineWithTeeth
             # The META question needs cumulative stuckness, not just single-frame
@@ -8557,6 +8661,9 @@ class GameplayEngine:
         Returns:
             Tuple of (action, reasoning) where reasoning explains why this action was chosen
         """
+        # DIAGNOSTIC: Track NoneType.get() errors
+        logger.debug(f"[SELECT-ACTION] Entry - game_state type: {type(game_state).__name__}")
+        
         agent_id = self.game_config.get('agent_id')
         run_context = self.game_config.get('run_context')
         
@@ -8568,7 +8675,7 @@ class GameplayEngine:
         # This closes the loop: Discovery -> Immediate Action
         # ================================================================
         last_discovery = getattr(self, '_last_discovery', None)
-        if last_discovery:
+        if last_discovery and isinstance(last_discovery, dict):
             # Clear the discovery so we don't keep using it forever
             self._last_discovery = None
             
@@ -8660,42 +8767,38 @@ class GameplayEngine:
         # These should ACTIVELY influence decisions, not just get logged.
         # Higher wA = favor personal exploration/discovery
         # Higher wB = favor network sequences/hypotheses
+        #
+        # REFACTORED: Now uses IThread for centralized stream management
         # ===================================================================
         wA_decision = 0.5  # Private experience weight
         wB_decision = 0.5  # Network wisdom weight
+        novelty_applied = False
         
         try:
             agent_id = self.game_config.get('agent_id')
-            if agent_id:
-                # Get persisted self_network_bias from agent
-                bias_result = self.db.execute_query("""
-                    SELECT self_network_bias FROM agents WHERE agent_id = ?
-                """, (agent_id,))
-                if bias_result:
-                    stored_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
-                    wA_decision = stored_bias
-                    wB_decision = 1.0 - stored_bias
-            
-            # Also check autobiography for dynamic wA/wB
-            if hasattr(self, 'game_config') and self.game_config.get('agent_autobiography'):
-                autobiography = self.game_config['agent_autobiography']
-                session = autobiography.get('session_state', {})
-                if session.get('wA') is not None:
-                    wA_decision = session.get('wA', wA_decision)
-                    wB_decision = session.get('wB', wB_decision)
-        except Exception:
+            if agent_id and hasattr(self, 'i_thread') and self.i_thread:
+                # Get autobiography for dynamic wA/wB
+                autobiography = None
+                if hasattr(self, 'game_config') and self.game_config.get('agent_autobiography'):
+                    autobiography = self.game_config['agent_autobiography']
+                
+                # IThread handles: DB lookup + autobiography merge
+                i_state = self.i_thread.get_state_with_autobiography(agent_id, autobiography)
+                
+                # Apply novelty boost if active (network wisdom doesn't apply)
+                if getattr(self, '_novelty_boost_active', False):
+                    i_state.novelty_boost_active = True
+                    i_state = self.i_thread.apply_novelty_boost(i_state)
+                    novelty_applied = i_state.novelty_boost_applied
+                
+                wA_decision = i_state.w_a
+                wB_decision = i_state.w_b
+            else:
+                # Fallback: No agent_id or IThread not available
+                wA_decision, wB_decision = 0.5, 0.5
+        except Exception as e:
+            logger.debug(f"[I-THREAD] Failed to get state: {e}")
             wA_decision, wB_decision = 0.5, 0.5
-        
-        # NOVELTY DETECTOR: Boost wA when in novel situation
-        # This implements fluid adaptation - trust self more when network wisdom doesn't apply
-        novelty_applied = False
-        if getattr(self, '_novelty_boost_active', False):
-            original_wA = wA_decision
-            novelty_boost = getattr(self, '_novelty_wA_boost', 0.2)
-            wA_decision = min(0.95, wA_decision + novelty_boost)  # Cap at 0.95
-            wB_decision = 1.0 - wA_decision
-            novelty_applied = True
-            logger.debug(f"[NOVELTY] Applied wA boost: {original_wA:.2f} -> {wA_decision:.2f}")
         
         # Store for use throughout action selection
         self._current_wA = wA_decision
@@ -8708,34 +8811,12 @@ class GameplayEngine:
         # Stream A = Private experience (discoveries, self-model, recent failures)
         # Stream B = Network wisdom (hypotheses, sequences, peer failures)
         # I-Thread detects conflict and synthesizes using wA/wB weights
+        #
+        # REFACTORED: Now uses IThread.build_stream_proposals() for centralized logic
         # ===================================================================
-        stream_a_proposals = []  # [(action, confidence, source)]
-        stream_b_proposals = []  # [(action, confidence, source)]
         
-        # Stream A: Recent discovery (from _last_discovery handled at top)
-        if hasattr(self, '_last_discovery') and self._last_discovery:
-            disc = self._last_discovery
-            if disc.get('action'):
-                stream_a_proposals.append({
-                    'action': disc['action'],
-                    'confidence': disc.get('reliability_score', 0.3),
-                    'source': 'discovery'
-                })
-        
-        # Stream A: Contradicted actions (from theory revision)
-        contradicted = getattr(self, '_contradicted_actions', {})
-        if contradicted:
-            # Add NEGATIVE proposals for contradicted actions
-            for action, count in contradicted.items():
-                if count >= 2:
-                    stream_a_proposals.append({
-                        'action': action,
-                        'confidence': -min(0.5, count * 0.1),  # Negative = avoid
-                        'source': 'contradicted'
-                    })
-        
-        # Stream B: Network control hypotheses (already queried)
-        # Note: These are passed to hypothesis_biases later, but we record them for I-Thread
+        # Gather network hypotheses for Stream B
+        net_hypotheses = []
         try:
             game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
             if game_id and hasattr(self.agent_self_model, 'get_network_control_hypotheses'):
@@ -8744,71 +8825,58 @@ class GameplayEngine:
                     min_reliability=0.15,
                     limit=5
                 ) or []
-                for hyp in net_hypotheses:
-                    action_map = hyp.get('action_response_map', {})
-                    for action_str, response in action_map.items():
-                        if 'ACTION' in str(action_str).upper():
-                            stream_b_proposals.append({
-                                'action': action_str,
-                                'confidence': hyp.get('reliability_score', 0.2),
-                                'source': f"network_hyp_{hyp.get('hypothesis_id', '')[:8]}"
-                            })
         except Exception:
             pass
         
-        # Stream B: Peer failure avoidance (already stored)
-        peer_failures = getattr(self, '_peer_failures_to_avoid', [])
-        for failure in peer_failures:
-            action_num = failure.get('action')
-            if action_num:
-                stream_b_proposals.append({
-                    'action': f"ACTION{action_num}",
-                    'confidence': -failure.get('confidence', 0.3),  # Negative = avoid
-                    'source': 'peer_failure'
-                })
-        
-        # ===================================================================
-        # FIX CON-002: PERSONA ENSEMBLE - REUSE EARLY PROPOSALS
-        # ===================================================================
-        # Persona proposals were already generated at the start of _select_action
-        # to ensure they're tracked even on early-return paths. Reuse them here
-        # for stream routing.
-        # ===================================================================
-        persona_proposals = getattr(self, '_early_persona_proposals', [])
-        if persona_proposals:
-            # Add persona proposals to appropriate stream based on persona type
-            for prop in persona_proposals:
-                ptype = (prop.get('persona_type') or '').lower()
-                if ptype in ('optimizer', 'network', 'validator', 'cautious'):
-                    # Network-oriented personas -> Stream B
-                    stream_b_proposals.append({
-                        'action': prop['action'],
-                        'confidence': prop.get('confidence', 0.3),
-                        'source': f"persona_{ptype}"
-                    })
-                else:
-                    # Exploration-oriented personas -> Stream A
+        # Build stream proposals using IThread (centralized logic)
+        if hasattr(self, 'i_thread') and self.i_thread:
+            stream_a_typed, stream_b_typed = self.i_thread.build_stream_proposals(
+                last_discovery=getattr(self, '_last_discovery', None),
+                contradicted_actions=getattr(self, '_contradicted_actions', {}),
+                network_hypotheses=net_hypotheses,
+                peer_failures=getattr(self, '_peer_failures_to_avoid', []),
+                persona_proposals=getattr(self, '_early_persona_proposals', [])
+            )
+            
+            # Convert StreamProposal objects to dicts for backward compatibility
+            stream_a_proposals = [
+                {'action': p.action, 'confidence': p.confidence, 'source': p.source}
+                for p in stream_a_typed
+            ]
+            stream_b_proposals = [
+                {'action': p.action, 'confidence': p.confidence, 'source': p.source}
+                for p in stream_b_typed
+            ]
+            
+            # Use IThread for conflict detection
+            conflict_result = self.i_thread.detect_multi_conflict(stream_a_typed, stream_b_typed)
+            stream_conflict = conflict_result.has_conflict
+            
+            if stream_conflict:
+                logger.info(f"[I-THREAD] {conflict_result.consciousness_intensity.upper()} conflict: "
+                           f"StreamA={conflict_result.stream_a_actions}, "
+                           f"StreamB={conflict_result.stream_b_actions}, "
+                           f"wA={wA_decision:.2f} wB={wB_decision:.2f}")
+            
+            self._last_synthesis_enabled = conflict_result.synthesis_enabled
+        else:
+            # Fallback: Manual stream building (legacy path)
+            stream_a_proposals = []
+            stream_b_proposals = []
+            
+            if hasattr(self, '_last_discovery') and self._last_discovery:
+                disc = self._last_discovery
+                if disc.get('action'):
                     stream_a_proposals.append({
-                        'action': prop['action'],
-                        'confidence': prop.get('confidence', 0.3),
-                        'source': f"persona_{ptype}"
+                        'action': disc['action'],
+                        'confidence': disc.get('reliability_score', 0.3),
+                        'source': 'discovery'
                     })
             
-            logger.debug(f"[CON-002] Persona ensemble generated {len(persona_proposals)} proposals")
-        
-        # I-Thread: Detect conflicts and log
-        stream_a_actions = {p['action'] for p in stream_a_proposals if p.get('confidence', 0) > 0}
-        stream_b_actions = {p['action'] for p in stream_b_proposals if p.get('confidence', 0) > 0}
-        stream_conflict = stream_a_actions and stream_b_actions and stream_a_actions != stream_b_actions
-        
-        if stream_conflict:
-            logger.info(f"[I-THREAD] Conflict detected: StreamA suggests {stream_a_actions}, "
-                       f"StreamB suggests {stream_b_actions}, wA={wA_decision:.2f} wB={wB_decision:.2f}")
-            # FIX CON-003: Enable synthesis when conflict detected
-            self._last_synthesis_enabled = True
-        else:
-            # FIX CON-003: Explicitly set False when no conflict (ensures tracking)
-            self._last_synthesis_enabled = False
+            stream_a_actions = {p['action'] for p in stream_a_proposals if p.get('confidence', 0) > 0}
+            stream_b_actions = {p['action'] for p in stream_b_proposals if p.get('confidence', 0) > 0}
+            stream_conflict = stream_a_actions and stream_b_actions and stream_a_actions != stream_b_actions
+            self._last_synthesis_enabled = stream_conflict
         
         # Store for later use in weaving
         self._stream_a_proposals = stream_a_proposals
@@ -12051,6 +12119,10 @@ class GameplayEngine:
             reasoning = " | ".join(reasoning_parts) if reasoning_parts else f"Exploring with {action}"
 
         imagination_context = self._compute_imagination_context(game_state, current_level)
+        # SAFETY: Ensure imagination_context is a dict (not None)
+        if imagination_context is None:
+            logger.warning("[DIAG-IC] _compute_imagination_context returned None - using defaults")
+            imagination_context = {'budget_total': 1000.0, 'budget_spend': 0.0, 'context_mode': 'exploration'}
         budget_total = imagination_context.get('budget_total')
         budget_spend = imagination_context.get('budget_spend')
         context_mode = imagination_context.get('context_mode') or 'exploration'
@@ -14178,23 +14250,20 @@ class GameplayEngine:
                     pass
             
             # === 5. SELF-NETWORK BIAS ===
-            if agent_id:
+            # DELEGATION: Use IThread for wA/wB state instead of direct DB access
+            if agent_id and self.i_thread:
                 try:
-                    bias_result = self.db.execute_query(
-                        "SELECT self_network_bias FROM agents WHERE agent_id = ?",
-                        (agent_id,)
-                    )
-                    if bias_result:
-                        self_bias = bias_result[0].get('self_network_bias', 0.5) or 0.5
-                        
-                        # High self-bias -> trust own instincts (randomize more)
-                        # Low self-bias -> trust network hypotheses more (already applied above)
-                        if self_bias > 0.6:
-                            # More self-directed: add some random variance
-                            import random
-                            for action in range(1, 8):
-                                action_scores[action] += random.uniform(-0.15, 0.25)
-                            reasoning_parts.append(f"Self-directed (bias={self_bias:.2f})")
+                    state = self.i_thread.get_state(agent_id)
+                    self_bias = state.w_a  # wA = self-trust
+                    
+                    # High self-bias -> trust own instincts (randomize more)
+                    # Low self-bias -> trust network hypotheses more (already applied above)
+                    if self_bias > 0.6:
+                        # More self-directed: add some random variance
+                        import random
+                        for action in range(1, 8):
+                            action_scores[action] += random.uniform(-0.15, 0.25)
+                        reasoning_parts.append(f"Self-directed (bias={self_bias:.2f})")
                 except Exception:
                     pass
             
@@ -15592,7 +15661,8 @@ class GameplayEngine:
         changed_positions = set()
         all_positions_checked = set()
         
-        for trace in self._recent_action_traces[-10:]:
+        # Use ALL traces from this game - agent needs full history
+        for trace in self._recent_action_traces:
             action_type = trace.get('action_type', '')
             frame_before = trace.get('frame_before')
             frame_after = trace.get('frame_after')
@@ -17817,7 +17887,18 @@ class GameplayEngine:
                 }
             
             a = agent_data[0]
-            self_network_bias = a.get('self_network_bias', 0.5) or 0.5
+            
+            # DELEGATION: Use IThread for wA/wB instead of DB self_network_bias
+            # IThread is the single source of truth for Two Streams state
+            if self.i_thread:
+                try:
+                    state = self.i_thread.get_state(agent_id)
+                    self_network_bias = state.w_a  # wA = self-trust
+                except Exception:
+                    self_network_bias = a.get('self_network_bias', 0.5) or 0.5
+            else:
+                self_network_bias = a.get('self_network_bias', 0.5) or 0.5
+            
             navigation_state = a.get('navigation_state', 0.0) or 0.0
             role_confidence = a.get('role_confidence', 0.5) or 0.5
             
@@ -23875,7 +23956,7 @@ class GameplayEngine:
             
             # Get current navigation state
             agent_result = self.db.execute_query(
-                "SELECT navigation_state FROM agents WHERE agent_id = ?",
+                QUERY_NAVIGATION_STATE,
                 (agent_id,)
             )
             navigation_state = agent_result[0]['navigation_state'] if agent_result else 0.0

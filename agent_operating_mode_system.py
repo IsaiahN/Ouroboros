@@ -32,6 +32,14 @@ import random
 import logging
 from database_interface import DatabaseInterface
 
+# IThread integration for centralized wA/wB management
+try:
+    from i_thread import IThread
+    ITHREAD_AVAILABLE = True
+except ImportError:
+    ITHREAD_AVAILABLE = False
+    IThread = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -129,7 +137,7 @@ class AgentOperatingModeSystem:
                     f"[TARGET] OPTIMIZATION PHASE: {full_wins[0]['win_count']} games fully beaten"
                 )
                 logger.info(
-                    f"   Distribution: 10% PIONEER, 50% OPTIMIZER, 25% GENERALIST, 15% EXPLOITER"
+                    "   Distribution: 10% PIONEER, 50% OPTIMIZER, 25% GENERALIST, 15% EXPLOITER"
                 )
             else:
                 # EXPLORATION PHASE: No games fully beaten yet - HEAVY PIONEER FOCUS
@@ -138,9 +146,9 @@ class AgentOperatingModeSystem:
                 self.TARGET_GENERALIST_PCT = 0.20
                 self.TARGET_EXPLOITER_PCT = 0.05  # Low in exploration (fewer sequences to exploit)
                 self.phase = "EXPLORATION"
-                logger.info(f"🔍 EXPLORATION PHASE: No games fully beaten yet")
+                logger.info("[EXPLORE] EXPLORATION PHASE: No games fully beaten yet")
                 logger.info(
-                    f"   Distribution: 60% PIONEER, 15% OPTIMIZER, 20% GENERALIST, 5% EXPLOITER"
+                    "   Distribution: 60% PIONEER, 15% OPTIMIZER, 20% GENERALIST, 5% EXPLOITER"
                 )
 
         except Exception as e:
@@ -369,17 +377,17 @@ class AgentOperatingModeSystem:
                 self.phase = "OPTIMIZATION"
 
                 logger.info(f"\n{'=' * 80}")
-                logger.info(f"[TARGET] PHASE TRANSITION: EXPLORATION → OPTIMIZATION")
+                logger.info("[TARGET] PHASE TRANSITION: EXPLORATION -> OPTIMIZATION")
                 logger.info(f"{'=' * 80}")
                 logger.info(f"[OK] {full_wins[0]['win_count']} games fully beaten!")
                 logger.info(
-                    f"[STATS] Old distribution: 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST"
+                    "[STATS] Old distribution: 70% PIONEER, 10% OPTIMIZER, 20% GENERALIST"
                 )
                 logger.info(
-                    f"[STATS] New distribution: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST"
+                    "[STATS] New distribution: 10% PIONEER, 60% OPTIMIZER, 30% GENERALIST"
                 )
                 logger.info(
-                    f"   Focus shifting from exploration to efficiency refinement"
+                    "   Focus shifting from exploration to efficiency refinement"
                 )
                 logger.info(f"{'=' * 80}\n")
                 return True
@@ -391,7 +399,7 @@ class AgentOperatingModeSystem:
                 self.TARGET_GENERALIST_PCT = 0.20
                 self.phase = "EXPLORATION"
                 logger.warning(
-                    f"[WARN] PHASE REVERT: OPTIMIZATION → EXPLORATION (no wins found)"
+                    "[WARN] PHASE REVERT: OPTIMIZATION -> EXPLORATION (no wins found)"
                 )
                 return True
 
@@ -1102,7 +1110,7 @@ class AgentOperatingModeSystem:
         deficits = {role: targets[role] - current_pcts.get(role, 0) 
                     for role in targets}
         
-        needed_role = max(deficits, key=deficits.get)
+        needed_role = max(deficits, key=lambda r: deficits[r])
         logger.debug(f"Population needs more {needed_role}s (deficit: {deficits[needed_role]:.2%})")
         
         return needed_role
@@ -1584,12 +1592,43 @@ class AgentOperatingModeSystem:
         Two-Streams Philosophy: Agents should learn WHEN to trust themselves
         vs when to trust the network. This is recursive meta-learning.
         
+        REFACTORED: Now delegates to IThread.learn_from_outcome() for centralized
+        wA/wB management. Maintains backward compatibility with fallback path.
+        
         Args:
             agent_id: Agent to update
             decision_aligned_with: 'private' (trusted self) or 'network' (trusted network)
             outcome_success: Whether the decision led to success
         """
-        # Get current bias and learning rate
+        # Map decision_aligned_with to chosen_source format
+        if decision_aligned_with == 'private':
+            chosen_source = 'stream_a'
+        elif decision_aligned_with == 'network':
+            chosen_source = 'stream_b'
+        else:
+            chosen_source = 'synthesis'
+        
+        # Map outcome_success to outcome string
+        outcome = 'positive' if outcome_success else 'negative'
+        
+        # Try IThread path first (centralized)
+        if ITHREAD_AVAILABLE and IThread:
+            try:
+                i_thread = IThread(self.db)
+                new_w_a, new_w_b = i_thread.learn_from_outcome(
+                    agent_id=agent_id,
+                    chosen_source=chosen_source,
+                    outcome=outcome
+                )
+                logger.debug(
+                    f"[I-THREAD META-BIAS] Agent {agent_id[:8]}: wA={new_w_a:.2f}, wB={new_w_b:.2f} "
+                    f"(aligned={decision_aligned_with}, success={outcome_success})"
+                )
+                return
+            except Exception as e:
+                logger.debug(f"[I-THREAD] learn_from_outcome failed, using fallback: {e}")
+        
+        # Fallback: Original manual implementation
         agent = self.db.execute_query("""
             SELECT self_network_bias, bias_learning_rate
             FROM agents WHERE agent_id = ?
@@ -1602,35 +1641,26 @@ class AgentOperatingModeSystem:
         learning_rate = agent[0]['bias_learning_rate'] or 0.1
         
         # Calculate bias adjustment
-        # If decision aligned with self and succeeded -> increase self trust
-        # If decision aligned with network and succeeded -> decrease self trust
-        # Opposite adjustments for failures
-        
         if decision_aligned_with == 'private':
-            # Trusted self
             if outcome_success:
-                adjustment = learning_rate  # Self was right, increase self trust
+                adjustment = learning_rate
             else:
-                adjustment = -learning_rate  # Self was wrong, decrease self trust
+                adjustment = -learning_rate
         elif decision_aligned_with == 'network':
-            # Trusted network
             if outcome_success:
-                adjustment = -learning_rate  # Network was right, decrease self trust
+                adjustment = -learning_rate
             else:
-                adjustment = learning_rate  # Network was wrong, increase self trust
-        else:  # 'balanced'
-            # No strong adjustment for balanced decisions
+                adjustment = learning_rate
+        else:
             adjustment = 0.0
         
         # Apply adjustment with dampening for extreme values
-        # Harder to move away from extremes (avoid oscillation)
-        dampening = 1.0 - abs(current_bias - 0.5) * 0.5  # Max dampening at extremes
+        dampening = 1.0 - abs(current_bias - 0.5) * 0.5
         adjustment *= dampening
         
         new_bias = current_bias + adjustment
-        new_bias = max(0.0, min(1.0, new_bias))  # Clamp to valid range
+        new_bias = max(0.0, min(1.0, new_bias))
         
-        # Update database
         self.db.execute_query("""
             UPDATE agents SET self_network_bias = ? WHERE agent_id = ?
         """, (new_bias, agent_id))
@@ -1771,7 +1801,7 @@ def calculate_role_saturation(db: DatabaseInterface, generation: int) -> Dict[st
             FROM winning_sequences
             WHERE is_full_game_win = 1 AND is_valid = 1
         """)
-        has_full_wins = (full_wins and full_wins[0]['count'] > 0)
+        has_full_wins: bool = bool(full_wins and full_wins[0]['count'] > 0)
         
         if has_full_wins:
             # OPTIMIZATION PHASE ratios

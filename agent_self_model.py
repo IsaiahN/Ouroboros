@@ -15,10 +15,29 @@ This addresses the agent self-model requirement from operational philosophy.
 import json
 import uuid
 import random
+import time
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, TYPE_CHECKING
 from database_interface import DatabaseInterface
 import logging
+
+if TYPE_CHECKING:
+    from i_thread import IThread as IThreadType
+
+# IThread integration for Two Streams consciousness
+try:
+    from i_thread import IThread, IThreadState, ROLE_DEFAULT_WEIGHTS
+    ITHREAD_AVAILABLE = True
+except ImportError:
+    ITHREAD_AVAILABLE = False
+    IThread = None  # type: ignore
+    IThreadState = None
+    ROLE_DEFAULT_WEIGHTS = {
+        'pioneer': (0.7, 0.3),
+        'optimizer': (0.3, 0.7),
+        'generalist': (0.5, 0.5),
+        'exploiter': (0.4, 0.6),
+    }
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +224,7 @@ class AgentSelfModel:
         for col_name, col_type in click_behavior_columns:
             try:
                 self.db.execute_query(f"ALTER TABLE object_selection_state ADD COLUMN {col_name} {col_type}")
-            except:
+            except Exception:
                 pass  # Column already exists
         
         # Index for fast selectable object lookup
@@ -1253,7 +1272,7 @@ class AgentSelfModel:
                 'SELECT value FROM evolutionary_state WHERE key = "current_generation"'
             )
             return int(result[0]['value']) if result else 0
-        except:
+        except Exception:
             return 0
     
     def identify_controlled_objects(
@@ -1869,7 +1888,7 @@ class AgentSelfModel:
                                     if isinstance(response, dict) and response.get('effect_type') == 'toggle':
                                         is_toggle = True
                                         break
-                        except:
+                        except Exception:
                             pass
                         
                         if is_toggle:
@@ -2848,13 +2867,13 @@ class AgentSelfModel:
         object_id: str,
         control_type: str,
         confidence: float,
-        agent_id: str = None
+        agent_id: Optional[str] = None
     ):
         """Record a control discovery to the database."""
         # Extract color from object_id
         try:
             color = int(object_id.replace('obj_', ''))
-        except:
+        except Exception:
             return
         
         self.db.execute_query("""
@@ -2878,7 +2897,7 @@ class AgentSelfModel:
         object_color: int,
         action_taken: str,
         actual_movement: str,
-        agent_id: str = None
+        agent_id: Optional[str] = None
     ):
         """
         Record when an object moves in a direction that doesn't match our action.
@@ -2916,7 +2935,7 @@ class AgentSelfModel:
         y: int,
         movement_direction: str,
         affected_object: str,
-        agent_id: str = None
+        agent_id: Optional[str] = None
     ):
         """Record a button discovery to the database."""
         region_x = min(x // 8, 7)
@@ -2940,7 +2959,7 @@ class AgentSelfModel:
         color_before: int,
         color_after: int,
         affected_object: str,
-        agent_id: str = None
+        agent_id: Optional[str] = None
     ):
         """
         Record a toggle object discovery to the database.
@@ -3807,7 +3826,7 @@ class AgentSelfModel:
                 agent_id=agent_id,
                 game_id=game_id,
                 level=level,
-                controlled=[(controlled_color, action, direction)],
+                controlled_objects=[(controlled_color, action, direction)],
                 confidence=0.75
             )
         except Exception as e:
@@ -3903,22 +3922,13 @@ class AgentSelfModel:
                 hypothesis = f"color_{color} property varies - no symmetry"
                 generalization = 'none'
             
-            # Store as conceptual pattern in CODS
-            if hasattr(cods, 'concept_engine') and cods.concept_engine:
-                cods.concept_engine.store_discovered_concept(
-                    concept_type='property_symmetry',
-                    description=hypothesis,
-                    evidence={
-                        'game_type': game_type,
-                        'level': level,
-                        'color': color,
-                        'property': property_type,
-                        'total_tested': total,
-                        'successes': successes,
-                        'confidence': confidence,
-                        'generalization': generalization
-                    },
-                    confidence=confidence
+            # Store as conceptual pattern in CODS if track_successful_operator_pattern exists
+            if hasattr(cods, 'concept_engine') and cods.concept_engine and hasattr(cods.concept_engine, 'track_successful_operator_pattern'):
+                # Use track_successful_operator_pattern which is the available method
+                cods.concept_engine.track_successful_operator_pattern(
+                    operator_id=f"symmetry_{property_type}_{color}",
+                    game_id=game_type,
+                    sub_patterns=[f"property_symmetry_{generalization}", f"color_{color}_{property_type}"]
                 )
                 logger.info(
                     f"[CODS] Symmetry hypothesis: {hypothesis} "
@@ -4300,7 +4310,7 @@ class AgentSelfModel:
                 best_control['control_pattern'],
                 json.dumps(composite_action_map),
                 f"synthesis_from_{len(source_ids)}_sources",
-                self.db.get_generation() if hasattr(self.db, 'get_generation') else 0,
+                getattr(self.db, 'get_generation', lambda: 0)(),
                 composite_reliability
             ))
             
@@ -5347,10 +5357,10 @@ class AgentSelfModel:
                 y, x = stack.pop()
                 if y < 0 or y >= height or x < 0 or x >= width:
                     continue
-                if visited[y, x] or grid[y, x] != color:
+                if visited[y][x] or grid[y][x] != color:
                     continue
                 
-                visited[y, x] = True
+                visited[y][x] = True
                 cells.append((y, x))
                 
                 # 4-connected neighbors
@@ -5361,12 +5371,12 @@ class AgentSelfModel:
         # Scan grid for objects
         for y in range(height):
             for x in range(width):
-                if visited[y, x]:
+                if visited[y][x]:
                     continue
                     
-                color = int(grid[y, x])
+                color = int(grid[y][x])
                 if color in exclude_colors:
-                    visited[y, x] = True
+                    visited[y][x] = True
                     continue
                 
                 cells = flood_fill(y, x, color)
@@ -8514,6 +8524,9 @@ class AgentSelfModel:
         
         game_type = game_id.split('-')[0] if '-' in game_id else game_id
         
+        if final_frame is None:
+            return None
+        
         final_grid = final_frame.get('grid', [])
         initial_grid = initial_frame.get('grid', []) if initial_frame else []
         
@@ -9128,8 +9141,12 @@ class WeavingReporter:
     """
     Generates self-reflection "weaving reports" for every action.
     
-    Philosophy: Every action sent to ARC API includes full self_reflection weaving data.
-    This is the agent's introspection visible in every API call.
+    DELEGATION: This class now delegates to IThread for report generation.
+    IThread is the single source of truth for Two Streams consciousness.
+    
+    This class is kept for backward compatibility and adds:
+    - Local database storage with sampling
+    - Outcome tracking
     
     Local Database Storage: Uses sampling to prevent bloat:
     - Sampling Rate: Store 1 in 10 decisions locally (10%)
@@ -9140,14 +9157,28 @@ class WeavingReporter:
     # Sampling rate for local storage (10% of non-exceptional decisions)
     SAMPLING_RATE = 0.1
     
-    def __init__(self, db: DatabaseInterface):
-        """Initialize weaving reporter."""
+    def __init__(self, db: DatabaseInterface, i_thread: Optional['IThreadType'] = None):
+        """Initialize weaving reporter.
+        
+        Args:
+            db: Database interface
+            i_thread: Optional IThread instance for delegation
+        """
         self.db = db
+        self._i_thread = i_thread
+        
+        # Create IThread if not provided and available
+        if self._i_thread is None and ITHREAD_AVAILABLE and IThread is not None:
+            try:
+                self._i_thread = IThread(db)
+            except Exception as e:
+                logger.debug(f"Could not create IThread for WeavingReporter: {e}")
+        
         self._ensure_tables()
     
     def _ensure_tables(self):
         """Ensure decision_weaving_reports table exists."""
-        # Table should be created in Phase 1, but ensure it exists
+        # Table kept for backward compatibility and local storage
         self.db.execute_query("""
             CREATE TABLE IF NOT EXISTS decision_weaving_reports (
                 report_id TEXT PRIMARY KEY,
@@ -9166,6 +9197,7 @@ class WeavingReporter:
                 chosen_action TEXT,
                 alternative_action TEXT,
                 conflict_detected BOOLEAN DEFAULT FALSE,
+                consciousness_intensity TEXT DEFAULT 'automatic',
                 outcome_correct BOOLEAN,
                 FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
             )
@@ -9194,7 +9226,8 @@ class WeavingReporter:
         """
         Generate a weaving report for an action decision.
         
-        This is called for EVERY action to produce API-ready self-reflection.
+        DELEGATION: Delegates to IThread.generate_weaving_report() when available.
+        Falls back to local implementation for backward compatibility.
         
         Args:
             agent_id: Agent making the decision
@@ -9214,6 +9247,27 @@ class WeavingReporter:
         Returns:
             Complete weaving report dictionary for API
         """
+        # DELEGATE to IThread if available
+        if self._i_thread is not None:
+            try:
+                return self._i_thread.generate_weaving_report(
+                    agent_id=agent_id,
+                    game_id=game_id,
+                    level_number=level_number,
+                    action_number=action_number,
+                    chosen_action=chosen_action,
+                    private_memory_strength=private_memory_strength,
+                    network_recommendation_strength=network_recommendation_strength,
+                    navigation_state=navigation_state,
+                    role_confidence=role_confidence,
+                    role_fit_score=role_fit_score,
+                    sensation_profile=sensation_profile,
+                    alternative_action=alternative_action
+                )
+            except Exception as e:
+                logger.debug(f"IThread delegation failed, using fallback: {e}")
+        
+        # FALLBACK: Original local implementation
         import uuid
         from datetime import datetime
         
@@ -9222,7 +9276,7 @@ class WeavingReporter:
         emotional_input = (navigation_state + 1.0) / 2.0
         
         # Semantic: Average of top sensation scores (if any)
-        object_sensations = sensation_profile.get('object_sensations', {})
+        object_sensations = sensation_profile.get('object_sensations', {}) if sensation_profile else {}
         if object_sensations:
             top_sensations = sorted(object_sensations.values(), reverse=True)[:3]
             semantic_input = sum(top_sensations) / len(top_sensations) if top_sensations else 0.5
@@ -9267,10 +9321,15 @@ class WeavingReporter:
             'self_network_bias': round(self_network_bias, 3),
             'final_decision_weight': round(final_decision_weight, 3),
             
+            # wA/wB state
+            'w_a': round(self_network_bias, 3),  # wA = self_network_bias in fallback
+            'w_b': round(1.0 - self_network_bias, 3),
+            
             # Decision
             'chosen_action': chosen_action,
             'alternative_action': alternative_action,
             'conflict_detected': conflict_detected,
+            'consciousness_intensity': 'deliberative' if conflict_detected else 'automatic',
             
             # Narrative summary
             'narrative': self._build_narrative(
@@ -9337,18 +9396,31 @@ class WeavingReporter:
         """
         Format weaving report for inclusion in API reasoning payload.
         
+        DELEGATION: Uses IThread.format_weaving_for_api() when available.
+        
         Returns a compact version suitable for the 16KB limit.
         """
+        # Delegate to IThread if available
+        if self._i_thread is not None:
+            try:
+                return self._i_thread.format_weaving_for_api(report)
+            except Exception:
+                pass  # Fall through to local implementation
+        
+        # Fallback: local implementation
         return {
-            'emotional_network': report['emotional_input'],
-            'semantic_network': report['semantic_input'],
-            'identity_network': report['identity_input'],
-            'private_memory': report['private_memory_strength'],
-            'network_wisdom': report['network_recommendation_strength'],
-            'self_trust_bias': report['self_network_bias'],
-            'decision_weight': report['final_decision_weight'],
-            'conflict': report['conflict_detected'],
-            'narrative': report['narrative']
+            'emotional_network': report.get('emotional_input', 0.5),
+            'semantic_network': report.get('semantic_input', 0.5),
+            'identity_network': report.get('identity_input', 0.5),
+            'private_memory': report.get('private_memory_strength', 0.5),
+            'network_wisdom': report.get('network_recommendation_strength', 0.5),
+            'self_trust_bias': report.get('self_network_bias', 0.5),
+            'w_a': report.get('w_a', 0.5),
+            'w_b': report.get('w_b', 0.5),
+            'decision_weight': report.get('final_decision_weight', 0.5),
+            'conflict': report.get('conflict_detected', False),
+            'consciousness': report.get('consciousness_intensity', 'automatic'),
+            'narrative': report.get('narrative', '')
         }
     
     def should_store_locally(self, report: Dict[str, Any], is_terminal: bool = False) -> bool:
@@ -10794,7 +10866,7 @@ class MetacognitiveReasoningEngine:
         self,
         game_type: str,
         level_number: int,
-        all_actions: List[str] = None
+        all_actions: Optional[List[str]] = None
     ) -> List[str]:
         """Get actions that haven't been eliminated yet."""
         if all_actions is None:
@@ -11069,22 +11141,41 @@ class EpisodicMemorySystem:
     This implements the Two-Streams insight that private memory (wA) should be
     queryable and comparable against network recommendations (wB).
     
+    DELEGATION: wA/wB state management is now delegated to IThread.
+    This class focuses on:
+    - Pre-game autobiography synthesis
+    - Personal history queries
+    - Session state tracking
+    
     Key Queries:
     - "What did I do last time in this situation?"
     - "Did my approach work better than network's?"
     - "What's my personal success pattern?"
     """
     
-    def __init__(self, db: DatabaseInterface):
-        """Initialize episodic memory system."""
+    def __init__(self, db: DatabaseInterface, i_thread: Optional['IThreadType'] = None):
+        """Initialize episodic memory system.
+        
+        Args:
+            db: Database interface
+            i_thread: Optional IThread instance for wA/wB management
+        """
         self.db = db
+        self._i_thread = i_thread
+        
+        # Create IThread if not provided and available
+        if self._i_thread is None and ITHREAD_AVAILABLE and IThread is not None:
+            try:
+                self._i_thread = IThread(db)
+            except Exception as e:
+                logger.debug(f"Could not create IThread for EpisodicMemorySystem: {e}")
     
     def query_personal_history(
         self,
         agent_id: str,
         game_type: str,
         level: int,
-        context: str = None,
+        context: Optional[str] = None,
         limit: int = 5
     ) -> Dict[str, Any]:
         """
@@ -11919,17 +12010,12 @@ class EpisodicMemorySystem:
         This creates the dynamic portion of the autobiography that
         updates as the agent plays.
         
-        wA/wB Initialization Priority:
-        1. Persisted self_network_bias from DB (if agent has learned bias)
-        2. Role-based defaults (if agent has assigned role)
-        3. Strategy-based defaults (from autobiography synthesis)
-        4. Fallback: 0.5/0.5 balanced
+        DELEGATION: wA/wB initialization is delegated to IThread when available.
         
-        Role-based wA/wB defaults (from AGI theory):
-        - PIONEER: wA=0.7, wB=0.3 (favor personal exploration, cautious of network)
-        - OPTIMIZER: wA=0.3, wB=0.7 (rely on network sequences, refine)
-        - GENERALIST: wA=0.5, wB=0.5 (balanced - sensation-enabled)
-        - EXPLOITER: wA=0.4, wB=0.6 (follow network but can break rules)
+        wA/wB Initialization Priority:
+        1. IThread.get_state() if IThread available (reads persisted DB values)
+        2. IThread.initialize_for_role() if role provided
+        3. Fallback: local role/strategy defaults
         
         Args:
             autobiography: Pre-game synthesized autobiography
@@ -11942,9 +12028,39 @@ class EpisodicMemorySystem:
         strategy = autobiography.get('recommended_strategy', {}).get('strategy', 'explore')
         
         # ================================================================
-        # PRIORITY 1: Persisted self_network_bias from database
+        # DELEGATE TO ITHREAD if available
         # ================================================================
-        # Agent's learned wA/wB across games - this persists and evolves
+        if self._i_thread is not None and agent_id:
+            try:
+                # Try to get existing state first
+                state = self._i_thread.get_state(agent_id)
+                if state:
+                    initial_wA = state.w_a
+                    initial_wB = state.w_b
+                    bias_source = 'i_thread:persisted'
+                elif agent_role:
+                    # Initialize for role if no existing state
+                    state = self._i_thread.initialize_for_role(agent_id, agent_role)
+                    initial_wA = state.w_a
+                    initial_wB = state.w_b
+                    bias_source = f'i_thread:role:{agent_role}'
+                else:
+                    initial_wA, initial_wB = 0.5, 0.5
+                    bias_source = 'i_thread:default'
+                    
+                # Skip fallback logic
+                return self._build_session_state(
+                    autobiography, agent_id, agent_role, strategy,
+                    initial_wA, initial_wB, bias_source
+                )
+            except Exception as e:
+                logger.debug(f"IThread delegation failed, using fallback: {e}")
+        
+        # ================================================================
+        # FALLBACK: Local wA/wB resolution
+        # ================================================================
+        
+        # Priority 1: Persisted self_network_bias from database
         persisted_bias = None
         if agent_id and self.db:
             try:
@@ -11957,20 +12073,10 @@ class EpisodicMemorySystem:
             except Exception as e:
                 logger.debug(f"Could not retrieve persisted bias: {e}")
         
-        # ================================================================
-        # PRIORITY 2: Role-based defaults
-        # ================================================================
-        # Agent roles have inherent wA/wB tendencies from AGI theory
-        role_defaults = {
-            'pioneer': (0.7, 0.3),     # Self-reliant explorers
-            'optimizer': (0.3, 0.7),    # Network-dependent refiners
-            'generalist': (0.5, 0.5),   # Balanced
-            'exploiter': (0.4, 0.6),    # Slightly network-favoring
-        }
+        # Use ROLE_DEFAULT_WEIGHTS from IThread import (or fallback)
+        role_defaults = ROLE_DEFAULT_WEIGHTS
         
-        # ================================================================
-        # PRIORITY 3: Strategy-based defaults (from autobiography)
-        # ================================================================
+        # Strategy-based defaults
         strategy_defaults = {
             'trust_self': (0.7, 0.3),
             'trust_network': (0.3, 0.7),
@@ -11978,23 +12084,34 @@ class EpisodicMemorySystem:
             'explore': (0.5, 0.5),
         }
         
-        # ================================================================
-        # RESOLVE INITIAL wA/wB
-        # ================================================================
+        # Resolve initial wA/wB
         if persisted_bias is not None:
-            # Priority 1: Use persisted bias (self_network_bias is wB)
             initial_wB = persisted_bias
             initial_wA = 1.0 - initial_wB
             bias_source = 'persisted'
         elif agent_role and agent_role.lower() in role_defaults:
-            # Priority 2: Use role-based default
             initial_wA, initial_wB = role_defaults[agent_role.lower()]
             bias_source = f'role:{agent_role}'
         else:
-            # Priority 3: Use strategy-based default
             initial_wA, initial_wB = strategy_defaults.get(strategy, (0.5, 0.5))
             bias_source = f'strategy:{strategy}'
         
+        return self._build_session_state(
+            autobiography, agent_id, agent_role, strategy,
+            initial_wA, initial_wB, bias_source
+        )
+    
+    def _build_session_state(
+        self,
+        autobiography: Dict[str, Any],
+        agent_id: Optional[str],
+        agent_role: Optional[str],
+        strategy: str,
+        initial_wA: float,
+        initial_wB: float,
+        bias_source: str
+    ) -> Dict[str, Any]:
+        """Build the session_state structure for autobiography."""
         autobiography['session_state'] = {
             'actions_taken_this_game': 0,
             'actions_taken_this_level': 0,
@@ -12004,14 +12121,14 @@ class EpisodicMemorySystem:
             'contradictions_this_game': [],
             'wA': initial_wA,
             'wB': initial_wB,
-            'initial_wA': initial_wA,  # Track starting point for role evaluation
+            'initial_wA': initial_wA,
             'initial_wB': initial_wB,
             'bias_source': bias_source,
             'agent_role': agent_role,
             'stream_trust_history': [],
             'level_transitions': [],
-            'last_action_source': None,  # 'wA', 'wB', or 'explore'
-            'last_action_outcome': None,  # 'positive', 'negative', 'neutral'
+            'last_action_source': None,
+            'last_action_outcome': None,
         }
         
         autobiography['session_narrative'] = (
@@ -12029,11 +12146,10 @@ class EpisodicMemorySystem:
         """
         Reset agent's wA/wB bias when they change roles.
         
+        DELEGATION: Uses IThread.initialize_for_role() when available.
+        
         Per AGI theory: When agents switch roles, their stream weighting
         should reset to the new role's default, not carry over old habits.
-        
-        This updates BOTH the database (self_network_bias) and returns
-        the new values for session initialization.
         
         Args:
             agent_id: Agent ID
@@ -12042,14 +12158,20 @@ class EpisodicMemorySystem:
         Returns:
             Tuple of (new_wA, new_wB)
         """
-        role_defaults = {
-            'pioneer': (0.7, 0.3),
-            'optimizer': (0.3, 0.7),
-            'generalist': (0.5, 0.5),
-            'exploiter': (0.4, 0.6),
-        }
+        # DELEGATE to IThread if available
+        if self._i_thread is not None:
+            try:
+                state = self._i_thread.initialize_for_role(agent_id, new_role, persist=True)
+                logger.info(
+                    f"[ROLE CHANGE] Reset wA/wB via IThread for {agent_id[:8]} -> {new_role}: "
+                    f"wA={state.w_a:.2f}, wB={state.w_b:.2f}"
+                )
+                return state.w_a, state.w_b
+            except Exception as e:
+                logger.debug(f"IThread delegation failed, using fallback: {e}")
         
-        new_wA, new_wB = role_defaults.get(new_role.lower(), (0.5, 0.5))
+        # FALLBACK: Local implementation
+        new_wA, new_wB = ROLE_DEFAULT_WEIGHTS.get(new_role.lower(), (0.5, 0.5))
         
         # Update database with new bias
         try:
@@ -12063,6 +12185,8 @@ class EpisodicMemorySystem:
             )
         except Exception as e:
             logger.warning(f"Failed to reset wA/wB in DB: {e}")
+        
+        return new_wA, new_wB
         
         return new_wA, new_wB
 
@@ -12223,7 +12347,7 @@ class EpisodicMemorySystem:
         autobiography: Dict[str, Any],
         personal_action: Optional[str] = None,
         network_action: Optional[str] = None
-    ) -> Tuple[str, str, str]:
+    ) -> Tuple[Optional[str], str, str]:
         """
         Decide which action source to use based on current wA/wB.
         
@@ -12237,7 +12361,7 @@ class EpisodicMemorySystem:
             
         Returns:
             Tuple of (action, source, reasoning) where:
-            - action: The recommended action string
+            - action: The recommended action string (may be None)
             - source: 'wA', 'wB', or 'explore'
             - reasoning: Human-readable explanation
         """
@@ -12531,10 +12655,10 @@ class AgentNetworkContributor:
         agent_id: str,
         game_type: str,
         level_number: int,
-        action_sequence: List[str] = None,
-        attempt_description: str = None,
+        action_sequence: Optional[List[str]] = None,
+        attempt_description: Optional[str] = None,
         frames_survived: int = 0,
-        death_cause: str = None
+        death_cause: Optional[str] = None
     ) -> Optional[str]:
         """
         Agent broadcasts what they tried that DIDN'T work.
@@ -12609,7 +12733,7 @@ class AgentNetworkContributor:
         game_type: str,
         insight_text: str,
         insight_type: str = 'approach_pattern',
-        level_number: int = None,
+        level_number: Optional[int] = None,
         confidence: float = 0.6
     ) -> Optional[str]:
         """
@@ -12678,7 +12802,7 @@ class AgentNetworkContributor:
     def query_peer_insights(
         self,
         game_type: str,
-        level_number: int = None,
+        level_number: Optional[int] = None,
         limit: int = 5,
         min_confidence: float = 0.4
     ) -> List[Dict[str, Any]]:
@@ -12864,7 +12988,7 @@ class AgentNetworkContributor:
     def reject_insight(
         self,
         insight_id: str,
-        agent_id: str = None
+        agent_id: Optional[str] = None
     ) -> None:
         """
         Agent rejects an insight that didn't work for them.
@@ -12999,12 +13123,12 @@ class AgentHypothesisSystem:
         game_type: str,
         hypothesis_text: str,
         hypothesis_type: str,
-        level_number: int = None,
-        initial_evidence: List[str] = None,
-        primitives_used: List[str] = None,
-        trigger_condition: Dict[str, Any] = None,
-        predicted_action: str = None,
-        action_sequence: List[str] = None
+        level_number: Optional[int] = None,
+        initial_evidence: Optional[List[str]] = None,
+        primitives_used: Optional[List[str]] = None,
+        trigger_condition: Optional[Dict[str, Any]] = None,
+        predicted_action: Optional[str] = None,
+        action_sequence: Optional[List[str]] = None
     ) -> Optional[str]:
         """
         Agent creates a new hypothesis based on observations.
@@ -13105,7 +13229,7 @@ class AgentHypothesisSystem:
         self,
         hypothesis_id: str,
         success: bool,
-        observation: str = None
+        observation: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Record the result of testing a hypothesis.
@@ -13197,8 +13321,8 @@ class AgentHypothesisSystem:
     def get_agent_hypotheses(
         self,
         agent_id: str,
-        game_type: str = None,
-        status: str = None
+        game_type: Optional[str] = None,
+        status: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get hypotheses created by an agent."""
         query = "SELECT * FROM agent_hypotheses WHERE agent_id = ?"
@@ -13419,7 +13543,7 @@ class AgentHypothesisSystem:
         self,
         agent_id: str,
         game_type: str,
-        level_number: int = None
+        level_number: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get an action recommendation based on agent's primitive-aware hypotheses.
@@ -13469,7 +13593,7 @@ class AgentHypothesisSystem:
     def get_hypotheses_by_primitives(
         self,
         primitives: List[str],
-        game_type: str = None,
+        game_type: Optional[str] = None,
         min_confidence: float = 0.3
     ) -> List[Dict[str, Any]]:
         """

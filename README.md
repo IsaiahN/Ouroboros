@@ -135,6 +135,23 @@ Agents integrate two knowledge sources for action selection:
 
 **Integration**: Weighted combination `action = w_A * stream_A + w_B * stream_B` where weights are learned from outcome feedback. Stream conflict triggers deliberative processing.
 
+### 3.1 IThread vs AgentSelfModel: Complementary Systems
+
+Two distinct subsystems handle different aspects of agent cognition:
+
+| Aspect | IThread (Consciousness Weaver) | AgentSelfModel (World Model) |
+|--------|-------------------------------|------------------------------|
+| **Core Question** | "Which knowledge should I trust?" | "What do I control in this world?" |
+| **Domain** | Knowledge/belief weighting | Object/action mapping |
+| **Scope** | Cognitive identity (wA/wB) | Physical control discovery |
+| **Persists Across** | Agent's entire life | Each game/level |
+| **Conflict Resolution** | Stream A vs Stream B | "Is this object me or environment?" |
+| **Output** | Weighted predictions/decisions | Control hypotheses, object bindings |
+
+**IThread** (`i_thread.py`): The persistent identity that weaves Stream A (private experience) and Stream B (collective wisdom) together moment-by-moment. Manages personality as learned stream weighting. When streams conflict, consciousness becomes vivid—the agent must deliberate.
+
+**AgentSelfModel** (`agent_self_model.py`): Discovers physical control through action-effect correlation: "When I press ACTION1 (up), Object X moves up → I control Object X." Builds a mini world model per level, distinguishing controlled objects from environment.
+
 ### 4. CODS: Centralized Pattern Validator
 
 CODS (Cognitive Operator Discovery System) is a population-level analyzer, not per-agent:
@@ -253,7 +270,8 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 | Module | Purpose |
 |--------|---------|
 | `core_gameplay.py` | Main gameplay loop and action execution |
-| `agent_self_model.py` | Two Streams consciousness, self-recognition, Stream A/B integration |
+| `i_thread.py` | **Consciousness Weaver** - Single source of truth for wA/wB stream weighting, identity persistence |
+| `agent_self_model.py` | **Physical World Model** - Object control discovery, action-effect correlation, developmental systems |
 | `cods_engine.py` | Centralized Operator Discovery System - pattern validation |
 | `network_intelligence_engine.py` | Network-level learning and emergence tracking |
 | `seed_primitives.py` | 110 innate cognitive primitives (attention, affordance, physics, metacognition) |
