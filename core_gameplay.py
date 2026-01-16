@@ -4027,6 +4027,21 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"wA/wB persistence failed (non-critical): {e}")
         
+        # ===================================================================
+        # I-THREAD: Consolidate memories after EVERY game (not just generation end)
+        # ===================================================================
+        # This ensures that if evolution is stopped early or agent is reassigned,
+        # the agent's learned stream weights and memories are preserved.
+        # Memory consolidation is like "sleep" - pruning unimportant memories
+        # while strengthening significant ones.
+        # ===================================================================
+        if mode_for_spine == 'LIVE' and agent_id and hasattr(self, 'i_thread') and self.i_thread:
+            try:
+                self.i_thread.consolidate_memories(agent_id, max_memories=100)
+                logger.debug(f"[I-THREAD] Consolidated memories for {agent_id[:8]} after game")
+            except Exception as e:
+                logger.debug(f"I-Thread memory consolidation failed (non-critical): {e}")
+        
         # TWO-STREAMS: Form semantic impressions for perceived objects based on game outcome
         # This builds personal object associations that persist across games
         if agent_id and hasattr(self, '_last_perceived_objects') and self._last_perceived_objects:
