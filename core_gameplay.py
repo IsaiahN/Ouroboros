@@ -3296,6 +3296,23 @@ class GameplayEngine:
                     is_frontier=is_new_level_frontier,
                 )
                 logger.debug(f"[CODS] Advanced to level {new_level} (frontier={is_new_level_frontier})")
+                
+                # Reload pseudo-buttons for the new level
+                try:
+                    pseudo_buttons = self.agent_self_model.get_all_pseudo_buttons(game_id, new_level, min_confidence=0.5)
+                    if pseudo_buttons:
+                        button_coords = set()
+                        for btn in pseudo_buttons:
+                            for y in range(btn['screen_y_range'][0], btn['screen_y_range'][1] + 1):
+                                for x in range(btn['screen_x_range'][0], btn['screen_x_range'][1] + 1):
+                                    button_coords.add((x, y))
+                        self.action_handler.set_known_pseudo_buttons(button_coords)
+                        logger.info(f"[PSEUDO-BUTTON] Loaded {len(pseudo_buttons)} buttons for {game_id} L{new_level}")
+                    else:
+                        # New level, no known buttons yet - clear previous
+                        self.action_handler.clear_pseudo_buttons()
+                except Exception as e:
+                    logger.debug(f"Failed to reload pseudo-buttons for level {new_level}: {e}")
             except Exception as e:
                 logger.debug(f"CODS level advance failed (non-critical): {e}")
         
@@ -4778,6 +4795,28 @@ class GameplayEngine:
         # to have empty initial_frame, breaking sequence replay matching.
         self.action_handler.last_frame = game_state.frame.copy() if game_state.frame else None
         self.action_handler.last_score = game_state.score  # Also initialize score
+        
+        # Load known pseudo-buttons for this game/level to exempt from oscillation detection
+        # Pseudo-buttons are legitimate interactive elements that SHOULD be clicked repeatedly
+        # NOTE: Loaded per-level because same coordinates may have different behavior across levels
+        try:
+            starting_level = int(game_state.score) + 1 if game_state.score is not None else 1
+            pseudo_buttons = self.agent_self_model.get_all_pseudo_buttons(game_id, starting_level, min_confidence=0.5)
+            if pseudo_buttons:
+                # Convert to coordinate set for fast lookup
+                button_coords = set()
+                for btn in pseudo_buttons:
+                    # Add all pixel coordinates in the button region
+                    for y in range(btn['screen_y_range'][0], btn['screen_y_range'][1] + 1):
+                        for x in range(btn['screen_x_range'][0], btn['screen_x_range'][1] + 1):
+                            button_coords.add((x, y))
+                self.action_handler.set_known_pseudo_buttons(button_coords)
+                logger.info(f"[PSEUDO-BUTTON] Loaded {len(pseudo_buttons)} known buttons ({len(button_coords)} coords) for {game_id} L{starting_level}")
+            else:
+                self.action_handler.clear_pseudo_buttons()
+        except Exception as e:
+            logger.debug(f"Failed to load pseudo-buttons (non-critical): {e}")
+            self.action_handler.clear_pseudo_buttons()
         
         # Trigger subgoal generation at game start (Tier 1: +30%)
         if self.subgoal_activator.should_generate_subgoals(

@@ -81,6 +81,10 @@ class ActionHandler:
         self.last_coordinates = None
         self.consecutive_similar_coordinate = 0
         
+        # Known pseudo-buttons for current game/level (exempt from oscillation detection)
+        # These are interactive game elements where repeated clicking is intentional
+        self._known_pseudo_buttons: set = set()
+        
         # Progressive spam tolerance based on game progress
         self.level_action_count = 0  # Actions taken in current level
         self.level_max_actions = 100  # Max actions per level (from config)
@@ -102,6 +106,40 @@ class ActionHandler:
         self.current_level = current_level
         self.network_max_level = network_max_level
         logger.debug(f"ActionHandler agent mode set to: {mode} (Level {current_level}, Network max: {network_max_level})")
+
+    def set_known_pseudo_buttons(self, buttons: set):
+        """
+        Set known pseudo-buttons for current game/level.
+        
+        Pseudo-buttons are interactive game elements (toggles, switches, etc.)
+        that are exempt from oscillation detection. Clicking the same button
+        repeatedly is often intentional gameplay.
+        
+        Args:
+            buttons: Set of (x, y) tuples representing known button coordinates
+        """
+        self._known_pseudo_buttons = buttons or set()
+        if buttons:
+            logger.debug(f"[PSEUDO-BUTTONS] Loaded {len(buttons)} known buttons: {list(buttons)[:5]}...")
+    
+    def register_pseudo_button(self, x: int, y: int, reason: str = ""):
+        """
+        Register a newly discovered pseudo-button during gameplay.
+        
+        Called when an agent discovers a coordinate that produces consistent,
+        meaningful effects (frame changes, score changes, etc.).
+        
+        Args:
+            x: X coordinate of button
+            y: Y coordinate of button
+            reason: Why this is considered a button (e.g., "toggle detected")
+        """
+        self._known_pseudo_buttons.add((x, y))
+        logger.debug(f"[PSEUDO-BUTTON] Registered ({x},{y}) as button: {reason}")
+    
+    def clear_pseudo_buttons(self):
+        """Clear known pseudo-buttons (call on level/game change)."""
+        self._known_pseudo_buttons.clear()
 
     def _validate_frame_dimensions(self, frame: List[List[int]], context: str = "") -> bool:
         """
@@ -255,7 +293,13 @@ class ActionHandler:
         distance = abs(x1 - x2) + abs(y1 - y2)  # Manhattan distance
         return distance <= threshold
     
-    def _check_coordinate_diversity(self, x: int, y: int) -> Dict[str, Any]:
+    def _check_coordinate_diversity(
+        self, 
+        x: int, 
+        y: int,
+        known_pseudo_buttons: Optional[set] = None,
+        frame_changing: bool = False
+    ) -> Dict[str, Any]:
         """Check if coordinate is diverse enough and detect spam/oscillation.
         
         Uses dynamic spam threshold based on level progress:
@@ -266,9 +310,18 @@ class ActionHandler:
         **PIONEER MODE EXEMPTION**: PIONEER agents are exempt from all oscillation
         and spam detection - they need maximum freedom to explore and discover.
         
+        **PSEUDO-BUTTON EXEMPTION**: Known pseudo-buttons (interactive game elements)
+        are exempt from oscillation detection. Clicking the same button repeatedly
+        is often intentional gameplay (toggling switches, pressing buttons, etc.).
+        Oscillation detection is for preventing unproductive random loops, not
+        for penalizing deliberate button interactions.
+        
         Args:
             x: X coordinate
             y: Y coordinate
+            known_pseudo_buttons: Set of (x,y) tuples representing known interactive elements.
+                                  These are exempt from oscillation detection.
+            frame_changing: Whether the frame is currently changing (productive clicks)
             
         Returns:
             Dict with diversity info: {
@@ -280,6 +333,19 @@ class ActionHandler:
             }
         """
         coord = (x, y)
+        
+        # PSEUDO-BUTTON EXEMPTION: Known interactive elements are never oscillation/spam
+        # Don't even track them in coordinate history - they're intentional interactions
+        if known_pseudo_buttons and coord in known_pseudo_buttons:
+            # Reset consecutive counter - button clicks break the "spam" pattern
+            self.consecutive_similar_coordinate = 0
+            return {
+                'is_diverse': True,
+                'spam_detected': False,
+                'oscillation_detected': False,
+                'reason': f'Known pseudo-button at ({x},{y}) - intentional interaction',
+                'threshold_used': 999
+            }
         
         # PIONEER EXEMPTION: Level-aware oscillation checks
         # Lenient on frontier (unbeaten levels), strict on known levels
@@ -310,7 +376,8 @@ class ActionHandler:
             'threshold_used': dynamic_threshold
         }
         
-        # Track coordinate history
+        # Track coordinate history (but filter out pseudo-buttons for oscillation check)
+        # We still track them for history, but they don't count toward oscillation patterns
         self.recent_coordinates.append(coord)
         if len(self.recent_coordinates) > self.max_coordinate_history:
             self.recent_coordinates.pop(0)
@@ -320,8 +387,13 @@ class ActionHandler:
         
         # Check if similar to last coordinate
         if self.last_coordinates:
+            # If last coordinate was a pseudo-button, don't count similarity as spam
+            last_was_button = known_pseudo_buttons and self.last_coordinates in known_pseudo_buttons
+            
             if self._is_coordinate_similar(coord, self.last_coordinates, threshold=3):
-                self.consecutive_similar_coordinate += 1
+                # Only increment spam counter if neither coord is a pseudo-button
+                if not last_was_button:
+                    self.consecutive_similar_coordinate += 1
                 
                 # Spam detection: clicking same spot repeatedly beyond threshold
                 if self.consecutive_similar_coordinate >= dynamic_threshold:
@@ -344,6 +416,17 @@ class ActionHandler:
             unique_coords = set(last_6)
             
             if len(unique_coords) <= 3:  # Only 2-3 unique coordinates in last 6 clicks
+                # PSEUDO-BUTTON EXEMPTION: If ALL oscillating coords are known buttons,
+                # this is intentional button interaction, not unproductive looping
+                if known_pseudo_buttons:
+                    non_button_coords = unique_coords - known_pseudo_buttons
+                    if not non_button_coords:
+                        # All oscillating coordinates are pseudo-buttons
+                        result['reason'] = f'Pseudo-button interaction: toggling {len(unique_coords)} known buttons'
+                        logger.info(f"[OK] Pseudo-button toggling detected - not oscillation: {unique_coords}")
+                        self.last_coordinates = coord
+                        return result
+                
                 # Count how many times each coordinate appears
                 from collections import Counter
                 coord_counts = Counter(last_6)
@@ -720,7 +803,8 @@ class ActionHandler:
                 x, y, reason = target
                 
                 # Check coordinate diversity (spam/oscillation detection)
-                diversity_check = self._check_coordinate_diversity(x, y)
+                # Pass known pseudo-buttons to exempt legitimate button interactions
+                diversity_check = self._check_coordinate_diversity(x, y, self._known_pseudo_buttons)
                 
                 # Log progress and threshold info
                 progress = (self.level_action_count / self.level_max_actions * 100) if self.level_max_actions > 0 else 0
@@ -810,7 +894,7 @@ class ActionHandler:
                 self.visual_analyzer.mark_coordinate_clicked(x, y)
                 
                 # Still check diversity even for exploratory
-                diversity_check = self._check_coordinate_diversity(x, y)
+                diversity_check = self._check_coordinate_diversity(x, y, self._known_pseudo_buttons)
                 
                 return x, y, "Exploratory search (no obvious targets)"
 
@@ -818,8 +902,8 @@ class ActionHandler:
             # Systematic exploration around frame center
             x, y = self.visual_analyzer.get_exploratory_coordinates(frame)
             
-            # Check diversity
-            diversity_check = self._check_coordinate_diversity(x, y)
+            # Check diversity - pass pseudo-buttons
+            diversity_check = self._check_coordinate_diversity(x, y, self._known_pseudo_buttons)
             if diversity_check['spam_detected'] or diversity_check['oscillation_detected']:
                 # Expand search radius
                 x, y = self.visual_analyzer.get_exploratory_coordinates(
