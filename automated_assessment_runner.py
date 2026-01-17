@@ -10,6 +10,7 @@ Automatically run assess_results.py after every evolution batch to track:
 - Level completion trends
 - Breakthrough detection
 - System health
+- Resonance detection (cross-role pattern convergence)
 
 PROBLEM SOLVED:
 Currently: Manual assessment required to track system performance
@@ -25,6 +26,9 @@ import sqlite3
 from datetime import datetime
 from typing import Dict, Any, List
 from pathlib import Path
+
+from database_interface import DatabaseInterface
+from resonance_detector import ResonanceDetector
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +89,10 @@ class AutomatedAssessmentRunner:
         
         # Metric 7: Subgoal planning effectiveness
         assessment['subgoal_planning'] = self._assess_subgoal_planning()
+        
+        # Metric 8: Resonance detection (cross-role pattern convergence)
+        # FIX 2026-01-16: Run resonance detection every generation to populate resonance_patterns table
+        assessment['resonance_detection'] = self._run_resonance_detection()
         
         # Generate recommendations
         assessment['recommendations'] = self._generate_recommendations(assessment)
@@ -381,6 +389,43 @@ class AutomatedAssessmentRunner:
                 'total_plans': 0,
                 'status': 'no_data',
                 'recommendation': 'Subgoal tables not available'
+            }
+    
+    def _run_resonance_detection(self) -> Dict[str, Any]:
+        """
+        Run resonance detection to find cross-role pattern convergence.
+        
+        FIX 2026-01-16: Added to populate resonance_patterns table which was empty.
+        Resonance = when agents with different roles independently discover same patterns.
+        This is strong evidence of objective truth (not bias-driven).
+        """
+        try:
+            db = DatabaseInterface(self.db_path)
+            detector = ResonanceDetector(db)
+            
+            # Run detection - this finds patterns and stores them
+            resonant_patterns = detector.detect_resonance()
+            
+            # Get summary stats
+            summary = detector.get_resonance_summary()
+            
+            return {
+                'patterns_detected_this_run': len(resonant_patterns),
+                'total_resonant_patterns': summary.get('total_resonant_patterns', 0),
+                'average_resonance_score': summary.get('average_resonance_score', 0.0),
+                'max_resonance_score': summary.get('max_resonance_score', 0.0),
+                'status': 'active' if len(resonant_patterns) > 0 else 'no_patterns',
+                'recommendation': 'Resonance detection working' if resonant_patterns else 'Need more diverse role discoveries'
+            }
+            
+        except Exception as e:
+            logger.error(f"[RESONANCE] Detection failed: {e}")
+            return {
+                'patterns_detected_this_run': 0,
+                'total_resonant_patterns': 0,
+                'status': 'error',
+                'error': str(e),
+                'recommendation': 'Fix resonance detector errors'
             }
     
     def _generate_recommendations(self, assessment: Dict[str, Any]) -> List[str]:

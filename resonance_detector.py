@@ -229,19 +229,20 @@ class ResonanceDetector:
         try:
             # Query to find patterns with role diversity
             # Joins inferred_beliefs with winning_sequences and agents
+            # FIX 2026-01-16: Use ws.agent_id instead of ws.discovered_by (column doesn't exist)
             query = """
                 SELECT 
                     ib.working_theory_required,
                     ib.self_model_required,
                     ib.inferences,
                     COUNT(DISTINCT a.preferred_role) as role_diversity,
-                    COUNT(DISTINCT ws.discovered_by) as independent_discoverers,
+                    COUNT(DISTINCT ws.agent_id) as independent_discoverers,
                     GROUP_CONCAT(DISTINCT a.preferred_role) as roles_found,
                     GROUP_CONCAT(DISTINCT SUBSTR(ws.game_id, 1, 4)) as game_types,
                     GROUP_CONCAT(DISTINCT ib.sequence_id) as sequence_ids
                 FROM inferred_beliefs ib
                 JOIN winning_sequences ws ON ib.sequence_id = ws.sequence_id
-                JOIN agents a ON ws.discovered_by = a.agent_id
+                JOIN agents a ON ws.agent_id = a.agent_id
                 WHERE ib.working_theory_required NOT LIKE 'NULL%'
                   AND ib.working_theory_required != ''
                 GROUP BY ib.working_theory_required, ib.self_model_required

@@ -2709,10 +2709,11 @@ class GameplayEngine:
                         # ============================================================
                         # I-THREAD LEARNING: Update wA/wB based on action outcome
                         # ============================================================
-                        # This closes the learning loop: when streams conflict and
-                        # we chose one, learn from the outcome to update weights.
+                        # FIX 2026-01-16: Always log I-Thread learning, not just on conflicts.
+                        # The original condition (only on _stream_conflict=True) was too strict
+                        # and resulted in empty i_thread_history table.
                         # ============================================================
-                        if hasattr(self, 'i_thread') and self.i_thread and getattr(self, '_stream_conflict', False):
+                        if hasattr(self, 'i_thread') and self.i_thread:
                             try:
                                 agent_id = self.game_config.get('agent_id')
                                 # Determine which stream we followed
@@ -9792,6 +9793,44 @@ class GameplayEngine:
             logger.info(f"[FIX5-RECOVERY] Entering recovery mode: stuck_conf={stuck_confidence:.2f}, primitive_stuck={is_stuck_by_primitive}")
             
             # ===================================================================
+            # FIX 2026-01-16: QUERY STREAM B (Network Wisdom) WHEN STUCK
+            # ===================================================================
+            # Theory: When stuck, agent should consult collective network wisdom.
+            # This is the "ask the network for help" pathway that was missing.
+            # Stream B = network_object_control_hypotheses with high reliability.
+            # ===================================================================
+            stream_b_guidance = None
+            try:
+                game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                if game_id and hasattr(self.agent_self_model, 'get_network_control_hypotheses'):
+                    game_type = game_id.split('-')[0] if '-' in str(game_id) else str(game_id)
+                    network_hypotheses = self.agent_self_model.get_network_control_hypotheses(
+                        game_type=game_type,
+                        min_reliability=0.2,  # Lower threshold when stuck
+                        limit=10
+                    ) or []
+                    
+                    if network_hypotheses:
+                        # Find hypothesis with best score for this situation
+                        best_hyp = max(network_hypotheses, key=lambda h: h.get('best_score_achieved', 0) or 0)
+                        if best_hyp.get('suggested_actions'):
+                            suggested = best_hyp['suggested_actions']
+                            if isinstance(suggested, str):
+                                # Parse "ACTION1,ACTION2" format
+                                try:
+                                    first_action = suggested.split(',')[0].strip()
+                                    if first_action.startswith('ACTION'):
+                                        stream_b_guidance = int(first_action.replace('ACTION', ''))
+                                except (ValueError, IndexError):
+                                    pass
+                            elif isinstance(suggested, list) and suggested:
+                                stream_b_guidance = suggested[0] if isinstance(suggested[0], int) else None
+                        
+                        logger.info(f"[STREAM-B-RECOVERY] Queried network: {len(network_hypotheses)} hypotheses, guidance={stream_b_guidance}")
+            except Exception as e:
+                logger.debug(f"[STREAM-B-RECOVERY] Network query failed: {e}")
+            
+            # ===================================================================
             # FIX 2025-01-10: CLEAR FAILED TRACKING WHEN ENTERING RECOVERY
             # ===================================================================
             # Problem: Agent keeps retrying same controlled objects that don't work.
@@ -9851,9 +9890,13 @@ class GameplayEngine:
                 if not untried_actions:
                     untried_actions = available_actions
             
-            # PREFER imagination-guided action if available, else random untried
+            # PREFER: Stream B guidance > imagination > untried exploration > random
             import random
-            if imagination_guided_action is not None:
+            if stream_b_guidance is not None and stream_b_guidance in available_actions:
+                recovery_action = stream_b_guidance
+                reasoning_source = "stream_b_network_guidance"
+                logger.info(f"[STREAM-B-RECOVERY] Using network hypothesis: ACTION{stream_b_guidance}")
+            elif imagination_guided_action is not None:
                 recovery_action = imagination_guided_action
                 reasoning_source = "imagination-guided"
             elif untried_actions:

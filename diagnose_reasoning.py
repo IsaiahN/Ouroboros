@@ -77,15 +77,16 @@ def diagnose():
     try:
         from seed_primitives import get_seed_primitives
         registry = get_seed_primitives()
-        primitives = registry.list_primitives() if hasattr(registry, 'list_primitives') else []
+        primitives = registry.list_all() if hasattr(registry, 'list_all') else []
         print(f"  Seed primitives loaded: {len(primitives) if primitives else 'Unknown'}")
         print(f"  Registry available: YES")
         
-        # Check if primitives are being called
+        # Check categories by getting actual primitive objects
         categories = set()
-        for p in (primitives or []):
-            if hasattr(p, 'category'):
-                categories.add(str(p.category))
+        for name in (primitives or []):
+            prim = registry.get(name) if hasattr(registry, 'get') else None
+            if prim and hasattr(prim, 'category'):
+                categories.add(str(prim.category))
         print(f"  Categories available: {len(categories)}")
     except Exception as e:
         print(f"  [ERROR] Primitive system not loading: {e}")
