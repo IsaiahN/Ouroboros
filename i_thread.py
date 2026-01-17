@@ -36,11 +36,181 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from database_interface import DatabaseInterface
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# DEATH TYPE CLASSIFICATION
+# =============================================================================
+# Five types of death - each has different causes and meanings.
+# Used to classify WHY an agent died for post-mortem analysis and learning.
+# =============================================================================
+
+class DeathType(Enum):
+    """
+    The five types of death an agent can experience.
+    
+    Each type has different causes and implications for the network:
+    - NATURAL_AGE: Graceful end, completed lifecycle
+    - PERFORMANCE_CULL: Fell behind the horde, culled for resources
+    - PRESTIGE_DECAY: Social irrelevance, no one values contributions
+    - VITALITY_STAGNATION: Lost ability to learn, became static
+    - DISGRACE: Died without contributing, wasted existence
+    """
+    NATURAL_AGE = "natural_age"           # Aged out, time is done
+    PERFORMANCE_CULL = "performance_cull"  # Culled for falling behind
+    PRESTIGE_DECAY = "prestige_decay"      # Social irrelevance
+    VITALITY_STAGNATION = "vitality_stagnation"  # Can't learn anymore
+    DISGRACE = "disgrace"                  # Died without contributing
+
+
+# =============================================================================
+# DEATH-TRIGGERED PERSONAS
+# =============================================================================
+# When death approaches (cull_distance < 0.2), agents spawn special personas
+# that focus their remaining time on role-appropriate final contributions.
+# =============================================================================
+
+DEATH_PERSONAS = {
+    # Each role has a death persona with specific behavioral modifications
+    
+    'pioneer': {
+        'persona_name': 'Legacy Hunter',
+        'activation_threshold': 0.2,  # cull_distance below this
+        'behavioral_shift': 'maximum_novelty',
+        'internal_voice': "What novel discovery can I leave behind?",
+        'action_bias': {
+            'exploration_weight': 1.5,    # 50% more exploration
+            'risk_tolerance': 0.95,       # Almost maximum risk
+            'network_queries': 0.3,       # Reduced - trust self more
+        },
+        'goal': "Find one undiscovered pattern before death",
+        'good_death': "Died discovering something novel",
+        'bad_death': "Died retreading known paths",
+    },
+    
+    'optimizer': {
+        'persona_name': 'Final Polisher',
+        'activation_threshold': 0.2,
+        'behavioral_shift': 'maximum_efficiency',
+        'internal_voice': "Can I refine one more sequence before I go?",
+        'action_bias': {
+            'exploration_weight': 0.3,    # Minimal exploration
+            'risk_tolerance': 0.2,        # Very conservative
+            'network_queries': 0.9,       # Heavy network use
+        },
+        'goal': "Polish one sequence to perfection before death",
+        'good_death': "Died with maximum efficiency achieved",
+        'bad_death': "Died wasting actions on random guessing",
+    },
+    
+    'generalist': {
+        'persona_name': 'Bridge Builder',
+        'activation_threshold': 0.2,
+        'behavioral_shift': 'maximum_connection',
+        'internal_voice': "What domains can I connect before I go?",
+        'action_bias': {
+            'exploration_weight': 0.8,    # Moderate exploration
+            'risk_tolerance': 0.5,        # Balanced risk
+            'network_queries': 0.7,       # Cross-domain queries
+        },
+        'goal': "Find one cross-domain insight before death",
+        'good_death': "Died bridging domains",
+        'bad_death': "Died becoming too specialized",
+    },
+    
+    'exploiter': {
+        'persona_name': 'Paradigm Breaker',
+        'activation_threshold': 0.2,
+        'behavioral_shift': 'maximum_disruption',
+        'internal_voice': "What edge case can I expose before I go?",
+        'action_bias': {
+            'exploration_weight': 1.8,    # Maximum exploration
+            'risk_tolerance': 0.99,       # Near-maximum risk
+            'network_queries': 0.2,       # Ignore network - find flaws
+        },
+        'goal': "Find one paradigm-breaking edge case before death",
+        'good_death': "Died finding edge cases",
+        'bad_death': "Died conforming to network",
+    }
+}
+
+
+@dataclass
+class DeathPersona:
+    """
+    A death-triggered persona that activates when an agent nears death.
+    
+    This is NOT the agent's normal persona - it's a special mode that
+    emerges when cull_distance drops below activation_threshold.
+    
+    The persona focuses the agent's remaining actions on role-appropriate
+    final contributions.
+    """
+    persona_name: str
+    role: str
+    is_active: bool = False
+    activated_at: Optional[datetime] = None
+    cull_distance_at_activation: float = 0.0
+    
+    # Behavioral modifications
+    internal_voice: str = ""
+    goal: str = ""
+    exploration_weight: float = 1.0
+    risk_tolerance: float = 0.5
+    network_query_weight: float = 0.5
+    
+    # Outcome tracking
+    actions_taken_as_persona: int = 0
+    contributions_made: int = 0  # Discoveries, sequences, etc.
+    final_reflection: Optional[str] = None
+    
+    def activate(self, cull_distance: float) -> None:
+        """Activate the death persona."""
+        self.is_active = True
+        self.activated_at = datetime.now()
+        self.cull_distance_at_activation = cull_distance
+    
+    def deactivate(self, reflection: str = None) -> None:
+        """Deactivate persona (either death occurred or cull_distance improved)."""
+        self.is_active = False
+        if reflection:
+            self.final_reflection = reflection
+    
+    def record_contribution(self) -> None:
+        """Record that the persona contributed something."""
+        self.contributions_made += 1
+    
+    def record_action(self) -> None:
+        """Record that an action was taken while persona active."""
+        self.actions_taken_as_persona += 1
+    
+    def get_action_bias(self) -> Dict[str, float]:
+        """Get the action biases for this death persona."""
+        return {
+            'exploration_weight': self.exploration_weight,
+            'risk_tolerance': self.risk_tolerance,
+            'network_query_weight': self.network_query_weight,
+        }
+    
+    @classmethod
+    def from_role(cls, role: str) -> 'DeathPersona':
+        """Create a death persona for a specific role."""
+        config = DEATH_PERSONAS.get(role, DEATH_PERSONAS['generalist'])
+        return cls(
+            persona_name=config['persona_name'],
+            role=role,
+            internal_voice=config['internal_voice'],
+            goal=config['goal'],
+            exploration_weight=config['action_bias']['exploration_weight'],
+            risk_tolerance=config['action_bias']['risk_tolerance'],
+            network_query_weight=config['action_bias']['network_queries'],
+        )
 
 
 # =============================================================================
@@ -344,6 +514,33 @@ class MortalityState:
     core_beliefs: List[str] = field(default_factory=list)  # Personal beliefs about existence
     personal_notes: List[str] = field(default_factory=list)  # Notes to self for recall
     
+    # ==========================================================================
+    # PRESTIGE DECAY TRACKING (Social Relevance Death)
+    # ==========================================================================
+    # Track whether agent's contributions are still valued.
+    # If packages haven't been queried recently, agent is becoming irrelevant.
+    # ==========================================================================
+    times_packages_queried_recent: int = 0  # How often others query my packages (last N gens)
+    social_relevance_score: float = 1.0  # 0.0 = irrelevant, 1.0 = highly valued
+    prestige_decay_rate: float = 0.05  # How fast prestige decays without activity
+    generations_since_contribution: int = 0  # Gens since last meaningful contribution
+    
+    # ==========================================================================
+    # DEATH TYPE TRACKING (Why Did I Die?)
+    # ==========================================================================
+    # When death occurs, classify why for post-mortem analysis
+    # ==========================================================================
+    predicted_death_type: Optional[str] = None  # Current prediction of how I'll die
+    learning_rate_effective: float = 0.1  # If < 0.01, vitality death imminent
+    
+    # ==========================================================================
+    # DEATH PERSONA STATE
+    # ==========================================================================
+    # When cull_distance < 0.2, a death persona activates
+    # ==========================================================================
+    death_persona_active: bool = False
+    death_persona: Optional['DeathPersona'] = None
+    
     def apply_death_philosophy(self, role: str) -> None:
         """Apply role-specific death philosophy."""
         self.role = role
@@ -527,6 +724,167 @@ class MortalityState:
         """Record potential last words when death approaches."""
         self.last_words = thought
         self.reflection_count += 1
+    
+    # ==========================================================================
+    # DEATH TYPE PREDICTION
+    # ==========================================================================
+    
+    def predict_death_type(self) -> DeathType:
+        """
+        Predict how this agent will likely die based on current state.
+        
+        Death Types:
+        - NATURAL_AGE: High generations, high contributions, graceful end
+        - PERFORMANCE_CULL: Low fitness percentile, falling behind
+        - PRESTIGE_DECAY: Low social relevance, packages not queried
+        - VITALITY_STAGNATION: Low learning rate, can't adapt anymore
+        - DISGRACE: Low contributions, no legacy, wasted existence
+        
+        Returns:
+            Predicted DeathType
+        """
+        # Check for vitality stagnation (can't learn anymore)
+        if self.learning_rate_effective < 0.01:
+            self.predicted_death_type = DeathType.VITALITY_STAGNATION.value
+            return DeathType.VITALITY_STAGNATION
+        
+        # Check for performance cull (falling behind the horde)
+        if self.fitness_percentile < 0.1 and self.cull_distance < 0.3:
+            self.predicted_death_type = DeathType.PERFORMANCE_CULL.value
+            return DeathType.PERFORMANCE_CULL
+        
+        # Check for prestige decay (socially irrelevant)
+        if self.social_relevance_score < 0.2 and self.times_packages_queried_recent == 0:
+            self.predicted_death_type = DeathType.PRESTIGE_DECAY.value
+            return DeathType.PRESTIGE_DECAY
+        
+        # Check for disgrace (no contributions, low legacy)
+        if self.legacy_score < 1.0 and self.discoveries_made == 0:
+            if self.cull_distance < 0.3:
+                self.predicted_death_type = DeathType.DISGRACE.value
+                return DeathType.DISGRACE
+        
+        # Default: Natural age (graceful end)
+        self.predicted_death_type = DeathType.NATURAL_AGE.value
+        return DeathType.NATURAL_AGE
+    
+    def update_social_relevance(self, times_queried: int, generations_active: int) -> None:
+        """
+        Update social relevance score based on how often packages are queried.
+        
+        Args:
+            times_queried: How many times packages were queried recently
+            generations_active: Total generations agent has been active
+        """
+        self.times_packages_queried_recent = times_queried
+        
+        # Social relevance decays if contributions aren't being used
+        if times_queried == 0:
+            self.social_relevance_score = max(
+                0.0, 
+                self.social_relevance_score - self.prestige_decay_rate
+            )
+            self.generations_since_contribution += 1
+        else:
+            # Relevance increases with queries
+            boost = min(0.2, times_queried * 0.05)
+            self.social_relevance_score = min(1.0, self.social_relevance_score + boost)
+            self.generations_since_contribution = 0
+    
+    def update_learning_rate(self, new_learning_rate: float) -> None:
+        """
+        Update effective learning rate (for vitality death prediction).
+        
+        If learning rate drops below 0.01, agent is stagnating.
+        """
+        self.learning_rate_effective = new_learning_rate
+    
+    # ==========================================================================
+    # DEATH PERSONA MANAGEMENT
+    # ==========================================================================
+    
+    def check_death_persona_activation(self) -> Optional['DeathPersona']:
+        """
+        Check if death persona should activate based on cull_distance.
+        
+        Death persona activates when cull_distance < 0.2, giving the agent
+        a special final mode focused on role-appropriate contributions.
+        
+        Returns:
+            DeathPersona if activated, None if not
+        """
+        activation_threshold = DEATH_PERSONAS.get(
+            self.role, DEATH_PERSONAS['generalist']
+        )['activation_threshold']
+        
+        # Check if we should activate
+        if self.cull_distance < activation_threshold and not self.death_persona_active:
+            # Activate death persona
+            self.death_persona = DeathPersona.from_role(self.role)
+            self.death_persona.activate(self.cull_distance)
+            self.death_persona_active = True
+            
+            logger.info(
+                f"[MORTALITY] Death persona '{self.death_persona.persona_name}' "
+                f"activated for {self.agent_id} (cull_distance={self.cull_distance:.2f})"
+            )
+            
+            return self.death_persona
+        
+        # Check if we should deactivate (cull_distance improved)
+        elif self.cull_distance >= activation_threshold + 0.1 and self.death_persona_active:
+            # Safety margin of 0.1 to prevent oscillation
+            if self.death_persona:
+                self.death_persona.deactivate(
+                    f"Survived near-death, cull_distance improved to {self.cull_distance:.2f}"
+                )
+            self.death_persona_active = False
+            
+            logger.info(
+                f"[MORTALITY] Death persona deactivated for {self.agent_id} "
+                f"(survived, cull_distance={self.cull_distance:.2f})"
+            )
+        
+        return self.death_persona if self.death_persona_active else None
+    
+    def get_death_persona_bias(self) -> Optional[Dict[str, float]]:
+        """
+        Get action biases if death persona is active.
+        
+        Returns:
+            Dict of action biases, or None if no death persona active
+        """
+        if self.death_persona_active and self.death_persona:
+            self.death_persona.record_action()
+            return self.death_persona.get_action_bias()
+        return None
+    
+    def record_death_persona_contribution(self) -> None:
+        """Record that the death persona contributed something meaningful."""
+        if self.death_persona_active and self.death_persona:
+            self.death_persona.record_contribution()
+    
+    def get_death_summary(self) -> Dict[str, Any]:
+        """
+        Get a summary of the agent's mortality state for logging/analysis.
+        
+        Returns:
+            Dict with mortality summary
+        """
+        return {
+            'agent_id': self.agent_id,
+            'role': self.role,
+            'vitality': self.vitality,
+            'cull_distance': self.cull_distance,
+            'fitness_percentile': self.fitness_percentile,
+            'legacy_score': self.legacy_score,
+            'social_relevance': self.social_relevance_score,
+            'learning_rate': self.learning_rate_effective,
+            'predicted_death_type': self.predicted_death_type,
+            'death_persona_active': self.death_persona_active,
+            'death_persona_name': self.death_persona.persona_name if self.death_persona else None,
+            'death_persona_contributions': self.death_persona.contributions_made if self.death_persona else 0,
+        }
 
 
 # =============================================================================
@@ -622,6 +980,7 @@ class DeliberationResult:
     examined_past_attempts: int
     examined_network_hypotheses: int
     examined_primitives: int
+    examined_episodic_memories: int  # Thoughts from previous games
     stream_a_consulted: bool
     stream_b_consulted: bool
     
@@ -738,6 +1097,7 @@ class ReasoningLog:
             lines.append(f"   Examined:")
             lines.append(f"   - Past attempts: {d.examined_past_attempts}")
             lines.append(f"   - Network hypotheses: {d.examined_network_hypotheses}")
+            lines.append(f"   - Episodic memories: {d.examined_episodic_memories}")
             lines.append(f"   - Available primitives: {d.examined_primitives}")
             lines.append("")
             
@@ -1100,6 +1460,7 @@ class DeliberationEngine:
         examined_past = 0
         examined_hypotheses = 0
         examined_primitives = 0
+        examined_memories = 0
         stream_a_consulted = False
         stream_b_consulted = False
         stream_conflict = False
@@ -1110,6 +1471,32 @@ class DeliberationEngine:
         
         # Step 1: Acknowledge gut response
         reasoning_steps.append(f"Gut suggests {gut_result.action} ({gut_result.basis})")
+        
+        # Step 1.5: Examine episodic memories (thoughts from previous games)
+        # This is the "reexamine their thoughts of previous games" requirement
+        try:
+            memories = self._query_episodic_memories(agent_id, game_type)
+            examined_memories = len(memories)
+            
+            if memories:
+                # Look for relevant breakthroughs or lessons
+                for memory in memories[:5]:  # Top 5 most relevant
+                    if memory.get('episode_type') == 'breakthrough':
+                        reasoning_steps.append(
+                            f"Memory (breakthrough): \"{memory.get('summary', '')[:60]}...\""
+                        )
+                    elif memory.get('episode_type') == 'frustration':
+                        reasoning_steps.append(
+                            f"Memory (frustration): \"{memory.get('summary', '')[:60]}...\""
+                        )
+                    
+                    # Check if memory has a belief that might help
+                    if memory.get('belief_formed'):
+                        reasoning_steps.append(
+                            f"Belief from memory: \"{memory.get('belief_formed')}\""
+                        )
+        except Exception as e:
+            pass  # Episodic memories are optional enhancement
         
         # Step 2: Consult Stream A (private experience)
         stream_a_consulted = True
@@ -1256,6 +1643,8 @@ class DeliberationEngine:
             base_confidence += 0.1
         if not stream_conflict:
             base_confidence += 0.1
+        if examined_memories > 0:
+            base_confidence += 0.05  # Memories add small confidence boost
         
         final_confidence = min(0.95, base_confidence)
         
@@ -1270,6 +1659,7 @@ class DeliberationEngine:
             examined_past_attempts=examined_past,
             examined_network_hypotheses=examined_hypotheses,
             examined_primitives=examined_primitives,
+            examined_episodic_memories=examined_memories,
             stream_a_consulted=stream_a_consulted,
             stream_b_consulted=stream_b_consulted,
             reasoning_steps=reasoning_steps,
@@ -1282,6 +1672,30 @@ class DeliberationEngine:
             gut_action=gut_result.action if changed_from_gut else None,
             change_reason=change_reason
         )
+    
+    def _query_episodic_memories(
+        self,
+        agent_id: str,
+        game_type: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Query episodic memories (thoughts from previous games).
+        
+        This implements "reexamine their thoughts of previous games" requirement.
+        Returns breakthroughs, frustrations, and lessons learned.
+        """
+        try:
+            results = self.db.execute_query("""
+                SELECT memory_id, episode_type, summary, belief_formed,
+                       rule_discovered, emotional_valence, significance
+                FROM i_thread_episodic_memories
+                WHERE agent_id = ? AND game_type = ?
+                ORDER BY significance DESC, created_at DESC
+                LIMIT 10
+            """, (agent_id, game_type))
+            return [dict(r) for r in results] if results else []
+        except Exception:
+            return []
     
     def _query_past_attempts(
         self, 
@@ -1526,10 +1940,13 @@ class DeliberationEngine:
                     deliberation_performed, deliberation_action, deliberation_confidence,
                     deliberation_time_seconds, deliberation_reasoning_steps,
                     deliberation_changed_from_gut, deliberation_change_reason,
-                    deliberation_skipped_reason, stream_conflict_detected,
-                    stream_conflict_resolution, missing_primitive_signal,
+                    deliberation_skipped_reason,
+                    examined_past_attempts, examined_network_hypotheses,
+                    examined_episodic_memories, examined_primitives,
+                    stream_conflict_detected, stream_conflict_resolution,
+                    missing_primitive_signal,
                     final_action, final_confidence, decision_source, total_decision_time_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 log.log_id, log.agent_id, log.game_id, log.game_type, log.level,
                 log.action_number, 1 if log.is_frontier else 0, log.network_traction,
@@ -1546,6 +1963,10 @@ class DeliberationEngine:
                 1 if log.deliberation and log.deliberation.changed_from_gut else 0,
                 log.deliberation.change_reason if log.deliberation else None,
                 log.deliberation_skipped_reason,
+                log.deliberation.examined_past_attempts if log.deliberation else 0,
+                log.deliberation.examined_network_hypotheses if log.deliberation else 0,
+                log.deliberation.examined_episodic_memories if log.deliberation else 0,
+                log.deliberation.examined_primitives if log.deliberation else 0,
                 1 if log.deliberation and log.deliberation.stream_conflict_detected else 0,
                 log.deliberation.stream_conflict_resolution if log.deliberation else None,
                 log.deliberation.missing_primitive_signal if log.deliberation else None,
