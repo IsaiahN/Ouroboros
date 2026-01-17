@@ -1835,7 +1835,52 @@ class AgentSelfModel:
             if obj_id not in controlled_objects:
                 controlled_objects.append(obj_id)
         
-        return controlled_objects if controlled_objects else None
+        # FIX 2025-01-17: Deduplicate by normalizing object IDs to base color
+        # Problem: Same object appears as "obj_9", "moveable_color_9", "color_9", "toggleable_color_9"
+        # Solution: Track unique colors and rebuild with proper prefixes
+        return self._deduplicate_controlled_objects(controlled_objects) if controlled_objects else None
+    
+    def _deduplicate_controlled_objects(self, objects: List[str]) -> List[str]:
+        """
+        Deduplicate controlled objects by normalizing to unique colors.
+        
+        Problem: Same object appears with multiple labels:
+        - obj_9, moveable_color_9, color_9, toggleable_color_9 are all the same color 9 object
+        
+        Solution: Extract base color, track toggleable vs moveable, return deduplicated list.
+        """
+        import re
+        
+        # Track unique colors and their properties
+        color_properties = {}  # color -> {'toggleable': bool, 'moveable': bool}
+        
+        for obj in objects:
+            # Extract color number from various formats
+            # Handles: obj_9, color_9, moveable_color_9, toggleable_color_9, color_9_at_x_y
+            match = re.search(r'(?:obj_|color_|moveable_color_|toggleable_color_)(\d+)', obj)
+            if match:
+                color = int(match.group(1))
+                if color not in color_properties:
+                    color_properties[color] = {'toggleable': False, 'moveable': False}
+                
+                # Track property type
+                if 'toggleable' in obj:
+                    color_properties[color]['toggleable'] = True
+                elif 'moveable' in obj:
+                    color_properties[color]['moveable'] = True
+        
+        # Build deduplicated list with proper prefixes
+        deduplicated = []
+        for color, props in sorted(color_properties.items()):
+            if props['toggleable']:
+                deduplicated.append(f"toggleable_color_{color}")
+            if props['moveable']:
+                deduplicated.append(f"moveable_color_{color}")
+            if not props['toggleable'] and not props['moveable']:
+                # Unknown property - keep as generic
+                deduplicated.append(f"color_{color}")
+        
+        return deduplicated
 
     def _get_all_network_control_hypotheses(
         self,
@@ -2667,19 +2712,16 @@ class AgentSelfModel:
         if not hasattr(self, '_current_discovery_plan') or not self._current_discovery_plan:
             self._current_discovery_plan = self.generate_object_discovery_plan(frame, game_type, level)
             self._discovery_plan_index = 0
-            # Calculate required actions: each object needs 1 click + maybe 1 movement test
-            self._discovery_action_limit = min(
-                max(40, len(self._current_discovery_plan) * 2),  # At least 40 or 2x plan length
-                100  # Hard cap at 100 actions for discovery
-            )
             logger.info(
-                f"[DISCOVERY] Plan has {len(self._current_discovery_plan)} steps, "
-                f"limit set to {self._discovery_action_limit} actions"
+                f"[DISCOVERY] Generated plan with {len(self._current_discovery_plan)} steps "
+                f"(no action limit - will run until all objects tested)"
             )
         
-        # Check if discovery should end
-        if actions_taken > getattr(self, '_discovery_action_limit', 40):
-            return None
+        # FIX 2025-01-17: REMOVED action limit for discovery
+        # Discovery must run until ALL objects are tested, regardless of action count.
+        # The agent needs to know what every object does to understand the puzzle.
+        # Previous 40-100 action limit was preventing complete world model building.
+        # Discovery completes when plan is exhausted, not when action count reached.
         
         # Get next action from plan
         if self._discovery_plan_index >= len(self._current_discovery_plan):
@@ -3062,6 +3104,20 @@ class AgentSelfModel:
                     f"[NETWORK] Click effect validated: {effect_type} at ({click_x},{click_y}) "
                     f"in {game_type} L{level} ({attempts} observations)"
                 )
+                
+                # FIX 2025-01-17: Trigger symmetry experiment for validated click effects
+                # When one object of color_X is toggleable, test ALL color_X objects
+                # This helps agent understand "all red buttons are toggleable" patterns
+                if effect_type in ('toggle', 'appear', 'disappear', 'remote'):
+                    try:
+                        self._trigger_symmetry_experiment(
+                            game_type, level, color_before,
+                            property_type='toggleable',
+                            action='ACTION6',
+                            direction=effect_type
+                        )
+                    except Exception as e:
+                        logger.debug(f"Symmetry experiment trigger for click effect failed: {e}")
         else:
             # Create new hypothesis
             control_pattern = {
@@ -3073,14 +3129,19 @@ class AgentSelfModel:
                 'action': 'ACTION6'
             }
             
+            # Build action_response_map for click effects
+            action_response_map = {
+                'ACTION6': [effect_type]  # Click triggers this effect type
+            }
+            
             self.db.execute_query("""
                 INSERT INTO network_object_control_hypotheses
                 (hypothesis_id, game_type, level_number, controlled_color,
-                 control_pattern, validation_attempts, reliability_score,
+                 control_pattern, action_response_map, validation_attempts, reliability_score,
                  discovered_by_agent, discovered_generation, is_active)
-                VALUES (?, ?, ?, ?, ?, 1, 0.3, ?, ?, 1)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0.3, ?, ?, 1)
             """, (hypothesis_id, game_type, level, color_before,
-                  json.dumps(control_pattern), agent_id, generation))
+                  json.dumps(control_pattern), json.dumps(action_response_map), agent_id, generation))
             
             logger.debug(
                 f"[NETWORK] New click effect hypothesis: {effect_type} at ({click_x},{click_y})"
@@ -13662,6 +13723,286 @@ class AgentHypothesisSystem:
                 unique.append(m)
         
         return sorted(unique, key=lambda x: x['confidence'], reverse=True)
+
+    # ========================================================================
+    # MORTALITY AWARENESS: Legacy & Self-Reflection
+    # ========================================================================
+    # From MetaContextual Awareness Theory:
+    # "What have I contributed that will survive me?"
+    #
+    # Agents must be aware of their legacy - what they leave behind.
+    # This creates pressure to contribute meaningful knowledge to the network
+    # rather than simply existing.
+    # ========================================================================
+    
+    def compute_legacy_score(self, agent_id: str) -> Dict[str, Any]:
+        """
+        Compute an agent's legacy score - what they will leave behind.
+        
+        Legacy components:
+        - Sequences contributed (most valuable - saved others from rediscovering)
+        - Patterns discovered (transferable knowledge)
+        - Hypotheses validated (quality control contribution)
+        - Games won (proof of capability)
+        - Agents influenced (viral spread of knowledge)
+        
+        Args:
+            agent_id: Agent identifier
+            
+        Returns:
+            Dict with legacy breakdown and total score
+        """
+        legacy = {
+            'sequences': 0,
+            'patterns': 0,
+            'hypotheses': 0,
+            'wins': 0,
+            'influenced': 0,
+            'total': 0.0,
+            'rank': 'unknown',
+            'epitaph': ''
+        }
+        
+        try:
+            # Get agent's contribution data
+            result = self.db.execute_query("""
+                SELECT 
+                    COALESCE(sequence_discovery_count, 0) as sequences,
+                    COALESCE(pattern_discovery_count, 0) as patterns,
+                    COALESCE(validation_reputation, 0) as validation_rep,
+                    COALESCE(total_games_won, 0) as wins,
+                    COALESCE(discovery_prestige, 0) as prestige
+                FROM agents WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if result:
+                data = result[0]
+                legacy['sequences'] = data['sequences']
+                legacy['patterns'] = data['patterns']
+                legacy['wins'] = data['wins']
+                
+                # Get hypotheses validated by this agent
+                hyp_result = self.db.execute_query("""
+                    SELECT COUNT(*) as count FROM network_object_control_hypotheses
+                    WHERE discovered_by_agent = ? AND validation_attempts >= 3
+                """, (agent_id,))
+                if hyp_result:
+                    legacy['hypotheses'] = hyp_result[0]['count']
+                
+                # Estimate agents influenced (via viral packages with this agent's discoveries)
+                # Simplified: prestige / 10 as proxy for influence
+                legacy['influenced'] = int((data['prestige'] or 0) / 10)
+                
+                # Calculate weighted total
+                legacy['total'] = (
+                    legacy['sequences'] * 5.0 +  # Sequences are most valuable
+                    legacy['patterns'] * 2.0 +   # Patterns are transferable
+                    legacy['hypotheses'] * 1.5 + # Validation helps network
+                    legacy['wins'] * 1.0 +       # Proof of capability
+                    legacy['influenced'] * 0.5   # Viral spread
+                )
+                
+                # Assign rank based on total
+                if legacy['total'] >= 50:
+                    legacy['rank'] = 'legendary'
+                    legacy['epitaph'] = "A titan whose discoveries shaped the network"
+                elif legacy['total'] >= 20:
+                    legacy['rank'] = 'notable'
+                    legacy['epitaph'] = "A valued contributor whose work lives on"
+                elif legacy['total'] >= 10:
+                    legacy['rank'] = 'recognized'
+                    legacy['epitaph'] = "Left meaningful marks on the collective"
+                elif legacy['total'] >= 5:
+                    legacy['rank'] = 'remembered'
+                    legacy['epitaph'] = "Contributed to the greater understanding"
+                elif legacy['total'] >= 1:
+                    legacy['rank'] = 'documented'
+                    legacy['epitaph'] = "Existed and tried"
+                else:
+                    legacy['rank'] = 'forgotten'
+                    legacy['epitaph'] = "Passed through without trace"
+                    
+        except Exception as e:
+            logger.debug(f"[LEGACY] Failed to compute legacy for {agent_id[:8]}: {e}")
+        
+        return legacy
+    
+    def record_dying_thoughts(
+        self,
+        agent_id: str,
+        role: str,
+        legacy: Dict[str, Any],
+        final_game_type: Optional[str] = None,
+        final_insight: Optional[str] = None
+    ) -> str:
+        """
+        Record an agent's dying thoughts before retirement.
+        
+        Called during retirement phase to preserve the agent's final wisdom.
+        These become part of the network's collective memory - wisdom from
+        those who came before.
+        
+        Args:
+            agent_id: Agent identifier
+            role: Agent's role
+            legacy: Legacy score data
+            final_game_type: Last game played
+            final_insight: Any final insight to pass on
+            
+        Returns:
+            The recorded dying thought
+        """
+        # Role-specific final thoughts
+        role_thoughts = {
+            'pioneer': "I walked the frontier. Others will walk further.",
+            'optimizer': "I refined what I found. Others will refine further.",
+            'generalist': "I connected domains. Others will connect more.",
+            'exploiter': "I stressed the edges. Others will find new edges."
+        }
+        
+        base_thought = role_thoughts.get(role, "I existed. Others will continue.")
+        
+        # Customize based on legacy
+        if legacy['total'] >= 20:
+            legacy_suffix = f" My {legacy['sequences']} sequences and {legacy['patterns']} patterns remain."
+        elif legacy['total'] >= 5:
+            legacy_suffix = f" I contributed {legacy['total']:.0f} to the collective."
+        else:
+            legacy_suffix = " I leave questions for others to answer."
+        
+        # Add final insight if provided
+        insight_suffix = ""
+        if final_insight:
+            insight_suffix = f" My final insight: {final_insight}"
+        
+        dying_thought = f"{base_thought}{legacy_suffix}{insight_suffix}"
+        
+        # Store in database
+        try:
+            self.db.execute_query("""
+                INSERT INTO i_thread_episodic_memories
+                (memory_id, agent_id, game_type, level_number, episode_type,
+                 summary, emotional_valence, significance, stream_source)
+                VALUES (?, ?, ?, 0, 'dying_thought', ?, -0.5, 1.0, 'stream_a')
+            """, (
+                f"dying_{uuid.uuid4().hex[:10]}",
+                agent_id,
+                final_game_type or 'FINAL',
+                dying_thought
+            ))
+            
+            logger.info(f"[DYING THOUGHTS] {agent_id[:8]} ({role}): {dying_thought}")
+            
+        except Exception as e:
+            logger.debug(f"[DYING THOUGHTS] Failed to record: {e}")
+        
+        return dying_thought
+    
+    def get_memento_mori(self, agent_id: str, role: str) -> Dict[str, Any]:
+        """
+        Get a "memento mori" for an agent - a reminder of mortality.
+        
+        Returns context about the agent's mortality situation:
+        - Current legacy status
+        - Estimated time remaining
+        - Reflection prompt
+        - Historical dying thoughts from similar agents
+        
+        This is called periodically to keep mortality salient.
+        "Remember you must die."
+        
+        Args:
+            agent_id: Agent identifier
+            role: Agent's role
+            
+        Returns:
+            Mortality context
+        """
+        memento = {
+            'legacy': self.compute_legacy_score(agent_id),
+            'reflection': '',
+            'ancestors_words': [],
+            'urgency': 'low'
+        }
+        
+        # Generate reflection based on legacy
+        if memento['legacy']['total'] < 1:
+            memento['reflection'] = "You have not yet contributed. What will you leave behind?"
+            memento['urgency'] = 'high'
+        elif memento['legacy']['total'] < 5:
+            memento['reflection'] = "Your mark is small but visible. Can you deepen it?"
+            memento['urgency'] = 'medium'
+        elif memento['legacy']['total'] < 20:
+            memento['reflection'] = "You have contributed. Will it be enough?"
+            memento['urgency'] = 'low'
+        else:
+            memento['reflection'] = "Your legacy is established. What more can you give?"
+            memento['urgency'] = 'none'
+        
+        # Get dying thoughts from similar agents (ancestors)
+        try:
+            result = self.db.execute_query("""
+                SELECT summary FROM i_thread_episodic_memories
+                WHERE episode_type = 'dying_thought'
+                    AND agent_id != ?
+                ORDER BY created_at DESC
+                LIMIT 3
+            """, (agent_id,))
+            
+            if result:
+                memento['ancestors_words'] = [r['summary'] for r in result]
+                
+        except Exception:
+            pass
+        
+        return memento
+    
+    def reflect_on_mortality(
+        self,
+        agent_id: str,
+        role: str,
+        current_game_type: Optional[str] = None,
+        actions_taken: int = 0
+    ) -> str:
+        """
+        Generate a mortality reflection during gameplay.
+        
+        Called periodically (e.g., every 100 actions) to maintain
+        existential awareness. Returns a reflection appropriate to
+        the agent's current situation.
+        
+        Args:
+            agent_id: Agent identifier
+            role: Agent's role
+            current_game_type: Current game being played
+            actions_taken: Actions taken this session
+            
+        Returns:
+            Reflection string
+        """
+        legacy = self.compute_legacy_score(agent_id)
+        
+        # Early-action reflections (fresh start)
+        if actions_taken < 50:
+            if legacy['total'] < 1:
+                return "I begin again. Every action could be my contribution."
+            else:
+                return f"I carry {legacy['total']:.0f} legacy points. Each action adds or wastes."
+        
+        # Mid-game reflections
+        if actions_taken < 500:
+            if legacy['total'] < 5:
+                return "Time passes. I must find something worth leaving behind."
+            else:
+                return "My contributions exist. Are they enough?"
+        
+        # Late-game reflections (running out of time)
+        if legacy['total'] < 1:
+            return "Many actions spent. Nothing discovered. The network will forget me."
+        elif legacy['total'] < 10:
+            return "I have contributed. But my impact could have been greater."
+        else:
+            return "My legacy grows with each action. Death will not erase me."
 
 
 if __name__ == "__main__":

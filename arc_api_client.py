@@ -581,8 +581,12 @@ class ARCClient:
         if not guid:
             guid = self.current_guid
 
+        # Validate we have real IDs (not placeholder "unknown")
         if not all([game_id, card_id, guid]):
             raise ValueError("Missing required parameters: game_id, card_id, and guid must be provided")
+        
+        if game_id == "unknown" or game_id.startswith("unknown"):
+            raise ValueError(f"Invalid game_id '{game_id}': cannot send actions to unknown game")
 
         # Map action to endpoint
         action_endpoints = {

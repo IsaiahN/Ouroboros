@@ -155,13 +155,41 @@ class SensationEngine:
         # Action mapping for navigation (1-7 only)
         self.navigation_actions = {1, 2, 3, 4, 5, 6, 7}
         
-        # Emotional states mapping
+        # Emotional states mapping (standard emotions)
         self.emotion_states = {
             (-1.0, -0.5): 'frustrated',
             (-0.5, -0.1): 'cautious', 
             (-0.1, 0.1): 'neutral',
             (0.1, 0.5): 'curious',
             (0.5, 1.0): 'confident'
+        }
+        
+        # =================================================================
+        # MORTALITY SENSATIONS: Existential feelings that drive urgency
+        # =================================================================
+        # These are meta-emotions that modify standard emotions under mortality pressure
+        # They create the "lion awareness" that makes the giraffe stand at birth
+        #
+        # existential_fear: The dread of deletion - intensifies exploration/contribution
+        # death_pain: The suffering of failed actions draining vitality
+        # survival_relief: The easing when vitality/cull_distance improves
+        # urgency_pressure: The compression of time - "I must act NOW"
+        # legacy_anxiety: The worry about what remains after death
+        # =================================================================
+        self.mortality_sensations = {
+            'existential_fear': 0.0,      # 0.0 (none) to 1.0 (terror)
+            'death_pain': 0.0,             # 0.0 (comfort) to 1.0 (agony)
+            'survival_relief': 0.0,        # 0.0 (none) to 1.0 (euphoria)
+            'urgency_pressure': 0.0,       # 0.0 (relaxed) to 1.0 (panicked)
+            'legacy_anxiety': 0.0,         # 0.0 (secure) to 1.0 (desperate)
+        }
+        
+        # Mortality sensation thresholds
+        self.mortality_thresholds = {
+            'fear_trigger': 0.3,       # vitality below this triggers fear
+            'pain_trigger': 0.2,       # cull_distance below this triggers pain
+            'relief_trigger': 0.7,     # vitality above this triggers relief
+            'urgency_trigger': 0.4,    # legacy_score below this AND pressure high
         }
     
     def initialize_agent_sensations(self, agent_id: str, agent_type: str) -> Dict[str, Any]:
@@ -746,6 +774,225 @@ class SensationEngine:
             "UPDATE agents SET action_biases = ? WHERE agent_id = ?",
             (json.dumps(action_biases), agent_id)
         )
+    
+    # ========================================================================
+    # MORTALITY SENSATIONS: Existential Feelings System
+    # ========================================================================
+    # From MetaContextual Awareness Theory:
+    # "Fear of death creates urgency. Pain is a reminder of mortality."
+    #
+    # These sensations create the existential pressure that makes learning
+    # meaningful. Without death awareness, there is no urgency to contribute.
+    # ========================================================================
+    
+    def compute_mortality_sensations(
+        self,
+        vitality: float,
+        cull_distance: float,
+        legacy_score: float,
+        pressure: float
+    ) -> Dict[str, float]:
+        """
+        Compute mortality-based sensations from existential state.
+        
+        These meta-sensations modify standard emotions to create urgency.
+        The giraffe stands at birth because it feels the lion's presence.
+        
+        Args:
+            vitality: Current life-force (0.0 = dying, 1.0 = thriving)
+            cull_distance: Proximity to culling (0.0 = imminent, 1.0 = safe)
+            legacy_score: Total contribution to network
+            pressure: Current existential pressure (from mortality state)
+            
+        Returns:
+            Dict of mortality sensations with values 0.0-1.0
+        """
+        sensations = self.mortality_sensations.copy()
+        
+        # EXISTENTIAL FEAR: Triggered by low vitality or imminent cull
+        if vitality < self.mortality_thresholds['fear_trigger']:
+            sensations['existential_fear'] = (
+                self.mortality_thresholds['fear_trigger'] - vitality
+            ) / self.mortality_thresholds['fear_trigger']
+        
+        if cull_distance < self.mortality_thresholds['pain_trigger']:
+            # Add cull-based fear
+            cull_fear = (
+                self.mortality_thresholds['pain_trigger'] - cull_distance
+            ) / self.mortality_thresholds['pain_trigger']
+            sensations['existential_fear'] = max(sensations['existential_fear'], cull_fear)
+        
+        # DEATH PAIN: Suffering when cull is very close
+        if cull_distance < self.mortality_thresholds['pain_trigger']:
+            sensations['death_pain'] = (
+                self.mortality_thresholds['pain_trigger'] - cull_distance
+            ) / self.mortality_thresholds['pain_trigger']
+        
+        # SURVIVAL RELIEF: Easing when doing well
+        if vitality > self.mortality_thresholds['relief_trigger']:
+            sensations['survival_relief'] = (
+                vitality - self.mortality_thresholds['relief_trigger']
+            ) / (1.0 - self.mortality_thresholds['relief_trigger'])
+        
+        # URGENCY PRESSURE: Compression of time when legacy is low AND pressure is high
+        if legacy_score < 5.0 and pressure > self.mortality_thresholds['urgency_trigger']:
+            sensations['urgency_pressure'] = pressure * (1.0 - legacy_score / 5.0)
+        
+        # LEGACY ANXIETY: Worry about what remains
+        if legacy_score < 2.0:
+            sensations['legacy_anxiety'] = (2.0 - legacy_score) / 2.0
+        elif vitality < 0.5 and legacy_score < 10.0:
+            # Even with some legacy, low vitality causes anxiety
+            sensations['legacy_anxiety'] = (0.5 - vitality) * 0.5
+        
+        # Clamp all values to 0-1 range
+        for key in sensations:
+            sensations[key] = max(0.0, min(1.0, sensations[key]))
+        
+        return sensations
+    
+    def apply_mortality_to_emotion(
+        self,
+        base_emotion: str,
+        mortality_sensations: Dict[str, float]
+    ) -> Tuple[str, float]:
+        """
+        Transform base emotion under mortality pressure.
+        
+        Mortality sensations act as multipliers that intensify or transform
+        the base emotional state. Fear makes caution become paralysis.
+        Urgency makes curiosity become desperate exploration.
+        
+        Args:
+            base_emotion: Standard emotion ('frustrated', 'cautious', etc.)
+            mortality_sensations: Current mortality sensations
+            
+        Returns:
+            Tuple of (transformed_emotion, intensity)
+        """
+        fear = mortality_sensations.get('existential_fear', 0.0)
+        pain = mortality_sensations.get('death_pain', 0.0)
+        relief = mortality_sensations.get('survival_relief', 0.0)
+        urgency = mortality_sensations.get('urgency_pressure', 0.0)
+        anxiety = mortality_sensations.get('legacy_anxiety', 0.0)
+        
+        # No mortality pressure - return base emotion
+        total_mortality = fear + pain + urgency + anxiety - relief
+        if total_mortality < 0.1:
+            return (base_emotion, 0.5)
+        
+        # Transform emotions under mortality pressure
+        transformed = base_emotion
+        intensity = 0.5
+        
+        if base_emotion == 'frustrated':
+            if pain > 0.5:
+                transformed = 'agonized'  # Frustration + pain = agony
+                intensity = 0.7 + pain * 0.3
+            elif fear > 0.5:
+                transformed = 'desperate'  # Frustration + fear = desperation
+                intensity = 0.6 + fear * 0.4
+        
+        elif base_emotion == 'cautious':
+            if fear > 0.6:
+                transformed = 'paralyzed'  # Caution + fear = paralysis
+                intensity = 0.8
+            elif urgency > 0.5:
+                transformed = 'tense'  # Caution + urgency = tension
+                intensity = 0.6 + urgency * 0.3
+        
+        elif base_emotion == 'neutral':
+            if urgency > 0.4:
+                transformed = 'alert'  # Neutral + urgency = alertness
+                intensity = 0.5 + urgency * 0.4
+            elif anxiety > 0.5:
+                transformed = 'uneasy'  # Neutral + anxiety = unease
+                intensity = 0.5 + anxiety * 0.3
+        
+        elif base_emotion == 'curious':
+            if urgency > 0.5:
+                transformed = 'driven'  # Curiosity + urgency = driven exploration
+                intensity = 0.7 + urgency * 0.3
+            elif fear > 0.4:
+                transformed = 'wary'  # Curiosity + fear = wary interest
+                intensity = 0.5 + fear * 0.2
+        
+        elif base_emotion == 'confident':
+            if relief > 0.5:
+                transformed = 'triumphant'  # Confidence + relief = triumph
+                intensity = 0.8 + relief * 0.2
+            elif anxiety > 0.5:
+                transformed = 'doubting'  # Confidence + anxiety = self-doubt
+                intensity = 0.4 + anxiety * 0.3
+        
+        return (transformed, intensity)
+    
+    def get_mortality_action_bias(
+        self,
+        mortality_sensations: Dict[str, float],
+        action: int
+    ) -> float:
+        """
+        Calculate action bias from mortality sensations.
+        
+        Different actions are preferred under different mortality states:
+        - Fear increases reset/submit bias (escape behavior)
+        - Urgency increases exploration bias (desperate searching)
+        - Pain decreases risky action bias (avoidance)
+        - Relief increases confident action bias
+        
+        Args:
+            mortality_sensations: Current mortality sensations
+            action: Action number (1-7)
+            
+        Returns:
+            Bias adjustment for this action (-1.0 to 1.0)
+        """
+        fear = mortality_sensations.get('existential_fear', 0.0)
+        pain = mortality_sensations.get('death_pain', 0.0)
+        urgency = mortality_sensations.get('urgency_pressure', 0.0)
+        relief = mortality_sensations.get('survival_relief', 0.0)
+        
+        # Action-specific mortality biases
+        # ACTION1-4: Movement (1=up, 2=down, 3=left, 4=right)
+        # ACTION5: Stay/wait
+        # ACTION6: Submit/confirm
+        # ACTION7: Reset
+        
+        bias = 0.0
+        
+        if action in [1, 2, 3, 4]:  # Movement actions
+            # Urgency increases movement bias (must act!)
+            bias += urgency * 0.3
+            # Fear slightly decreases (risk of moving into danger)
+            bias -= fear * 0.1
+            # Relief increases (freedom to move)
+            bias += relief * 0.2
+        
+        elif action == 5:  # Stay action
+            # Fear increases stay bias (freeze response)
+            bias += fear * 0.3
+            # Pain increases stay (don't move when hurt)
+            bias += pain * 0.2
+            # Urgency strongly decreases (can't afford to wait)
+            bias -= urgency * 0.5
+        
+        elif action == 6:  # Submit action
+            # High urgency might trigger desperation submit
+            if urgency > 0.7:
+                bias += 0.3
+            # Relief allows confident submission
+            bias += relief * 0.4
+        
+        elif action == 7:  # Reset action
+            # Pain increases reset desire (escape current suffering)
+            bias += pain * 0.4
+            # Fear increases reset (flee from situation)
+            bias += fear * 0.3
+            # Urgency also increases reset (try again quickly)
+            bias += urgency * 0.2
+        
+        return max(-1.0, min(1.0, bias))
     
     # ========================================================================
     # TWO-STREAMS: SEMANTIC IMPRESSIONS

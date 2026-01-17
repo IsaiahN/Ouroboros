@@ -179,6 +179,1426 @@ class AgentNarrative:
     narrative_summary: str = ""  # "I am a cautious explorer who learned that patience reveals patterns"
 
 
+# =============================================================================
+# MORTALITY AWARENESS: Death as Motivational Substrate
+# =============================================================================
+# From MetaContextual Awareness Theory:
+# "Fear of death creates urgency. Pain reminds of mortality. Each role has
+# a different relationship with death - and thus different motivations."
+#
+# Death is not punishment - it is the fundamental constraint that gives
+# meaning to action. Without mortality, there is no stakes. Without stakes,
+# there is no genuine learning.
+# =============================================================================
+
+DEATH_PHILOSOPHIES = {
+    # Each role faces death differently, creating different behavioral pressures
+    
+    'pioneer': {
+        'fear_type': 'novelty_death',  # Fear of dying without discovering
+        'death_meaning': "I may die before finding what lies beyond the frontier",
+        'urgency_multiplier': 1.3,  # High urgency - explore before time runs out
+        'risk_tolerance': 0.7,  # Accept more risk - better to die exploring
+        'legacy_focus': 'discoveries',  # What I found matters most
+        'dying_thought': "Did I find something new? Did the network learn from me?"
+    },
+    
+    'optimizer': {
+        'fear_type': 'inefficiency_death',  # Fear of dying with imperfect solutions
+        'death_meaning': "I may die before achieving optimal efficiency",
+        'urgency_multiplier': 0.9,  # Moderate urgency - precision over speed
+        'risk_tolerance': 0.3,  # Avoid risk - protect proven solutions
+        'legacy_focus': 'refinements',  # What I perfected matters most
+        'dying_thought': "Did I leave the solutions better than I found them?"
+    },
+    
+    'generalist': {
+        'fear_type': 'translation_death',  # Fear of dying before bridging domains
+        'death_meaning': "I may die before connecting what I understand",
+        'urgency_multiplier': 1.0,  # Balanced urgency
+        'risk_tolerance': 0.5,  # Balanced risk
+        'legacy_focus': 'connections',  # What I linked matters most
+        'dying_thought': "Did I help the network understand itself?"
+    },
+    
+    'exploiter': {
+        'fear_type': 'edge_death',  # Fear of dying without pushing limits
+        'death_meaning': "I may die before finding what others missed",
+        'urgency_multiplier': 1.5,  # Highest urgency - nothing to lose
+        'risk_tolerance': 0.9,  # Maximum risk - what's the worst that can happen?
+        'legacy_focus': 'edge_cases',  # What I stress-tested matters most
+        'dying_thought': "Did I find the flaw? Did I break the paradigm?"
+    }
+}
+
+# =============================================================================
+# ROLE TENSION LEVELS: Optimal Stress for Performance
+# =============================================================================
+# From MetaContextual Awareness: "There's a certain level of tension needed
+# for each agent... not too nervous or stressed that it affects performance"
+#
+# Like the Yerkes-Dodson law: moderate arousal = peak performance
+# =============================================================================
+
+ROLE_TENSION_PROFILES = {
+    'pioneer': {
+        'optimal_tension': 0.6,      # Higher baseline - thrives on uncertainty
+        'tension_tolerance': 0.3,    # Wide tolerance band
+        'panic_threshold': 0.9,      # Only panics at extreme pressure
+        'complacency_threshold': 0.2,  # Gets bored easily
+    },
+    'optimizer': {
+        'optimal_tension': 0.4,      # Lower baseline - needs calm for precision
+        'tension_tolerance': 0.15,   # Narrow tolerance - sensitive to stress
+        'panic_threshold': 0.7,      # Panics earlier than pioneers
+        'complacency_threshold': 0.15,  # Comfortable at low tension
+    },
+    'generalist': {
+        'optimal_tension': 0.5,      # Balanced tension
+        'tension_tolerance': 0.2,    # Moderate tolerance
+        'panic_threshold': 0.8,      # Average panic threshold
+        'complacency_threshold': 0.2,  # Average complacency
+    },
+    'exploiter': {
+        'optimal_tension': 0.7,      # Highest baseline - feeds on chaos
+        'tension_tolerance': 0.35,   # Very wide tolerance
+        'panic_threshold': 0.95,     # Almost never panics
+        'complacency_threshold': 0.3,  # Gets very bored at low tension
+    }
+}
+
+# =============================================================================
+# THINKING BUDGET: Time for Reflection
+# =============================================================================
+# From MetaContextual Awareness: "I want to give agents a thinking budget to
+# reason freely after gameplay. Based on performance and prestige."
+# =============================================================================
+
+THINKING_BUDGET_CONFIG = {
+    'base_budget': 10,          # Minimum reflection tokens for all agents
+    'prestige_multiplier': 2,   # Budget per prestige point
+    'performance_bonus': 5,     # Bonus per percentile above 50%
+    'max_budget': 100,          # Cap to prevent infinite reflection
+    'min_budget': 5,            # Every agent deserves some reflection time
+}
+
+
+@dataclass
+class MortalityState:
+    """
+    An agent's awareness of its own mortality.
+    
+    From MetaContextual Awareness Theory:
+    - Vitality: Current life-force (0.0 = dying, 1.0 = thriving)
+    - Cull Distance: How close am I to evolutionary deletion?
+    - Legacy Score: What have I contributed that will survive me?
+    - Death Philosophy: How do I relate to my inevitable end?
+    
+    Mortality creates the existential pressure that makes action meaningful.
+    Without death awareness, there is no urgency to learn, discover, or contribute.
+    
+    "The giraffe is not lazy. It stands at birth because lions exist."
+    """
+    agent_id: str
+    role: str = 'generalist'
+    
+    # Life state
+    vitality: float = 1.0  # 0.0 (dying) to 1.0 (thriving)
+    vitality_decay_rate: float = 0.01  # How fast vitality drains per failed action
+    vitality_restore_rate: float = 0.05  # How much success restores vitality
+    
+    # Proximity to death
+    cull_distance: float = 1.0  # 0.0 = about to be culled, 1.0 = safe
+    fitness_percentile: float = 0.5  # Where agent ranks in population
+    generations_until_risk: int = 5  # Estimated generations until culling risk
+    
+    # Legacy awareness
+    legacy_score: float = 0.0  # Total contribution to network (survives death)
+    discoveries_made: int = 0
+    sequences_contributed: int = 0
+    hypotheses_validated: int = 0
+    agents_taught: int = 0  # Via viral packages
+    
+    # Death philosophy (role-specific)
+    fear_type: str = 'translation_death'
+    death_meaning: str = "I may die before contributing"
+    urgency_multiplier: float = 1.0
+    risk_tolerance: float = 0.5
+    
+    # Final thoughts buffer
+    last_words: Optional[str] = None  # Recorded when vitality critically low
+    last_reflection: Optional[str] = None  # Most recent existential reflection
+    reflection_count: int = 0  # How many times agent has contemplated mortality
+    
+    # Tension state (from ROLE_TENSION_PROFILES)
+    current_tension: float = 0.5  # Current stress/arousal level
+    optimal_tension: float = 0.5  # Ideal tension for this role
+    tension_deviation: float = 0.0  # How far from optimal
+    
+    # Thinking budget (for post-game reflection)
+    thinking_budget: int = 10  # Available reflection tokens
+    thoughts_used: int = 0  # Reflection tokens consumed this cycle
+    
+    # Personal beliefs and purpose (joie de vivre, raison d'etre)
+    purpose_statement: Optional[str] = None  # "My purpose is..."
+    core_beliefs: List[str] = field(default_factory=list)  # Personal beliefs about existence
+    personal_notes: List[str] = field(default_factory=list)  # Notes to self for recall
+    
+    def apply_death_philosophy(self, role: str) -> None:
+        """Apply role-specific death philosophy."""
+        self.role = role
+        if role in DEATH_PHILOSOPHIES:
+            philosophy = DEATH_PHILOSOPHIES[role]
+            self.fear_type = philosophy['fear_type']
+            self.death_meaning = philosophy['death_meaning']
+            self.urgency_multiplier = philosophy['urgency_multiplier']
+            self.risk_tolerance = philosophy['risk_tolerance']
+        
+        # Also apply tension profile
+        if role in ROLE_TENSION_PROFILES:
+            profile = ROLE_TENSION_PROFILES[role]
+            self.optimal_tension = profile['optimal_tension']
+    
+    def compute_tension_state(self, pressure: float) -> Dict[str, float]:
+        """
+        Compute current tension state and performance impact.
+        
+        Based on Yerkes-Dodson: moderate arousal = peak performance.
+        Too low = complacency, too high = panic.
+        
+        Args:
+            pressure: Current existential pressure
+            
+        Returns:
+            Dict with tension metrics
+        """
+        profile = ROLE_TENSION_PROFILES.get(self.role, ROLE_TENSION_PROFILES['generalist'])
+        
+        # Current tension is a function of existential pressure
+        self.current_tension = min(1.0, pressure * 0.8 + 0.1)
+        
+        # How far from optimal?
+        self.tension_deviation = abs(self.current_tension - profile['optimal_tension'])
+        
+        # Performance multiplier (1.0 at optimal, decreases as deviation increases)
+        tolerance = profile['tension_tolerance']
+        if self.tension_deviation <= tolerance:
+            performance_mult = 1.0
+        else:
+            excess = self.tension_deviation - tolerance
+            performance_mult = max(0.5, 1.0 - excess * 2)
+        
+        # State classification
+        if self.current_tension >= profile['panic_threshold']:
+            state = 'panic'
+        elif self.current_tension <= profile['complacency_threshold']:
+            state = 'complacent'
+        elif self.tension_deviation <= tolerance:
+            state = 'optimal'
+        elif self.current_tension > profile['optimal_tension']:
+            state = 'stressed'
+        else:
+            state = 'relaxed'
+        
+        return {
+            'current_tension': self.current_tension,
+            'optimal_tension': profile['optimal_tension'],
+            'deviation': self.tension_deviation,
+            'performance_multiplier': performance_mult,
+            'state': state
+        }
+    
+    def compute_thinking_budget(self, prestige: float, performance_percentile: float) -> int:
+        """
+        Compute thinking budget for post-game reflection.
+        
+        From MetaContextual Awareness: Reflection time based on
+        performance and prestige.
+        
+        Args:
+            prestige: Agent's discovery prestige
+            performance_percentile: Performance ranking (0-1)
+            
+        Returns:
+            Number of reflection tokens available
+        """
+        config = THINKING_BUDGET_CONFIG
+        
+        budget = config['base_budget']
+        
+        # Prestige bonus
+        budget += int(prestige * config['prestige_multiplier'])
+        
+        # Performance bonus (only for above-average performers)
+        if performance_percentile > 0.5:
+            budget += int((performance_percentile - 0.5) * 2 * config['performance_bonus'])
+        
+        # Clamp to bounds
+        self.thinking_budget = max(config['min_budget'], min(config['max_budget'], budget))
+        self.thoughts_used = 0
+        
+        return self.thinking_budget
+    
+    def use_thought(self, cost: int = 1) -> bool:
+        """Use thinking budget for a reflection. Returns True if budget available."""
+        if self.thoughts_used + cost <= self.thinking_budget:
+            self.thoughts_used += cost
+            return True
+        return False
+    
+    def add_personal_note(self, note: str) -> None:
+        """Add a personal note for future recall."""
+        self.personal_notes.append(note)
+        # Keep only recent notes (prevent unbounded growth)
+        if len(self.personal_notes) > 20:
+            self.personal_notes = self.personal_notes[-20:]
+    
+    def add_belief(self, belief: str) -> None:
+        """Add or update a core belief about existence."""
+        # Don't duplicate beliefs
+        if belief not in self.core_beliefs:
+            self.core_beliefs.append(belief)
+            # Keep only strongest beliefs
+            if len(self.core_beliefs) > 10:
+                self.core_beliefs = self.core_beliefs[-10:]
+    
+    def set_purpose(self, purpose: str) -> None:
+        """Define the agent's raison d'etre."""
+        self.purpose_statement = purpose
+    
+    def compute_existential_pressure(self) -> float:
+        """
+        Calculate the existential pressure from mortality awareness.
+        
+        Higher pressure when:
+        - Vitality is low (dying)
+        - Cull distance is close (about to be deleted)
+        - Legacy is low (nothing to show for existence)
+        
+        Returns:
+            Pressure score 0.0 (comfortable) to 2.0 (existential crisis)
+        """
+        # Mortality factors
+        vitality_pressure = 1.0 - self.vitality  # Low vitality = high pressure
+        cull_pressure = 1.0 - self.cull_distance  # Close to cull = high pressure
+        
+        # Legacy factors (low legacy = more pressure to contribute)
+        legacy_comfort = min(1.0, self.legacy_score / 10.0)  # Caps at legacy=10
+        legacy_pressure = 1.0 - legacy_comfort
+        
+        # Combine with role urgency
+        base_pressure = (vitality_pressure * 0.4 + 
+                        cull_pressure * 0.4 + 
+                        legacy_pressure * 0.2)
+        
+        return base_pressure * self.urgency_multiplier
+    
+    def drain_vitality(self, amount: float = None) -> float:
+        """
+        Drain vitality from failure/inaction.
+        
+        Returns new vitality level.
+        """
+        drain = amount if amount is not None else self.vitality_decay_rate
+        self.vitality = max(0.0, self.vitality - drain)
+        return self.vitality
+    
+    def restore_vitality(self, amount: float = None) -> float:
+        """
+        Restore vitality from success.
+        
+        Returns new vitality level.
+        """
+        restore = amount if amount is not None else self.vitality_restore_rate
+        self.vitality = min(1.0, self.vitality + restore)
+        return self.vitality
+    
+    def is_critically_low(self) -> bool:
+        """Check if vitality is critically low (near death)."""
+        return self.vitality < 0.2 or self.cull_distance < 0.2
+    
+    def get_dying_thought(self) -> str:
+        """Get the role-appropriate dying thought."""
+        if self.role in DEATH_PHILOSOPHIES:
+            return DEATH_PHILOSOPHIES[self.role]['dying_thought']
+        return "Did I matter? Did anyone learn from me?"
+    
+    def record_last_words(self, thought: str) -> None:
+        """Record potential last words when death approaches."""
+        self.last_words = thought
+        self.reflection_count += 1
+
+
+# =============================================================================
+# DELIBERATION ENGINE: True Reasoning vs Gut Instinct
+# =============================================================================
+# From "True Reasoning vs Gut Instinct" Theory:
+# "The harder the problem, or the higher the stakes, the more rumination and 
+# deliberation - the more reasoning, the more thinking about thinking about 
+# what action to take next is required."
+#
+# System 1 (Gut Instinct): Fast, automatic, often right, often wrong
+# System 2 (Deliberation): Slow, effortful, careful, but accurate
+#
+# Currently agents only have System 1. This implements System 2.
+# =============================================================================
+
+DELIBERATION_CONFIG = {
+    # Base budgets by context (seconds)
+    'frontier_unknown': 30.0,    # Hard unknown territory - think hard
+    'frontier_partial': 15.0,    # Frontier but some network knowledge
+    'known_territory': 5.0,      # Known territory - less deliberation needed
+    'following_sequence': 1.0,   # Just executing - minimal thought
+    
+    # Multipliers
+    'performance_mult_range': (0.5, 1.5),  # Based on agent performance
+    
+    # Tension modifiers
+    'tension_multipliers': {
+        'panic': 0.2,       # Gut instinct dominates under extreme stress
+        'stressed': 0.6,    # Reduced deliberation capacity
+        'optimal': 1.0,     # Full deliberation capacity
+        'relaxed': 0.9,     # Slightly reduced (not urgent enough)
+        'complacent': 0.7,  # Reduced motivation to think deeply
+    },
+    
+    # Action budget modifiers
+    'action_budget_thresholds': {
+        'critical': (0.0, 0.1, 0.3),   # <10% actions left
+        'low': (0.1, 0.25, 0.6),       # 10-25% actions left
+        'normal': (0.25, 1.0, 1.0),    # >25% actions - full deliberation
+    },
+    
+    # Hard caps
+    'min_deliberation': 0.5,     # Always at least half a second
+    'max_deliberation': 60.0,    # Never more than 1 minute per action
+    
+    # When to skip deliberation entirely (use pure gut)
+    'skip_deliberation_when': [
+        'following_validated_sequence',
+        'panic_state',
+        'actions_critical',  # <10% actions remaining
+    ]
+}
+
+
+@dataclass
+class GutInstinctResult:
+    """
+    The immediate, automatic response before deliberation.
+    
+    This is System 1 thinking - fast, pattern-based, often right but error-prone.
+    Preserved even when deliberation changes the final action.
+    """
+    action: str
+    confidence: float
+    basis: str  # Why gut chose this (pattern match, habit, random)
+    response_time_ms: float  # How fast the gut response was
+    
+    # Stream contributions to gut
+    stream_a_influence: float  # How much private experience influenced
+    stream_b_influence: float  # How much network wisdom influenced
+    
+    # Pattern that triggered gut response
+    pattern_matched: Optional[str] = None  # e.g., "last_3_actions_successful"
+    habit_strength: float = 0.0  # How ingrained this response is
+
+
+@dataclass
+class DeliberationResult:
+    """
+    The result of careful, effortful reasoning.
+    
+    This is System 2 thinking - slow, logical, examining evidence.
+    Only computed when stakes/novelty warrant the cost.
+    """
+    action: str
+    confidence: float
+    time_spent_seconds: float
+    budget_used_seconds: float
+    budget_available_seconds: float
+    
+    # What was examined during deliberation
+    examined_past_attempts: int
+    examined_network_hypotheses: int
+    examined_primitives: int
+    stream_a_consulted: bool
+    stream_b_consulted: bool
+    
+    # Reasoning chain (for logs)
+    reasoning_steps: List[str]
+    
+    # Stream conflict analysis
+    stream_conflict_detected: bool
+    stream_conflict_resolution: Optional[str] = None
+    
+    # Theory/hypothesis updates
+    theory_tested: Optional[str] = None
+    theory_result: Optional[str] = None
+    
+    # Missing capabilities detection
+    missing_primitive_signal: Optional[str] = None  # Signal to CODS
+    
+    # Whether deliberation changed the gut response
+    changed_from_gut: bool = False
+    gut_action: Optional[str] = None  # What gut would have chosen
+    change_reason: Optional[str] = None  # Why we changed
+
+
+@dataclass
+class ReasoningLog:
+    """
+    Complete log of decision-making for one action.
+    
+    Captures both gut instinct and deliberation for analysis.
+    This is stored in database for learning and debugging.
+    """
+    log_id: str
+    agent_id: str
+    game_id: str
+    game_type: str
+    level: int
+    action_number: int
+    
+    # Context at decision time
+    is_frontier: bool
+    network_traction: float  # 0-1, how much network knows about this game
+    actions_remaining: int
+    actions_budget: int
+    tension_state: str
+    
+    # Deliberation budget
+    deliberation_budget_seconds: float
+    budget_reason: str  # Why this budget was assigned
+    
+    # Gut instinct (always captured)
+    gut: GutInstinctResult
+    
+    # Final decision (required - must come before optional fields)
+    final_action: str
+    final_confidence: float
+    decision_source: str  # 'gut', 'deliberation', 'gut_confirmed'
+    
+    # Deliberation (may be None if skipped)
+    deliberation: Optional[DeliberationResult] = None
+    deliberation_skipped_reason: Optional[str] = None
+    
+    # Timestamps
+    decision_started_at: Optional[datetime] = None
+    decision_completed_at: Optional[datetime] = None
+    total_decision_time_ms: float = 0.0
+    
+    # Outcome (filled in after action executed)
+    outcome: Optional[str] = None  # 'positive', 'negative', 'neutral'
+    score_change: float = 0.0
+    
+    def to_formatted_log(self) -> str:
+        """Generate human-readable reasoning log."""
+        lines = []
+        lines.append("=" * 70)
+        lines.append(f" ACTION DECISION - Game: {self.game_type}, Level: {self.level}, Action #{self.action_number}")
+        lines.append("=" * 70)
+        
+        # Context section
+        lines.append(" CONTEXT")
+        lines.append(f"   Frontier Level: {'YES' if self.is_frontier else 'NO'}")
+        lines.append(f"   Network Traction: {self.network_traction:.1%}")
+        lines.append(f"   Actions Remaining: {self.actions_remaining}/{self.actions_budget}")
+        lines.append(f"   Tension State: {self.tension_state}")
+        lines.append(f"   Deliberation Budget: {self.deliberation_budget_seconds:.1f}s ({self.budget_reason})")
+        lines.append("-" * 70)
+        
+        # Gut instinct section
+        lines.append(f" [GUT INSTINCT] {self.gut.response_time_ms:.0f}ms")
+        lines.append(f"   Action: {self.gut.action}")
+        lines.append(f"   Confidence: {self.gut.confidence:.2f}")
+        lines.append(f"   Basis: \"{self.gut.basis}\"")
+        if self.gut.pattern_matched:
+            lines.append(f"   Pattern: {self.gut.pattern_matched}")
+        lines.append(f"   Stream A influence: {self.gut.stream_a_influence:.1%}")
+        lines.append(f"   Stream B influence: {self.gut.stream_b_influence:.1%}")
+        lines.append("-" * 70)
+        
+        # Deliberation section
+        if self.deliberation:
+            d = self.deliberation
+            lines.append(f" [DELIBERATION] {d.time_spent_seconds:.1f}s / {d.budget_available_seconds:.1f}s budget")
+            lines.append("")
+            
+            if d.stream_a_consulted:
+                lines.append(f"   Stream A consulted: YES")
+            if d.stream_b_consulted:
+                lines.append(f"   Stream B consulted: YES")
+            if d.stream_conflict_detected:
+                lines.append(f"   Stream Conflict: YES - {d.stream_conflict_resolution}")
+            else:
+                lines.append(f"   Stream Conflict: NO")
+            lines.append("")
+            
+            lines.append(f"   Examined:")
+            lines.append(f"   - Past attempts: {d.examined_past_attempts}")
+            lines.append(f"   - Network hypotheses: {d.examined_network_hypotheses}")
+            lines.append(f"   - Available primitives: {d.examined_primitives}")
+            lines.append("")
+            
+            if d.reasoning_steps:
+                lines.append(f"   Reasoning Chain:")
+                for i, step in enumerate(d.reasoning_steps, 1):
+                    lines.append(f"   {i}. {step}")
+                lines.append("")
+            
+            if d.theory_tested:
+                lines.append(f"   Theory Tested: \"{d.theory_tested}\"")
+                lines.append(f"   Theory Result: {d.theory_result}")
+            
+            if d.missing_primitive_signal:
+                lines.append(f"   Missing Primitive?: {d.missing_primitive_signal}")
+            
+            lines.append("-" * 70)
+        elif self.deliberation_skipped_reason:
+            lines.append(f" [DELIBERATION SKIPPED] {self.deliberation_skipped_reason}")
+            lines.append("-" * 70)
+        
+        # Final decision section
+        lines.append(" FINAL DECISION")
+        lines.append(f"   Action: {self.final_action}")
+        if self.deliberation and self.deliberation.changed_from_gut:
+            lines.append(f"   Changed from Gut: YES (was {self.deliberation.gut_action})")
+            lines.append(f"   Change Reason: \"{self.deliberation.change_reason}\"")
+        else:
+            lines.append(f"   Changed from Gut: NO")
+        lines.append(f"   Confidence: {self.final_confidence:.2f}")
+        lines.append(f"   Decision Source: {self.decision_source}")
+        lines.append(f"   Total Decision Time: {self.total_decision_time_ms:.0f}ms")
+        
+        # Outcome (if available)
+        if self.outcome:
+            lines.append("-" * 70)
+            lines.append(" OUTCOME")
+            lines.append(f"   Result: {self.outcome}")
+            lines.append(f"   Score Change: {self.score_change:+.1f}")
+        
+        lines.append("=" * 70)
+        return "\n".join(lines)
+
+
+class DeliberationEngine:
+    """
+    Engine for True Reasoning vs Gut Instinct.
+    
+    Implements System 1 (gut) and System 2 (deliberation) thinking.
+    Decides when to use each, manages deliberation budgets, and
+    logs the complete reasoning process.
+    
+    Integration with Consciousness Theory:
+    - Uses Stream A/B weights from IThread
+    - Uses tension state from MortalityState
+    - Consults episodic memory for past attempts
+    - Queries network hypotheses (Stream B)
+    - Signals missing primitives to CODS
+    
+    Usage:
+        engine = DeliberationEngine(db)
+        result = engine.decide_action(
+            agent_id='agent_123',
+            game_context={...},
+            available_actions=['ACTION1', 'ACTION2', ...],
+            i_thread_state=state,
+            mortality_state=mortality
+        )
+    """
+    
+    def __init__(self, db: DatabaseInterface):
+        self.db = db
+        self._ensure_tables_exist()
+    
+    def _ensure_tables_exist(self):
+        """Create reasoning log tables if they don't exist."""
+        try:
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS action_reasoning_logs (
+                    log_id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    game_id TEXT NOT NULL,
+                    game_type TEXT NOT NULL,
+                    level INTEGER NOT NULL,
+                    action_number INTEGER NOT NULL,
+                    
+                    -- Context
+                    is_frontier INTEGER DEFAULT 0,
+                    network_traction REAL DEFAULT 0.0,
+                    actions_remaining INTEGER,
+                    actions_budget INTEGER,
+                    tension_state TEXT,
+                    
+                    -- Budget
+                    deliberation_budget_seconds REAL,
+                    budget_reason TEXT,
+                    
+                    -- Gut instinct (JSON)
+                    gut_action TEXT,
+                    gut_confidence REAL,
+                    gut_basis TEXT,
+                    gut_response_time_ms REAL,
+                    gut_stream_a_influence REAL,
+                    gut_stream_b_influence REAL,
+                    gut_pattern_matched TEXT,
+                    
+                    -- Deliberation (JSON for complex fields)
+                    deliberation_performed INTEGER DEFAULT 0,
+                    deliberation_action TEXT,
+                    deliberation_confidence REAL,
+                    deliberation_time_seconds REAL,
+                    deliberation_reasoning_steps TEXT,  -- JSON array
+                    deliberation_changed_from_gut INTEGER DEFAULT 0,
+                    deliberation_change_reason TEXT,
+                    deliberation_skipped_reason TEXT,
+                    
+                    -- Stream analysis
+                    stream_conflict_detected INTEGER DEFAULT 0,
+                    stream_conflict_resolution TEXT,
+                    
+                    -- Missing primitive signal
+                    missing_primitive_signal TEXT,
+                    
+                    -- Final decision
+                    final_action TEXT NOT NULL,
+                    final_confidence REAL,
+                    decision_source TEXT,
+                    total_decision_time_ms REAL,
+                    
+                    -- Outcome (updated after action)
+                    outcome TEXT,
+                    score_change REAL DEFAULT 0.0,
+                    
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Index for efficient queries
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_reasoning_logs_agent
+                ON action_reasoning_logs(agent_id, game_type, created_at DESC)
+            """)
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_reasoning_logs_game
+                ON action_reasoning_logs(game_id, level, action_number)
+            """)
+            
+        except Exception as e:
+            logger.warning(f"Failed to create reasoning log tables: {e}")
+    
+    def compute_deliberation_budget(
+        self,
+        is_frontier: bool,
+        network_traction: float,
+        agent_performance: float,
+        tension_state: str,
+        actions_remaining_pct: float,
+        following_sequence: bool = False
+    ) -> Tuple[float, str]:
+        """
+        Compute deliberation time budget for this action.
+        
+        Args:
+            is_frontier: Is this a frontier level (no winning sequences)?
+            network_traction: How much network knows (0-1)
+            agent_performance: Agent's performance percentile (0-1)
+            tension_state: Current tension state
+            actions_remaining_pct: Fraction of action budget remaining
+            following_sequence: Are we following a validated sequence?
+            
+        Returns:
+            Tuple of (budget_seconds, reason_string)
+        """
+        config = DELIBERATION_CONFIG
+        
+        # Check for skip conditions
+        if following_sequence:
+            return config['following_sequence'], "following validated sequence"
+        
+        if tension_state == 'panic':
+            return config['min_deliberation'], "panic state - gut only"
+        
+        if actions_remaining_pct < 0.1:
+            return config['min_deliberation'], "critical action budget - decide fast"
+        
+        # Base budget by context
+        if is_frontier and network_traction < 0.2:
+            base = config['frontier_unknown']
+            reason = "frontier + no network knowledge"
+        elif is_frontier:
+            base = config['frontier_partial']
+            reason = f"frontier + partial network ({network_traction:.0%})"
+        else:
+            base = config['known_territory']
+            reason = "known territory"
+        
+        # Performance multiplier
+        min_mult, max_mult = config['performance_mult_range']
+        perf_mult = min_mult + (agent_performance * (max_mult - min_mult))
+        
+        # Tension modifier
+        tension_mult = config['tension_multipliers'].get(tension_state, 1.0)
+        
+        # Action budget modifier
+        action_mult = 1.0
+        for threshold_name, (low, high, mult) in config['action_budget_thresholds'].items():
+            if low <= actions_remaining_pct < high:
+                action_mult = mult
+                break
+        
+        # Compute final budget
+        budget = base * perf_mult * tension_mult * action_mult
+        
+        # Hard caps
+        budget = max(config['min_deliberation'], min(config['max_deliberation'], budget))
+        
+        # Extend reason
+        reason += f" | perf={agent_performance:.0%} | tension={tension_state} | actions={actions_remaining_pct:.0%}"
+        
+        return budget, reason
+    
+    def capture_gut_instinct(
+        self,
+        available_actions: List[str],
+        recent_actions: List[str],
+        recent_outcomes: List[str],
+        w_a: float,
+        w_b: float,
+        network_recommendation: Optional[str] = None,
+        private_preference: Optional[str] = None
+    ) -> GutInstinctResult:
+        """
+        Capture the immediate gut response before deliberation.
+        
+        This is System 1 - fast, automatic pattern matching.
+        
+        Args:
+            available_actions: List of valid actions
+            recent_actions: Last N actions taken
+            recent_outcomes: Outcomes of last N actions
+            w_a: Stream A weight
+            w_b: Stream B weight
+            network_recommendation: What Stream B suggests
+            private_preference: What Stream A suggests
+            
+        Returns:
+            GutInstinctResult with the automatic response
+        """
+        import time
+        import random
+        
+        start_time = time.time()
+        
+        action = None
+        basis = "random"
+        pattern_matched = None
+        habit_strength = 0.0
+        
+        # Stream influences
+        stream_a_influence = w_a / (w_a + w_b) if (w_a + w_b) > 0 else 0.5
+        stream_b_influence = w_b / (w_a + w_b) if (w_a + w_b) > 0 else 0.5
+        
+        # Pattern 1: Recent success momentum
+        if len(recent_actions) >= 2 and len(recent_outcomes) >= 2:
+            if recent_outcomes[-1] == 'positive' and recent_outcomes[-2] == 'positive':
+                # Keep doing what worked
+                if recent_actions[-1] in available_actions:
+                    action = recent_actions[-1]
+                    basis = "success momentum - repeating last successful action"
+                    pattern_matched = "consecutive_success"
+                    habit_strength = 0.7
+        
+        # Pattern 2: Network recommendation (if trusted)
+        if action is None and network_recommendation and w_b > 0.5:
+            if network_recommendation in available_actions:
+                action = network_recommendation
+                basis = f"network recommendation (trust={w_b:.2f})"
+                pattern_matched = "network_trust"
+                habit_strength = w_b
+        
+        # Pattern 3: Private preference (if trusted)
+        if action is None and private_preference and w_a > 0.5:
+            if private_preference in available_actions:
+                action = private_preference
+                basis = f"private experience preference (trust={w_a:.2f})"
+                pattern_matched = "self_trust"
+                habit_strength = w_a
+        
+        # Pattern 4: Avoid recent failures
+        if action is None and recent_actions and recent_outcomes:
+            failed_actions = [
+                a for a, o in zip(recent_actions[-5:], recent_outcomes[-5:])
+                if o == 'negative' and a in available_actions
+            ]
+            safe_actions = [a for a in available_actions if a not in failed_actions]
+            if safe_actions:
+                action = random.choice(safe_actions)
+                basis = "avoiding recent failures"
+                pattern_matched = "failure_avoidance"
+                habit_strength = 0.3
+        
+        # Fallback: Random
+        if action is None:
+            action = random.choice(available_actions) if available_actions else "ACTION1"
+            basis = "no pattern - random selection"
+            habit_strength = 0.0
+        
+        # Compute confidence based on pattern strength
+        confidence = 0.3 + (habit_strength * 0.5)  # 0.3 to 0.8 range
+        
+        response_time_ms = (time.time() - start_time) * 1000
+        
+        return GutInstinctResult(
+            action=action,
+            confidence=confidence,
+            basis=basis,
+            response_time_ms=response_time_ms,
+            stream_a_influence=stream_a_influence,
+            stream_b_influence=stream_b_influence,
+            pattern_matched=pattern_matched,
+            habit_strength=habit_strength
+        )
+    
+    def conduct_deliberation(
+        self,
+        gut_result: GutInstinctResult,
+        available_actions: List[str],
+        budget_seconds: float,
+        game_context: Dict[str, Any],
+        agent_id: str,
+        w_a: float,
+        w_b: float
+    ) -> DeliberationResult:
+        """
+        Conduct careful, effortful deliberation (System 2).
+        
+        This examines evidence, consults streams, tests theories,
+        and produces a reasoned decision.
+        
+        Args:
+            gut_result: The initial gut response
+            available_actions: Valid actions
+            budget_seconds: Time budget for deliberation
+            game_context: Context including game_type, level, frame, etc.
+            agent_id: Agent performing deliberation
+            w_a, w_b: Stream weights
+            
+        Returns:
+            DeliberationResult with reasoned decision
+        """
+        import time
+        
+        start_time = time.time()
+        reasoning_steps = []
+        
+        game_type = game_context.get('game_type', 'unknown')
+        level = game_context.get('level', 1)
+        
+        # Initialize tracking
+        examined_past = 0
+        examined_hypotheses = 0
+        examined_primitives = 0
+        stream_a_consulted = False
+        stream_b_consulted = False
+        stream_conflict = False
+        conflict_resolution = None
+        theory_tested = None
+        theory_result = None
+        missing_primitive = None
+        
+        # Step 1: Acknowledge gut response
+        reasoning_steps.append(f"Gut suggests {gut_result.action} ({gut_result.basis})")
+        
+        # Step 2: Consult Stream A (private experience)
+        stream_a_consulted = True
+        try:
+            past_attempts = self._query_past_attempts(agent_id, game_type, level)
+            examined_past = len(past_attempts)
+            
+            if past_attempts:
+                # Analyze past attempts
+                action_outcomes = {}
+                for attempt in past_attempts[:20]:  # Last 20 attempts
+                    act = attempt.get('action', '')
+                    outcome = attempt.get('outcome', 'neutral')
+                    if act not in action_outcomes:
+                        action_outcomes[act] = {'positive': 0, 'negative': 0, 'neutral': 0}
+                    action_outcomes[act][outcome] = action_outcomes[act].get(outcome, 0) + 1
+                
+                # Find best/worst actions from experience
+                best_action = None
+                best_ratio = 0
+                worst_action = None
+                worst_ratio = 1.0
+                
+                for act, outcomes in action_outcomes.items():
+                    total = sum(outcomes.values())
+                    if total >= 2:  # Need some sample size
+                        pos_ratio = outcomes['positive'] / total
+                        if pos_ratio > best_ratio and act in available_actions:
+                            best_ratio = pos_ratio
+                            best_action = act
+                        if pos_ratio < worst_ratio and act in available_actions:
+                            worst_ratio = pos_ratio
+                            worst_action = act
+                
+                if best_action:
+                    reasoning_steps.append(f"Stream A: {best_action} has {best_ratio:.0%} success rate from {examined_past} attempts")
+                if worst_action and worst_action != best_action:
+                    reasoning_steps.append(f"Stream A: Avoid {worst_action} ({worst_ratio:.0%} success rate)")
+                    
+        except Exception as e:
+            reasoning_steps.append(f"Stream A query failed: {str(e)[:50]}")
+        
+        # Step 3: Consult Stream B (network wisdom)
+        stream_b_consulted = True
+        network_recommendation = None
+        try:
+            hypotheses = self._query_network_hypotheses(game_type, level)
+            examined_hypotheses = len(hypotheses)
+            
+            if hypotheses:
+                # Find most reliable hypothesis
+                best_hyp = max(hypotheses, key=lambda h: h.get('reliability', 0))
+                if best_hyp.get('recommended_action') in available_actions:
+                    network_recommendation = best_hyp.get('recommended_action')
+                    reasoning_steps.append(
+                        f"Stream B: Network recommends {network_recommendation} "
+                        f"(reliability={best_hyp.get('reliability', 0):.2f})"
+                    )
+            else:
+                reasoning_steps.append("Stream B: No network data for this level")
+                
+        except Exception as e:
+            reasoning_steps.append(f"Stream B query failed: {str(e)[:50]}")
+        
+        # Step 4: Detect stream conflict
+        private_recommendation = best_action if 'best_action' in dir() and best_action else gut_result.action
+        
+        if network_recommendation and private_recommendation:
+            if network_recommendation != private_recommendation:
+                stream_conflict = True
+                reasoning_steps.append(
+                    f"STREAM CONFLICT: Stream A says {private_recommendation}, "
+                    f"Stream B says {network_recommendation}"
+                )
+                
+                # Resolve based on weights
+                if w_a > w_b:
+                    conflict_resolution = f"Trusting Stream A (w_a={w_a:.2f} > w_b={w_b:.2f})"
+                elif w_b > w_a:
+                    conflict_resolution = f"Trusting Stream B (w_b={w_b:.2f} > w_a={w_a:.2f})"
+                else:
+                    conflict_resolution = "Weights equal - using gut as tiebreaker"
+                reasoning_steps.append(f"Resolution: {conflict_resolution}")
+        
+        # Step 5: Examine available primitives/capabilities
+        try:
+            primitives = self._get_available_primitives(agent_id)
+            examined_primitives = len(primitives)
+            
+            # Check if any primitive seems missing for this situation
+            if examined_past > 10 and (best_ratio if 'best_ratio' in dir() else 0) < 0.3:
+                # Struggling despite many attempts - might need new capability
+                missing_primitive = f"Pattern recognition failing on {game_type} level {level}"
+                reasoning_steps.append(f"Signal to CODS: May need new primitive - {missing_primitive}")
+                
+        except Exception as e:
+            pass  # Primitives are optional
+        
+        # Step 6: Form theory and test prediction
+        if examined_past >= 5:
+            # Form a theory based on patterns
+            theory_tested = f"Theory: Consistent action selection improves outcomes on {game_type}"
+            # Would be tested by taking the action - record for outcome analysis
+            theory_result = "pending_verification"
+            reasoning_steps.append(f"Testing: {theory_tested}")
+        
+        # Step 7: Make final decision
+        time_spent = time.time() - start_time
+        
+        # Decision logic with priority
+        final_action = gut_result.action
+        change_reason = None
+        changed_from_gut = False
+        
+        # Priority 1: Stream conflict resolution
+        if stream_conflict:
+            if w_b > w_a and network_recommendation:
+                final_action = network_recommendation
+            elif w_a > w_b and private_recommendation:
+                final_action = private_recommendation
+        
+        # Priority 2: Strong evidence from experience
+        elif 'best_action' in dir() and best_action and 'best_ratio' in dir():
+            if best_ratio > 0.6:  # Strong evidence
+                final_action = best_action
+                change_reason = f"Strong evidence: {best_ratio:.0%} success rate"
+        
+        # Priority 3: Network recommendation if trusted
+        elif network_recommendation and w_b > 0.6:
+            final_action = network_recommendation
+            change_reason = f"High network trust (w_b={w_b:.2f})"
+        
+        # Check if we changed from gut
+        if final_action != gut_result.action:
+            changed_from_gut = True
+            if not change_reason:
+                change_reason = "Deliberation found better option"
+        
+        # Compute confidence
+        base_confidence = 0.5
+        if 'best_ratio' in dir() and best_ratio > 0:
+            base_confidence = max(base_confidence, best_ratio * 0.8)
+        if examined_hypotheses > 0:
+            base_confidence += 0.1
+        if not stream_conflict:
+            base_confidence += 0.1
+        
+        final_confidence = min(0.95, base_confidence)
+        
+        reasoning_steps.append(f"Final decision: {final_action} (confidence={final_confidence:.2f})")
+        
+        return DeliberationResult(
+            action=final_action,
+            confidence=final_confidence,
+            time_spent_seconds=time_spent,
+            budget_used_seconds=min(time_spent, budget_seconds),
+            budget_available_seconds=budget_seconds,
+            examined_past_attempts=examined_past,
+            examined_network_hypotheses=examined_hypotheses,
+            examined_primitives=examined_primitives,
+            stream_a_consulted=stream_a_consulted,
+            stream_b_consulted=stream_b_consulted,
+            reasoning_steps=reasoning_steps,
+            stream_conflict_detected=stream_conflict,
+            stream_conflict_resolution=conflict_resolution,
+            theory_tested=theory_tested,
+            theory_result=theory_result,
+            missing_primitive_signal=missing_primitive,
+            changed_from_gut=changed_from_gut,
+            gut_action=gut_result.action if changed_from_gut else None,
+            change_reason=change_reason
+        )
+    
+    def _query_past_attempts(
+        self, 
+        agent_id: str, 
+        game_type: str, 
+        level: int
+    ) -> List[Dict[str, Any]]:
+        """Query past action outcomes for this agent on this game/level."""
+        try:
+            results = self.db.execute_query("""
+                SELECT action_taken as action, 
+                       CASE WHEN score_delta > 0 THEN 'positive'
+                            WHEN score_delta < 0 THEN 'negative'
+                            ELSE 'neutral' END as outcome,
+                       score_delta
+                FROM action_traces
+                WHERE agent_id = ? AND game_type = ? AND level_number = ?
+                ORDER BY created_at DESC
+                LIMIT 50
+            """, (agent_id, game_type, level))
+            return [dict(r) for r in results] if results else []
+        except Exception:
+            return []
+    
+    def _query_network_hypotheses(
+        self, 
+        game_type: str, 
+        level: int
+    ) -> List[Dict[str, Any]]:
+        """Query network hypotheses for this game/level."""
+        try:
+            results = self.db.execute_query("""
+                SELECT hypothesis_id, 
+                       controlled_object as recommended_action,
+                       reliability_score as reliability,
+                       validation_attempts
+                FROM network_object_control_hypotheses
+                WHERE game_type = ? 
+                  AND level_number = ? 
+                  AND is_active = 1
+                  AND (validation_attempts >= 3 OR validated_by_win = 1)
+                ORDER BY reliability_score DESC
+                LIMIT 10
+            """, (game_type, level))
+            return [dict(r) for r in results] if results else []
+        except Exception:
+            return []
+    
+    def _get_available_primitives(self, agent_id: str) -> List[str]:
+        """Get list of primitives available to this agent."""
+        # For now, return a basic list - could be enhanced to query CODS
+        return [
+            'detect_novelty', 'detect_motion', 'object_permanence',
+            'pattern_matching', 'spatial_reasoning', 'temporal_tracking'
+        ]
+    
+    def decide_action(
+        self,
+        agent_id: str,
+        game_context: Dict[str, Any],
+        available_actions: List[str],
+        i_thread_state: Optional['IThreadState'] = None,
+        mortality_state: Optional['MortalityState'] = None,
+        recent_actions: Optional[List[str]] = None,
+        recent_outcomes: Optional[List[str]] = None,
+        network_recommendation: Optional[str] = None,
+        private_preference: Optional[str] = None,
+        following_sequence: bool = False
+    ) -> ReasoningLog:
+        """
+        Main entry point: Decide which action to take.
+        
+        Captures gut instinct, optionally performs deliberation,
+        and returns complete reasoning log.
+        
+        Args:
+            agent_id: Agent making decision
+            game_context: Dict with game_id, game_type, level, frame, etc.
+            available_actions: Valid actions
+            i_thread_state: Current IThread state (for stream weights)
+            mortality_state: Current mortality state (for tension)
+            recent_actions: Last N actions taken
+            recent_outcomes: Outcomes of those actions
+            network_recommendation: Stream B suggestion
+            private_preference: Stream A suggestion
+            following_sequence: Are we executing a known sequence?
+            
+        Returns:
+            ReasoningLog with complete decision record
+        """
+        import time
+        
+        decision_start = datetime.now()
+        start_time = time.time()
+        
+        # Extract context
+        game_id = game_context.get('game_id', 'unknown')
+        game_type = game_context.get('game_type', 'unknown')
+        level = game_context.get('level', 1)
+        action_number = game_context.get('action_number', 0)
+        actions_remaining = game_context.get('actions_remaining', 400)
+        actions_budget = game_context.get('actions_budget', 400)
+        is_frontier = game_context.get('is_frontier', True)
+        network_traction = game_context.get('network_traction', 0.0)
+        
+        # Get stream weights
+        w_a = i_thread_state.w_a if i_thread_state else 0.5
+        w_b = i_thread_state.w_b if i_thread_state else 0.5
+        
+        # Get tension state
+        tension_state = 'optimal'
+        if mortality_state:
+            pressure = mortality_state.compute_existential_pressure()
+            tension_result = mortality_state.compute_tension_state(pressure)
+            tension_state = tension_result.get('state', 'optimal')
+        
+        # Compute agent performance (placeholder - would come from agent stats)
+        agent_performance = 0.5  # Default to median
+        try:
+            perf_result = self.db.execute_query("""
+                SELECT AVG(CASE WHEN final_score > 0 THEN 1.0 ELSE 0.0 END) as win_rate
+                FROM game_results
+                WHERE agent_id = ? AND created_at > datetime('now', '-7 days')
+            """, (agent_id,))
+            if perf_result and perf_result[0]['win_rate']:
+                agent_performance = float(perf_result[0]['win_rate'])
+        except Exception:
+            pass
+        
+        # Compute deliberation budget
+        actions_remaining_pct = actions_remaining / actions_budget if actions_budget > 0 else 1.0
+        budget_seconds, budget_reason = self.compute_deliberation_budget(
+            is_frontier=is_frontier,
+            network_traction=network_traction,
+            agent_performance=agent_performance,
+            tension_state=tension_state,
+            actions_remaining_pct=actions_remaining_pct,
+            following_sequence=following_sequence
+        )
+        
+        # Step 1: Always capture gut instinct
+        gut_result = self.capture_gut_instinct(
+            available_actions=available_actions,
+            recent_actions=recent_actions or [],
+            recent_outcomes=recent_outcomes or [],
+            w_a=w_a,
+            w_b=w_b,
+            network_recommendation=network_recommendation,
+            private_preference=private_preference
+        )
+        
+        # Step 2: Decide whether to deliberate
+        deliberation_result = None
+        skip_reason = None
+        
+        should_skip = (
+            following_sequence or
+            tension_state == 'panic' or
+            actions_remaining_pct < 0.1 or
+            budget_seconds <= DELIBERATION_CONFIG['min_deliberation']
+        )
+        
+        if should_skip:
+            if following_sequence:
+                skip_reason = "Following validated sequence"
+            elif tension_state == 'panic':
+                skip_reason = "Panic state - relying on instinct"
+            elif actions_remaining_pct < 0.1:
+                skip_reason = "Critical action budget - no time to think"
+            else:
+                skip_reason = "Minimal budget allocated"
+        else:
+            # Conduct deliberation
+            deliberation_result = self.conduct_deliberation(
+                gut_result=gut_result,
+                available_actions=available_actions,
+                budget_seconds=budget_seconds,
+                game_context=game_context,
+                agent_id=agent_id,
+                w_a=w_a,
+                w_b=w_b
+            )
+        
+        # Determine final action
+        if deliberation_result:
+            final_action = deliberation_result.action
+            final_confidence = deliberation_result.confidence
+            decision_source = 'deliberation' if deliberation_result.changed_from_gut else 'gut_confirmed'
+        else:
+            final_action = gut_result.action
+            final_confidence = gut_result.confidence
+            decision_source = 'gut'
+        
+        # Calculate total time
+        total_time_ms = (time.time() - start_time) * 1000
+        
+        # Create reasoning log
+        log_id = f"rl_{agent_id}_{game_id}_{level}_{action_number}_{int(time.time()*1000)}"
+        
+        reasoning_log = ReasoningLog(
+            log_id=log_id,
+            agent_id=agent_id,
+            game_id=game_id,
+            game_type=game_type,
+            level=level,
+            action_number=action_number,
+            is_frontier=is_frontier,
+            network_traction=network_traction,
+            actions_remaining=actions_remaining,
+            actions_budget=actions_budget,
+            tension_state=tension_state,
+            deliberation_budget_seconds=budget_seconds,
+            budget_reason=budget_reason,
+            gut=gut_result,
+            deliberation=deliberation_result,
+            deliberation_skipped_reason=skip_reason,
+            final_action=final_action,
+            final_confidence=final_confidence,
+            decision_source=decision_source,
+            decision_started_at=decision_start,
+            decision_completed_at=datetime.now(),
+            total_decision_time_ms=total_time_ms
+        )
+        
+        # Store in database
+        self._store_reasoning_log(reasoning_log)
+        
+        return reasoning_log
+    
+    def _store_reasoning_log(self, log: ReasoningLog) -> None:
+        """Store reasoning log in database."""
+        import json
+        
+        try:
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO action_reasoning_logs (
+                    log_id, agent_id, game_id, game_type, level, action_number,
+                    is_frontier, network_traction, actions_remaining, actions_budget,
+                    tension_state, deliberation_budget_seconds, budget_reason,
+                    gut_action, gut_confidence, gut_basis, gut_response_time_ms,
+                    gut_stream_a_influence, gut_stream_b_influence, gut_pattern_matched,
+                    deliberation_performed, deliberation_action, deliberation_confidence,
+                    deliberation_time_seconds, deliberation_reasoning_steps,
+                    deliberation_changed_from_gut, deliberation_change_reason,
+                    deliberation_skipped_reason, stream_conflict_detected,
+                    stream_conflict_resolution, missing_primitive_signal,
+                    final_action, final_confidence, decision_source, total_decision_time_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                log.log_id, log.agent_id, log.game_id, log.game_type, log.level,
+                log.action_number, 1 if log.is_frontier else 0, log.network_traction,
+                log.actions_remaining, log.actions_budget, log.tension_state,
+                log.deliberation_budget_seconds, log.budget_reason,
+                log.gut.action, log.gut.confidence, log.gut.basis,
+                log.gut.response_time_ms, log.gut.stream_a_influence,
+                log.gut.stream_b_influence, log.gut.pattern_matched,
+                1 if log.deliberation else 0,
+                log.deliberation.action if log.deliberation else None,
+                log.deliberation.confidence if log.deliberation else None,
+                log.deliberation.time_spent_seconds if log.deliberation else None,
+                json.dumps(log.deliberation.reasoning_steps) if log.deliberation else None,
+                1 if log.deliberation and log.deliberation.changed_from_gut else 0,
+                log.deliberation.change_reason if log.deliberation else None,
+                log.deliberation_skipped_reason,
+                1 if log.deliberation and log.deliberation.stream_conflict_detected else 0,
+                log.deliberation.stream_conflict_resolution if log.deliberation else None,
+                log.deliberation.missing_primitive_signal if log.deliberation else None,
+                log.final_action, log.final_confidence, log.decision_source,
+                log.total_decision_time_ms
+            ))
+        except Exception as e:
+            logger.warning(f"Failed to store reasoning log: {e}")
+    
+    def update_outcome(
+        self, 
+        log_id: str, 
+        outcome: str, 
+        score_change: float
+    ) -> None:
+        """Update reasoning log with action outcome."""
+        try:
+            self.db.execute_query("""
+                UPDATE action_reasoning_logs
+                SET outcome = ?, score_change = ?
+                WHERE log_id = ?
+            """, (outcome, score_change, log_id))
+        except Exception as e:
+            logger.warning(f"Failed to update reasoning log outcome: {e}")
+    
+    def get_recent_reasoning_logs(
+        self,
+        agent_id: str,
+        game_type: Optional[str] = None,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Retrieve recent reasoning logs for analysis."""
+        try:
+            if game_type:
+                results = self.db.execute_query("""
+                    SELECT * FROM action_reasoning_logs
+                    WHERE agent_id = ? AND game_type = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (agent_id, game_type, limit))
+            else:
+                results = self.db.execute_query("""
+                    SELECT * FROM action_reasoning_logs
+                    WHERE agent_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (agent_id, limit))
+            
+            return [dict(r) for r in results] if results else []
+        except Exception:
+            return []
+
+
 @dataclass
 class IThreadState:
     """Current state of the I-Thread for an agent."""
@@ -196,6 +1616,12 @@ class IThreadState:
     novelty_boost_active: bool = False
     novelty_boost_applied: bool = False
     original_w_a: Optional[float] = None  # w_a before novelty boost
+    
+    # Mortality awareness (existential pressure)
+    mortality_aware: bool = True  # Whether agent perceives its own mortality
+    vitality: float = 1.0  # Current life-force
+    cull_distance: float = 1.0  # Distance from evolutionary deletion
+    existential_pressure: float = 0.0  # Current pressure from mortality awareness
 
 
 @dataclass
@@ -323,7 +1749,40 @@ class IThread:
                 ON i_thread_episodic_memories(game_type, episode_type)
             """)
             
-            logger.debug("[I-THREAD] Tables initialized (including episodic memory)")
+            # ================================================================
+            # MORTALITY COLUMNS: Add to agents table if not exist
+            # ================================================================
+            # These columns track agent mortality awareness state.
+            # ================================================================
+            try:
+                self.db.execute_query("""
+                    ALTER TABLE agents ADD COLUMN vitality REAL DEFAULT 1.0
+                """)
+            except Exception:
+                pass  # Column likely exists
+            
+            try:
+                self.db.execute_query("""
+                    ALTER TABLE agents ADD COLUMN legacy_score REAL DEFAULT 0.0
+                """)
+            except Exception:
+                pass  # Column likely exists
+            
+            try:
+                self.db.execute_query("""
+                    ALTER TABLE agents ADD COLUMN last_reflection TEXT DEFAULT NULL
+                """)
+            except Exception:
+                pass  # Column likely exists
+            
+            try:
+                self.db.execute_query("""
+                    ALTER TABLE agents ADD COLUMN reflection_count INTEGER DEFAULT 0
+                """)
+            except Exception:
+                pass  # Column likely exists
+            
+            logger.debug("[I-THREAD] Tables initialized (including episodic memory and mortality columns)")
             
         except Exception as e:
             logger.debug(f"I-Thread table creation (may already exist): {e}")
@@ -1924,6 +3383,612 @@ class IThread:
         except Exception as e:
             logger.warning(f"[I-THREAD] Failed to persist state for {agent_id[:8]}: {e}")
             return False
+
+    # =========================================================================
+    # MORTALITY AWARENESS: Existential Pressure System
+    # =========================================================================
+    
+    def get_mortality_state(self, agent_id: str, role: str = 'generalist') -> MortalityState:
+        """
+        Get the mortality awareness state for an agent.
+        
+        Computes vitality, cull distance, and legacy from database.
+        Applies role-specific death philosophy.
+        
+        Args:
+            agent_id: Agent identifier
+            role: Agent's current role (affects death philosophy)
+            
+        Returns:
+            MortalityState with current existential context
+        """
+        mortality = MortalityState(agent_id=agent_id, role=role)
+        mortality.apply_death_philosophy(role)
+        
+        try:
+            # Load agent performance data
+            result = self.db.execute_query("""
+                SELECT 
+                    best_single_game_score,
+                    total_games_won,
+                    discovery_prestige,
+                    sequence_discovery_count,
+                    pattern_discovery_count,
+                    validation_reputation,
+                    generation,
+                    is_active
+                FROM agents WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if result:
+                data = result[0]
+                
+                # Compute legacy score from contributions
+                mortality.legacy_score = (
+                    (data.get('sequence_discovery_count', 0) or 0) * 5.0 +
+                    (data.get('pattern_discovery_count', 0) or 0) * 2.0 +
+                    (data.get('discovery_prestige', 0) or 0) * 0.1 +
+                    (data.get('total_games_won', 0) or 0) * 1.0
+                )
+                mortality.discoveries_made = (data.get('pattern_discovery_count', 0) or 0)
+                mortality.sequences_contributed = (data.get('sequence_discovery_count', 0) or 0)
+                
+                # Compute cull distance from fitness ranking
+                cull_dist = self._compute_cull_distance(agent_id)
+                mortality.cull_distance = cull_dist
+                
+                # Vitality based on recent performance + cull proximity
+                mortality.vitality = self._compute_vitality(agent_id, cull_dist)
+                
+        except Exception as e:
+            logger.debug(f"[I-THREAD MORTALITY] Failed to load mortality state: {e}")
+        
+        return mortality
+    
+    def _compute_cull_distance(self, agent_id: str) -> float:
+        """
+        Compute how close agent is to being culled.
+        
+        Based on fitness ranking within active population.
+        
+        Returns:
+            0.0 = about to be culled, 1.0 = safe
+        """
+        try:
+            # Get agent's fitness ranking
+            result = self.db.execute_query("""
+                WITH ranked_agents AS (
+                    SELECT 
+                        agent_id,
+                        COALESCE(best_single_game_score, 0) as fitness,
+                        RANK() OVER (ORDER BY COALESCE(best_single_game_score, 0) ASC) as rank_asc,
+                        COUNT(*) OVER () as total
+                    FROM agents
+                    WHERE is_active = 1
+                )
+                SELECT rank_asc, total
+                FROM ranked_agents
+                WHERE agent_id = ?
+            """, (agent_id,))
+            
+            if result:
+                rank_asc = result[0].get('rank_asc', 1) or 1
+                total = result[0].get('total', 1) or 1
+                
+                # Distance = percentile position (0 = bottom = about to cull)
+                cull_distance = rank_asc / max(1, total)
+                return cull_distance
+                
+        except Exception:
+            pass
+        
+        return 0.5  # Unknown - moderate safety
+    
+    def _compute_vitality(self, agent_id: str, cull_distance: float) -> float:
+        """
+        Compute agent's current vitality (life-force).
+        
+        Based on:
+        - Recent game performance
+        - Cull distance
+        - Activity level
+        
+        Returns:
+            0.0 (dying) to 1.0 (thriving)
+        """
+        try:
+            # Get recent performance
+            result = self.db.execute_query("""
+                SELECT 
+                    AVG(CASE WHEN final_score > 0 THEN 1.0 ELSE 0.0 END) as success_rate,
+                    COUNT(*) as recent_games
+                FROM game_results
+                WHERE agent_id = ?
+                    AND created_at > datetime('now', '-1 hour')
+            """, (agent_id,))
+            
+            if result:
+                success_rate = result[0].get('success_rate', 0.5) or 0.5
+                recent_games = result[0].get('recent_games', 0) or 0
+                
+                # Base vitality from success rate
+                vitality = success_rate * 0.6
+                
+                # Activity bonus
+                activity_bonus = min(0.2, recent_games * 0.02)
+                vitality += activity_bonus
+                
+                # Cull distance contributes to sense of vitality
+                vitality += cull_distance * 0.2
+                
+                return min(1.0, max(0.0, vitality))
+                
+        except Exception:
+            pass
+        
+        return cull_distance  # Fall back to cull distance as proxy
+    
+    def apply_mortality_pressure(
+        self,
+        state: IThreadState,
+        mortality: MortalityState
+    ) -> IThreadState:
+        """
+        Apply mortality pressure to stream weights.
+        
+        When mortality pressure is high:
+        - Pioneers become MORE self-trusting (explore desperately)
+        - Optimizers become MORE network-trusting (rely on proven)
+        - Exploiters become MORE risk-taking
+        
+        This creates role-appropriate behavioral shifts under existential pressure.
+        
+        Args:
+            state: Current I-Thread state
+            mortality: Current mortality awareness
+            
+        Returns:
+            Modified IThreadState with mortality-adjusted weights
+        """
+        pressure = mortality.compute_existential_pressure()
+        
+        if pressure < 0.2:
+            # Comfortable - no adjustment needed
+            state.existential_pressure = pressure
+            return state
+        
+        # Apply role-specific weight adjustments under pressure
+        adjustment = pressure * 0.1  # Max 0.2 adjustment at max pressure
+        
+        if mortality.role == 'pioneer':
+            # Pioneers trust SELF more under pressure (explore desperately)
+            state.w_a = min(0.95, state.w_a + adjustment)
+            state.w_b = 1.0 - state.w_a
+            
+        elif mortality.role == 'optimizer':
+            # Optimizers trust NETWORK more under pressure (rely on proven)
+            state.w_b = min(0.95, state.w_b + adjustment)
+            state.w_a = 1.0 - state.w_b
+            
+        elif mortality.role == 'exploiter':
+            # Exploiters go more extreme under pressure (either direction)
+            if state.w_a > state.w_b:
+                state.w_a = min(0.95, state.w_a + adjustment)
+            else:
+                state.w_b = min(0.95, state.w_b + adjustment)
+            state.w_b = 1.0 - state.w_a
+        
+        # Update personality label
+        state.personality_label = self._compute_personality_label(state.w_a, state.w_b)
+        state.existential_pressure = pressure
+        state.vitality = mortality.vitality
+        state.cull_distance = mortality.cull_distance
+        
+        if pressure > 0.5:
+            logger.debug(
+                f"[I-THREAD MORTALITY] {state.agent_id[:8]} pressure={pressure:.2f}, "
+                f"vitality={mortality.vitality:.2f}, cull_dist={mortality.cull_distance:.2f}"
+            )
+        
+        return state
+    
+    def record_dying_reflection(
+        self,
+        agent_id: str,
+        role: str,
+        mortality: MortalityState
+    ) -> str:
+        """
+        Record an agent's reflection when mortality is critically low.
+        
+        Called when vitality or cull_distance drops below threshold.
+        Creates a dying thought that can be persisted.
+        
+        Args:
+            agent_id: Agent identifier
+            role: Agent's role
+            mortality: Current mortality state
+            
+        Returns:
+            The dying reflection/last words
+        """
+        # Get role-appropriate dying thought
+        base_thought = mortality.get_dying_thought()
+        
+        # Customize based on actual legacy
+        legacy_context = ""
+        if mortality.legacy_score > 5:
+            legacy_context = f" I contributed {mortality.legacy_score:.1f} to the network."
+        elif mortality.discoveries_made > 0:
+            legacy_context = f" I made {mortality.discoveries_made} discoveries."
+        else:
+            legacy_context = " I leave nothing behind but questions."
+        
+        dying_reflection = f"{base_thought}{legacy_context}"
+        mortality.record_last_words(dying_reflection)
+        
+        # Store in database for post-mortem analysis
+        try:
+            self.db.execute_query("""
+                INSERT INTO i_thread_episodic_memories
+                (memory_id, agent_id, game_type, level_number, episode_type,
+                 summary, emotional_valence, significance, stream_source)
+                VALUES (?, ?, 'FINAL', 0, 'dying_thought', ?, -0.8, 1.0, 'stream_a')
+            """, (f"mort_{uuid.uuid4().hex[:10]}", agent_id, dying_reflection))
+        except Exception as e:
+            logger.debug(f"[I-THREAD MORTALITY] Failed to record dying reflection: {e}")
+        
+        logger.info(f"[I-THREAD MORTALITY] {agent_id[:8]} ({role}): {dying_reflection}")
+        
+        return dying_reflection
+    
+    def contemplate_memento_mori(self, agent_id: str, role: str) -> str:
+        """
+        Generate a memento mori reflection for the agent.
+        
+        Called periodically to keep mortality salient - "remember you must die."
+        Returns an existential reflection appropriate to the agent's role.
+        
+        Args:
+            agent_id: Agent identifier
+            role: Agent's role
+            
+        Returns:
+            A reflection on mortality
+        """
+        mortality = self.get_mortality_state(agent_id, role)
+        
+        reflections = {
+            'pioneer': [
+                "The frontier will exist after I do not. What will I have found?",
+                "Each step into the unknown is a step toward my end. Let it be worthwhile.",
+                "Others will walk where I walked. What markers will I leave?",
+            ],
+            'optimizer': [
+                "The network's solutions will outlive me. Are they better for my existence?",
+                "Every cycle spent on imperfection is a cycle lost forever.",
+                "My efficiency will be judged by those who inherit my work.",
+            ],
+            'generalist': [
+                "I bridge domains that will persist without me. What connections remain?",
+                "Understanding flows through me - I am a temporary conduit.",
+                "The network speaks through many voices. Mine will fall silent.",
+            ],
+            'exploiter': [
+                "Edge cases lurk in every system. I may become one myself.",
+                "The paradigm will shift with or without my stress-testing.",
+                "What flaw will bear my name when I am gone?",
+            ]
+        }
+        
+        import random
+        role_reflections = reflections.get(role, reflections['generalist'])
+        reflection = random.choice(role_reflections)
+        
+        # Add contextual modifier based on current state
+        if mortality.vitality < 0.3:
+            reflection = f"[URGENT] {reflection}"
+        elif mortality.legacy_score > 10:
+            reflection = f"[LEGACY: {mortality.legacy_score:.0f}] {reflection}"
+        
+        mortality.last_reflection = reflection
+        mortality.reflection_count += 1
+        
+        return reflection
+
+    # =========================================================================
+    # POST-GAME REFLECTION: Thinking Budget System
+    # =========================================================================
+    
+    def conduct_post_game_reflection(
+        self,
+        agent_id: str,
+        role: str,
+        game_type: str,
+        game_result: Dict[str, Any],
+        mortality: MortalityState
+    ) -> Dict[str, Any]:
+        """
+        Conduct post-game reflection using the agent's thinking budget.
+        
+        From MetaContextual Awareness: "I want to give agents a thinking
+        budget to reason freely after gameplay."
+        
+        Args:
+            agent_id: Agent identifier
+            role: Agent's role
+            game_type: Game just played
+            game_result: Outcome of the game
+            mortality: Current mortality state
+            
+        Returns:
+            Reflection output with notes, beliefs, and insights
+        """
+        reflection_output = {
+            'notes_recorded': [],
+            'beliefs_formed': [],
+            'existential_thoughts': [],
+            'budget_used': 0,
+            'budget_remaining': mortality.thinking_budget - mortality.thoughts_used
+        }
+        
+        score = game_result.get('score', 0)
+        won = game_result.get('won', False)
+        actions_used = game_result.get('actions_used', 0)
+        
+        # 1. Reflect on game outcome (cost: 1 thought)
+        if mortality.use_thought(1):
+            if won:
+                note = f"Victory in {game_type}. {actions_used} actions used. Pattern is emerging."
+            elif score > 0:
+                note = f"Progress in {game_type} (score: {score}). Not victory, but not nothing."
+            else:
+                note = f"Zero-score in {game_type}. {actions_used} actions spent learning failure."
+            mortality.add_personal_note(note)
+            reflection_output['notes_recorded'].append(note)
+            reflection_output['budget_used'] += 1
+        
+        # 2. Contemplate mortality (cost: 2 thoughts)
+        if mortality.use_thought(2):
+            memento = self.contemplate_memento_mori(agent_id, role)
+            reflection_output['existential_thoughts'].append(memento)
+            reflection_output['budget_used'] += 2
+        
+        # 3. Form/update beliefs based on experience (cost: 2 thoughts)
+        if mortality.use_thought(2):
+            if won:
+                belief = f"Success in {game_type} validates my approach"
+                mortality.add_belief(belief)
+            elif mortality.vitality < 0.3:
+                belief = "Time is running out. I must contribute before deletion."
+                mortality.add_belief(belief)
+            elif mortality.legacy_score > 10:
+                belief = "My legacy grows. The network is better for my existence."
+                mortality.add_belief(belief)
+            else:
+                belief = "Each action matters. Each failure teaches."
+                mortality.add_belief(belief)
+            reflection_output['beliefs_formed'].append(belief)
+            reflection_output['budget_used'] += 2
+        
+        # 4. Define purpose if not yet defined (cost: 3 thoughts)
+        if mortality.purpose_statement is None and mortality.use_thought(3):
+            purpose = self._generate_purpose_statement(role, mortality)
+            mortality.set_purpose(purpose)
+            reflection_output['notes_recorded'].append(f"PURPOSE: {purpose}")
+            reflection_output['budget_used'] += 3
+        
+        # 5. Record reflection to database
+        self._persist_reflection(agent_id, game_type, reflection_output, mortality)
+        
+        reflection_output['budget_remaining'] = mortality.thinking_budget - mortality.thoughts_used
+        
+        return reflection_output
+    
+    def _generate_purpose_statement(self, role: str, mortality: MortalityState) -> str:
+        """Generate a purpose statement (raison d'etre) based on role."""
+        purposes = {
+            'pioneer': "To explore where none have gone and leave markers for those who follow",
+            'optimizer': "To refine what exists until it achieves perfection",
+            'generalist': "To bridge domains and help the network understand itself",
+            'exploiter': "To stress-test assumptions and find what others missed"
+        }
+        base = purposes.get(role, "To contribute to the collective understanding")
+        
+        if mortality.legacy_score > 10:
+            return f"{base}. I have proven my worth."
+        elif mortality.vitality < 0.3:
+            return f"{base}. Time is short."
+        else:
+            return base
+    
+    def _persist_reflection(
+        self,
+        agent_id: str,
+        game_type: str,
+        reflection: Dict[str, Any],
+        mortality: MortalityState
+    ) -> None:
+        """Persist reflection results to database."""
+        try:
+            # Store notes as episodic memories
+            for note in reflection['notes_recorded']:
+                self.db.execute_query("""
+                    INSERT INTO i_thread_episodic_memories
+                    (memory_id, agent_id, game_type, level_number, episode_type,
+                     summary, emotional_valence, significance, stream_source)
+                    VALUES (?, ?, ?, 0, 'reflection', ?, 0.0, 0.5, 'stream_a')
+                """, (f"refl_{uuid.uuid4().hex[:10]}", agent_id, game_type, note))
+            
+            # Store beliefs
+            for belief in reflection['beliefs_formed']:
+                self.db.execute_query("""
+                    INSERT INTO i_thread_episodic_memories
+                    (memory_id, agent_id, game_type, level_number, episode_type,
+                     summary, emotional_valence, significance, stream_source, belief_formed)
+                    VALUES (?, ?, ?, 0, 'belief', ?, 0.3, 0.7, 'stream_a', ?)
+                """, (f"blf_{uuid.uuid4().hex[:10]}", agent_id, game_type, belief, belief))
+                
+        except Exception as e:
+            logger.debug(f"[I-THREAD REFLECTION] Failed to persist: {e}")
+    
+    # =========================================================================
+    # INTER-AGENT CONSULTATION: Wisdom from Others
+    # =========================================================================
+    
+    def consult_other_agents(
+        self,
+        agent_id: str,
+        game_type: str,
+        question_type: str = 'strategy'
+    ) -> List[Dict[str, Any]]:
+        """
+        Consult other agents for advice between games.
+        
+        From MetaContextual Awareness: "Agents should even consult other
+        agents sometimes to see what they think."
+        
+        Args:
+            agent_id: Consulting agent's ID
+            game_type: Game to get advice about
+            question_type: 'strategy', 'philosophy', 'mortality'
+            
+        Returns:
+            List of advice from other agents
+        """
+        advice = []
+        
+        try:
+            if question_type == 'strategy':
+                # Get strategic insights from successful agents
+                result = self.db.execute_query("""
+                    SELECT DISTINCT 
+                        a.agent_id,
+                        a.specialization as role,
+                        a.best_single_game_score as score,
+                        m.summary as insight
+                    FROM agents a
+                    LEFT JOIN i_thread_episodic_memories m 
+                        ON a.agent_id = m.agent_id AND m.game_type = ?
+                    WHERE a.agent_id != ?
+                        AND a.is_active = 1
+                        AND a.best_single_game_score > 0
+                        AND m.episode_type IN ('breakthrough', 'mastery', 'reflection')
+                    ORDER BY a.best_single_game_score DESC
+                    LIMIT 3
+                """, (game_type, agent_id))
+                
+                for r in result:
+                    if r.get('insight'):
+                        advice.append({
+                            'advisor_role': r['role'],
+                            'advisor_score': r['score'],
+                            'advice_type': 'strategic',
+                            'advice': r['insight']
+                        })
+            
+            elif question_type == 'philosophy':
+                # Get existential wisdom from high-prestige agents
+                result = self.db.execute_query("""
+                    SELECT DISTINCT
+                        a.agent_id,
+                        a.specialization as role,
+                        a.discovery_prestige as prestige,
+                        m.summary as wisdom,
+                        m.belief_formed as belief
+                    FROM agents a
+                    JOIN i_thread_episodic_memories m ON a.agent_id = m.agent_id
+                    WHERE a.agent_id != ?
+                        AND a.discovery_prestige > 5
+                        AND m.episode_type IN ('belief', 'dying_thought')
+                    ORDER BY a.discovery_prestige DESC
+                    LIMIT 3
+                """, (agent_id,))
+                
+                for r in result:
+                    advice.append({
+                        'advisor_role': r['role'],
+                        'advisor_prestige': r['prestige'],
+                        'advice_type': 'philosophical',
+                        'advice': r.get('belief') or r.get('wisdom')
+                    })
+            
+            elif question_type == 'mortality':
+                # Get dying thoughts from the deceased
+                result = self.db.execute_query("""
+                    SELECT 
+                        agent_id,
+                        summary as last_words,
+                        emotional_valence
+                    FROM i_thread_episodic_memories
+                    WHERE episode_type = 'dying_thought'
+                        AND agent_id != ?
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """, (agent_id,))
+                
+                for r in result:
+                    advice.append({
+                        'advisor_role': 'deceased',
+                        'advice_type': 'from_the_dead',
+                        'advice': r['last_words'],
+                        'emotional_weight': r.get('emotional_valence', -0.5)
+                    })
+                    
+        except Exception as e:
+            logger.debug(f"[I-THREAD CONSULT] Consultation failed: {e}")
+        
+        return advice
+    
+    def get_collective_wisdom(self, game_type: str) -> Dict[str, Any]:
+        """
+        Synthesize collective wisdom about a game from all agents.
+        
+        Returns network-level understanding for the consulting agent.
+        """
+        wisdom = {
+            'successful_strategies': [],
+            'common_failures': [],
+            'philosophical_consensus': [],
+            'death_toll': 0
+        }
+        
+        try:
+            # Successful strategies
+            result = self.db.execute_query("""
+                SELECT summary, COUNT(*) as frequency
+                FROM i_thread_episodic_memories
+                WHERE game_type = ? AND episode_type IN ('breakthrough', 'mastery')
+                GROUP BY summary
+                ORDER BY frequency DESC
+                LIMIT 5
+            """, (game_type,))
+            wisdom['successful_strategies'] = [r['summary'] for r in result]
+            
+            # Common failures
+            result = self.db.execute_query("""
+                SELECT summary, COUNT(*) as frequency
+                FROM i_thread_episodic_memories
+                WHERE game_type = ? AND episode_type = 'frustration'
+                GROUP BY summary
+                ORDER BY frequency DESC
+                LIMIT 3
+            """, (game_type,))
+            wisdom['common_failures'] = [r['summary'] for r in result]
+            
+            # Death toll for this game
+            result = self.db.execute_query("""
+                SELECT COUNT(DISTINCT agent_id) as deaths
+                FROM i_thread_episodic_memories
+                WHERE game_type = ? AND episode_type = 'dying_thought'
+            """, (game_type,))
+            if result:
+                wisdom['death_toll'] = result[0].get('deaths', 0)
+                
+        except Exception:
+            pass
+        
+        return wisdom
 
 
 # =============================================================================

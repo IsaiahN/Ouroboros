@@ -200,32 +200,46 @@ class DatabaseLogHandler(logging.Handler):
             # Prepare log entry
             timestamp = datetime.fromtimestamp(record.created).isoformat()
 
-            with self._lock:
-                conn = self._get_connection()
-                cursor = conn.cursor()
+            # Retry logic for database locks (common with concurrent agents)
+            max_retries = 3
+            retry_delay = 0.1  # seconds
+            
+            for attempt in range(max_retries):
+                try:
+                    with self._lock:
+                        conn = self._get_connection()
+                        cursor = conn.cursor()
 
-                cursor.execute("""
-                    INSERT INTO system_logs (
-                        timestamp, level, logger_name, message, module,
-                        function_name, line_number, session_id, game_id,
-                        process_id, thread_id, extra_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    timestamp,
-                    record.levelname,
-                    record.name,
-                    message,
-                    record.module if hasattr(record, 'module') else record.filename,
-                    record.funcName,
-                    record.lineno,
-                    self.current_session_id,
-                    self.current_game_id,
-                    record.process,
-                    record.thread,
-                    json.dumps(extra_data) if extra_data else None
-                ))
+                        cursor.execute("""
+                            INSERT INTO system_logs (
+                                timestamp, level, logger_name, message, module,
+                                function_name, line_number, session_id, game_id,
+                                process_id, thread_id, extra_data
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            timestamp,
+                            record.levelname,
+                            record.name,
+                            message,
+                            record.module if hasattr(record, 'module') else record.filename,
+                            record.funcName,
+                            record.lineno,
+                            self.current_session_id,
+                            self.current_game_id,
+                            record.process,
+                            record.thread,
+                            json.dumps(extra_data) if extra_data else None
+                        ))
 
-                conn.commit()
+                        conn.commit()
+                    break  # Success - exit retry loop
+                    
+                except sqlite3.OperationalError as db_err:
+                    if "database is locked" in str(db_err) and attempt < max_retries - 1:
+                        import time
+                        time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                        continue
+                    raise  # Re-raise if not a lock error or final attempt
 
         except Exception as e:
             # If database logging fails, fall back to stderr

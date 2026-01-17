@@ -1071,6 +1071,130 @@ class PrimitiveHelper:
         
         return {'action': None, 'reason': 'No primitive-based recommendation', 'confidence': 0.0}
 
+    # ========================================================================
+    # BIRTHRIGHT PERCEPTION - Runs EVERY action, unconditionally
+    # ========================================================================
+    # These primitives are not optional features - they define what these agents ARE.
+    # Like how humans don't "decide" to see motion - visual cortex processes it automatically.
+    # 
+    # From Metalearning Theory: "Babies don't process all input equally - they have 
+    # built-in attention biases... Without attention primitives, the system treats 
+    # all input equally."
+    #
+    # Birthright primitives for ALL agents:
+    #   - detect_contingency: "Did my action cause something?" (agency)
+    #   - detect_change: "What changed?" (attention)
+    #   - find_similar_objects: "What else looks like this?" (generalization)
+    #   - novelty_bonus: "Is this new?" (curiosity)
+    #   - surprise_magnitude: "Was I surprised?" (learning signal)
+    # ========================================================================
+    
+    def run_birthright_perception(
+        self,
+        action: Any,
+        frame_before: List,
+        frame_after: List,
+        score_before: float,
+        score_after: float,
+        click_coords: Optional[Tuple[int, int]] = None
+    ) -> Dict[str, Any]:
+        """
+        Run ALL birthright primitives - this is what agents ARE, not what they DO.
+        
+        This method MUST be called after EVERY action. It is not optional.
+        Results flow automatically to self-model and learning systems.
+        
+        Args:
+            action: The action just taken
+            frame_before: Frame state before action
+            frame_after: Frame state after action  
+            score_before: Score before action
+            score_after: Score after action
+            click_coords: If ACTION6, the click coordinates
+            
+        Returns:
+            Perception results that MUST be processed by caller
+        """
+        if not self.available:
+            return {'available': False}
+        
+        result = {
+            'available': True,
+            'action': action,
+            'score_delta': score_after - score_before
+        }
+        
+        # BIRTHRIGHT 1: detect_contingency - "Did my action cause something?"
+        # This is the fundamental agency primitive - three-month-olds have this
+        try:
+            action_int = int(str(action).replace('ACTION', '')) if action else 0
+            contingency = self.analyze_action_contingency(action_int, frame_before, frame_after)
+            result['contingency'] = contingency
+            result['caused_change'] = contingency.get('contingent', False)
+        except Exception as e:
+            result['contingency'] = {'available': False, 'error': str(e)}
+            result['caused_change'] = False
+        
+        # BIRTHRIGHT 2: detect_change - "What changed?"
+        # Attention primitive - filters what to process
+        try:
+            changes = self.analyze_frame_changes(frame_before, frame_after)
+            result['changes'] = changes
+            result['changed_positions'] = changes.get('changed_positions', [])
+            result['moving_objects'] = changes.get('moving_objects', [])
+        except Exception as e:
+            result['changes'] = {'available': False, 'error': str(e)}
+            result['changed_positions'] = []
+            result['moving_objects'] = []
+        
+        # BIRTHRIGHT 3: If click action, detect click effect specifically
+        # This is critical for games like ft09 where clicking is the mechanic
+        if click_coords and str(action) in ('6', 'ACTION6'):
+            try:
+                click_effect = self.detect_click_effect(click_coords, frame_before, frame_after)
+                result['click_effect'] = click_effect
+            except Exception as e:
+                result['click_effect'] = {'available': False, 'error': str(e)}
+        
+        # BIRTHRIGHT 4: If something changed, find similar objects (generalization)
+        # "If this object did X, do all similar objects do X?"
+        # This replaces the coded symmetry trigger - it's AUTOMATIC
+        if result['caused_change'] and result.get('moving_objects'):
+            try:
+                # Get the object that changed
+                for obj_id in result['moving_objects'][:3]:  # Limit to avoid spam
+                    # Find all similar objects for later symmetry testing
+                    similar = self.find_similar({'color': obj_id}, frame_after, 'color')
+                    if similar.get('count', 0) > 1:
+                        result.setdefault('similar_objects', {})[obj_id] = similar['similar']
+            except Exception as e:
+                logger.debug(f"[BIRTHRIGHT] find_similar failed: {e}")
+        
+        # BIRTHRIGHT 5: novelty_bonus - "Is this new to me?"
+        # Curiosity drive - babies prefer moderately novel stimuli
+        try:
+            frame_sig = str(frame_after)[:200] if frame_after else ""
+            # Note: caller should maintain state_history for proper novelty calculation
+            novelty = self.get_novelty_bonus(frame_sig, [])  # Simplified - full impl needs history
+            result['novelty'] = novelty
+        except Exception as e:
+            result['novelty'] = 0.5
+        
+        # BIRTHRIGHT 6: surprise_magnitude - "Was I surprised?"
+        # The fundamental learning signal - high surprise = high attention
+        try:
+            if result['caused_change']:
+                # Change happened - how surprising was it?
+                # If we expected no change (no prior theory), any change is moderately surprising
+                result['surprise'] = 0.6 if len(result.get('changed_positions', [])) > 5 else 0.3
+            else:
+                # No change - if we expected change (took an action), that's surprising
+                result['surprise'] = 0.4  # Mildly surprising that nothing happened
+        except Exception as e:
+            result['surprise'] = 0.5
+        
+        return result
+
 
 # Global primitive helper instance
 _primitive_helper: Optional[PrimitiveHelper] = None
@@ -3314,6 +3438,14 @@ class GameplayEngine:
                         self.action_handler.clear_pseudo_buttons()
                 except Exception as e:
                     logger.debug(f"Failed to reload pseudo-buttons for level {new_level}: {e}")
+                
+                # FIX 2025-01-17: Reset discovery state for new level
+                # Each level needs fresh discovery - objects may be different
+                try:
+                    self.agent_self_model.reset_discovery_state()
+                    logger.info(f"[DISCOVERY] Reset discovery state for new level {new_level}")
+                except Exception as e:
+                    logger.debug(f"Discovery state reset failed: {e}")
             except Exception as e:
                 logger.debug(f"CODS level advance failed (non-critical): {e}")
         
@@ -6072,6 +6204,112 @@ class GameplayEngine:
                             if len(self._recent_action_traces) > 20000:
                                 self._recent_action_traces = self._recent_action_traces[-20000:]
                             
+                            # ================================================================
+                            # BIRTHRIGHT PERCEPTION - Runs EVERY action, unconditionally
+                            # ================================================================
+                            # These primitives define what agents ARE, not optional features.
+                            # From Metalearning Theory: "Babies don't process all input equally"
+                            # Results automatically flow to self-model and learning systems.
+                            # ================================================================
+                            if hasattr(self, 'primitive_helper') and self.primitive_helper.available:
+                                try:
+                                    # Get click coordinates if this was ACTION6
+                                    click_coords = getattr(self, '_last_click_coords', None)
+                                    
+                                    birthright_perception = self.primitive_helper.run_birthright_perception(
+                                        action=action,
+                                        frame_before=self._previous_frame if hasattr(self, '_previous_frame') else None,
+                                        frame_after=game_state.frame,
+                                        score_before=previous_score,
+                                        score_after=game_state.score,
+                                        click_coords=click_coords
+                                    )
+                                    
+                                    # Store for use by action selection and other systems
+                                    self._last_birthright_perception = birthright_perception
+                                    
+                                    # AUTO-UPDATE SELF-MODEL: If contingency detected, update automatically
+                                    # This replaces the coded "discovery phase" with innate perception
+                                    if birthright_perception.get('caused_change') and hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                        try:
+                                            # If click effect detected, learn from it automatically
+                                            click_effect = birthright_perception.get('click_effect', {})
+                                            if click_effect.get('available') and click_coords:
+                                                # Get colors from frames for the click learning
+                                                color_before = 0
+                                                color_after = 0
+                                                try:
+                                                    prev_frame = self._previous_frame if hasattr(self, '_previous_frame') else None
+                                                    if prev_frame and click_coords[1] < len(prev_frame) and click_coords[0] < len(prev_frame[0]):
+                                                        color_before = prev_frame[click_coords[1]][click_coords[0]]
+                                                    if game_state.frame and click_coords[1] < len(game_state.frame) and click_coords[0] < len(game_state.frame[0]):
+                                                        color_after = game_state.frame[click_coords[1]][click_coords[0]]
+                                                except (IndexError, TypeError):
+                                                    pass
+                                                
+                                                self.agent_self_model.learn_from_click_effect(
+                                                    agent_id=agent_id,
+                                                    game_id=game_id,
+                                                    level=current_level,
+                                                    click_x=click_coords[0],
+                                                    click_y=click_coords[1],
+                                                    effect_type=click_effect.get('effect_type', 'unknown'),
+                                                    color_before=color_before,
+                                                    color_after=color_after,
+                                                    generation=self.game_config.get('generation', 0)
+                                                )
+                                            
+                                            # If movement detected, learn from correlation automatically
+                                            moving_objects = birthright_perception.get('moving_objects', [])
+                                            if moving_objects:
+                                                action_str = str(action) if not str(action).startswith('ACTION') else action
+                                                if not action_str.startswith('ACTION'):
+                                                    action_str = f'ACTION{action}'
+                                                
+                                                # Map action to expected direction
+                                                action_direction_map = {
+                                                    'ACTION1': 'up', 'ACTION2': 'down',
+                                                    'ACTION3': 'left', 'ACTION4': 'right'
+                                                }
+                                                expected_direction = action_direction_map.get(action_str, 'unknown')
+                                                
+                                                for obj_id in moving_objects[:3]:
+                                                    # Extract color number from obj_id (e.g., "obj_12" -> 12)
+                                                    try:
+                                                        color_num = int(str(obj_id).split('_')[-1])
+                                                    except (ValueError, IndexError):
+                                                        color_num = 0
+                                                    
+                                                    self.agent_self_model.learn_from_movement_correlation(
+                                                        agent_id=agent_id,
+                                                        game_id=game_id,
+                                                        level=current_level,
+                                                        action=action_str,
+                                                        direction=expected_direction,
+                                                        controlled_color=color_num,
+                                                        generation=self.game_config.get('generation', 0)
+                                                    )
+                                            
+                                            # AUTO-SYMMETRY: If similar objects found, queue for testing
+                                            # This replaces the coded _trigger_symmetry_experiment
+                                            similar_objects = birthright_perception.get('similar_objects', {})
+                                            if similar_objects and len(similar_objects) > 0:
+                                                for ref_obj, similar_list in similar_objects.items():
+                                                    if len(similar_list) > 1:
+                                                        # Store that we should test these similar objects
+                                                        # The agent's curiosity will drive it to test them
+                                                        self.game_config.setdefault('pending_symmetry_tests', []).append({
+                                                            'reference': ref_obj,
+                                                            'similar': similar_list,
+                                                            'discovered_at': action_count
+                                                        })
+                                                        logger.debug(f"[BIRTHRIGHT] Auto-queued symmetry test: {len(similar_list)} objects like {ref_obj}")
+                                        except Exception as sm_err:
+                                            logger.debug(f"[BIRTHRIGHT] Self-model auto-update failed: {sm_err}")
+                                    
+                                except Exception as bp_err:
+                                    logger.debug(f"[BIRTHRIGHT] Perception failed: {bp_err}")
+                            
                             # FIX (2025-01-08): Progress theory_validation_state based on outcomes
                             # Theory states: UNTESTED -> TESTING -> VALIDATED/REFUTED
                             # This was identified as a critical gap - state never progressed from UNTESTED
@@ -7204,8 +7442,29 @@ class GameplayEngine:
                             logger.warning(f"[MID-GAME REPLAY] Error: {e}")
                     
                     # Check if exceeded max actions for this level
-                    if level_action_count >= self.game_config['max_actions_per_level']:
-                        logger.warning(f"[TIME] Reached max actions ({self.game_config['max_actions_per_level']}) for level {current_level}")
+                    # FRONTIER EXEMPTION: At frontier level, use remaining total budget instead of per-level limit
+                    # This ensures agents can fully explore frontier levels until total budget exhausted
+                    # FIX 2025-01-17: Use BOTH frontier_mode from config AND local is_frontier_level check
+                    # frontier_mode is set after replay, is_frontier_level is computed per-iteration
+                    is_at_frontier = (
+                        self.game_config.get('frontier_mode', False) and 
+                        current_level == self.game_config.get('frontier_level', 0)
+                    ) or is_frontier_level  # Also use the local frontier check from stuck detection
+                    max_total = self.game_config.get('max_total_actions', 2000)
+                    remaining_total_budget = max_total - action_count
+                    
+                    if is_at_frontier:
+                        # At frontier: only stop if total budget exhausted
+                        effective_level_limit = remaining_total_budget
+                    else:
+                        # Non-frontier: use per-level limit as guideline
+                        effective_level_limit = self.game_config['max_actions_per_level']
+                    
+                    if level_action_count >= effective_level_limit:
+                        if is_at_frontier:
+                            logger.info(f"[FRONTIER] Total budget exhausted ({action_count}/{max_total} actions) on frontier level {current_level}")
+                        else:
+                            logger.warning(f"[TIME] Reached max actions ({effective_level_limit}) for level {current_level}")
                         
                         # FIX: In ARC games, you CANNOT skip levels. Levels are sequential.
                         # If max actions reached without completing the level, the game is over.
@@ -8234,6 +8493,72 @@ class GameplayEngine:
                         f"{FAILURE_THRESHOLD_PER_REGION}+ times - need visual exploration"
                     )
             
+            # ================================================================
+            # FIX: NETWORK INVENTORY INTEGRATION
+            # When local controlled objects fail, check network-discovered
+            # toggleable/interactable positions that other agents found.
+            # ================================================================
+            game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+            game_type = game_id[:4] if game_id else ''
+            level = getattr(self, '_current_level', 1)
+            
+            if game_type:
+                try:
+                    network_inv = self.agent_self_model.get_network_object_inventory(game_type, level)
+                    
+                    # Priority 1: Try known interactable positions (coordinates)
+                    interactables = network_inv.get('interactable', [])
+                    if interactables:
+                        import re
+                        valid_coords = []
+                        for coord_str in interactables:
+                            match = re.search(r'x:(\d+),y:(\d+)', coord_str)
+                            if match:
+                                nx, ny = int(match.group(1)), int(match.group(2))
+                                region_key = (nx // 8, ny // 8)
+                                if self._failed_click_regions.get(region_key, 0) < FAILURE_THRESHOLD_PER_REGION:
+                                    if 0 <= ny < len(frame) and 0 <= nx < len(frame[0]):
+                                        valid_coords.append((nx, ny, f"Network-discovered interactable"))
+                        
+                        if valid_coords:
+                            x, y, reason = random.choice(valid_coords)
+                            self._last_click_coords_for_tracking = (x, y)
+                            logger.info(f"[NETWORK-INVENTORY] Using interactable position ({x}, {y})")
+                            return (x, y, reason)
+                    
+                    # Priority 2: Try network toggleable colors
+                    network_toggleables = network_inv.get('toggleable', [])
+                    if network_toggleables:
+                        # Extract colors from toggleable names
+                        network_toggle_colors = set()
+                        for toggle_str in network_toggleables:
+                            if 'color_' in toggle_str.lower():
+                                try:
+                                    color = int(toggle_str.lower().split('color_')[-1].split('_')[0].split(',')[0])
+                                    if color > 0:
+                                        network_toggle_colors.add(color)
+                                except (ValueError, IndexError):
+                                    pass
+                        
+                        # Find pixels of network-known toggleable colors
+                        if network_toggle_colors:
+                            toggle_candidates = []
+                            for y_idx, row in enumerate(frame):
+                                for x_idx, pixel in enumerate(row):
+                                    if pixel in network_toggle_colors:
+                                        region_key = (x_idx // 8, y_idx // 8)
+                                        if self._failed_click_regions.get(region_key, 0) < FAILURE_THRESHOLD_PER_REGION:
+                                            toggle_candidates.append((x_idx, y_idx, f"Network toggleable color {pixel}"))
+                            
+                            if toggle_candidates:
+                                x, y, reason = random.choice(toggle_candidates)
+                                self._last_click_coords_for_tracking = (x, y)
+                                logger.info(f"[NETWORK-INVENTORY] Using toggleable color {frame[y][x]} at ({x}, {y})")
+                                return (x, y, reason)
+                    
+                except Exception as e:
+                    logger.debug(f"Network inventory check failed: {e}")
+            
             return None
             
         except Exception as e:
@@ -8977,9 +9302,9 @@ class GameplayEngine:
             },
         }
         action_source = None
-        self.loop_state = loop_state
+        self.loop_state = ladder_trace
         # Store reference for updating remaining after consumption
-        self._loop_state_imagination_ref = loop_state.get('imagination', {})
+        self._loop_state_imagination_ref = ladder_trace.get('imagination', {})
         persona_context = self._build_persona_context(game_state)
         self._last_persona_context = persona_context
         self._last_persona_decision = None
@@ -9967,18 +10292,83 @@ class GameplayEngine:
             escape_action = self._forced_escape_action
             del self._forced_escape_action  # Clear for next iteration
             
-            # For ACTION6 (click), get exploratory coordinates
+            # For ACTION6 (click), get coordinates - prioritize network-known targets
             if escape_action == 6 and game_state.frame:
                 try:
-                    # Use visual analyzer to find a random unexplored target
-                    if hasattr(self.action_handler, 'visual_analyzer'):
+                    escape_coords = None
+                    escape_reason = "exploratory"
+                    
+                    # ================================================================
+                    # PRIORITY 1: Try network inventory interactables/toggleables
+                    # These are positions that OTHER agents discovered work
+                    # ================================================================
+                    if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                        game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                        game_type = game_id[:4] if game_id else ''
+                        level = getattr(self, '_current_level', 1)
+                        
+                        if game_type:
+                            try:
+                                network_inv = self.agent_self_model.get_network_object_inventory(game_type, level)
+                                import re
+                                import random
+                                
+                                # Try interactable coordinates first
+                                interactables = network_inv.get('interactable', [])
+                                if interactables:
+                                    valid_coords = []
+                                    for coord_str in interactables:
+                                        match = re.search(r'x:(\d+),y:(\d+)', coord_str)
+                                        if match:
+                                            nx, ny = int(match.group(1)), int(match.group(2))
+                                            if 0 <= ny < len(game_state.frame) and 0 <= nx < len(game_state.frame[0]):
+                                                valid_coords.append((nx, ny))
+                                    if valid_coords:
+                                        escape_coords = random.choice(valid_coords)
+                                        escape_reason = "network-discovered interactable"
+                                
+                                # If no interactables, try toggleable colors
+                                if not escape_coords:
+                                    network_toggleables = network_inv.get('toggleable', [])
+                                    toggle_colors = set()
+                                    for toggle_str in network_toggleables:
+                                        if 'color_' in toggle_str.lower():
+                                            try:
+                                                color = int(toggle_str.lower().split('color_')[-1].split('_')[0])
+                                                if color > 0:
+                                                    toggle_colors.add(color)
+                                            except (ValueError, IndexError):
+                                                pass
+                                    
+                                    if toggle_colors:
+                                        # Find pixels of these colors in frame
+                                        candidates = []
+                                        for y_idx, row in enumerate(game_state.frame):
+                                            for x_idx, pixel in enumerate(row):
+                                                if pixel in toggle_colors:
+                                                    candidates.append((x_idx, y_idx))
+                                        if candidates:
+                                            escape_coords = random.choice(candidates)
+                                            escape_reason = f"network toggleable color"
+                                
+                            except Exception as e:
+                                logger.debug(f"Network inventory escape lookup failed: {e}")
+                    
+                    # ================================================================
+                    # PRIORITY 2: Fall back to visual exploratory
+                    # ================================================================
+                    if not escape_coords and hasattr(self.action_handler, 'visual_analyzer'):
                         x, y = self.action_handler.visual_analyzer.get_exploratory_coordinates(
                             game_state.frame, 
                             radius=20  # Wide exploration radius
                         )
-                        # Store coordinates for the action handler
-                        self.action_handler._escape_click_coords = (x, y)
-                        logger.info(f"[ESCAPE] ACTION6 escape at exploratory coordinates ({x}, {y})")
+                        escape_coords = (x, y)
+                        escape_reason = "exploratory"
+                    
+                    if escape_coords:
+                        self.action_handler._escape_click_coords = escape_coords
+                        logger.info(f"[ESCAPE] ACTION6 escape at ({escape_coords[0]}, {escape_coords[1]}) - {escape_reason}")
+                        
                 except Exception as e:
                     logger.debug(f"Escape coordinate error: {e}")
             
@@ -18851,17 +19241,21 @@ class GameplayEngine:
                 recent_traces = getattr(self, '_recent_action_traces', [])
                 if recent_traces:
                     # Avoid the most repeated action (likely causing the stuck state)
+                    # BUT: Skip ACTION6 (click) - it's coordinate-based, the problem is
+                    # WHERE we click, not THAT we click. Avoiding clicks when stuck is wrong.
                     action_counts = {}
                     for trace in recent_traces[-20:]:
                         action = trace.get('action_type', '')
                         if isinstance(action, str) and action.startswith('ACTION'):
                             try:
                                 action_num = int(action.replace('ACTION', ''))
-                                action_counts[action_num] = action_counts.get(action_num, 0) + 1
+                                # Skip ACTION6 - clicks fail due to coordinates, not the action type
+                                if action_num != 6:
+                                    action_counts[action_num] = action_counts.get(action_num, 0) + 1
                             except ValueError:
                                 pass
                     
-                    # Most repeated action during stuck period = avoid it
+                    # Most repeated NON-CLICK action during stuck period = avoid it
                     if action_counts:
                         most_repeated = max(action_counts.keys(), key=lambda k: action_counts.get(k, 0))
                         if action_counts[most_repeated] >= 5:
@@ -24730,6 +25124,13 @@ def _merge_theories_with_weights(
         network_consensus.get('toggleable', 0) * norm_wb +
         hist_toggleable * hist_weight
     )
+    
+    # FIX: Don't let network zeros dilute current observations
+    # If agent currently SEES 2 toggleables but network says 0, trust the eyes.
+    # The weighted formula can't reduce below what the agent actually sees.
+    # This prevents "1 objects" when there are clearly 2.
+    merged_moveable = max(merged_moveable, current_moveable * 0.9)  # At least 90% of what we see
+    merged_toggleable = max(merged_toggleable, current_toggleable * 0.9)
     
     return {
         'moveable': merged_moveable,
