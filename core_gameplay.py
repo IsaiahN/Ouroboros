@@ -1729,6 +1729,26 @@ class GameplayEngine:
         else:
             self.teacher_engine = None
         
+        # CONCEPT DISCOVERY ENGINE - Pattern and concept tracking
+        # Enables abstraction cycle: patterns discovered -> concepts formed
+        try:
+            from concept_discovery_engine import ConceptDiscoveryEngine
+            self.concept_engine = ConceptDiscoveryEngine(db=self.db, db_path=db_path)
+            logger.info("Concept discovery engine initialized")
+        except Exception as e:
+            self.concept_engine = None
+            logger.debug(f"Concept engine init failed: {e}")
+        
+        # RESONANCE DETECTOR - Cross-game pattern matching
+        # Enables unification: patterns from different games recognized as similar
+        try:
+            from resonance_detector import ResonanceDetector
+            self.resonance_detector = ResonanceDetector(self.db)
+            logger.info("Resonance detector initialized")
+        except Exception as e:
+            self.resonance_detector = None
+            logger.debug(f"Resonance detector init failed: {e}")
+        
         # IMAGINATION BUDGET MANAGER - Performance-based cognitive allowance
         # Budget decreases on poor performance (fewer personas/speculation)
         # Budget increases on wins (more cognitive exploration)
@@ -2783,6 +2803,60 @@ class GameplayEngine:
                     pass
             
             # =================================================================
+            # 6b. BELIEF CHECKPOINTS (Invariant 2: Reversibility)
+            # =================================================================
+            # On positive outcomes, create a checkpoint of current belief state
+            # so agent can "roll back" if subsequent changes degrade performance
+            # =================================================================
+            if was_positive and hasattr(self, 'i_thread') and self.i_thread and agent_id:
+                try:
+                    # Only checkpoint periodically (not every positive outcome)
+                    current_level = outcome.get('level', 1)
+                    action_count = getattr(self, '_action_count', 0)
+                    
+                    # Checkpoint every 50 actions OR on significant score gains
+                    should_checkpoint = (
+                        action_count % 50 == 0 or
+                        score_delta >= 10 or
+                        outcome.get('level_completed', False)
+                    )
+                    
+                    if should_checkpoint:
+                        # Gather current hypotheses
+                        hypotheses: List[Dict] = []
+                        try:
+                            hyp_result = self.db.execute_query("""
+                                SELECT hypothesis_id, control_pattern, reliability_score
+                                FROM network_object_control_hypotheses
+                                WHERE game_type = ? AND level_number = ?
+                                    AND is_active = TRUE
+                                ORDER BY reliability_score DESC
+                                LIMIT 10
+                            """, (game_id.split('-')[0] if '-' in game_id else game_id, current_level))
+                            if hyp_result:
+                                hypotheses = [dict(h) for h in hyp_result]
+                        except Exception:
+                            pass
+                        
+                        # Create checkpoint
+                        checkpoint_fn = getattr(self.i_thread, 'create_belief_checkpoint', None)
+                        if callable(checkpoint_fn):
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                            checkpoint_fn(
+                                agent_id=agent_id,
+                                game_type=game_type,
+                                hypotheses=hypotheses,
+                                theories=[],  # Could add theory gathering here
+                                action_count=action_count,
+                                score=outcome.get('score_after', 0),
+                                level=current_level,
+                                reason='positive_outcome' if score_delta > 0 else 'periodic'
+                            )
+                            logger.debug(f"[CHECKPOINT] Created checkpoint at action {action_count}, score={outcome.get('score_after', 0)}")
+                except Exception as e:
+                    logger.debug(f"[CHECKPOINT] Failed to create checkpoint: {e}")
+            
+            # =================================================================
             # 7. STRUCTURAL PATTERN LIBRARY learns from outcome (GENERALIZATION)
             # =================================================================
             # This is critical for cross-game generalization - indexing patterns
@@ -2796,16 +2870,16 @@ class GameplayEngine:
                 current_frame = consciousness_state.get('current_frame')
                 
                 if current_frame and pattern_lib:
-                    # Extract objects for structural indexing
-                    objects = pattern_lib._extract_objects(current_frame) if hasattr(pattern_lib, '_extract_objects') else []
-                    
-                    if not objects and hasattr(self, 'concept_engine') and self.concept_engine:
-                        # Use concept engine's extraction as fallback
+                    # Extract objects for structural indexing (concept_engine has the extraction method)
+                    objects: list = []
+                    if hasattr(self, 'concept_engine') and self.concept_engine:
                         extract_fn = getattr(self.concept_engine, '_extract_objects_from_frame', None)
                         if callable(extract_fn):
-                            objects = extract_fn(current_frame)
+                            extracted = extract_fn(current_frame)
+                            if isinstance(extracted, list):
+                                objects = extracted
                     
-                    if objects and len(objects) >= 2:  # Need at least 2 objects for relational structure
+                    if len(objects) >= 2:  # Need at least 2 objects for relational structure
                         # Index this pattern for future cross-game matching
                         pattern_lib.index_pattern(
                             objects=objects,
@@ -2940,25 +3014,10 @@ class GameplayEngine:
                                 expected_outcome = 'discover_pattern'
                         # NOTE: 'score_increase' removed as default - only use for explicit win attempts
                         
-                        # FIX #9: Check if prediction type is suppressed; try alternatives
-                        # Available prediction types (in priority order for fallback)
-                        # 'frame_change' is most general - any action should cause some change
-                        # NOTE: avoid_failure is NOT in this list - it should only be used when explicitly avoiding danger
-                        prediction_types = ['frame_change', 'discover_pattern', 'object_control']
-                        suppressed = getattr(self.metacognitive_engine, '_suppressed_prediction_types', set())
-                        
-                        # If default type is suppressed, find an alternative
-                        # But NEVER suppress frame_change - it's the ultimate fallback
-                        if expected_outcome in suppressed and expected_outcome != 'frame_change':
-                            alternatives = [pt for pt in prediction_types if pt not in suppressed]
-                            if alternatives:
-                                expected_outcome = alternatives[0]
-                                logger.debug(f"[METACOG] Using alternative prediction type: {expected_outcome}")
-                            else:
-                                # All types suppressed - reset suppression to allow fresh start
-                                logger.warning("[METACOG] All prediction types suppressed - resetting suppression")
-                                self.metacognitive_engine._suppressed_prediction_types = set()
-                                expected_outcome = 'frame_change'  # Neutral fallback
+                        # Available prediction types for reference (no longer using suppression system)
+                        # The suppression system was removed because it caused death spirals:
+                        # types get suppressed -> never tried -> never succeed -> stay suppressed
+                        # Now we just use the context-based expected_outcome directly.
                         
                         # Current theory from autobiography
                         theory_source = getattr(self, '_last_action_source', 'intuition')
@@ -4327,15 +4386,15 @@ class GameplayEngine:
                 """, (session_id, game_id)) if session_id else []
                 
                 # Build action_history as list of action strings and score_history as list of floats
-                action_history = [f"ACTION{t.get('action_number', 0)}" for t in action_traces] if action_traces else []
-                score_history = [float(t.get('score_after', 0.0)) for t in action_traces] if action_traces else []
+                action_history_strs = list(f"ACTION{t.get('action_number', 0)}" for t in action_traces) if action_traces else []  # type: List[str]
+                score_history = list(float(t.get('score_after', 0.0)) for t in action_traces) if action_traces else []  # type: List[float]
                 
                 # Generate the reflection with correct parameters
                 insight = self.metacognitive_engine.generate_win_reflection(
                     agent_id=agent_id or "unknown",
                     game_type=game_type,
                     level_number=loop_state.current_level,
-                    action_history=action_history,
+                    action_history=action_history_strs,
                     score_history=score_history
                 )
                 
@@ -4543,11 +4602,21 @@ class GameplayEngine:
                 )
                 cf_limit = self._get_counterfactual_limit(cognitive_mode)
                 
+                # Build action_history from recent actions
+                action_history: List[Dict[str, Any]] = []
+                if hasattr(self, '_action_history') and self._action_history:
+                    action_history = list(self._action_history)
+                elif hasattr(self, '_recent_actions') and self._recent_actions:
+                    # Convert simple action list to dict format
+                    action_history = [{'action': a, 'index': i} for i, a in enumerate(self._recent_actions)]
+                
                 cf_scenarios = self.counterfactual_analyzer.analyze_failure(
                     agent_id=agent_id or 'unknown',
                     game_id=game_id,
-                    session_id=self.session_manager.current_session_id if self.session_manager else 'unknown',
+                    game_type=game_type,
                     final_score=float(game_state.score),
+                    action_history=action_history,
+                    session_id=self.session_manager.current_session_id if self.session_manager else 'unknown',
                     generation=self.game_config.get('generation', 0),
                     max_counterfactuals=cf_limit
                 )
@@ -6209,18 +6278,8 @@ class GameplayEngine:
                                     else:
                                         expected_outcome = 'discover_pattern'
                                     
-                                    # FIX #9: Check if prediction type is suppressed; try alternatives
-                                    # NOTE: avoid_failure is NOT in this list - only used when explicitly avoiding danger
-                                    prediction_types = ['frame_change', 'object_control', 'discover_pattern']
-                                    suppressed = getattr(self.metacognitive_engine, '_suppressed_prediction_types', set())
-                                    # Never suppress frame_change - it's the ultimate fallback
-                                    if expected_outcome in suppressed and expected_outcome != 'frame_change':
-                                        alternatives = [pt for pt in prediction_types if pt not in suppressed]
-                                        if alternatives:
-                                            expected_outcome = alternatives[0]
-                                        else:
-                                            self.metacognitive_engine._suppressed_prediction_types = set()
-                                            expected_outcome = 'frame_change'
+                                    # NOTE: Suppression system removed - it caused death spirals.
+                                    # Use context-based expected_outcome directly.
                                     
                                     theory_source = getattr(self, '_last_action_source', 'intuition')
                                     self.metacognitive_engine.make_prediction(

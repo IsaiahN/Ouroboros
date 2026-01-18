@@ -3176,6 +3176,18 @@ class AgentSelfModel:
             """, (hypothesis_id, game_type, level, color_before,
                   json.dumps(control_pattern), json.dumps(action_response_map), agent_id, generation))
             
+            # INVARIANT 10: Auto-register dependencies for new hypothesis
+            try:
+                self.auto_register_hypothesis_dependencies(
+                    hypothesis_id=hypothesis_id,
+                    game_type=game_type,
+                    level=level,
+                    control_pattern=json.dumps(control_pattern),
+                    discovered_by=agent_id
+                )
+            except Exception as e:
+                logger.debug(f"[DEP-AUTO] Auto-registration failed: {e}")
+            
             logger.debug(
                 f"[NETWORK] New click effect hypothesis: {effect_type} at ({click_x},{click_y})"
             )
@@ -3823,6 +3835,20 @@ class AgentSelfModel:
                             f"[MOVEMENT] CONTRADICTION: {action} moved color_{controlled_color} {direction} "
                             f"but expected {expected_direction} - lowering reliability"
                         )
+                        
+                        # INVARIANT 10: Cascade invalidation to dependent beliefs
+                        # If this hypothesis is wrong, beliefs that depend on it
+                        # should also have their reliability reduced
+                        try:
+                            self.invalidate_with_cascade(
+                                belief_id=row['hypothesis_id'],
+                                belief_type='hypothesis',
+                                reason=f'contradiction_{action}_{direction}_vs_{expected_direction}',
+                                cascade_depth=2  # Shallow cascade for single contradiction
+                            )
+                        except Exception as e:
+                            logger.debug(f"[CASCADE] Cascade invalidation failed: {e}")
+                        
                         return None  # Don't update with contradictory data
             except Exception as e:
                 logger.debug(f"Pattern comparison failed: {e}")
@@ -9225,6 +9251,333 @@ class AgentSelfModel:
         
         # All objects tested
         return None
+    
+    # =========================================================================
+    # INVARIANT 10: DEPENDENCY TRACKING - Belief Dependencies & Cascade
+    # =========================================================================
+    # "I know which beliefs depend on which others" - track parent-child
+    # relationships between beliefs. When a parent is invalidated, children
+    # can be automatically reconsidered or invalidated via cascade.
+    # =========================================================================
+    
+    def register_belief_dependency(
+        self,
+        child_id: str,
+        child_type: str,
+        parent_id: str,
+        parent_type: str,
+        dependency_type: str = 'derived_from',
+        strength: float = 1.0,
+        cascade: bool = True,
+        discovered_by: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Register a dependency relationship between two beliefs.
+        
+        When the parent belief is invalidated, children with cascade=True
+        will also be invalidated (or have reliability reduced).
+        
+        Args:
+            child_id: ID of the dependent belief (e.g., hypothesis_id)
+            child_type: Type of child ('hypothesis', 'theory', 'rule', 'concept')
+            parent_id: ID of the parent belief
+            parent_type: Type of parent
+            dependency_type: Relationship type:
+                - 'derived_from': Child was logically derived from parent
+                - 'requires': Child assumes parent is true
+                - 'conflicts_with': If parent true, child must be false
+                - 'supports': Parent provides evidence for child
+            strength: Dependency strength (1.0 = full, 0.5 = weak)
+            cascade: Whether to cascade invalidation to child
+            discovered_by: Agent that discovered this dependency
+            
+        Returns:
+            dependency_id if successful
+        """
+        try:
+            dep_id = f"dep_{child_id[:6]}_{parent_id[:6]}_{int(time.time())}"
+            
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO belief_dependencies (
+                    dependency_id,
+                    child_belief_id, child_belief_type,
+                    parent_belief_id, parent_belief_type,
+                    dependency_type, dependency_strength,
+                    cascade_on_invalidate, discovered_by_agent
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                dep_id,
+                child_id, child_type,
+                parent_id, parent_type,
+                dependency_type, strength,
+                cascade, discovered_by
+            ))
+            
+            logger.debug(f"[BELIEF-DEP] Registered: {child_type}:{child_id[:8]} "
+                        f"--{dependency_type}--> {parent_type}:{parent_id[:8]}")
+            return dep_id
+            
+        except Exception as e:
+            logger.debug(f"[BELIEF-DEP] Failed to register dependency: {e}")
+            return None
+    
+    def get_belief_dependencies(
+        self,
+        belief_id: str,
+        belief_type: str,
+        direction: str = 'children'
+    ) -> List[Dict[str, Any]]:
+        """
+        Get beliefs that depend on or support this belief.
+        
+        Args:
+            belief_id: The belief to query
+            belief_type: Type of the belief
+            direction: 'children' (things that depend on this) or 
+                       'parents' (things this depends on)
+                       
+        Returns:
+            List of dependent beliefs with relationship info
+        """
+        try:
+            if direction == 'children':
+                # Find beliefs that depend on this one
+                result = self.db.execute_query("""
+                    SELECT 
+                        child_belief_id, child_belief_type,
+                        dependency_type, dependency_strength,
+                        cascade_on_invalidate
+                    FROM belief_dependencies
+                    WHERE parent_belief_id = ? AND parent_belief_type = ?
+                """, (belief_id, belief_type))
+            else:
+                # Find beliefs this depends on
+                result = self.db.execute_query("""
+                    SELECT 
+                        parent_belief_id, parent_belief_type,
+                        dependency_type, dependency_strength,
+                        cascade_on_invalidate
+                    FROM belief_dependencies
+                    WHERE child_belief_id = ? AND child_belief_type = ?
+                """, (belief_id, belief_type))
+            
+            return result if result else []
+            
+        except Exception:
+            return []
+    
+    def invalidate_with_cascade(
+        self,
+        belief_id: str,
+        belief_type: str,
+        reason: str = 'contradiction',
+        cascade_depth: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Invalidate a belief and cascade to dependent beliefs.
+        
+        When a belief is invalidated:
+        1. Mark the belief itself as invalid/reduced reliability
+        2. Find all beliefs that depend on it (children)
+        3. For children with cascade=True, reduce their reliability
+        4. Recursively process (up to cascade_depth)
+        
+        Args:
+            belief_id: The belief being invalidated
+            belief_type: Type of belief
+            reason: Why invalidation occurred
+            cascade_depth: Max recursion depth
+            
+        Returns:
+            Summary of cascade effects
+        """
+        cascade_results = {
+            'root_belief': belief_id,
+            'root_type': belief_type,
+            'reason': reason,
+            'invalidated_children': [],
+            'reduced_reliability': [],
+            'cascade_depth_reached': 0
+        }
+        
+        # Track visited to prevent infinite loops
+        visited = set()
+        
+        def cascade(bid: str, btype: str, depth: int, reliability_penalty: float):
+            if depth > cascade_depth or (bid, btype) in visited:
+                return
+            
+            visited.add((bid, btype))
+            cascade_results['cascade_depth_reached'] = max(
+                cascade_results['cascade_depth_reached'], depth
+            )
+            
+            # Apply reliability penalty based on belief type
+            self._apply_reliability_penalty(bid, btype, reliability_penalty, reason)
+            
+            # Find children
+            children = self.get_belief_dependencies(bid, btype, 'children')
+            
+            for child in children:
+                if not child.get('cascade_on_invalidate', False):
+                    continue
+                
+                child_id = child.get('child_belief_id')
+                child_type = child.get('child_belief_type')
+                strength = child.get('dependency_strength', 1.0)
+                
+                # Penalty diminishes with depth and dependency strength
+                child_penalty = reliability_penalty * strength * 0.7
+                
+                if child_penalty >= 0.05:  # Only cascade if meaningful
+                    cascade_results['reduced_reliability'].append({
+                        'belief_id': child_id,
+                        'belief_type': child_type,
+                        'penalty': child_penalty,
+                        'depth': depth + 1
+                    })
+                    cascade(child_id, child_type, depth + 1, child_penalty)
+        
+        # Start cascade from root
+        cascade(belief_id, belief_type, 0, 0.3)  # 30% initial penalty
+        
+        logger.info(f"[BELIEF-CASCADE] Invalidated {belief_type}:{belief_id[:8]} "
+                   f"- cascaded to {len(cascade_results['reduced_reliability'])} beliefs")
+        
+        return cascade_results
+    
+    def _apply_reliability_penalty(
+        self,
+        belief_id: str,
+        belief_type: str,
+        penalty: float,
+        reason: str
+    ):
+        """
+        Apply a reliability penalty to a specific belief.
+        
+        Handles different belief types stored in different tables.
+        """
+        try:
+            if belief_type == 'hypothesis':
+                self.db.execute_query("""
+                    UPDATE network_object_control_hypotheses
+                    SET reliability_score = MAX(0.1, reliability_score - ?),
+                        is_active = CASE WHEN reliability_score - ? < 0.2 
+                                   THEN FALSE ELSE is_active END
+                    WHERE hypothesis_id = ?
+                """, (penalty, penalty, belief_id))
+                
+            elif belief_type == 'theory':
+                self.db.execute_query("""
+                    UPDATE agent_theories
+                    SET confidence = MAX(0.1, confidence - ?),
+                        status = CASE WHEN confidence - ? < 0.2 
+                                THEN 'invalidated' ELSE status END
+                    WHERE theory_id = ?
+                """, (penalty, penalty, belief_id))
+                
+            elif belief_type == 'rule':
+                self.db.execute_query("""
+                    UPDATE discovered_rules
+                    SET confidence = MAX(0.1, confidence - ?),
+                        is_active = CASE WHEN confidence - ? < 0.2 
+                                   THEN 0 ELSE is_active END
+                    WHERE rule_id = ?
+                """, (penalty, penalty, belief_id))
+                
+            elif belief_type == 'pattern':
+                self.db.execute_query("""
+                    UPDATE universal_object_patterns
+                    SET transfer_reliability = MAX(0.1, transfer_reliability - ?),
+                        is_active = CASE WHEN transfer_reliability - ? < 0.2 
+                                   THEN 0 ELSE is_active END
+                    WHERE pattern_id = ?
+                """, (penalty, penalty, belief_id))
+                
+            logger.debug(f"[BELIEF-CASCADE] Applied penalty {penalty:.2f} to "
+                        f"{belief_type}:{belief_id[:8]}")
+                        
+        except Exception as e:
+            logger.debug(f"[BELIEF-CASCADE] Penalty failed for {belief_type}: {e}")
+    
+    def auto_register_hypothesis_dependencies(
+        self,
+        hypothesis_id: str,
+        game_type: str,
+        level: int,
+        control_pattern: str,
+        discovered_by: Optional[str] = None
+    ):
+        """
+        Automatically discover and register dependencies for a new hypothesis.
+        
+        When a new hypothesis is created, find:
+        1. Related hypotheses in the same game/level that it might depend on
+        2. Universal patterns it could be derived from
+        3. Higher-level theories it supports or derives from
+        """
+        try:
+            # 1. Find related hypotheses in same game
+            related = self.db.execute_query("""
+                SELECT hypothesis_id, control_pattern, reliability_score
+                FROM network_object_control_hypotheses
+                WHERE game_type = ? AND level_number = ?
+                    AND hypothesis_id != ?
+                    AND is_active = TRUE
+                ORDER BY reliability_score DESC
+                LIMIT 5
+            """, (game_type, level, hypothesis_id))
+            
+            for r in (related or []):
+                # If patterns are similar, they might support each other
+                if self._patterns_similar(control_pattern, r['control_pattern']):
+                    self.register_belief_dependency(
+                        child_id=hypothesis_id,
+                        child_type='hypothesis',
+                        parent_id=r['hypothesis_id'],
+                        parent_type='hypothesis',
+                        dependency_type='supports',
+                        strength=0.5,
+                        cascade=False,  # Supporting relations don't cascade
+                        discovered_by=discovered_by
+                    )
+            
+            # 2. Find universal patterns this might derive from
+            universal = self.db.execute_query("""
+                SELECT pattern_id, pattern_class
+                FROM universal_object_patterns
+                WHERE is_active = 1 AND transfer_reliability >= 0.5
+                LIMIT 10
+            """)
+            
+            for u in (universal or []):
+                if control_pattern and u['pattern_class'] in control_pattern:
+                    self.register_belief_dependency(
+                        child_id=hypothesis_id,
+                        child_type='hypothesis',
+                        parent_id=u['pattern_id'],
+                        parent_type='pattern',
+                        dependency_type='derived_from',
+                        strength=0.7,
+                        cascade=True,
+                        discovered_by=discovered_by
+                    )
+                    
+            logger.debug(f"[BELIEF-DEP] Auto-registered dependencies for {hypothesis_id[:8]}")
+            
+        except Exception as e:
+            logger.debug(f"[BELIEF-DEP] Auto-registration failed: {e}")
+    
+    def _patterns_similar(self, pattern1: str, pattern2: str) -> bool:
+        """Check if two control patterns are similar enough to be related."""
+        if not pattern1 or not pattern2:
+            return False
+        # Simple heuristic: check for common keywords
+        keywords1 = set(pattern1.lower().split('_'))
+        keywords2 = set(pattern2.lower().split('_'))
+        overlap = len(keywords1 & keywords2)
+        return overlap >= 2 or (overlap >= 1 and len(keywords1 | keywords2) <= 4)
 
 
 # ============================================================================

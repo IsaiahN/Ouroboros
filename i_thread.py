@@ -4773,6 +4773,258 @@ class IThread:
         
         return advice
     
+    # =========================================================================
+    # INVARIANT 2: REVERSIBILITY - Belief Checkpoints
+    # =========================================================================
+    # "I can undo changes that don't work" - store snapshots of belief state
+    # that can be restored if new beliefs lead to worse performance.
+    # =========================================================================
+    
+    def create_belief_checkpoint(
+        self,
+        agent_id: str,
+        game_type: str,
+        hypotheses: List[Dict[str, Any]],
+        theories: List[Dict[str, Any]],
+        action_count: int,
+        score: float,
+        level: int = 0,
+        reason: str = 'positive_outcome'
+    ) -> Optional[str]:
+        """
+        Create a checkpoint of current belief state for potential restoration.
+        
+        Called when agent achieves positive outcomes, allowing "rollback" if
+        subsequent belief changes lead to performance degradation.
+        
+        Args:
+            agent_id: Agent identifier
+            game_type: Current game type
+            hypotheses: List of current hypotheses with confidence scores
+            theories: List of current theories
+            action_count: Actions taken when checkpoint created
+            score: Score at checkpoint time
+            level: Current level
+            reason: Why checkpoint was created
+            
+        Returns:
+            checkpoint_id if successful, None otherwise
+        """
+        try:
+            state = self.get_state(agent_id)
+            checkpoint_id = f"ckpt_{agent_id[:8]}_{int(time.time())}"
+            
+            # Calculate recent performance as context
+            recent_perf = self._get_recent_performance(agent_id, game_type)
+            
+            self.db.execute_query("""
+                INSERT INTO belief_checkpoints (
+                    checkpoint_id, agent_id, game_type,
+                    wA, wB,
+                    hypotheses_snapshot, theories_snapshot,
+                    action_count_at_snapshot, score_at_snapshot,
+                    level_at_snapshot, recent_performance,
+                    checkpoint_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                checkpoint_id, agent_id, game_type,
+                state.w_a, state.w_b,
+                json.dumps(hypotheses), json.dumps(theories),
+                action_count, score,
+                level, recent_perf,
+                reason
+            ))
+            
+            logger.debug(f"[I-THREAD CKPT] Created checkpoint {checkpoint_id} "
+                        f"for {agent_id[:8]} at score={score}")
+            return checkpoint_id
+            
+        except Exception as e:
+            logger.debug(f"[I-THREAD CKPT] Failed to create checkpoint: {e}")
+            return None
+    
+    def get_best_checkpoint(
+        self,
+        agent_id: str,
+        game_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the best performing checkpoint for potential restoration.
+        
+        Returns checkpoint with highest score that wasn't previously restored.
+        """
+        try:
+            result = self.db.execute_query("""
+                SELECT 
+                    checkpoint_id, wA, wB,
+                    hypotheses_snapshot, theories_snapshot,
+                    score_at_snapshot, action_count_at_snapshot,
+                    recent_performance
+                FROM belief_checkpoints
+                WHERE agent_id = ? AND game_type = ?
+                    AND was_restored = FALSE
+                ORDER BY score_at_snapshot DESC
+                LIMIT 1
+            """, (agent_id, game_type))
+            
+            if result:
+                row = result[0]
+                return {
+                    'checkpoint_id': row['checkpoint_id'],
+                    'w_a': row['wA'],
+                    'w_b': row['wB'],
+                    'hypotheses': json.loads(row['hypotheses_snapshot'] or '[]'),
+                    'theories': json.loads(row['theories_snapshot'] or '[]'),
+                    'score': row['score_at_snapshot'],
+                    'action_count': row['action_count_at_snapshot'],
+                    'recent_performance': row['recent_performance']
+                }
+            return None
+            
+        except Exception as e:
+            logger.debug(f"[I-THREAD CKPT] Failed to get checkpoint: {e}")
+            return None
+    
+    def restore_checkpoint(
+        self,
+        agent_id: str,
+        checkpoint_id: str,
+        restoration_reason: str = 'performance_degradation'
+    ) -> bool:
+        """
+        Restore agent's stream weights from a checkpoint.
+        
+        Note: This restores wA/wB only - the caller must handle
+        hypothesis/theory restoration separately.
+        
+        Args:
+            agent_id: Agent identifier
+            checkpoint_id: Checkpoint to restore
+            restoration_reason: Why restoration occurred
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Get checkpoint data
+            result = self.db.execute_query("""
+                SELECT wA, wB, hypotheses_snapshot, theories_snapshot
+                FROM belief_checkpoints
+                WHERE checkpoint_id = ? AND agent_id = ?
+            """, (checkpoint_id, agent_id))
+            
+            if not result:
+                return False
+            
+            row = result[0]
+            
+            # Restore stream weights
+            state = self.get_state(agent_id)
+            old_w_a, old_w_b = state.w_a, state.w_b
+            state.w_a = row['wA']
+            state.w_b = row['wB']
+            self._save_state(agent_id, state.w_b)
+            
+            # Log the restoration
+            self._log_history(
+                agent_id,
+                old_w_a, old_w_b,
+                state.w_a, state.w_b,
+                event_type='checkpoint_restore'
+            )
+            
+            # Mark checkpoint as used
+            self.db.execute_query("""
+                UPDATE belief_checkpoints
+                SET was_restored = TRUE,
+                    restored_at = CURRENT_TIMESTAMP,
+                    restoration_reason = ?
+                WHERE checkpoint_id = ?
+            """, (restoration_reason, checkpoint_id))
+            
+            logger.info(f"[I-THREAD CKPT] Restored {checkpoint_id} for {agent_id[:8]} "
+                       f"(wA: {old_w_a:.2f}->{state.w_a:.2f}, "
+                       f"wB: {old_w_b:.2f}->{state.w_b:.2f})")
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"[I-THREAD CKPT] Restore failed: {e}")
+            return False
+    
+    def should_restore_checkpoint(
+        self,
+        agent_id: str,
+        game_type: str,
+        current_score: float,
+        actions_since_checkpoint: int = 20
+    ) -> Optional[str]:
+        """
+        Determine if agent should restore to a previous checkpoint.
+        
+        Triggers restoration if:
+        - Performance has degraded significantly since checkpoint
+        - Agent hasn't made progress in many actions
+        
+        Args:
+            agent_id: Agent identifier
+            game_type: Current game
+            current_score: Current performance score
+            actions_since_checkpoint: Minimum actions before considering restore
+            
+        Returns:
+            checkpoint_id to restore, or None
+        """
+        try:
+            checkpoint = self.get_best_checkpoint(agent_id, game_type)
+            if not checkpoint:
+                return None
+            
+            # Don't restore too quickly
+            if checkpoint['action_count'] + actions_since_checkpoint > 1000:
+                return None
+            
+            # Significant degradation threshold
+            checkpoint_score = checkpoint['score']
+            if checkpoint_score <= 0:
+                return None
+                
+            degradation_ratio = current_score / checkpoint_score
+            
+            # Restore if performance dropped by >40%
+            if degradation_ratio < 0.6:
+                logger.debug(f"[I-THREAD CKPT] Performance degraded "
+                           f"({current_score:.1f} vs {checkpoint_score:.1f}), "
+                           f"suggesting restore")
+                return checkpoint['checkpoint_id']
+            
+            return None
+            
+        except Exception:
+            return None
+    
+    def _get_recent_performance(
+        self,
+        agent_id: str,
+        game_type: str,
+        lookback: int = 50
+    ) -> float:
+        """Get average performance over recent actions."""
+        try:
+            result = self.db.execute_query("""
+                SELECT AVG(COALESCE(final_score, 0)) as avg_score
+                FROM game_results
+                WHERE agent_id = ? AND game_type = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (agent_id, game_type, lookback))
+            
+            if result and result[0].get('avg_score'):
+                return float(result[0]['avg_score'])
+            return 0.0
+        except Exception:
+            return 0.0
+    
     def get_collective_wisdom(self, game_type: str) -> Dict[str, Any]:
         """
         Synthesize collective wisdom about a game from all agents.
