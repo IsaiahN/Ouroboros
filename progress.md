@@ -2,6 +2,266 @@
 
 ---
 
+## Session: January 17, 2026 - Remove Broken Systems (Prediction Suppression & Counterfactual Analyzer)
+
+---
+
+### Approach: Remove death-spiral systems, replace with simpler alternatives
+
+**Timestamp**: 5:45:59 PM  
+**Status**: COMPLETE
+
+---
+
+### Problem 1: Prediction Type Suppression Death Spiral
+
+**Symptom**: Logs showed warnings like:
+```
+[METACOG] PREDICTION TYPE SUPPRESSED: 'frame_change' failed 143x consecutively
+```
+
+**Root Cause**: The suppression system created a death spiral:
+1. Prediction type fails 5x → Gets added to `_suppressed_prediction_types`
+2. Once suppressed, type is NEVER tried again
+3. Since it's never tried, it can NEVER succeed to un-suppress
+4. Counter keeps climbing (8x, 80x, 143x...) across games/levels
+5. Eventually ALL prediction types get suppressed
+
+**The Fix**: Complete removal of the suppression system from `agent_self_model.py`:
+- Removed `_prediction_type_failures` tracking dict
+- Removed `_suppressed_prediction_types` set
+- Removed suppression check in `make_prediction()`
+- Removed failure counting in `observe_outcome()`
+- Theory revision still works (the useful part)
+
+**Why Removal > Fix**: The underlying premise was flawed. Predictions should be based on context/theory, not global failure avoidance. A prediction that fails in Game A might succeed in Game B.
+
+---
+
+### Problem 2: Counterfactual Analyzer Generating Dead Data
+
+**Symptom**: Database query showed:
+- 155,836 counterfactual scenarios generated
+- 0 scenarios ever tested (`was_tested = 1`)
+
+**Root Cause**: The system generated "what if" scenarios after failures but:
+1. Nothing ever READ these scenarios
+2. Nothing ever TESTED these scenarios
+3. Just wasting compute and database space
+
+**The Fix**: Replaced with simpler "Lessons Learned" system:
+- Max 3 lessons per game (not thousands of scenarios)
+- Lessons are retrievable before playing same game_type
+- Lessons track if they helped (confidence updates)
+- Old file moved to `deprecated/counterfactual_analyzer_old.py`
+
+**New System Features**:
+| Feature | Old System | New System |
+|---------|------------|------------|
+| Scenarios per game | 10+ (unbounded) | Max 3 |
+| Ever retrieved? | No | Yes, via `get_lessons_for_game()` |
+| Validation | Never tested | `mark_lesson_helped()` updates confidence |
+| Database bloat | 155K+ rows | Bounded by max 3/game |
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `agent_self_model.py` | Removed prediction suppression system (~40 lines) |
+| `counterfactual_analyzer.py` | Complete rewrite as "Lessons Learned" system |
+| `deprecated/counterfactual_analyzer_old.py` | Old file preserved |
+
+---
+
+### Verification
+
+```python
+# Prediction suppression removed
+python -m py_compile agent_self_model.py  # OK
+
+# New lessons system works
+from counterfactual_analyzer import CounterfactualAnalyzer  # OK
+```
+
+---
+
+## Session: January 17, 2026 - Five Types of Death & Death-Triggered Personas
+
+---
+
+### Approach: Implement Death Classification and End-of-Life Personas
+
+**Timestamp**: 4:31:20 PM  
+**Status**: COMPLETE
+
+---
+
+### Problem Statement
+
+From the MetaContextual Awareness document and critic analysis, the mortality system needed expansion:
+1. Death was binary (alive/dead) - no classification of WHY agents die
+2. Agents had no special behavior when death was imminent
+3. No tracking of social relevance decay (prestige death)
+4. No distinction between vitality death vs performance death
+
+**Key Insight from Critic**: "If a variable affects behavior, it's functional. If it doesn't, it's theatrical."
+The mortality system needed to CAUSE different behaviors, not just track numbers.
+
+---
+
+### Implementation Summary
+
+| Component | Description | Location |
+|-----------|-------------|----------|
+| `DeathType` enum | 5 death classifications | `i_thread.py` lines 30-45 |
+| `DEATH_PERSONAS` dict | Role-specific end-of-life behaviors | `i_thread.py` lines 52-107 |
+| `DeathPersona` dataclass | Tracks active death persona state | `i_thread.py` lines 110-170 |
+| MortalityState extensions | Prestige decay, learning rate, persona fields | `i_thread.py` lines 510-530 |
+| Death type methods | `predict_death_type()`, `check_death_persona_activation()` | `i_thread.py` lines 730-870 |
+| Database columns | 6 new columns in agents table | `complete_database_schema.sql` |
+| Migration script | Add columns to existing DB | `migrations/add_death_type_columns.py` |
+
+---
+
+### Five Types of Death
+
+| Death Type | Cause | Detection Criteria |
+|------------|-------|-------------------|
+| `NATURAL_AGE` | Graceful end, completed lifecycle | Default/fallback |
+| `PERFORMANCE_CULL` | Fell behind the horde | `fitness_percentile < 0.1` AND `cull_distance < 0.3` |
+| `PRESTIGE_DECAY` | Social irrelevance, no one values contributions | `social_relevance_score < 0.2` AND `times_packages_queried_recent == 0` |
+| `VITALITY_STAGNATION` | Lost ability to learn, became static | `learning_rate_effective < 0.01` |
+| `DISGRACE` | Died without contributing anything | `legacy_score < 1.0` AND `discoveries_made == 0` |
+
+---
+
+### Death-Triggered Personas
+
+When `cull_distance < 0.2`, agents spawn role-specific death personas:
+
+| Role | Persona | Goal | Risk Tolerance |
+|------|---------|------|----------------|
+| Pioneer | **Legacy Hunter** | Find one undiscovered pattern before death | 0.95 (near-max) |
+| Optimizer | **Final Polisher** | Polish one sequence to perfection | 0.20 (very conservative) |
+| Generalist | **Bridge Builder** | Find one cross-domain insight | 0.50 (balanced) |
+| Exploiter | **Paradigm Breaker** | Find one paradigm-breaking edge case | 0.99 (maximum) |
+
+**Key behavioral shifts:**
+- Exploration weights modified (Pioneer: +50%, Optimizer: -70%)
+- Network query weights adjusted (Pioneer: -70%, Optimizer: +80%)
+- Each persona has internal voice, goal, good death/bad death criteria
+
+---
+
+### New MortalityState Fields
+
+```python
+# Prestige decay tracking
+times_packages_queried_recent: int = 0
+social_relevance_score: float = 1.0
+prestige_decay_rate: float = 0.05
+generations_since_contribution: int = 0
+
+# Death type prediction
+predicted_death_type: Optional[str] = None
+learning_rate_effective: float = 0.1
+
+# Death persona state
+death_persona_active: bool = False
+death_persona: Optional[DeathPersona] = None
+```
+
+---
+
+### New Methods Added
+
+| Method | Purpose |
+|--------|---------|
+| `predict_death_type()` | Analyze state and predict likely cause of death |
+| `update_social_relevance()` | Track package query frequency, decay relevance |
+| `update_learning_rate()` | Track effective learning rate for vitality death |
+| `check_death_persona_activation()` | Activate/deactivate death persona based on cull_distance |
+| `get_death_persona_bias()` | Get action biases when persona active |
+| `record_death_persona_contribution()` | Track persona's final contributions |
+| `get_death_summary()` | Complete mortality state for logging/analysis |
+
+---
+
+### Database Schema Updates
+
+New columns added to `agents` table:
+- `death_type TEXT DEFAULT NULL`
+- `death_persona TEXT DEFAULT NULL`
+- `social_relevance_score REAL DEFAULT 1.0`
+- `learning_rate_effective REAL DEFAULT 0.1`
+- `generations_since_contribution INTEGER DEFAULT 0`
+- `times_packages_queried_recent INTEGER DEFAULT 0`
+
+Migration: `migrations/add_death_type_columns.py`
+
+---
+
+### Verification Tests
+
+All tests passed:
+```
+DeathType values: ['natural_age', 'performance_cull', 'prestige_decay', 'vitality_stagnation', 'disgrace']
+DEATH_PERSONAS roles: ['pioneer', 'optimizer', 'generalist', 'exploiter']
+
+# Death type prediction test
+Pioneer with fitness_percentile=0.05, cull_distance=0.15:
+  - Predicted: DeathType.PERFORMANCE_CULL
+  - Death persona: Legacy Hunter
+  - Goal: Find one undiscovered pattern before death
+
+# Vitality stagnation test
+Optimizer with learning_rate_effective=0.005:
+  - Predicted: DeathType.VITALITY_STAGNATION
+
+# Prestige decay test
+Generalist with social_relevance_score=0.1, times_packages_queried_recent=0:
+  - Predicted: DeathType.PRESTIGE_DECAY
+```
+
+---
+
+### Critic Analysis Review
+
+Also reviewed two critique documents (`hella pushback analysis.md`, `hellaer harder pushback.md`):
+
+**Valid criticisms addressed:**
+1. ✓ Mortality should affect behavior (death personas change action biases)
+2. ✓ Need clear failure modes (death types are classifiable)
+3. ✓ Social relevance tracking (prestige decay now tracked)
+
+**Unfair criticisms identified:**
+- "Fear is just a number" - all computation is numbers; functional impact matters
+- "I-Thread is homunculus" - weighted integration isn't recursive
+- "O(N²) scaling" - ignores standard DB optimizations
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `i_thread.py` | Added DeathType enum, DEATH_PERSONAS, DeathPersona class, MortalityState extensions, death methods |
+| `complete_database_schema.sql` | Added 6 new columns to agents table |
+| `migrations/add_death_type_columns.py` | New migration script |
+
+---
+
+### Current Status: COMPLETE
+
+No failures. Ready for integration with:
+1. Agent lifecycle manager (apply death type on cull)
+2. Core gameplay (use death persona biases when active)
+3. Prestige engine (update social relevance based on package queries)
+
+---
+
 ## Session: January 13, 2026 - Fix Game Ending Prematurely After Replay
 
 ---

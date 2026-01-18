@@ -2336,58 +2336,45 @@ class GameplayEngine:
             # game_state is guaranteed to exist if success is True
             assert game_state is not None, "game_state must exist on success"
             
-            # BUGFIX: Check for TRUE full win, not premature WIN after level completion
-            is_full_win = (
-                game_state.state == "WIN" and 
-                game_state.win_score > 0 and 
-                game_state.score >= game_state.win_score
-            )
+            # ================================================================
+            # CRITICAL FIX (2026-01-17): NEVER trust score >= win_score as full game win!
+            # ================================================================
+            # win_score = objectives needed to complete THIS LEVEL (e.g., 55 clicks)
+            # score = objectives completed on this level
+            # score >= win_score means "Level N complete", NOT "game complete"
+            # 
+            # Games like lp85 show "55/55" after Level 1 but have unknown additional levels!
+            # The agent stopped at Level 1 because we incorrectly thought it was a full win.
+            # 
+            # FIX: After replay, ALWAYS continue to game loop to explore more levels.
+            # Only recognize true full-game wins from validated full_game_sequences.
+            # ================================================================
             
-            if is_full_win:
-                # Full win from replay! Finish and return
-                level_completions = int(game_state.score)
-                actions_taken = len(json.loads(known_sequence['action_sequence']))
-                await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
-                
-                # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
-                # to avoid race condition (must be called AFTER store_arc_reward_data)
-                
-                logger.info(" COMPLETE WIN via cumulative sequence replay!")
-                return {
-                    'game_id': game_id,
-                    'final_state': game_state.state,
-                    'final_score': game_state.score,
-                    'actions_taken': actions_taken,
-                    'win': True,
-                    'method': 'cumulative_sequence_replay',
-                    'sequence_id': known_sequence['sequence_id']
-                }
-            else:
-                # Replay succeeded but didn't win completely - at frontier
-                frontier_level = int(game_state.score) + 1
-                logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
-                
-                # ALL AGENTS EXPLORE AT FRONTIER (including exploiters)
-                # Exploiters can contribute discoveries too - sequence abstraction will help guide them
-                
-                # Force game state to NOT_FINISHED for continuation
-                if game_state.state != "NOT_FINISHED":
-                    logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED")
-                    game_state.state = "NOT_FINISHED"
-                
-                # Frontier mode: boost budgets and mark exploration continuation
-                mode_name = (agent_mode or 'generalist').upper()
-                self.game_config['frontier_mode'] = True
-                self.game_config['frontier_level'] = frontier_level
-                # Give extra room so runs do not end early at frontier
-                per_level_boost = max(self.game_config.get('max_actions_per_level', 0), 600)
-                total_boost = max(self.game_config.get('max_total_actions', 0), per_level_boost * 4)
-                self.game_config['max_actions_per_level'] = per_level_boost
-                self.game_config['max_total_actions'] = total_boost
-                logger.info(f" [FRONTIER BUDGET] Boosted to {per_level_boost}/lvl and {total_boost} total for exploration")
-                logger.info(f" {mode_name}: At frontier (Level {frontier_level}), exploring until action budget exhausted")
-                self._frontier_replay_blocklist.add(game_id)
-                logger.info(f"[FRONTIER-LOCK] Disabled further sequence replays for {game_id} in this run")
+            # Replay succeeded - we're at frontier, continue exploring
+            frontier_level = int(game_state.score) + 1 if game_state.score >= 1 else 1
+            logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
+            
+            # ALL AGENTS EXPLORE AT FRONTIER (including exploiters)
+            # Exploiters can contribute discoveries too - sequence abstraction will help guide them
+            
+            # Force game state to NOT_FINISHED for continuation
+            if game_state.state != "NOT_FINISHED":
+                logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED")
+                game_state.state = "NOT_FINISHED"
+            
+            # Frontier mode: boost budgets and mark exploration continuation
+            mode_name = (agent_mode or 'generalist').upper()
+            self.game_config['frontier_mode'] = True
+            self.game_config['frontier_level'] = frontier_level
+            # Give extra room so runs do not end early at frontier
+            per_level_boost = max(self.game_config.get('max_actions_per_level', 0), 600)
+            total_boost = max(self.game_config.get('max_total_actions', 0), per_level_boost * 4)
+            self.game_config['max_actions_per_level'] = per_level_boost
+            self.game_config['max_total_actions'] = total_boost
+            logger.info(f" [FRONTIER BUDGET] Boosted to {per_level_boost}/lvl and {total_boost} total for exploration")
+            logger.info(f" {mode_name}: At frontier (Level {frontier_level}), exploring until action budget exhausted")
+            self._frontier_replay_blocklist.add(game_id)
+            logger.info(f"[FRONTIER-LOCK] Disabled further sequence replays for {game_id} in this run")
 
         # Frontier reached even if replay did not fully succeed (e.g., stuck/no-op) -> force exploration
         elif fallback_result.reached_frontier:
@@ -5315,59 +5302,40 @@ class GameplayEngine:
             if replay_success and successful_sequence:
                 known_sequence = successful_sequence
                 
-                # BUGFIX: Check for TRUE full win, not premature WIN after level completion
-                # Some games (like sp80, ls20) report WIN after each level, not just the final one
-                # ENHANCED: Also use reached_frontier from replay result if available
-                replay_says_frontier = replay_result.get('reached_frontier', False) if replay_result else False
-                replay_says_true_win = replay_result.get('is_true_full_win', False) if replay_result else False
+                # ================================================================
+                # CRITICAL FIX (2026-01-17): NEVER trust score >= win_score as full game win!
+                # ================================================================
+                # win_score = objectives needed to complete THIS LEVEL (e.g., 55 clicks)
+                # score = objectives completed on this level (NOT levels completed!)
+                # score >= win_score means "Level N complete", NOT "game complete"
+                # 
+                # Example: lp85 shows "55/55" after Level 1 but has more levels!
+                # The old code incorrectly thought score(55) >= win_score(55) = full win.
+                # 
+                # FIX: After ANY replay success, ALWAYS continue to game loop.
+                # The game loop will properly detect true game completion.
+                # ================================================================
                 
-                is_full_win = (
-                    game_state.state == "WIN" and 
-                    game_state.win_score > 0 and 
-                    game_state.score >= game_state.win_score and
-                    not replay_says_frontier  # Trust replay's frontier detection
-                ) or replay_says_true_win  # Or trust replay's explicit win detection
+                # Replay succeeded - determine what level we're at now
+                # We're at the frontier (highest known level) - continue exploring
+                frontier_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
+                logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
                 
-                if is_full_win:
-                    # Full win from replay! Finish and return
-                    level_completions = int(game_state.score)  # Each level = 1 point
-                    actions_taken = len(json.loads(known_sequence['action_sequence']))
-                    await self.session_manager.finish_game(game_state.state, game_state.score, level_completions, actions_taken)
-                    
-                    # NOTE: deduct_actions_used moved to autonomous_evolution_runner.py
-                    # to avoid race condition (must be called AFTER store_arc_reward_data)
-                    
-                    logger.info(" COMPLETE WIN via cumulative sequence replay!")
-                    return {
-                        'game_id': game_id,
-                        'final_state': game_state.state,
-                        'final_score': game_state.score,
-                        'actions_taken': actions_taken,
-                        'win': True,
-                        'method': 'cumulative_sequence_replay',
-                        'sequence_id': known_sequence['sequence_id']
-                    }
-                else:
-                    # Replay succeeded but didn't win completely
-                    # We're now at the frontier (highest known level)
-                    frontier_level = int(game_state.score) + 1  # Score 2 = completed 2 levels, now on level 3
-                    logger.info(f" Cumulative replay reached frontier (Level {frontier_level}, Score {game_state.score})")
-                    
-                    # ALL AGENTS EXPLORE AT FRONTIER (including exploiters)
-                    # Exploiters can contribute discoveries too - sequence abstraction will help guide them
-                    # This is where abstraction templates and guided exploration kick in
-                    
-                    # CRITICAL FIX: Force game state to NOT_FINISHED for ALL agent types
-                    # Some games (like ls20) incorrectly report WIN/GAME_OVER after partial completion
-                    # All agents should continue playing until action budget exhausted
-                    if game_state.state != "NOT_FINISHED":
-                        logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED for continuation")
-                        game_state.state = "NOT_FINISHED"
-                    
-                    # ALL AGENTS: Continue playing until action budget exhausted
-                    mode_name = (agent_mode or 'generalist').upper()
-                    logger.info(f" {mode_name}: At frontier (Level {frontier_level}), exploring until action budget exhausted")
-                    # Continue to game loop below
+                # ALL AGENTS EXPLORE AT FRONTIER (including exploiters)
+                # Exploiters can contribute discoveries too - sequence abstraction will help guide them
+                # This is where abstraction templates and guided exploration kick in
+                
+                # CRITICAL FIX: Force game state to NOT_FINISHED for ALL agent types
+                # Some games (like ls20) incorrectly report WIN/GAME_OVER after partial completion
+                # All agents should continue playing until action budget exhausted
+                if game_state.state != "NOT_FINISHED":
+                    logger.warning(f"[WARN] Game state is '{game_state.state}' at frontier - forcing to NOT_FINISHED for continuation")
+                    game_state.state = "NOT_FINISHED"
+                
+                # ALL AGENTS: Continue playing until action budget exhausted
+                mode_name = (agent_mode or 'generalist').upper()
+                logger.info(f" {mode_name}: At frontier (Level {frontier_level}), exploring until action budget exhausted")
+                # Continue to game loop below
             
             elif all_sequences_failed:
                 # All 3 ranked sequences failed - check fallback options

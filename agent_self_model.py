@@ -9841,11 +9841,10 @@ class MetacognitiveReasoningEngine:
         self._theory_revisions = []
         self._current_theory = None
         
-        # Fix #5: Track prediction type failures for adaptation
-        # Key = prediction_type (e.g., 'discover_pattern', 'score_increase')
-        # Value = {'consecutive_failures': int, 'last_context': str}
-        self._prediction_type_failures: Dict[str, Dict[str, Any]] = {}
-        self._suppressed_prediction_types: set = set()  # Types that should be avoided
+        # REMOVED: Fix #5 prediction type suppression system
+        # The suppression created a death spiral: types get suppressed, never tried,
+        # never succeed, stay suppressed forever. Counters climbed to 143x+ failures.
+        # Predictions should be based on context/theory, not global failure avoidance.
         
         # Fix #4: Track contradicted action-object pairs for actionable theory revision
         # Key = action (e.g., 'ACTION1'), Value = list of contradictions
@@ -10261,11 +10260,9 @@ class MetacognitiveReasoningEngine:
         
         self._current_theory = theory
         
-        # Fix #5: Check if this prediction type is suppressed due to repeated failures
-        prediction_type = predicted_outcome.lower().split()[0] if predicted_outcome else 'unknown'
-        if prediction_type in self._suppressed_prediction_types:
-            logger.info(f"[METACOG] PREDICTION (suppressed type '{prediction_type}'): Skipping - failed too many times")
-            return prediction_id
+        # NOTE: Prediction type suppression system was REMOVED.
+        # It created a death spiral where types never got tried after initial failures.
+        # Predictions are now always logged based on theory/context.
         
         logger.info(f"[METACOG] PREDICTION: If '{theory}' then {action} should cause '{predicted_outcome}'")
         return prediction_id
@@ -10440,39 +10437,14 @@ class MetacognitiveReasoningEngine:
         if prediction_correct:
             logger.info(f"[METACOG] PREDICTION CORRECT: Theory '{pred['theory']}' confirmed!")
             result['recommendation'] = 'strengthen_theory'
-            
-            # Fix #5: Reset failure counter for this prediction type on success
-            prediction_type = pred['predicted'].lower().split()[0] if pred['predicted'] else 'unknown'
-            if prediction_type in self._prediction_type_failures:
-                self._prediction_type_failures[prediction_type]['consecutive_failures'] = 0
-            # Remove from suppressed if it was suppressed
-            self._suppressed_prediction_types.discard(prediction_type)
+            # Prediction type suppression REMOVED - was causing death spiral
         else:
             logger.info(f"[METACOG] PREDICTION WRONG: Expected '{pred['predicted']}', got '{actual_outcome}'")
             result['recommendation'] = 'revise_theory'
             
-            # Fix #5: Track consecutive failures by prediction type
-            prediction_type = pred['predicted'].lower().split()[0] if pred['predicted'] else 'unknown'
-            if prediction_type not in self._prediction_type_failures:
-                self._prediction_type_failures[prediction_type] = {
-                    'consecutive_failures': 0,
-                    'last_context': '',
-                    'total_failures': 0
-                }
-            
-            self._prediction_type_failures[prediction_type]['consecutive_failures'] += 1
-            self._prediction_type_failures[prediction_type]['total_failures'] += 1
-            self._prediction_type_failures[prediction_type]['last_context'] = pred.get('theory', '')
-            
-            consecutive = self._prediction_type_failures[prediction_type]['consecutive_failures']
-            
-            # After 5 consecutive failures of same prediction type, suppress it
-            if consecutive >= 5:
-                self._suppressed_prediction_types.add(prediction_type)
-                logger.warning(
-                    f"[METACOG] PREDICTION TYPE SUPPRESSED: '{prediction_type}' failed {consecutive}x consecutively. "
-                    f"Will try alternative prediction types."
-                )
+            # Prediction type suppression REMOVED - counters climbed to 143x+ failures
+            # and created a death spiral where types never got retried.
+            # Theory revision still happens below - that's the useful part.
             
             # Queue theory revision
             self._theory_revisions.append({
