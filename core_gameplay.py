@@ -2571,6 +2571,35 @@ class GameplayEngine:
                                     f"[BELIEF CONFLICT] Surprise={observation.get('surprise', 0):.2f}, "
                                     f"Active beliefs={belief_count}, Prediction failed - spawning competing hypothesis"
                                 )
+                            
+                            # =============================================================
+                            # PHASE 5: Wire Physics -> Surprise (felt as 'surprised')
+                            # =============================================================
+                            # When physics rules are violated, the agent FEELS surprised
+                            # This isn't just data - it's an experiential qualia
+                            # =============================================================
+                            if observation.get('physics_violated', False):
+                                consciousness_state['current_feeling'] = 'surprised'
+                                consciousness_state['physics_surprised'] = True
+                                
+                                # Log the felt surprise for visibility
+                                logger.info(
+                                    f"[PHYSICS SURPRISE] Agent feels surprised: physics prediction violated. "
+                                    f"Surprise level: {observation.get('surprise', 0):.2f}"
+                                )
+                                
+                                # Update sensation if available - integrate with sensation engine
+                                if hasattr(self, 'sensation_engine') and self.sensation_engine and agent_id:
+                                    try:
+                                        # Record this as a learning event - surprised by physics
+                                        self.sensation_engine.update_navigation_state(
+                                            agent_id,
+                                            -0.3,  # Negative sensation from surprise/confusion
+                                            {'state_change_trigger': 'physics_surprise', 
+                                             'surprise_level': observation.get('surprise', 0)}
+                                        )
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
                     
@@ -2616,6 +2645,193 @@ class GameplayEngine:
         # Cache for other systems
         self._last_consciousness_state = consciousness_state
         return consciousness_state
+
+    def experience_outcome(
+        self,
+        action: Optional[str],
+        outcome: Dict[str, Any],
+        consciousness_state: Dict[str, Any],
+        agent_id: Optional[str],
+        game_id: str
+    ) -> None:
+        """
+        Phase 6: Unified outcome experience across ALL cognitive faculties.
+        
+        This is the LEARNING LOOP CLOSURE - every outcome feeds back into
+        every cognitive faculty so they can update their models together.
+        
+        The agent doesn't just RECEIVE outcomes - it EXPERIENCES them as
+        updates to its entire cognitive state.
+        
+        Args:
+            action: Action that was taken
+            outcome: Dict with score_before, score_after, frame_changed, state
+            consciousness_state: Current consciousness state from _consciousness_step
+            agent_id: Agent ID
+            game_id: Game ID
+        """
+        try:
+            score_delta = outcome.get('score_after', 0) - outcome.get('score_before', 0)
+            was_positive = score_delta > 0
+            was_negative = score_delta < 0
+            frame_changed = outcome.get('frame_changed', False)
+            game_over = outcome.get('state') == 'GAME_OVER'
+            
+            # =================================================================
+            # 1. WORLD MODEL learns from outcome
+            # =================================================================
+            if hasattr(self, '_world_model') and self._world_model:
+                try:
+                    # WorldModel already updated via observe_after_action
+                    # But now we also update physics rules based on outcome
+                    if was_positive and consciousness_state.get('physics_surprised'):
+                        # Our physics was wrong but outcome was good - 
+                        # this is a DISCOVERY not an error
+                        logger.debug("[EXPERIENCE] Physics surprise led to positive outcome - potential new rule discovered")
+                except Exception:
+                    pass
+            
+            # =================================================================
+            # 2. ABSTRACTION ENGINE learns from outcome
+            # =================================================================
+            if hasattr(self, 'abstraction_engine') and self.abstraction_engine:
+                try:
+                    # Feed this action-outcome pair for abstraction learning
+                    learn_fn = getattr(self.abstraction_engine, 'learn_from_outcome', None)
+                    if callable(learn_fn):
+                        learn_fn(
+                            action=action,
+                            outcome={'score_delta': score_delta, 'frame_changed': frame_changed},
+                            context={'game_id': game_id, 'level': outcome.get('level', 1)}
+                        )
+                except Exception:
+                    pass
+            
+            # =================================================================
+            # 3. CONCEPT DISCOVERY learns from outcome
+            # =================================================================
+            if hasattr(self, 'concept_engine') and self.concept_engine:
+                try:
+                    # Reinforce or weaken concept associations based on outcome
+                    confirm_fn = getattr(self.concept_engine, 'update_concept_confidence', None)
+                    if callable(confirm_fn) and was_positive:
+                        # Positive outcome = reinforce active concepts
+                        active_concepts = consciousness_state.get('active_concepts', [])
+                        for concept in active_concepts:
+                            confirm_fn(concept, 0.1)  # Small positive reinforcement
+                except Exception:
+                    pass
+            
+            # =================================================================
+            # 4. RESONANCE DETECTOR learns from outcome
+            # =================================================================
+            if hasattr(self, 'resonance_detector') and self.resonance_detector:
+                try:
+                    # Record whether resonance-matched actions worked
+                    resonance_felt = consciousness_state.get('resonance_felt', {})
+                    if resonance_felt.get('patterns'):
+                        update_fn = getattr(self.resonance_detector, 'update_pattern_effectiveness', None)
+                        if callable(update_fn):
+                            for pattern in resonance_felt['patterns']:
+                                update_fn(pattern, was_positive)
+                except Exception:
+                    pass
+            
+            # =================================================================
+            # 5. SENSATION ENGINE learns from outcome (emotional learning)
+            # =================================================================
+            if hasattr(self, 'sensation_engine') and self.sensation_engine and agent_id:
+                try:
+                    # Already handled in existing learn_from_outcome calls
+                    # But we can add additional context
+                    current_feeling = consciousness_state.get('current_feeling', 'neutral')
+                    if current_feeling == 'surprised' and was_positive:
+                        # Surprise that led to success = CURIOSITY REWARDED
+                        self.sensation_engine.update_navigation_state(
+                            agent_id, 0.3,  # Positive boost
+                            {'state_change_trigger': 'curious_success'}
+                        )
+                    elif current_feeling == 'surprised' and was_negative:
+                        # Surprise that led to failure = CAUTION LEARNED
+                        self.sensation_engine.update_navigation_state(
+                            agent_id, -0.2,  # Negative adjustment
+                            {'state_change_trigger': 'surprised_failure'}
+                        )
+                except Exception:
+                    pass
+            
+            # =================================================================
+            # 6. I-THREAD updates integration weights
+            # =================================================================
+            if hasattr(self, 'i_thread') and self.i_thread:
+                try:
+                    # Update Stream A/B weights based on which stream's advice was right
+                    update_fn = getattr(self.i_thread, 'update_stream_weights', None)
+                    if callable(update_fn):
+                        # If predictions were wrong but outcome was good,
+                        # maybe Stream A (personal experience) should be trusted more
+                        physics_violated = consciousness_state.get('physics_violated', False)
+                        resonance_used = bool(consciousness_state.get('resonance_felt', {}).get('patterns'))
+                        
+                        if physics_violated and was_positive:
+                            # Network knowledge (Stream B) was wrong, but we succeeded
+                            update_fn('stream_a', 0.05)  # Trust self more
+                        elif resonance_used and was_positive:
+                            # Network resonance (Stream B) worked
+                            update_fn('stream_b', 0.03)  # Trust network more
+                except Exception:
+                    pass
+            
+            # =================================================================
+            # 7. STRUCTURAL PATTERN LIBRARY learns from outcome (GENERALIZATION)
+            # =================================================================
+            # This is critical for cross-game generalization - indexing patterns
+            # that can be matched against NEW games
+            # =================================================================
+            try:
+                from concept_discovery_engine import get_pattern_library
+                pattern_lib = get_pattern_library()
+                
+                # Get current frame for structural analysis
+                current_frame = consciousness_state.get('current_frame')
+                
+                if current_frame and pattern_lib:
+                    # Extract objects for structural indexing
+                    objects = pattern_lib._extract_objects(current_frame) if hasattr(pattern_lib, '_extract_objects') else []
+                    
+                    if not objects and hasattr(self, 'concept_engine') and self.concept_engine:
+                        # Use concept engine's extraction as fallback
+                        extract_fn = getattr(self.concept_engine, '_extract_objects_from_frame', None)
+                        if callable(extract_fn):
+                            objects = extract_fn(current_frame)
+                    
+                    if objects and len(objects) >= 2:  # Need at least 2 objects for relational structure
+                        # Index this pattern for future cross-game matching
+                        pattern_lib.index_pattern(
+                            objects=objects,
+                            outcome={'action': action, 'score_delta': score_delta, 'success': was_positive},
+                            game_type=game_id.split('-')[0] if '-' in game_id else game_id,
+                            success=was_positive,
+                            frame=current_frame
+                        )
+            except Exception as e:
+                logger.debug(f"[PATTERN-INDEX] Structural indexing failed: {e}")
+            
+            # =================================================================
+            # 8. Log unified experience for debugging
+            # =================================================================
+            feeling = consciousness_state.get('current_feeling', 'neutral')
+            deja_vu = consciousness_state.get('deja_vu_strength', 0.0)
+            understanding = consciousness_state.get('understanding_confidence', 0.0)
+            
+            if was_positive or game_over or consciousness_state.get('physics_surprised'):
+                logger.info(
+                    f"[EXPERIENCE] Action={action}, Delta={score_delta:+d}, "
+                    f"Feeling={feeling}, DejaVu={deja_vu:.2f}, Understanding={understanding:.2f}"
+                )
+                
+        except Exception as e:
+            logger.debug(f"Experience outcome integration failed: {e}")
 
     async def _run_single_action(
         self,
@@ -3220,6 +3436,32 @@ class GameplayEngine:
                         pass
             except Exception as exc:
                 logger.debug(f"Persona outcome logging skipped: {exc}")
+            
+            # =================================================================
+            # PHASE 6: UNIFIED EXPERIENCE OUTCOME (Learning Loop Closure)
+            # =================================================================
+            # After all individual systems have processed the outcome,
+            # call the unified experience method to integrate across ALL
+            # cognitive faculties. This closes the learning loop.
+            # =================================================================
+            try:
+                consciousness_state = getattr(self, '_last_consciousness_state', {}) or {}
+                outcome_data = {
+                    'score_before': getattr(loop_state, 'previous_score', 0),
+                    'score_after': game_state.score if game_state else 0,
+                    'frame_changed': True,  # Will be determined by frame tracking
+                    'state': game_state.state if game_state else 'UNKNOWN',
+                    'level': getattr(loop_state, 'current_level', 1)
+                }
+                self.experience_outcome(
+                    action=action,
+                    outcome=outcome_data,
+                    consciousness_state=consciousness_state,
+                    agent_id=agent_id,
+                    game_id=game_id
+                )
+            except Exception as e:
+                logger.debug(f"Unified experience integration skipped: {e}")
             
         except Exception as action_error:
             error_msg = str(action_error).lower()

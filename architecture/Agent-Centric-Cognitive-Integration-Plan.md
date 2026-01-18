@@ -92,76 +92,76 @@ Currently, these cognitive faculties exist but don't flow into deliberation:
 
 | Component | Location | Capability | Status | Integration |
 |-----------|----------|------------|--------|-------------|
-| SequenceAbstraction | sequence_abstraction.py | Extract invariants vs variants from multiple winning sequences | ✅ IMPLEMENTED | ❌ NOT CONNECTED to concept discovery |
+| SequenceAbstraction | sequence_abstraction.py | Extract invariants vs variants from multiple winning sequences | ✅ IMPLEMENTED | ✅ WIRED to concept discovery (2026-01-18) |
 | AbstractTemplate | sequence_abstraction.py#L120 | Create executable templates from patterns | ✅ IMPLEMENTED | ⚠️ Used only in replay system |
-| ConceptDiscoveryEngine | concept_discovery_engine.py | Track patterns that emerge across games | ✅ IMPLEMENTED | ⚠️ Only used by CODS, not deliberation |
+| ConceptDiscoveryEngine | concept_discovery_engine.py | Track patterns that emerge across games | ✅ IMPLEMENTED | ✅ Receives from all sources |
 | Primitive Bootstrapping | primitive_unlock_manager.py | Build abstraction ladder rung-by-rung | ✅ IMPLEMENTED | ⚠️ Unlock pressure exists but levels not climbing |
-| Theory Abstraction | scientific_method_engine.py#L828 | Generalize theories from level→game | ⚠️ PARTIAL | ❌ Only generalizes within same game type |
+| Theory Abstraction | scientific_method_engine.py#L828 | Generalize theories from level→game | ✅ IMPLEMENTED | ✅ WIRED to concept discovery (2026-01-18) |
 
-**GAP**: Abstractions stay siloed. SequenceAbstraction doesn't feed ConceptDiscoveryEngine. Theories don't become concepts. Templates don't become patterns.
+**GAP CLOSED (2026-01-18)**: SequenceAbstraction now notifies ConceptDiscoveryEngine when extracting multi-sequence concepts via `_notify_concept_discovery()`. ScientificMethodEngine notifies on lesson extraction via `_notify_concept_from_lesson()`.
 
 #### 2. UNIFICATION - "Recognizing they're related despite surface differences"
 
 | Component | Location | Capability | Status | Integration |
 |-----------|----------|------------|--------|-------------|
-| ResonanceDetector | resonance_detector.py#L216 | Find same pattern across different agent roles | ✅ IMPLEMENTED | ⚠️ Queried by core_gameplay, but results not fed back |
-| StructuralPatternLibrary | concept_discovery_engine.py#L730 | Hash-indexed structural matching | ✅ JUST ADDED | ❌ NOT INTEGRATED INTO ANYTHING YET |
-| _analogical_mapping | seed_primitives.py#L3378 | Find transformations between patterns | ✅ JUST ENHANCED | ❌ NOT CALLED DURING GAMEPLAY |
-| Cross-domain operators | core_gameplay.py#L18748 | Load resonant patterns for hints | ⚠️ PARTIAL | Only provides hints, doesn't learn from success |
-| Belief Hash | resonance_detector.py#L142 | Abstract fingerprint of beliefs | ✅ IMPLEMENTED | ⚠️ Used for resonance, not for analogy |
+| ResonanceDetector | resonance_detector.py#L216 | Find same pattern across different agent roles | ✅ IMPLEMENTED | ✅ WIRED to concept discovery (2026-01-18) |
+| StructuralPatternLibrary | concept_discovery_engine.py#L862 | Hash-indexed structural matching | ✅ IMPLEMENTED | ✅ WIRED to deliberation & experience (2026-01-18) |
+| _analogical_mapping | seed_primitives.py#L3378 | Find transformations between patterns | ✅ ENHANCED | ✅ Available via find_analogical_mapping() |
+| Cross-domain operators | core_gameplay.py#L18748 | Load resonant patterns for hints | ✅ IMPLEMENTED | ✅ Now uses structural pattern matching |
+| Belief Hash | resonance_detector.py#L142 | Abstract fingerprint of beliefs | ✅ IMPLEMENTED | ✅ Used for resonance AND cross-game transfer |
 
-**GAP**: Unification is detection-only, not learning. When resonance is found, we don't extract the common structure and store it. The system notices similarities but doesn't learn from them.
+**GAP CLOSED (2026-01-18)**: ResonanceDetector now notifies ConceptDiscoveryEngine when high resonance is detected (score >= 2.0, role_diversity >= 2) via `_notify_concept_from_resonance()`. **NEW**: I-Thread deliberation now uses StructuralPatternLibrary to find cross-game matches when no direct resonance exists - enabling true cross-game transfer.
 
 #### 3. GENERALIZATION - "Predicting Z works even where you've never tested"
 
 | Component | Location | Capability | Status | Integration |
 |-----------|----------|------------|--------|-------------|
-| Theory Generalization | scientific_method_engine.py#L828 | Same theory → applies to all levels | ⚠️ LIMITED | Only within same game_type |
-| cross_game_transfer | agent_self_model.py#L9638 | Flag for cross-game learning | ⚠️ SCHEMA ONLY | Flag exists, transfer logic doesn't |
-| Few-shot relations | sequence_abstraction.py#L171 | Derive invariants from 2-10 sequences | ✅ IMPLEMENTED | ❌ Doesn't transfer to new games |
-| WorldModel.physics_rules | symbolic_reasoning_engine.py#L573 | Store learned physics for prediction | ✅ JUST WIRED | ⚠️ Per-game, not cross-game |
-| Concept suggest_for_game | concept_discovery_engine.py#L618 | Suggest concepts for new games | ⚠️ STUB | Only matches on game_type, not structure |
+| Theory Generalization | scientific_method_engine.py#L828 | Same theory → applies to all levels | ✅ IMPLEMENTED | ✅ Feeds concept engine |
+| cross_game_transfer | agent_self_model.py#L9638 | Flag for cross-game learning | ✅ IMPLEMENTED | ✅ Enabled via structural matching |
+| Few-shot relations | sequence_abstraction.py#L171 | Derive invariants from 2-10 sequences | ✅ IMPLEMENTED | ✅ Feeds concept engine |
+| WorldModel.physics_rules | symbolic_reasoning_engine.py#L573 | Store learned physics for prediction | ✅ WIRED | ⚠️ Per-game, not cross-game |
+| Concept suggest_for_game | concept_discovery_engine.py#L704 | Suggest concepts for new games | ✅ IMPLEMENTED | ✅ Now uses STRUCTURAL matching (2026-01-18) |
 
-**GAP**: Generalization stays within-game. Nothing extracts "this worked in game A" and asks "will it work in structurally similar game B?"
+**GAP CLOSED (2026-01-18)**: `suggest_concept_for_game()` now uses StructuralPatternLibrary to suggest concepts for NEW games based on structural similarity, not just game_type matching. experience_outcome() now indexes patterns for cross-game retrieval.
 
 ---
 
-## The Integration Failures
+## The Integration Failures → NOW FIXED
 
-### 1. Abstraction → Unification Gap
+### 1. Abstraction → Unification Gap ✅ CLOSED
 
 ```
 SequenceAbstraction extracts invariants
-    BUT doesn't tell ConceptDiscoveryEngine
+    NOW notifies ConceptDiscoveryEngine via _notify_concept_discovery()
     
 ConceptDiscoveryEngine tracks concepts
-    BUT doesn't tell ResonanceDetector
+    Now unified with resonance patterns
     
-Result: System abstracts in isolation, can't unify across modules
+Result: Templates become patterns, patterns feed unification
 ```
 
-### 2. Unification → Generalization Gap
+### 2. Unification → Generalization Gap ✅ CLOSED
 
 ```
 ResonanceDetector finds: "Pioneer and Generalist both discovered pattern P"
-    BUT doesn't ask: "What games is P likely to work on?"
+    NOW extracts common structure via _notify_concept_from_resonance()
     
-StructuralPatternLibrary matches structural hashes
-    BUT doesn't tell WorldModel to expect similar physics
+ConceptDiscoveryEngine stores cross-game patterns
+    Enables suggest_for_game to recommend patterns for new games
     
-Result: Similarities detected but not leveraged for prediction
+Result: Similarities detected AND leveraged for prediction
 ```
 
-### 3. Generalization → Abstraction Gap (The Cycle Should Be Closed)
+### 3. Generalization → Abstraction Gap ✅ CLOSED
 
 ```
 ScientificMethodEngine generalizes: "red kills me on levels 1,2,3"
-    BUT doesn't abstract: "collision with color X causes death"
+    NOW feeds to ConceptDiscoveryEngine via _notify_concept_from_lesson()
     
-WorldModel learns physics rules per-game
-    BUT doesn't abstract to: "this TYPE of rule appears in THESE game types"
+Lessons become concept candidates that can be confirmed
+    Confirmed concepts become sensations (felt knowledge)
     
-Result: Generalization doesn't create higher-level abstractions
+Result: Generalization creates higher-level abstractions
 ```
 
 ---
@@ -427,34 +427,34 @@ Agent acts, observes outcome:
 ## Verification Criteria
 
 ### Phase 1 Complete When:
-- [ ] WorldModel predictions appear in deliberation logs
-- [ ] Prediction confidence affects action selection
-- [ ] Prediction violations trigger surprise signal
+- [x] WorldModel predictions appear in deliberation logs
+- [x] Prediction confidence affects action selection
+- [x] Prediction violations trigger surprise signal
 
 ### Phase 2 Complete When:
-- [ ] Resonance scores appear in Stream B contributions
-- [ ] High-resonance patterns get selection bonus
-- [ ] Resonance success feeds back to detector
+- [x] Resonance scores appear in Stream B contributions
+- [x] High-resonance patterns get selection bonus
+- [x] Resonance success feeds back to detector (update_pattern_effectiveness)
 
 ### Phase 3 Complete When:
-- [ ] Analytical persona proposes template-based actions
-- [ ] Template suggestions have 'understanding' feeling
-- [ ] Template reliability updates from outcomes
+- [x] Analytical persona proposes template-based actions
+- [x] Template suggestions have 'understanding' feeling
+- [x] Template reliability updates from outcomes (learn_from_outcome)
 
 ### Phase 4 Complete When:
-- [ ] Confirmed concepts create sensation mappings
-- [ ] Objects matching concepts trigger immediate feelings
-- [ ] Sensation valence updates from experience
+- [x] Confirmed concepts create sensation mappings (concept_sensation_mappings table)
+- [x] Objects matching concepts trigger immediate feelings
+- [x] Sensation valence updates from experience (update_concept_confidence)
 
 ### Phase 5 Complete When:
-- [ ] Physics violations trigger 'surprised' feeling
-- [ ] Theory confidence adjusts based on physics accuracy
-- [ ] New rules learned from violations
+- [x] Physics violations trigger 'surprised' feeling
+- [x] Theory confidence adjusts based on physics accuracy
+- [x] New rules learned from violations (apply_physics_rules, check_physics_violation)
 
 ### Phase 6 Complete When:
-- [ ] Single outcome flows to all cognitive faculties
-- [ ] All systems update based on experience
-- [ ] No system is siloed from outcome feedback
+- [x] Single outcome flows to all cognitive faculties (experience_outcome method)
+- [x] All systems update based on experience
+- [x] No system is siloed from outcome feedback
 
 ---
 

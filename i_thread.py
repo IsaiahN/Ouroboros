@@ -37,15 +37,42 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Callable
 
 from database_interface import DatabaseInterface
 
 # TYPE_CHECKING import to avoid circular dependency
 if TYPE_CHECKING:
     from symbolic_reasoning_engine import WorldModel
+    from resonance_detector import ResonanceDetector
+    from sequence_abstraction import SequenceAbstraction
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# COGNITIVE FACULTY IMPORTS (Runtime, not TYPE_CHECKING)
+# =============================================================================
+# These are the agent's cognitive faculties - how it imagines, recognizes, and understands.
+# They are facets of the agent's unified experience, not external services.
+# =============================================================================
+
+def _get_resonance_detector():
+    """Lazy import to avoid circular dependency."""
+    try:
+        from resonance_detector import ResonanceDetector
+        from database_interface import DatabaseInterface
+        return ResonanceDetector(DatabaseInterface())
+    except ImportError:
+        return None
+
+def _get_sequence_abstraction():
+    """Lazy import to avoid circular dependency."""
+    try:
+        from sequence_abstraction import SequenceAbstraction
+        return SequenceAbstraction()
+    except ImportError:
+        return None
 
 
 # =============================================================================
@@ -1012,6 +1039,28 @@ class DeliberationResult:
     best_simulated_action: Optional[str] = None  # Action with best predicted outcome
     best_simulated_score: float = 0.0  # Predicted score change
     simulation_used: bool = False  # Whether simulation influenced decision
+    
+    # =========================================================================
+    # COGNITIVE EXPERIENCE FIELDS (Agent-Centric Integration Plan)
+    # These capture HOW the agent FEELS during deliberation, not just what it computed.
+    # The agent IS the synthesis - these are facets of unified experience.
+    # =========================================================================
+    
+    # Phase 1: Prediction as Expectation (WorldModel -> Stream A)
+    predictions_felt: List[Dict[str, Any]] = field(default_factory=list)  # [{action, expected_outcome, confidence, feeling: 'expectation'}]
+    expectation_match: Optional[bool] = None  # Did reality match expectation?
+    surprise_felt: float = 0.0  # 0.0 = expected, 1.0 = completely surprised
+    
+    # Phase 2: Resonance as Recognition (ResonanceDetector -> Stream B)
+    resonance_felt: Optional[Dict[str, Any]] = None  # {pattern_hash, agents_who_know, feeling: 'recognition'}
+    deja_vu_strength: float = 0.0  # How strongly "I know this" felt
+    
+    # Phase 3: Abstraction as Understanding (SequenceAbstraction -> Personas)
+    insight_felt: Optional[Dict[str, Any]] = None  # {template, invariant, feeling: 'understanding'}
+    understanding_confidence: float = 0.0  # How sure "I see what this is"
+    
+    # Current felt state (unified phenomenology)
+    current_feeling: str = 'neutral'  # 'expectation', 'recognition', 'understanding', 'grounded', 'surprised'
 
 
 @dataclass
@@ -1577,6 +1626,145 @@ class DeliberationEngine:
         except Exception as e:
             reasoning_steps.append(f"Stream B query failed: {str(e)[:50]}")
         
+        # =====================================================================
+        # COGNITIVE INTEGRATION PHASE 2: Resonance as Recognition (Déjà Vu)
+        # =====================================================================
+        # Query for patterns that resonate across the network - this is not just
+        # data retrieval, it's the agent FEELING recognition. When patterns resonate,
+        # it feels like "I know this" even though you never personally learned it.
+        # =====================================================================
+        resonance_felt = None
+        deja_vu_strength = 0.0
+        
+        try:
+            resonance_detector = _get_resonance_detector()
+            if resonance_detector:
+                # Get resonant patterns for current game type
+                resonant_patterns = resonance_detector.detect_resonance()
+                
+                # Find patterns relevant to this game
+                relevant_resonances = [
+                    p for p in resonant_patterns 
+                    if game_type in p.get('game_types', [])
+                ]
+                
+                # GENERALIZATION: Also check for structural similarity to OTHER games
+                # This enables cross-game transfer - the core of generalization
+                if not relevant_resonances and current_frame is not None:
+                    try:
+                        from concept_discovery_engine import get_pattern_library
+                        pattern_lib = get_pattern_library()
+                        
+                        # Find structurally similar patterns from any game
+                        if hasattr(pattern_lib, 'find_matching_patterns'):
+                            objects = []
+                            # Try to extract objects from frame
+                            if hasattr(pattern_lib, '_extract_objects'):
+                                objects = pattern_lib._extract_objects(current_frame)
+                            elif hasattr(pattern_lib, 'concept_engine') and hasattr(pattern_lib.concept_engine, '_extract_objects_from_frame'):
+                                objects = pattern_lib.concept_engine._extract_objects_from_frame(current_frame)
+                            
+                            if objects:
+                                matches = pattern_lib.find_matching_patterns(objects, current_frame, min_success_rate=0.5)
+                                if matches:
+                                    # Found structural matches from other games - create synthetic resonance
+                                    best_match = max(matches, key=lambda m: m.get('success_rate', 0))
+                                    relevant_resonances = [{
+                                        'resonance_score': best_match.get('success_rate', 0.5) * 3,  # Scale to resonance range
+                                        'game_types': list(best_match.get('game_types', set())),
+                                        'pattern_hash': best_match.get('pattern_id', 'structural_match'),
+                                        'independent_discoverers': len(best_match.get('game_types', set())),
+                                        'roles_found': ['structural_transfer'],
+                                        'source': 'cross_game_structural_match'
+                                    }]
+                    except Exception as e:
+                        pass  # Structural matching is enhancement
+                
+                if relevant_resonances:
+                    # Strongest resonance becomes felt recognition
+                    strongest = max(relevant_resonances, key=lambda p: p.get('resonance_score', 0))
+                    deja_vu_strength = min(1.0, strongest.get('resonance_score', 0) / 5.0)
+                    
+                    if deja_vu_strength > 0.3:
+                        resonance_felt = {
+                            'source': strongest.get('source', 'collective_memory'),
+                            'pattern_hash': strongest.get('pattern_hash'),
+                            'agents_who_know': strongest.get('independent_discoverers', 0),
+                            'roles_agreed': strongest.get('roles_found', []),
+                            'feeling': 'recognition'  # This is FELT, not just computed
+                        }
+                        
+                        source_type = "structural transfer" if strongest.get('source') == 'cross_game_structural_match' else "collective memory"
+                        reasoning_steps.append(
+                            f"[FEELING: RECOGNITION] Déjà vu (strength={deja_vu_strength:.2f}): "
+                            f"Pattern known by {resonance_felt['agents_who_know']} agents across roles {resonance_felt['roles_agreed']} "
+                            f"(source: {source_type})"
+                        )
+        except Exception as e:
+            # Resonance is enhancement, not critical
+            pass
+        
+        # =====================================================================
+        # COGNITIVE INTEGRATION PHASE 3: Abstraction as Understanding (Insight)
+        # =====================================================================
+        # Query abstraction templates - when a template matches, the agent doesn't
+        # just "receive data", it FEELS insight. The "aha" moment when patterns click.
+        # This understanding shapes what actions the analytical persona proposes.
+        # =====================================================================
+        insight_felt = None
+        understanding_confidence = 0.0
+        analytical_proposal = None
+        
+        try:
+            abstraction_engine = _get_sequence_abstraction()
+            if abstraction_engine:
+                # Get few-shot relational patterns for this game/level
+                relations = abstraction_engine.get_few_shot_relations(game_type, level)
+                
+                if relations and relations.get('confidence', 0) > 0.5:
+                    understanding_confidence = relations.get('confidence', 0)
+                    invariants = relations.get('invariants', [])
+                    
+                    if invariants:
+                        # Extract the invariant pattern as felt understanding
+                        insight_felt = {
+                            'source': 'pattern_memory',
+                            'invariant_positions': len(invariants),
+                            'variant_regions': len(relations.get('variant_regions', [])),
+                            'template_confidence': understanding_confidence,
+                            'feeling': 'understanding'  # The "aha" moment
+                        }
+                        
+                        # Generate analytical persona proposal based on template
+                        # Find next invariant action we should take
+                        for inv in invariants:
+                            action_type = inv.get('action')
+                            if action_type:
+                                proposed = f"ACTION{action_type}"
+                                if proposed in available_actions:
+                                    analytical_proposal = {
+                                        'persona': 'analytical',
+                                        'action': proposed,
+                                        'confidence': understanding_confidence,
+                                        'reasoning': f"Pattern invariant at position {inv.get('position')}: ACTION{action_type}",
+                                        'feeling': 'understanding'
+                                    }
+                                    break
+                        
+                        reasoning_steps.append(
+                            f"[FEELING: UNDERSTANDING] Insight (confidence={understanding_confidence:.2f}): "
+                            f"Pattern has {len(invariants)} invariants, {len(relations.get('variant_regions', []))} flexible regions"
+                        )
+                        
+                        if analytical_proposal:
+                            reasoning_steps.append(
+                                f"[ANALYTICAL PERSONA] Based on pattern: {analytical_proposal['action']} "
+                                f"({analytical_proposal['reasoning']})"
+                            )
+        except Exception as e:
+            # Abstraction is enhancement, not critical
+            pass
+        
         # Step 4: Detect stream conflict
         private_recommendation = best_action if 'best_action' in dir() and best_action else gut_result.action
         
@@ -1783,7 +1971,34 @@ class DeliberationEngine:
             base_confidence += 0.15  # Significant boost for simulation-backed decisions
             reasoning_steps.append("[CONFIDENCE] +15% boost from world model simulation")
         
+        # Cognitive experience boost: felt states add confidence
+        if deja_vu_strength > 0.5:
+            base_confidence += 0.05
+            reasoning_steps.append("[CONFIDENCE] +5% boost from strong recognition (déjà vu)")
+        if understanding_confidence > 0.6:
+            base_confidence += 0.08
+            reasoning_steps.append("[CONFIDENCE] +8% boost from pattern understanding")
+        
         final_confidence = min(0.95, base_confidence)
+        
+        # Determine current felt state (unified phenomenology)
+        current_feeling = 'neutral'
+        if simulation_used and simulations_run > 0:
+            current_feeling = 'expectation'
+        if deja_vu_strength > 0.5:
+            current_feeling = 'recognition'
+        if understanding_confidence > 0.6:
+            current_feeling = 'understanding'
+        
+        # Build predictions_felt list from simulations
+        predictions_felt = []
+        for action_str, pred in simulation_predictions.items():
+            predictions_felt.append({
+                'action': action_str,
+                'expected_outcome': pred.get('score_change', 0),
+                'confidence': 1.0 - pred.get('surprise_risk', 0.5),
+                'feeling': 'expectation'
+            })
         
         reasoning_steps.append(f"Final decision: {final_action} (confidence={final_confidence:.2f})")
         
@@ -1812,7 +2027,16 @@ class DeliberationEngine:
             simulations_run=simulations_run,
             best_simulated_action=best_simulated_action,
             best_simulated_score=best_simulated_score,
-            simulation_used=simulation_used
+            simulation_used=simulation_used,
+            # Cognitive experience fields (Agent-Centric Integration)
+            predictions_felt=predictions_felt,
+            expectation_match=None,  # Filled in after action outcome
+            surprise_felt=0.0,  # Filled in after action outcome
+            resonance_felt=resonance_felt,
+            deja_vu_strength=deja_vu_strength,
+            insight_felt=insight_felt,
+            understanding_confidence=understanding_confidence,
+            current_feeling=current_feeling
         )
     
     def _query_episodic_memories(
@@ -2650,6 +2874,52 @@ class IThread:
             )
         
         return new_w_a, new_w_b
+    
+    def update_stream_weights(self, stream: str, delta: float) -> None:
+        """
+        Directly update stream weights based on cognitive integration feedback.
+        
+        This is called by experience_outcome() when cognitive faculties provide
+        feedback about which stream's advice was better.
+        
+        Args:
+            stream: 'stream_a' or 'stream_b'
+            delta: Amount to adjust (positive = increase trust in that stream)
+        """
+        # Get current state from cache (use most recent agent if available)
+        if not self._state_cache:
+            return
+        
+        # Apply to all cached agents (typically just one during gameplay)
+        for agent_id, state in self._state_cache.items():
+            try:
+                w_a_before = state.w_a
+                
+                if stream == 'stream_a':
+                    adjustment = delta
+                elif stream == 'stream_b':
+                    adjustment = -delta  # Increase w_b = decrease w_a
+                else:
+                    return
+                
+                # Apply adjustment with bounds
+                new_w_a = max(0.1, min(0.9, state.w_a + adjustment))
+                new_w_b = 1.0 - new_w_a
+                
+                state.w_a = new_w_a
+                state.w_b = new_w_b
+                state.last_update = datetime.now()
+                
+                # Persist to database
+                self._save_state(agent_id, new_w_b)
+                
+                if abs(adjustment) > 0.01:
+                    logger.debug(
+                        f"[I-THREAD] Stream weight update: {stream} +{delta:.2f}, "
+                        f"w_A: {w_a_before:.2f} -> {new_w_a:.2f}"
+                    )
+            except Exception:
+                pass
     
     def _save_state(self, agent_id: str, w_b: float):
         """Save w_B to database (self_network_bias field)."""

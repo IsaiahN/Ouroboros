@@ -36,6 +36,39 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _notify_concept_from_lesson(game_type: str, concept: str, lesson_id: str) -> None:
+    """
+    Notify ConceptDiscoveryEngine when a lesson is extracted.
+    
+    This closes the Theories -> Concepts gap:
+    When the ScientificMethodEngine extracts a lesson from a win,
+    the concept demonstrated becomes a candidate in the concept engine.
+    """
+    try:
+        from concept_discovery_engine import ConceptDiscoveryEngine
+        from database_interface import DatabaseInterface
+        
+        db = DatabaseInterface()
+        concept_engine = ConceptDiscoveryEngine(db)
+        
+        # Track this as a successful pattern
+        pattern_description = f"lesson:{concept}:{lesson_id[:12]}"
+        
+        concept_engine.track_successful_operator_pattern(
+            operator_id=f"scientific_method_{lesson_id[:8]}",
+            game_id=game_type,
+            sub_patterns=[pattern_description, concept, f"theory_{concept}"]
+        )
+        
+        logger.debug(
+            f"[THEORY->CONCEPT] Lesson concept '{concept}' fed to concept engine "
+            f"(game={game_type})"
+        )
+    except Exception as e:
+        # Non-critical - concept discovery is enhancement
+        logger.debug(f"[THEORY->CONCEPT] Notification failed: {e}")
+
+
 class TheoryStatus(Enum):
     """Status of a theory in the scientific method pipeline."""
     PROPOSED = "proposed"           # Just formed, not tested
@@ -1759,6 +1792,16 @@ class GamesAsTeachersEngine:
         
         # Store in database if available
         self._store_lesson(lesson)
+        
+        # =================================================================
+        # COGNITIVE INTEGRATION: Theories -> Concept Discovery
+        # =================================================================
+        # When a lesson is extracted from a win, the concept demonstrated
+        # should become a concept candidate. This closes the Generalization
+        # -> Abstraction gap (theories become concepts).
+        # =================================================================
+        if concept and concept != 'exploration_required':
+            _notify_concept_from_lesson(game_type, concept, lesson_id)
         
         logger.info(f"[TEACHER] Extracted lesson: {concept} from {game_type} L{level_number}")
         

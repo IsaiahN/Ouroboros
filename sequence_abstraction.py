@@ -31,6 +31,31 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _notify_concept_discovery(pattern: str, game_type: str, confidence: float, source: str = "abstraction") -> None:
+    """
+    Notify ConceptDiscoveryEngine when abstraction discovers a pattern.
+    
+    This closes the Abstraction -> Concepts gap in the cognitive cycle.
+    When sequence invariants are discovered, they become concept candidates.
+    """
+    try:
+        from concept_discovery_engine import ConceptDiscoveryEngine
+        db = DatabaseInterface()
+        concept_engine = ConceptDiscoveryEngine(db)
+        
+        # Track this as a successful pattern that might become a concept
+        concept_engine.track_successful_operator_pattern(
+            operator_id=f"abstraction_{source}",
+            game_id=game_type,
+            sub_patterns=[pattern]
+        )
+        
+        logger.debug(f"[ABSTRACTION->CONCEPT] Notified concept engine of pattern: {pattern[:50]}")
+    except Exception as e:
+        # Non-critical - concept discovery is enhancement
+        logger.debug(f"[ABSTRACTION->CONCEPT] Notification failed: {e}")
+
+
 class RelationalPatternCache:
     """Lightweight cache for pattern → outcome pairs harvested from telemetry."""
 
@@ -1016,6 +1041,29 @@ class SequenceAbstraction:
             else:
                 desc = "Flexible strategy"
             
+            confidence = min(len(patterns) / 10.0, 1.0)
+            
+            # =================================================================
+            # COGNITIVE INTEGRATION: Abstraction -> Concept Discovery
+            # =================================================================
+            # When we find strong invariants, notify ConceptDiscoveryEngine
+            # This closes the abstraction cycle - templates become patterns
+            # =================================================================
+            if len(invariant_positions) >= 3 and confidence >= 0.5:
+                # Create a pattern description from invariants
+                invariant_pattern = ",".join([
+                    f"pos{inv['position']}=ACTION{inv['action']}"
+                    for inv in invariant_positions[:5]
+                ])
+                pattern_description = f"sequence_invariant:{game_type}:L{level_number}:{invariant_pattern}"
+                
+                _notify_concept_discovery(
+                    pattern=pattern_description,
+                    game_type=game_type,
+                    confidence=confidence,
+                    source="multi_sequence_invariant"
+                )
+            
             return {
                 'description': desc,
                 'invariant_positions': invariant_positions,
@@ -1028,7 +1076,7 @@ class SequenceAbstraction:
                 ],
                 'template': template,
                 'sample_size': len(patterns),
-                'confidence': min(len(patterns) / 10.0, 1.0),
+                'confidence': confidence,
                 'game_type': game_type,
                 'level': level_number
             }
@@ -1363,6 +1411,63 @@ class SequenceAbstraction:
                 (sorted_helpful[0][0] if sorted_helpful else None)
             )
         }
+    
+    def learn_from_outcome(
+        self,
+        action: Optional[str],
+        outcome: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> None:
+        """
+        Learn from action outcome to improve abstraction patterns.
+        
+        This is called by experience_outcome() when cognitive faculties provide
+        feedback about action results. Updates template reliability and 
+        pattern confidence based on whether abstraction-suggested actions worked.
+        
+        Args:
+            action: The action that was taken
+            outcome: Dict with 'score_delta', 'frame_changed'
+            context: Dict with 'game_id', 'level'
+        """
+        try:
+            game_id = context.get('game_id', '')
+            level = context.get('level', 1)
+            score_delta = outcome.get('score_delta', 0)
+            
+            if not game_id:
+                return
+            
+            # Extract game_type from game_id
+            game_type = game_id[:4] if len(game_id) >= 4 else game_id
+            
+            # Invalidate cache for this game/level if outcome was negative
+            # This forces re-computation of patterns
+            cache_key = (game_type, level)
+            
+            if score_delta < 0:
+                # Negative outcome - reduce confidence in cached relations
+                if cache_key in self._relation_cache:
+                    cached = self._relation_cache[cache_key]
+                    if cached and 'confidence' in cached:
+                        cached['confidence'] = max(0.1, cached['confidence'] * 0.9)
+                        logger.debug(
+                            f"[ABSTRACTION] Reduced confidence for {game_type}@L{level}: "
+                            f"negative outcome"
+                        )
+            elif score_delta > 0:
+                # Positive outcome - boost confidence
+                if cache_key in self._relation_cache:
+                    cached = self._relation_cache[cache_key]
+                    if cached and 'confidence' in cached:
+                        cached['confidence'] = min(1.0, cached['confidence'] * 1.05)
+                        logger.debug(
+                            f"[ABSTRACTION] Boosted confidence for {game_type}@L{level}: "
+                            f"positive outcome"
+                        )
+                        
+        except Exception as e:
+            logger.debug(f"Abstraction learn_from_outcome failed: {e}")
 
 
 # Abstraction levels

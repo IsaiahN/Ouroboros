@@ -837,6 +837,47 @@ class WorldModel:
             except Exception:
                 pass
         
+        # =============================================================================
+        # PHYSICS RULE VIOLATION CHECK (Phase 5: Physics -> Surprise)
+        # Compare outcome against learned physics rules
+        # =============================================================================
+        physics_violation = None
+        if prediction.expected_agent_position and actual_position:
+            # Check if physics rules were violated
+            physics_violation = self.check_physics_violation(
+                predicted_position=prediction.expected_agent_position,
+                actual_position=actual_position,
+                action=action
+            )
+            
+            if physics_violation.get('violated'):
+                # Add physics violation surprise
+                surprise += physics_violation['surprise_amount']
+                diffs.append({
+                    'type': 'physics_violation',
+                    'violation_type': physics_violation['violation_type'],
+                    'learn_from': physics_violation['learn_from']
+                })
+                
+                # Trigger learning from the violation
+                if physics_violation.get('learn_from'):
+                    learn_data = physics_violation['learn_from']
+                    if learn_data['type'] == 'weaken_rule':
+                        # Reduce confidence in the rule that was wrong
+                        rule = learn_data.get('rule')
+                        if rule and 'confidence' in rule:
+                            rule['confidence'] = max(0.1, rule['confidence'] * 0.7)
+                    elif learn_data['type'] == 'new_collision_rule':
+                        # Learn new blocking rule
+                        self.add_physics_rule({
+                            'type': 'collision',
+                            'object_a': 'agent',
+                            'object_b': 'unknown',
+                            'position': learn_data['position'],
+                            'effect': 'blocked',
+                            'confidence': 0.5
+                        })
+        
         # Normalize surprise to 0-1
         surprise = min(surprise, 1.0)
         
@@ -849,7 +890,8 @@ class WorldModel:
             'surprise': surprise,
             'prediction_made': True,
             'diffs': diffs,
-            'prediction_accuracy': self.correct_predictions / max(self.total_predictions, 1)
+            'prediction_accuracy': self.correct_predictions / max(self.total_predictions, 1),
+            'physics_violated': physics_violation.get('violated', False) if physics_violation else False
         }
         self.prediction_history.append(result)
         self.surprise_history.append(surprise)
@@ -965,6 +1007,142 @@ class WorldModel:
                 return
         
         self.physics_rules.append(rule)
+    
+    def apply_physics_rules(self, action: int, current_position: Tuple[int, int], target_position: Tuple[int, int]) -> Dict[str, Any]:
+        """
+        Apply learned physics rules to predict outcome of movement.
+        
+        This is where the agent's learned knowledge is USED to inform predictions.
+        Returns dict with predictions based on learned physics.
+        
+        Args:
+            action: The action being considered
+            current_position: Agent's current position
+            target_position: Where agent would move without physics
+            
+        Returns:
+            Dict with physics predictions:
+            - 'blocked': bool if movement should be blocked
+            - 'expected_effect': what should happen
+            - 'confidence': how certain we are
+            - 'rule_used': which physics rule applies
+        """
+        result = {
+            'blocked': False,
+            'expected_effect': 'move',
+            'confidence': 0.0,  # 0 means no physics rule applies
+            'rule_used': None
+        }
+        
+        # Check each learned physics rule
+        for rule in self.physics_rules:
+            rule_type = rule.get('type', '')
+            
+            if rule_type == 'collision':
+                # Check if target position contains the collision object
+                object_b_type = rule.get('object_b', '').lower()
+                effect = rule.get('effect', '')
+                
+                # Look for objects of this type at target position
+                for obj_id, obj in self.state.objects.items():
+                    obj_type_str = str(obj.object_type.value) if hasattr(obj.object_type, 'value') else str(obj.object_type)
+                    if obj_type_str.lower() == object_b_type or object_b_type in obj_type_str.lower():
+                        if target_position in (obj.cells if obj.cells else [obj.position]):
+                            if effect == 'blocked':
+                                result['blocked'] = True
+                                result['expected_effect'] = 'blocked'
+                                result['confidence'] = rule.get('confidence', 0.8)
+                                result['rule_used'] = rule
+                                return result
+                            elif effect == 'push':
+                                result['expected_effect'] = 'push'
+                                result['confidence'] = rule.get('confidence', 0.8)
+                                result['rule_used'] = rule
+            
+            elif rule_type == 'boundary':
+                # Learned that boundaries block
+                if not self.state.is_valid_position(target_position):
+                    result['blocked'] = True
+                    result['expected_effect'] = 'blocked_boundary'
+                    result['confidence'] = rule.get('confidence', 1.0)
+                    result['rule_used'] = rule
+                    return result
+            
+            elif rule_type == 'teleport':
+                # Learned about teleportation
+                trigger_pos = rule.get('trigger_position')
+                dest_pos = rule.get('destination')
+                if target_position == trigger_pos and dest_pos:
+                    result['expected_effect'] = 'teleport'
+                    result['teleport_destination'] = dest_pos
+                    result['confidence'] = rule.get('confidence', 0.7)
+                    result['rule_used'] = rule
+        
+        return result
+    
+    def check_physics_violation(self, predicted_position: Tuple[int, int], actual_position: Tuple[int, int], 
+                                 action: int) -> Dict[str, Any]:
+        """
+        Check if the actual outcome violates our learned physics rules.
+        
+        This is the SURPRISE detector - when reality differs from what 
+        our physics understanding predicted.
+        
+        Returns:
+            Dict with violation info:
+            - 'violated': bool - did physics rules fail
+            - 'surprise_amount': float 0-1 
+            - 'violation_type': what kind of surprise
+            - 'learn_from': data for updating physics rules
+        """
+        result = {
+            'violated': False,
+            'surprise_amount': 0.0,
+            'violation_type': None,
+            'learn_from': None
+        }
+        
+        # What did physics rules predict?
+        effect = self.action_effects.get(action)
+        if not effect:
+            return result
+            
+        # Calculate expected target
+        expected_delta = effect.delta
+        expected_target = (predicted_position[0] + expected_delta[0], 
+                          predicted_position[1] + expected_delta[1])
+        
+        # Apply our learned physics
+        physics_prediction = self.apply_physics_rules(action, predicted_position, expected_target)
+        
+        if physics_prediction['confidence'] > 0.5:  # We had a physics-based prediction
+            physics_expected_blocked = physics_prediction['blocked']
+            actual_blocked = (actual_position == predicted_position)  # Didn't move
+            
+            # Check for violation
+            if physics_expected_blocked != actual_blocked:
+                result['violated'] = True
+                result['surprise_amount'] = 0.7 * physics_prediction['confidence']
+                
+                if physics_expected_blocked and not actual_blocked:
+                    # Physics said blocked but we moved - need to UNLEARN rule
+                    result['violation_type'] = 'false_block_prediction'
+                    result['learn_from'] = {
+                        'type': 'weaken_rule',
+                        'rule': physics_prediction['rule_used'],
+                        'evidence': {'could_move': True, 'position': actual_position}
+                    }
+                else:
+                    # Physics said clear but we were blocked - need to LEARN new rule
+                    result['violation_type'] = 'missed_block'
+                    result['learn_from'] = {
+                        'type': 'new_collision_rule',
+                        'position': expected_target,
+                        'action': action,
+                        'was_blocked': True
+                    }
+        
+        return result
     
     def add_trigger_rule(self, trigger: Dict[str, Any]) -> None:
         """

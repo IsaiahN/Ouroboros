@@ -1366,6 +1366,19 @@ CREATE TABLE concept_operator_map (
                 PRIMARY KEY (concept_id, operator_id)
             );
 
+-- Phase 4: Concept -> Sensation mappings (Agent-Centric Integration Plan)
+-- When concepts are confirmed, they become FELT experiences
+CREATE TABLE concept_sensation_mappings (
+                concept_id TEXT PRIMARY KEY,
+                concept_name TEXT NOT NULL,
+                structural_signature TEXT,
+                feeling TEXT DEFAULT 'known',      -- 'known', 'familiar', 'dangerous', etc.
+                confidence REAL DEFAULT 0.5,
+                valence REAL DEFAULT 0.0,          -- -1.0 (bad) to +1.0 (good)
+                games_validated TEXT,              -- JSON array of game types
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
 CREATE TABLE consciousness_logs (
         log_id INTEGER PRIMARY KEY AUTOINCREMENT,
         agent_id TEXT NOT NULL,

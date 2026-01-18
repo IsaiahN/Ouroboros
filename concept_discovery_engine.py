@@ -445,6 +445,16 @@ class ConceptDiscoveryEngine:
         # NEW: Apply unlock pressure for primitives required by this concept
         self._apply_unlock_pressure_for_concept(concept)
         
+        # =====================================================================
+        # COGNITIVE INTEGRATION PHASE 4: Concepts become Sensations
+        # =====================================================================
+        # When a concept is confirmed, it doesn't just become "data" - it becomes
+        # something the agent FEELS about objects. Red objects that killed you
+        # feel dangerous BEFORE you think about why. This is categorization as
+        # knowing - the agent recognizes patterns immediately through feeling.
+        # =====================================================================
+        self._wire_concept_to_sensations(concept)
+        
         logger.info(f"[CONCEPT CONFIRMED] '{concept.name}' (ID: {concept_id[:8]})")
         
         return concept
@@ -522,6 +532,83 @@ class ConceptDiscoveryEngine:
             )
         
         return unlock_attempts
+    
+    def _wire_concept_to_sensations(self, concept: 'Concept') -> None:
+        """
+        Wire a confirmed concept to the sensation engine.
+        
+        This implements Phase 4 of the Agent-Centric Integration Plan:
+        When a concept is confirmed, it becomes something the agent FEELS
+        about objects - categorization as knowing. The agent recognizes
+        patterns immediately through sensation, not just computation.
+        
+        Args:
+            concept: The confirmed concept to wire to sensations
+        """
+        try:
+            # Determine valence from concept's pattern and success rate
+            # Higher confidence concepts should have stronger valence
+            valence = 0.0
+            
+            # Analyze the pattern for typical valence indicators
+            pattern_lower = concept.pattern.lower() if concept.pattern else ''
+            
+            # Negative patterns (danger, avoid, fail, death, etc.)
+            negative_indicators = ['fail', 'death', 'avoid', 'danger', 'kill', 'lose', 'collision']
+            # Positive patterns (success, goal, win, collect, complete)
+            positive_indicators = ['success', 'goal', 'win', 'collect', 'complete', 'progress', 'solve']
+            
+            for neg in negative_indicators:
+                if neg in pattern_lower:
+                    valence = -0.5 * concept.confidence
+                    break
+            
+            for pos in positive_indicators:
+                if pos in pattern_lower:
+                    valence = 0.5 * concept.confidence
+                    break
+            
+            # If neutral, assign slight positive (knowledge is usually good)
+            if valence == 0.0:
+                valence = 0.1 * concept.confidence
+            
+            # Create sensation mapping for this concept
+            # This goes into the network_sensation_mappings table
+            sensation_mapping = {
+                'structural_signature': concept.pattern[:100],
+                'concept_id': concept.concept_id,
+                'concept_name': concept.name,
+                'feeling': 'known',  # "I know what this is"
+                'confidence': concept.confidence,
+                'valence': valence,  # good/bad/neutral
+                'games_validated': concept.games_proven[:5],
+                'created_from': 'concept_discovery'
+            }
+            
+            # Store in database for agents to query
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO concept_sensation_mappings
+                (concept_id, concept_name, structural_signature, feeling, 
+                 confidence, valence, games_validated, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            """, (
+                concept.concept_id,
+                concept.name,
+                concept.pattern[:100],
+                'known',
+                concept.confidence,
+                valence,
+                json.dumps(concept.games_proven[:5])
+            ))
+            
+            logger.info(
+                f"[CONCEPT->SENSATION] Concept '{concept.name}' wired to sensations "
+                f"(valence={valence:.2f}, feeling='known')"
+            )
+            
+        except Exception as e:
+            # Sensation wiring is enhancement, not critical
+            logger.debug(f"[CONCEPT->SENSATION] Failed to wire concept to sensations: {e}")
     
     def extract_concept_from_counterfactuals(
         self,
@@ -622,6 +709,9 @@ class ConceptDiscoveryEngine:
         """
         Suggest which concept might apply to a game.
         
+        This is critical for GENERALIZATION - suggesting concepts for NEW games
+        based on structural similarity, not just games we've seen before.
+        
         Args:
             game_type: The game type to analyze
             frame: Optional current frame for visual analysis
@@ -629,7 +719,7 @@ class ConceptDiscoveryEngine:
         Returns:
             Best matching concept or None
         """
-        # Check if this game type has known concept associations
+        # 1. Direct match: Check if this game type has known concept associations
         for concept in self.confirmed_concepts.values():
             if game_type in concept.games_proven:
                 logger.debug(
@@ -637,10 +727,97 @@ class ConceptDiscoveryEngine:
                 )
                 return concept
         
-        # TODO: Use frame analysis to detect concept-relevant patterns
-        # (e.g., detect boundaries for containment, detect templates for reference_semantics)
+        # 2. STRUCTURAL GENERALIZATION: Use frame analysis to detect concept-relevant patterns
+        # This is the key to generalization - finding concepts in NEW games
+        if frame is not None:
+            try:
+                # Get pattern library for structural matching
+                pattern_lib = get_pattern_library(self.db.db_path)
+                
+                # Extract objects from frame for structural analysis
+                objects = self._extract_objects_from_frame(frame)
+                
+                if objects:
+                    # Find matching patterns from OTHER games
+                    matches = pattern_lib.find_matching_patterns(
+                        objects=objects,
+                        frame=frame,
+                        min_success_rate=0.4
+                    )
+                    
+                    if matches:
+                        # Find which concepts these patterns belong to
+                        for match in matches:
+                            for match_game_type in match.get('game_types', []):
+                                # Look for concept used in the matching game
+                                for concept in self.confirmed_concepts.values():
+                                    if match_game_type in concept.games_proven:
+                                        logger.info(
+                                            f"[CONCEPT->GENERALIZE] Suggesting '{concept.name}' for NEW game {game_type} "
+                                            f"based on structural match with {match_game_type} "
+                                            f"(success_rate={match.get('success_rate', 0):.0%})"
+                                        )
+                                        return concept
+                        
+                        # If no direct concept match but patterns found, track this
+                        logger.debug(
+                            f"[CONCEPT] {len(matches)} structural matches found for {game_type} "
+                            f"but no confirmed concept yet"
+                        )
+            except Exception as e:
+                logger.debug(f"[CONCEPT] Structural suggestion failed: {e}")
         
         return None
+    
+    def _extract_objects_from_frame(self, frame: List[List[int]]) -> List[Dict[str, Any]]:
+        """
+        Extract object representations from a frame for structural matching.
+        
+        This enables cross-game generalization by finding similar structures.
+        """
+        if not frame or not isinstance(frame, list):
+            return []
+        
+        try:
+            # Simple object extraction: find connected regions of same color
+            objects = []
+            height = len(frame)
+            width = len(frame[0]) if frame else 0
+            visited = set()
+            
+            for y in range(height):
+                for x in range(width):
+                    if (x, y) not in visited:
+                        color = frame[y][x]
+                        if color != 0:  # Skip background
+                            # Flood fill to find object
+                            positions = []
+                            stack = [(x, y)]
+                            while stack:
+                                cx, cy = stack.pop()
+                                if (cx, cy) in visited or cx < 0 or cx >= width or cy < 0 or cy >= height:
+                                    continue
+                                if frame[cy][cx] == color:
+                                    visited.add((cx, cy))
+                                    positions.append((cx, cy))
+                                    stack.extend([(cx+1, cy), (cx-1, cy), (cx, cy+1), (cx, cy-1)])
+                            
+                            if positions:
+                                # Compute centroid
+                                cx = sum(p[0] for p in positions) / len(positions)
+                                cy = sum(p[1] for p in positions) / len(positions)
+                                
+                                objects.append({
+                                    'color': color,
+                                    'positions': positions,
+                                    'centroid': (cx, cy),
+                                    'size': len(positions)
+                                })
+            
+            return objects
+        except Exception as e:
+            logger.debug(f"[CONCEPT] Object extraction failed: {e}")
+            return []
     
     def associate_operator_with_concept(
         self,
@@ -709,6 +886,46 @@ class ConceptDiscoveryEngine:
                 )[:5]
             ]
         }
+    
+    def update_concept_confidence(self, concept_name: str, delta: float) -> None:
+        """
+        Update confidence for a concept based on outcome feedback.
+        
+        This is called by experience_outcome() when cognitive faculties provide
+        feedback about whether a concept-based action was successful.
+        
+        Args:
+            concept_name: Name of the concept to update
+            delta: Amount to adjust confidence (positive = increase, negative = decrease)
+        """
+        try:
+            # Update in-memory cache
+            if concept_name in self.confirmed_concepts:
+                concept = self.confirmed_concepts[concept_name]
+                old_confidence = concept.confidence
+                concept.confidence = max(0.1, min(1.0, concept.confidence + delta))
+                
+                logger.debug(
+                    f"[CONCEPT] Updated '{concept_name}' confidence: "
+                    f"{old_confidence:.2f} -> {concept.confidence:.2f}"
+                )
+            
+            # Update database
+            self.db.execute_query("""
+                UPDATE concept_library
+                SET confidence = MIN(1.0, MAX(0.1, confidence + ?))
+                WHERE concept_name = ?
+            """, (delta, concept_name))
+            
+            # Also update sensation mapping if it exists
+            self.db.execute_query("""
+                UPDATE concept_sensation_mappings
+                SET confidence = MIN(1.0, MAX(0.1, confidence + ?))
+                WHERE concept_name = ?
+            """, (delta, concept_name))
+            
+        except Exception as e:
+            logger.debug(f"Concept confidence update failed: {e}")
 
 
 # =============================================================================

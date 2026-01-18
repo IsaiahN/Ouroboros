@@ -46,6 +46,43 @@ from database_interface import DatabaseInterface
 logger = logging.getLogger(__name__)
 
 
+def _notify_concept_from_resonance(pattern: Dict[str, Any], beliefs: Dict[str, Any]) -> None:
+    """
+    Notify ConceptDiscoveryEngine when high resonance is detected.
+    
+    This closes the Unification -> Generalization gap:
+    When agents with different roles converge on the same pattern,
+    that commonality IS a concept candidate for cross-game generalization.
+    """
+    try:
+        from concept_discovery_engine import ConceptDiscoveryEngine
+        db = DatabaseInterface()
+        concept_engine = ConceptDiscoveryEngine(db)
+        
+        # High resonance means multiple roles agree - this is concept-worthy
+        theory = beliefs.get('working_theory_required', '')
+        control = beliefs.get('self_model_required', '')
+        
+        # Create a pattern description from resonance
+        pattern_description = f"resonance:{theory}:{control}"
+        
+        # Track across all game types where resonance was found
+        for game_type in pattern.get('game_types', []):
+            concept_engine.track_successful_operator_pattern(
+                operator_id=f"resonance_{pattern.get('pattern_hash', 'unknown')[:8]}",
+                game_id=game_type,
+                sub_patterns=[pattern_description, theory, control]
+            )
+        
+        logger.debug(
+            f"[RESONANCE->CONCEPT] High resonance pattern fed to concept engine: "
+            f"score={pattern.get('resonance_score', 0):.2f}, roles={pattern.get('role_diversity', 0)}"
+        )
+    except Exception as e:
+        # Non-critical - concept discovery is enhancement
+        logger.debug(f"[RESONANCE->CONCEPT] Notification failed: {e}")
+
+
 # =============================================================================
 # RESONANCE QUERY FREQUENCIES BY ROLE
 # =============================================================================
@@ -350,6 +387,15 @@ class ResonanceDetector:
                     json.dumps(pattern['game_types'])
                 ))
                 
+                # =============================================================
+                # COGNITIVE INTEGRATION: Resonance -> Concept Discovery
+                # =============================================================
+                # When high resonance is detected (multiple roles agree),
+                # this is concept-worthy - feed to concept discovery engine
+                # =============================================================
+                if pattern['resonance_score'] >= 2.0 and pattern['role_diversity'] >= 2:
+                    _notify_concept_from_resonance(pattern, beliefs)
+                
         except Exception as e:
             logger.debug(f"Storing resonance pattern failed: {e}")
     
@@ -575,6 +621,65 @@ class ResonanceDetector:
         except Exception as e:
             logger.debug(f"Resonance summary failed: {e}")
             return {'error': str(e)}
+    
+    def update_pattern_effectiveness(self, pattern: Dict[str, Any], was_positive: bool) -> None:
+        """
+        Update pattern effectiveness based on outcome feedback.
+        
+        This is called by experience_outcome() when a resonance-matched action
+        produces a result. Updates the pattern's resonance score based on whether
+        it led to positive or negative outcomes.
+        
+        Args:
+            pattern: Pattern dict with 'pattern_hash' or similar identifier
+            was_positive: Whether the action using this pattern was successful
+        """
+        try:
+            pattern_hash = pattern.get('pattern_hash')
+            if not pattern_hash:
+                return
+            
+            # Get current validation count
+            result = self.db.execute_query("""
+                SELECT times_validated, times_succeeded, resonance_score
+                FROM resonance_patterns
+                WHERE pattern_hash = ?
+            """, (pattern_hash,))
+            
+            if not result:
+                return
+            
+            row = result[0]
+            times_validated = (row.get('times_validated') or 0) + 1
+            times_succeeded = (row.get('times_succeeded') or 0) + (1 if was_positive else 0)
+            
+            # Update resonance score based on success rate
+            # Higher success rate = higher resonance confidence
+            success_rate = times_succeeded / max(times_validated, 1)
+            current_score = row.get('resonance_score') or 1.0
+            
+            # Adjust score: successful uses increase it, failures decrease it
+            if was_positive:
+                new_score = current_score * 1.05  # 5% boost
+            else:
+                new_score = current_score * 0.95  # 5% penalty
+            
+            self.db.execute_query("""
+                UPDATE resonance_patterns SET
+                    times_validated = ?,
+                    times_succeeded = ?,
+                    resonance_score = ?,
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE pattern_hash = ?
+            """, (times_validated, times_succeeded, new_score, pattern_hash))
+            
+            logger.debug(
+                f"[RESONANCE] Pattern {pattern_hash[:8]} effectiveness updated: "
+                f"success_rate={success_rate:.2f}, score={current_score:.2f}->{new_score:.2f}"
+            )
+            
+        except Exception as e:
+            logger.debug(f"Pattern effectiveness update failed: {e}")
 
 
 # =============================================================================
