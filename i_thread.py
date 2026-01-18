@@ -1900,64 +1900,169 @@ class DeliberationEngine:
             theory_result = "pending_verification"
             reasoning_steps.append(f"Testing: {theory_tested}")
         
-        # Step 7: Make final decision
+        # =====================================================================
+        # Step 7: Make final decision with TRM-INSPIRED ITERATIVE REFINEMENT
+        # =====================================================================
+        # Key insight from "Less is More: Recursive Reasoning with Tiny Networks":
+        # Instead of one pass through decision logic, do MULTIPLE REFINEMENT PASSES.
+        # Each pass builds action_scores and refines confidence until convergence.
+        # This mimics TRM's recursive application of the same small network.
+        # =====================================================================
         time_spent = time.time() - start_time
+        time_remaining = budget_seconds - time_spent
         
-        # Decision logic with priority
-        final_action = gut_result.action
+        # Initialize action scores for all available actions
+        action_scores: Dict[str, float] = {a: 0.0 for a in available_actions}
+        action_sources: Dict[str, List[str]] = {a: [] for a in available_actions}
+        
+        # Seed with gut instinct (one-time, not per pass)
+        if gut_result.action in action_scores:
+            action_scores[gut_result.action] += gut_result.confidence * 0.3
+            action_sources[gut_result.action].append(f"gut:{gut_result.confidence:.2f}")
+        
+        # =====================================================================
+        # ITERATIVE REFINEMENT LOOP (TRM-inspired)
+        # Max passes depends on time budget. Early convergence if scores stabilize.
+        # =====================================================================
+        # Adaptive passes: more time = more refinement
+        if time_remaining > 10.0:
+            max_refinement_passes = 4
+        elif time_remaining > 3.0:
+            max_refinement_passes = 3
+        elif time_remaining > 1.0:
+            max_refinement_passes = 2
+        else:
+            max_refinement_passes = 1  # Minimal budget = single pass
+        
+        convergence_threshold = 0.05  # Stop if top action score changes < 5%
+        previous_best_score = -1.0
+        refinement_passes_used = 0
+        
+        for refinement_pass in range(max_refinement_passes):
+            refinement_passes_used += 1
+            
+            # --- SINGLE PASS: Collect evidence (scores added ONCE per source) ---
+            # Only add source contributions on first pass to avoid score inflation
+            
+            if refinement_pass == 0:
+                # Source 1: Stream A (private experience) - best_action from earlier
+                if 'best_action' in dir() and best_action and best_action in action_scores:
+                    score_boost = (best_ratio if 'best_ratio' in dir() else 0.5) * 0.4
+                    action_scores[best_action] += score_boost
+                    action_sources[best_action].append(f"stream_a:{score_boost:.2f}")
+                
+                # Source 2: Stream B (network wisdom)
+                if network_recommendation and network_recommendation in action_scores:
+                    score_boost = w_b * 0.4
+                    action_scores[network_recommendation] += score_boost
+                    action_sources[network_recommendation].append(f"stream_b:{score_boost:.2f}")
+                
+                # Source 3: Simulation predictions
+                for action_str, pred in simulation_predictions.items():
+                    if action_str in action_scores:
+                        score_change = pred.get('score_change', 0)
+                        risk = pred.get('surprise_risk', 0.5)
+                        sim_score = (score_change * 0.1) - (risk * 0.2)
+                        action_scores[action_str] += sim_score
+                        if abs(sim_score) > 0.01:
+                            action_sources[action_str].append(f"sim:{sim_score:.2f}")
+                
+                # Source 4: Analytical persona (from pattern understanding)
+                if analytical_proposal and analytical_proposal.get('action') in action_scores:
+                    conf = analytical_proposal.get('confidence', 0.5)
+                    action_scores[analytical_proposal['action']] += conf * 0.3
+                    action_sources[analytical_proposal['action']].append(f"pattern:{conf:.2f}")
+                
+                # Source 5: Resonance/deja vu (cross-game transfer)
+                if deja_vu_strength > 0.3 and resonance_felt:
+                    roles = resonance_felt.get('roles_agreed', [])
+                    for action_str in action_scores:
+                        action_num = action_str.replace('ACTION', '')
+                        if action_num in str(roles):
+                            action_scores[action_str] += deja_vu_strength * 0.2
+                            action_sources[action_str].append(f"resonance:{deja_vu_strength:.2f}")
+            
+            # --- REFINEMENT: Apply consensus boost each pass ---
+            # TRM insight: Multiple passes let conflicting evidence resolve.
+            # Actions supported by MULTIPLE sources get progressive bonus.
+            # Bonus is small per pass but compounds to reward consistency.
+            consensus_applied = 0
+            for action_str in action_scores:
+                source_count = len(action_sources.get(action_str, []))
+                if source_count >= 2:
+                    # Small consensus bonus per pass (0.02 per additional source)
+                    consensus_boost = (source_count - 1) * 0.02
+                    action_scores[action_str] += consensus_boost
+                    consensus_applied += 1
+            
+            # Check for convergence
+            current_best = max(action_scores.values()) if action_scores else 0
+            if refinement_pass > 0 and abs(current_best - previous_best_score) < convergence_threshold:
+                reasoning_steps.append(f"[REFINEMENT] Converged at pass {refinement_pass + 1}")
+                break
+            previous_best_score = current_best
+        
+        # Log refinement result
+        if refinement_passes_used > 1:
+            top_3 = dict(sorted(action_scores.items(), key=lambda x: -x[1])[:3])
+            reasoning_steps.append(f"[REFINEMENT] {refinement_passes_used} passes, top: {top_3}")
+        
+        # Select final action from refined scores
+        final_action = max(action_scores, key=action_scores.get) if action_scores else gut_result.action
         change_reason = None
         changed_from_gut = False
         
-        # Priority 0: SIMULATION PREDICTS POSITIVE OUTCOME (highest priority)
-        # If world model predicts an action will gain score, trust the simulation
+        # Get refinement confidence (how much better is top action than 2nd?)
+        sorted_scores = sorted(action_scores.values(), reverse=True)
+        refinement_confidence = 0.0
+        if len(sorted_scores) >= 2 and sorted_scores[0] > 0:
+            # Confidence = margin between top 2 / top score
+            refinement_confidence = (sorted_scores[0] - sorted_scores[1]) / sorted_scores[0]
+        
+        # OVERRIDE: Only if simulation strongly disagrees with refinement AND has good confidence
+        # This preserves simulation's priority when it has a clear prediction
         if best_simulated_action and best_simulated_score > 0:
             pred = simulation_predictions.get(best_simulated_action, {})
-            # Only use simulation if surprise risk is acceptable
-            if pred.get('surprise_risk', 1.0) < 0.5:
+            # Only override refinement if simulation is very confident AND refinement is uncertain
+            if pred.get('surprise_risk', 1.0) < 0.3 and refinement_confidence < 0.3:
                 final_action = best_simulated_action
-                change_reason = f"Simulation predicts +{pred.get('score_change', 0):.1f} score"
+                change_reason = f"Simulation override: +{pred.get('score_change', 0):.1f} predicted"
                 simulation_used = True
-                reasoning_steps.append(f"[DECISION] Using simulated best action: {final_action}")
+                reasoning_steps.append(f"[DECISION] Simulation overrides uncertain refinement: {final_action}")
         
-        # Priority 1: Stream conflict resolution (if simulation didn't decide)
-        if not simulation_used and stream_conflict:
-            if w_b > w_a and network_recommendation:
-                final_action = network_recommendation
-            elif w_a > w_b and private_recommendation:
-                final_action = private_recommendation
-        
-        # Priority 2: Strong evidence from experience
-        elif not simulation_used and 'best_action' in dir() and best_action and 'best_ratio' in dir():
-            if best_ratio > 0.6:  # Strong evidence
-                final_action = best_action
-                change_reason = f"Strong evidence: {best_ratio:.0%} success rate"
-        
-        # Priority 3: Network recommendation if trusted
-        elif not simulation_used and network_recommendation and w_b > 0.6:
-            final_action = network_recommendation
-            change_reason = f"High network trust (w_b={w_b:.2f})"
-        
-        # Priority 4: Simulation suggests avoiding gut action (defensive)
-        # If gut action has negative predicted outcome, consider alternatives
-        if not simulation_used and gut_result.action in simulation_predictions:
+        # DEFENSIVE CHECK: If gut action is predicted to fail badly, avoid it
+        if not simulation_used and gut_result.action == final_action and gut_result.action in simulation_predictions:
             gut_pred = simulation_predictions[gut_result.action]
-            if gut_pred.get('score_change', 0) < 0 or gut_pred.get('surprise_risk', 0) > 0.7:
-                # Gut action looks bad - find a safer alternative
-                for alt_action, alt_pred in simulation_predictions.items():
-                    if alt_pred.get('score_change', 0) >= 0 and alt_pred.get('surprise_risk', 0) < 0.5:
-                        final_action = alt_action
-                        change_reason = f"Avoiding gut ({gut_result.action}) due to predicted negative outcome"
-                        simulation_used = True
-                        break
+            if gut_pred.get('score_change', 0) < -1 or gut_pred.get('surprise_risk', 0) > 0.8:
+                # Final action matches gut but gut looks bad - find alternative
+                sorted_actions = sorted(action_scores.items(), key=lambda x: -x[1])
+                for alt_action, alt_score in sorted_actions:
+                    if alt_action != gut_result.action:
+                        alt_pred = simulation_predictions.get(alt_action, {})
+                        if alt_pred.get('surprise_risk', 0.5) < 0.6:
+                            final_action = alt_action
+                            change_reason = f"Defensive: avoiding gut ({gut_result.action}) due to high risk"
+                            simulation_used = True
+                            reasoning_steps.append(f"[DECISION] Defensive switch to: {final_action}")
+                            break
         
         # Check if we changed from gut
         if final_action != gut_result.action:
             changed_from_gut = True
             if not change_reason:
-                change_reason = "Deliberation found better option"
+                # Use action sources to explain
+                sources = action_sources.get(final_action, [])
+                if sources:
+                    change_reason = f"Iterative refinement ({', '.join(sources[:2])})"
+                else:
+                    change_reason = "Deliberation found better option"
         
-        # Compute confidence
+        # Compute confidence - incorporate refinement confidence
         base_confidence = 0.5
+        
+        # Refinement confidence contributes significantly
+        base_confidence += refinement_confidence * 0.3
+        
         if 'best_ratio' in dir() and best_ratio > 0:
             base_confidence = max(base_confidence, best_ratio * 0.8)
         if examined_hypotheses > 0:
@@ -1999,6 +2104,9 @@ class DeliberationEngine:
                 'confidence': 1.0 - pred.get('surprise_risk', 0.5),
                 'feeling': 'expectation'
             })
+        
+        # Final time calculation (includes refinement loop)
+        time_spent = time.time() - start_time
         
         reasoning_steps.append(f"Final decision: {final_action} (confidence={final_confidence:.2f})")
         
