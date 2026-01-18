@@ -12554,10 +12554,16 @@ class GameplayEngine:
         
         # Try meta-learning pattern detection
         # FIX: Added pattern failure tracking and abandonment
+        # FIX: Blacklist is now per-game-type-per-level with decay
         if (self.game_config.get('enable_pattern_learning', True) and 
             game_state.frame is not None):
             
             try:
+                # Get current game context for scoped blacklist
+                current_game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
+                current_level = getattr(loop_state, 'current_level', 1) if loop_state else 1
+                blacklist_key = f"{current_game_type}_L{current_level}"
+                
                 # Initialize pattern tracking if needed
                 if not hasattr(self, '_meta_pattern_tracker'):
                     self._meta_pattern_tracker = {
@@ -12565,12 +12571,45 @@ class GameplayEngine:
                         'applications': 0,
                         'last_score': 0,
                         'last_frame_hash': None,
-                        'failed_patterns': set(),  # Blacklist
-                        'no_progress_count': 0
+                        'failed_patterns': {},  # Now dict: {game_level_key: {pattern_id: fail_action_count}}
+                        'no_progress_count': 0,
+                        'last_game_level': None,  # Track for level change detection
+                        'global_action_count': 0,  # For decay
                     }
                 
                 tracker = self._meta_pattern_tracker
                 current_score = getattr(game_state, 'score', 0) or 0
+                
+                # Increment global action count for decay tracking
+                tracker['global_action_count'] += 1
+                
+                # Clear blacklist on level change (fresh start for new level)
+                if tracker['last_game_level'] != blacklist_key:
+                    if tracker['last_game_level'] is not None:
+                        logger.debug(f"[META] Level changed from {tracker['last_game_level']} to {blacklist_key} - clearing active pattern")
+                    # Reset active pattern state (but keep per-level blacklists)
+                    tracker['current_pattern_id'] = None
+                    tracker['applications'] = 0
+                    tracker['no_progress_count'] = 0
+                    if hasattr(self, '_pattern_action_queue'):
+                        self._pattern_action_queue = []
+                    tracker['last_game_level'] = blacklist_key
+                
+                # Initialize blacklist for this game/level if needed
+                if blacklist_key not in tracker['failed_patterns']:
+                    tracker['failed_patterns'][blacklist_key] = {}
+                
+                # Decay old blacklist entries (patterns blacklisted > 200 actions ago can be retried)
+                BLACKLIST_DECAY_ACTIONS = 200
+                current_action = tracker['global_action_count']
+                level_blacklist = tracker['failed_patterns'][blacklist_key]
+                expired_patterns = [
+                    pid for pid, fail_action in level_blacklist.items()
+                    if current_action - fail_action > BLACKLIST_DECAY_ACTIONS
+                ]
+                for pid in expired_patterns:
+                    del level_blacklist[pid]
+                    logger.debug(f"[META] Pattern {pid[:16]} expired from blacklist (decay)")
                 
                 # Calculate frame hash for change detection
                 frame = game_state.frame
@@ -12593,8 +12632,9 @@ class GameplayEngine:
                         # ABANDON pattern if no progress after 10 applications
                         if tracker['no_progress_count'] >= 10:
                             failed_id = tracker['current_pattern_id']
-                            tracker['failed_patterns'].add(failed_id)
-                            logger.warning(f"[META] ABANDONING pattern {failed_id[:16]} - no progress after {tracker['applications']} applications")
+                            # Add to per-game-level blacklist with current action count for decay
+                            level_blacklist[failed_id] = tracker['global_action_count']
+                            logger.warning(f"[META] ABANDONING pattern {failed_id[:16]} on {blacklist_key} - no progress after {tracker['applications']} applications")
                             
                             # Clear the queue and reset tracker
                             if hasattr(self, '_pattern_action_queue'):
@@ -12617,9 +12657,9 @@ class GameplayEngine:
                         rule_str = json.dumps(pattern_result.get('rule', {}), sort_keys=True)
                         pattern_id = f"meta_{hashlib.md5(rule_str.encode()).hexdigest()[:16]}"
                         
-                        # Skip if pattern was already tried and failed
-                        if pattern_id in tracker['failed_patterns']:
-                            logger.info(f"[META] Skipping blacklisted pattern {pattern_id[:16]}")
+                        # Skip if pattern was already tried and failed ON THIS GAME/LEVEL
+                        if pattern_id in level_blacklist:
+                            logger.info(f"[META] Skipping blacklisted pattern {pattern_id[:16]} on {blacklist_key}")
                         else:
                             logger.info(f"[META] Meta-learner detected pattern: {pattern_result['pattern_type']}")
                             logger.info(f"   Rule: {pattern_result['rule']['type']}, Confidence: {pattern_result['confidence']:.2f}")
@@ -12673,10 +12713,16 @@ class GameplayEngine:
             # Check if it was successful (made any progress during its run)
             tracker = self._meta_pattern_tracker
             if tracker['no_progress_count'] > 0:
-                # Pattern completed but made no progress - blacklist it
+                # Pattern completed but made no progress - blacklist it for this game/level
                 failed_id = tracker['current_pattern_id']
-                tracker['failed_patterns'].add(failed_id)
-                logger.warning(f"[META] Pattern {failed_id[:16]} completed but made no progress - blacklisting")
+                # Get current game/level context for scoped blacklist
+                _bl_game_type = self.session_manager.current_game_id.split('-')[0] if self.session_manager.current_game_id else 'unknown'
+                _bl_level = getattr(loop_state, 'current_level', 1) if loop_state else 1
+                _bl_key = f"{_bl_game_type}_L{_bl_level}"
+                if _bl_key not in tracker['failed_patterns']:
+                    tracker['failed_patterns'][_bl_key] = {}
+                tracker['failed_patterns'][_bl_key][failed_id] = tracker['global_action_count']
+                logger.warning(f"[META] Pattern {failed_id[:16]} completed on {_bl_key} but made no progress - blacklisting")
             else:
                 logger.info(f"[META] Pattern {tracker['current_pattern_id'][:16]} completed successfully")
             # Reset for next pattern

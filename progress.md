@@ -2,6 +2,130 @@
 
 ---
 
+## Session: January 18, 2026 - TRM Paper Integration & Blacklist Improvements
+
+---
+
+### Approach: Integrate insights from "Less is More: Recursive Reasoning with Tiny Networks" paper into existing reasoning system, and fix over-aggressive meta-pattern blacklisting
+
+**Timestamp**: 1:06:11 PM  
+**Status**: COMPLETE
+
+---
+
+### Task 1: TRM Paper Analysis & Integration
+
+**Paper**: "Less is More: Recursive Reasoning with Tiny Networks" (arXiv:2510.04871)
+
+**Key Insight**: A 7M parameter, 2-layer network achieves 45% on ARC-AGI-1 by recursively applying the same network multiple times. "Thinking longer" through iteration beats "thinking bigger" through scale.
+
+**Integration Approach**: Instead of creating a new module (which user explicitly rejected), we enhanced the existing `conduct_deliberation()` method in [i_thread.py](i_thread.py) with TRM-inspired iterative refinement.
+
+**Changes to `conduct_deliberation()` Step 7**:
+
+1. **Action Score Accumulation** - All evidence sources now contribute weighted scores:
+   - Gut instinct (30% weight)
+   - Stream A private experience (40% weight x success ratio)
+   - Stream B network wisdom (40% weight x w_b trust)
+   - Simulation predictions (score change - risk penalty)
+   - Pattern analysis (30% weight x confidence)
+   - Resonance/deja vu (20% weight if applicable)
+
+2. **Iterative Refinement Loop** (adaptive passes based on time budget):
+   - >10s remaining: 4 passes
+   - 3-10s remaining: 3 passes
+   - 1-3s remaining: 2 passes
+   - <1s remaining: 1 pass (minimal budget)
+   - Early convergence if best score changes < 5% between passes
+   - Consensus bonus: Actions supported by 2+ sources get 0.02 boost per pass
+
+3. **Refinement Confidence** - Computed as margin between #1 and #2 actions
+   - High margin = clear winner = high confidence
+   - Low margin = uncertain = open to simulation override
+
+4. **Final Time Calculation** - Fixed bug where `time_spent` was calculated before refinement loop
+
+**Files Modified**: [i_thread.py](i_thread.py#L1903-L2010) (conduct_deliberation Step 7)
+
+---
+
+### Task 2: Meta-Pattern Blacklist Fix
+
+**Problem**: The meta-learning pattern blacklist was **permanent and global**:
+- A pattern that failed on `ls20` Level 1 would never be tried on ANY game/level
+- No decay mechanism - once blacklisted, always blacklisted
+- Cross-game pollution harming reasoning
+
+**Log Example**:
+```
+[META] Skipping blacklisted pattern meta_...
+```
+
+**Solution Implemented**:
+
+1. **Per-Game-Type-Per-Level Scoping**
+   - Blacklist key is now `{game_type}_L{level}` (e.g., `ls20_L2`, `sp80_L1`)
+   - Changed from `set()` to nested dict: `{game_level_key: {pattern_id: fail_action_count}}`
+
+2. **Decay Mechanism**
+   - Patterns stored with action count when blacklisted
+   - After 200 actions, blacklisted patterns expire and can be retried
+   - Decay check runs at start of each pattern detection cycle
+
+3. **Clear on Level Transitions**
+   - When level changes, active pattern state is reset
+   - Pattern queue is cleared
+   - Per-level blacklists preserved but will decay naturally
+
+**Files Modified**: [core_gameplay.py](core_gameplay.py#L12555-L12730) (meta-learning pattern tracking)
+
+---
+
+### Task 3: Code Review - METACOG PREDICTION CORRECT
+
+**Log Analyzed**:
+```
+[METACOG] PREDICTION CORRECT: Theory 'Action from explore: BLOCKED by ['Q9']: Network hypotheses (3 insights, 0 validated) | ACT... -> forced exploration' confirmed!
+```
+
+**Analysis**:
+- **Q9** = Critical question triggered when agent's theory is contradicted
+- **BLOCKED by Q9** = Questioning engine blocked the original action
+- **forced exploration** = Random ACTION1-4 substituted
+- **PREDICTION CORRECT** = `discover_pattern` prediction succeeded (any observable change)
+
+**Verdict**: **HELPING** - This is working as designed:
+- Q9 prevents repeating failed strategies
+- Forced exploration provides variety
+- The prediction type `discover_pattern` is intentionally forgiving for exploration
+- Minor noise in theory text but doesn't affect learning
+
+---
+
+### Verification
+
+```bash
+# All files compile
+python -m py_compile i_thread.py  # OK
+python -m py_compile core_gameplay.py  # OK
+
+# Import chain works
+python -c "from core_gameplay import GameplayEngine; from i_thread import DeliberationEngine; print('OK')"
+```
+
+---
+
+### Summary Table
+
+| Change | File | Lines | Impact |
+|--------|------|-------|--------|
+| TRM iterative refinement | i_thread.py | 1903-2010 | Better action selection through multi-pass consensus |
+| Scoped blacklist | core_gameplay.py | 12555-12730 | Per-game-level pattern tracking |
+| Blacklist decay | core_gameplay.py | 12600-12610 | Patterns can be retried after 200 actions |
+| Level transition reset | core_gameplay.py | 12585-12595 | Clean slate for new levels |
+
+---
+
 ## Session: January 17, 2026 - Remove Broken Systems (Prediction Suppression & Counterfactual Analyzer)
 
 ---
