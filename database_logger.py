@@ -70,6 +70,8 @@ class DatabaseLogHandler(logging.Handler):
             try:
                 self._local.connection.execute("PRAGMA foreign_keys=ON")
                 self._local.connection.execute("PRAGMA journal_mode=WAL")
+                # Wait up to 5 seconds for locks instead of failing immediately
+                self._local.connection.execute("PRAGMA busy_timeout=5000")
                 self._local.connection.execute("PRAGMA synchronous=NORMAL")
             except Exception:
                 pass

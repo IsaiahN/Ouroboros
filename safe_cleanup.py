@@ -184,7 +184,8 @@ class SafeDatabaseCleaner:
         Returns:
             dict with cleanup statistics
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout=5000")  # Wait for locks
         c = conn.cursor()
         
         results = {
@@ -1103,7 +1104,8 @@ class SafeDatabaseCleaner:
     
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout=5000")  # Wait for locks
         c = conn.cursor()
         
         # Core winning sequences (CRITICAL)

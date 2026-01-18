@@ -84,7 +84,8 @@ class DiskSpaceMonitor:
     
     def get_table_sizes(self, top_n: int = 10) -> list:
         """Get sizes of largest tables"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.execute("PRAGMA busy_timeout=5000")  # Wait for locks
         cursor = conn.cursor()
         
         tables = cursor.execute("""

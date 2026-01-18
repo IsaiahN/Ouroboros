@@ -70,6 +70,9 @@ class DatabaseInterface:
                 logger.warning(f"Failed to enable foreign_keys pragma: {e}")
             # Enable WAL mode for better concurrent access
             self._local.connection.execute("PRAGMA journal_mode=WAL")
+            # Set busy_timeout to wait for locks instead of failing immediately
+            # 5000ms = 5 seconds wait before "database is locked" error
+            self._local.connection.execute("PRAGMA busy_timeout=5000")
             # Aggressive WAL checkpointing to prevent data loss on force-close
             # Checkpoint every 1000 pages (~4MB) instead of default 1000 pages
             self._local.connection.execute("PRAGMA wal_autocheckpoint=100")  # 400KB
