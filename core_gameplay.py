@@ -67,7 +67,7 @@ from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
-from i_thread import IThread, IThreadState, StreamProposal, NoveltyConfig, MultiConflictResult
+from i_thread import IThread, IThreadState, StreamProposal, NoveltyConfig, MultiConflictResult, DeliberationEngine, GutInstinctResult, DeliberationResult
 from agent_self_model import (
     AgentSelfModel,
     WeavingReporter,
@@ -1555,6 +1555,15 @@ class GameplayEngine:
         # All other systems delegate to IThread for wA/wB management
         self.i_thread = IThread(self.db)
         
+        # DeliberationEngine: System 2 reasoning when stuck or novel situations
+        # Called when _deliberation_mode_active is True (triggered by extended stuck)
+        # Uses conduct_deliberation() for full reasoning chain with Stream A/B consultation
+        self.deliberation_engine = DeliberationEngine(self.db)
+        self._deliberation_mode_active = False
+        self._deliberation_trigger_reason = None
+        self._force_strategy_reexamination = False
+        self._last_deliberation_result: Optional[DeliberationResult] = None
+        
         # Two-Streams: Weaving reporter for self-reflection in every action
         # DELEGATION: WeavingReporter now delegates to IThread for report generation
         self.weaving_reporter = WeavingReporter(self.db, i_thread=self.i_thread)
@@ -1742,8 +1751,8 @@ class GameplayEngine:
             logger.debug("Subgoal planner not available")
         
         self.game_config = {
-            'max_actions_per_level': 250,  # Max actions per level (REDUCED: force efficiency, prevent wandering)
-            'max_total_actions': 2000,  # Max total actions across all levels (REDUCED: 7000→2000, fail fast not stuck loops)
+            'max_actions_per_level': 200,  # Max actions per level (REDUCED: force efficiency, ~20min game target)
+            'max_total_actions': 1500,  # Max total actions across all levels (REDUCED: 2000→1500 for ~20min games)
             'action_timeout': 30.0,
             'strategy': 'balanced',
             'enable_random_exploration': True,
@@ -2651,6 +2660,17 @@ class GameplayEngine:
                 action, reasoning = await self._select_action(game_state, loop_state)
                 
                 # ================================================================
+                # VERBOSE CONSOLE OUTPUT - Show action progress in real-time
+                # More frequent output at frontier (every 5 actions), less during known territory
+                # ================================================================
+                is_frontier = self.game_config.get('frontier_mode', False)
+                show_every_n = 5 if is_frontier else 20  # More frequent at frontier
+                if loop_state.action_count % show_every_n == 0 or loop_state.action_count <= 3:
+                    frontier_tag = "[FRONTIER] " if is_frontier else ""
+                    short_reason = reasoning[:80] + "..." if len(reasoning) > 80 else reasoning
+                    logger.info(f"{frontier_tag}[ACTION #{loop_state.action_count}] {action} | L{loop_state.current_level} | Score:{game_state.score} | {short_reason}")
+                
+                # ================================================================
                 # METACOGNITIVE: PREDICTION BEFORE ACTION
                 # ================================================================
                 # Make a falsifiable prediction before executing the action.
@@ -3425,6 +3445,72 @@ class GameplayEngine:
                         self.action_handler.clear_pseudo_buttons()
                 except Exception as e:
                     logger.debug(f"Failed to reload pseudo-buttons for level {new_level}: {e}")
+                
+                # =============================================================
+                # FIX #7: CROSS-LEVEL OBJECT RECURRENCE DETECTION
+                # =============================================================
+                # Before resetting discovery state, query what we learned about
+                # the controlled object in the PRIOR level. If the same color/signature
+                # appears in the new level, this is strong evidence it's the same object.
+                # This enables "carry-over" knowledge across levels.
+                # =============================================================
+                try:
+                    prior_level = new_level - 1
+                    if prior_level >= 1 and hasattr(self, 'agent_self_model') and self.agent_self_model:
+                        # Query prior level's self-object identity
+                        prior_self_object = self.agent_self_model.get_current_self_object(game_id, prior_level)
+                        
+                        if prior_self_object:
+                            prior_color = prior_self_object.get('self_object_color')
+                            prior_signature = prior_self_object.get('self_object_signature')
+                            prior_confidence = prior_self_object.get('confidence', 0)
+                            
+                            # Store as hint for new level discovery
+                            self._prior_level_object_hint = {
+                                'color': prior_color,
+                                'signature': prior_signature,
+                                'confidence': prior_confidence,
+                                'source_level': prior_level,
+                                'game_id': game_id
+                            }
+                            
+                            logger.info(
+                                f"[FIX7-CROSSLEVEL] Level {prior_level} had self-object: "
+                                f"color={prior_color}, confidence={prior_confidence:.2f} -> "
+                                f"Hint for Level {new_level} discovery"
+                            )
+                            
+                            # Also query any actions that worked well with this object
+                            # These become strong priors for the new level
+                            prior_control = self.db.execute_query("""
+                                SELECT hypothesis_data, reliability_score, best_score_achieved
+                                FROM network_object_control_hypotheses
+                                WHERE game_type = ? AND level_number = ? 
+                                  AND is_active = 1 AND reliability_score > 0.4
+                                ORDER BY best_score_achieved DESC
+                                LIMIT 3
+                            """, (game_id.split('-')[0] if '-' in game_id else game_id, prior_level))
+                            
+                            if prior_control:
+                                self._prior_level_control_hints = [
+                                    {
+                                        'data': row['hypothesis_data'],
+                                        'reliability': row['reliability_score'],
+                                        'score': row['best_score_achieved']
+                                    }
+                                    for row in prior_control
+                                ]
+                                logger.info(
+                                    f"[FIX7-CROSSLEVEL] Loaded {len(prior_control)} control hypotheses from L{prior_level}"
+                                )
+                        else:
+                            self._prior_level_object_hint = None
+                            self._prior_level_control_hints = []
+                            logger.debug(f"[FIX7-CROSSLEVEL] No self-object found in prior level {prior_level}")
+                except Exception as e:
+                    logger.debug(f"Cross-level object detection failed: {e}")
+                    self._prior_level_object_hint = None
+                    self._prior_level_control_hints = []
                 
                 # FIX 2025-01-17: Reset discovery state for new level
                 # Each level needs fresh discovery - objects may be different
@@ -5713,6 +5799,17 @@ class GameplayEngine:
                                 except Exception:
                                     pass
                             action, reasoning = await self._select_action(game_state)
+
+                            # ================================================================
+                            # VERBOSE CONSOLE OUTPUT - Show action progress in real-time
+                            # More frequent output at frontier (every 5), less during known territory
+                            # ================================================================
+                            is_frontier = self.game_config.get('frontier_mode', False)
+                            show_every_n = 5 if is_frontier else 20
+                            if action_count % show_every_n == 0 or action_count <= 3:
+                                frontier_tag = "[FRONTIER] " if is_frontier else ""
+                                short_reason = reasoning[:80] + "..." if len(reasoning) > 80 else reasoning
+                                logger.info(f"{frontier_tag}[ACTION #{action_count}] {action} | L{current_level} | Score:{game_state.score} | {short_reason}")
 
                             # THEORY/ACTION guard: require role compliance + theory validation in LIVE
                             if mode_for_spine == 'LIVE':
@@ -9538,6 +9635,220 @@ class GameplayEngine:
                 logger.debug(f"Theory-gated scoring failed: {tg_err}")
             
             # ===============================================================
+            # FIX #5: TRUE DELIBERATION - SYSTEM 2 REASONING
+            # ===============================================================
+            # When stuck for extended periods (50+ null frames), switch from
+            # gut instinct (System 1) to careful deliberation (System 2).
+            # 
+            # TIERED DELIBERATION BUDGET (Friston-inspired):
+            # - 1 committed theory: 0.3s (fast, confident)
+            # - 2-3 competing theories: 0.5s (moderate uncertainty)
+            # - 4+ competing theories: 1.0s (high uncertainty, need disambiguation)
+            # 
+            # THEORY COMMITMENT (Occam's Razor simplified):
+            # When evidence_for / total > 0.85 AND total > 10, commit to theory
+            # ===============================================================
+            deliberation_active = getattr(self, '_deliberation_mode_active', False)
+            
+            if deliberation_active and hasattr(self, 'deliberation_engine') and self.deliberation_engine:
+                try:
+                    import time as _time_mod
+                    
+                    # -------------------------------------------------------
+                    # Calculate tiered deliberation budget based on theory uncertainty
+                    # -------------------------------------------------------
+                    competing_theory_count = 1
+                    committed_theory = None
+                    try:
+                        if hasattr(self, 'science_engine') and self.science_engine:
+                            _tg_game_type = None
+                            _tg_level = 1
+                            if hasattr(self, 'session_manager') and self.session_manager:
+                                gid = getattr(self.session_manager, 'current_game_id', None)
+                                if gid:
+                                    _tg_game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                            if hasattr(self, 'loop_state') and self.loop_state:
+                                _tg_level = getattr(self.loop_state, 'current_level', 1) or 1
+                            
+                            # Get all active theories for this level
+                            _get_theories_fn = getattr(self.science_engine, '_get_theories_for_level', None)
+                            if callable(_get_theories_fn) and _tg_game_type:
+                                theories = _get_theories_fn(_tg_game_type, _tg_level)
+                                competing_theory_count = len(theories) if theories else 1
+                                
+                                # Check for committed theory (evidence ratio > 0.85, total > 10)
+                                for theory in (theories or []):
+                                    ev_for = len(theory.supporting_observations) if hasattr(theory, 'supporting_observations') else 0
+                                    ev_against = len(theory.contradicting_observations) if hasattr(theory, 'contradicting_observations') else 0
+                                    total = ev_for + ev_against
+                                    
+                                    if total >= 10:
+                                        ratio = ev_for / total
+                                        if ratio >= 0.85:
+                                            committed_theory = theory
+                                            competing_theory_count = 1  # Treat as single theory
+                                            logger.info(f"[THEORY-COMMIT] Theory ready for commitment: "
+                                                       f"ratio={ratio:.2f}, total={total}")
+                                            break
+                    except Exception as tc_err:
+                        logger.debug(f"Theory count failed: {tc_err}")
+                    
+                    # Tiered budget based on competing theories
+                    if committed_theory or competing_theory_count <= 1:
+                        deliberation_budget = 0.3  # Fast - confident or single theory
+                    elif competing_theory_count <= 3:
+                        deliberation_budget = 0.5  # Moderate - few competing
+                    else:
+                        deliberation_budget = 2.0  # Slow - many competing, need disambiguation
+                    
+                    logger.debug(f"[DELIBERATION] Budget={deliberation_budget}s for {competing_theory_count} theories")
+                    
+                    # Create GutInstinctResult from current action selection
+                    gut_confidence = 0.5  # Default moderate confidence
+                    gut_basis = rung  # What rung of the decision ladder chose this
+                    
+                    # Adjust confidence based on decision source
+                    if rung == 'sequence':
+                        gut_confidence = 0.7  # Sequences are more reliable
+                    elif rung == 'heuristic':
+                        gut_confidence = 0.4  # Heuristics are less certain
+                    
+                    gut_result = GutInstinctResult(
+                        action=action,
+                        confidence=gut_confidence,
+                        basis=gut_basis,
+                        response_time_ms=0,  # Already computed
+                        stream_a_influence=getattr(self, '_current_wA', 0.5),
+                        stream_b_influence=getattr(self, '_current_wB', 0.5),
+                        pattern_matched=reason[:50] if reason else None,
+                        habit_strength=0.3
+                    )
+                    
+                    # Build game context for deliberation
+                    _dl_game_type = None
+                    _dl_level = 1
+                    _dl_frame = None
+                    try:
+                        if hasattr(self, 'session_manager') and self.session_manager:
+                            gid = getattr(self.session_manager, 'current_game_id', None)
+                            if gid:
+                                _dl_game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                        if hasattr(self, 'loop_state') and self.loop_state:
+                            _dl_level = getattr(self.loop_state, 'current_level', 1) or 1
+                            _dl_frame = getattr(self.loop_state, 'current_frame', None)
+                    except Exception:
+                        pass
+                    
+                    game_context = {
+                        'game_type': _dl_game_type,
+                        'level': _dl_level,
+                        'frame': _dl_frame,
+                        'trigger_reason': getattr(self, '_deliberation_trigger_reason', 'unknown'),
+                        'null_frame_count': getattr(self, '_no_frame_change_count', 0),
+                    }
+                    
+                    # Get available actions
+                    available_actions = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION6', 'ACTION7']
+                    
+                    # Get agent_id and stream weights
+                    _dl_agent_id = self.game_config.get('agent_id', 'unknown')
+                    _dl_wA = getattr(self, '_current_wA', 0.5)
+                    _dl_wB = getattr(self, '_current_wB', 0.5)
+                    
+                    # Get world model for TRUE deliberation (counterfactual simulation)
+                    _dl_world_model = getattr(self, '_world_model', None)
+                    
+                    # Conduct deliberation with tiered budget AND world model simulation
+                    deliberation_result = self.deliberation_engine.conduct_deliberation(
+                        gut_result=gut_result,
+                        available_actions=available_actions,
+                        budget_seconds=deliberation_budget,  # Tiered: 0.3s, 0.5s, or 2.0s
+                        game_context=game_context,
+                        agent_id=_dl_agent_id,
+                        w_a=_dl_wA,
+                        w_b=_dl_wB,
+                        world_model=_dl_world_model  # Pass world model for counterfactual reasoning
+                    )
+                    
+                    # Store result for later analysis
+                    self._last_deliberation_result = deliberation_result
+                    
+                    # Log simulation usage if it influenced the decision
+                    if deliberation_result.simulation_used:
+                        logger.info(f"[DELIBERATION-SIM] World model simulation chose {deliberation_result.action} "
+                                   f"({deliberation_result.simulations_run} simulations, "
+                                   f"best score: {deliberation_result.best_simulated_score:.2f})")
+                    
+                    # If deliberation changed from gut, use the new action
+                    if deliberation_result.changed_from_gut:
+                        old_action = action
+                        action = deliberation_result.action
+                        reason = (
+                            f"[DELIBERATION] Changed from {old_action} to {action}: "
+                            f"{deliberation_result.change_reason or 'System 2 override'}"
+                        )
+                        logger.info(f"[FIX5-DELIBERATION] {old_action} -> {action} | "
+                                   f"Confidence: {deliberation_result.confidence:.2f} | "
+                                   f"Reason: {deliberation_result.change_reason}")
+                        
+                        # Log reasoning chain
+                        if deliberation_result.reasoning_steps:
+                            for i, step in enumerate(deliberation_result.reasoning_steps[:5]):  # First 5 steps
+                                logger.debug(f"[DELIBERATION-STEP] {i+1}. {step}")
+                    else:
+                        # Deliberation confirmed the gut choice
+                        reason = f"[DELIBERATION-CONFIRMED] {reason}"
+                        logger.debug(f"[FIX5-DELIBERATION] Confirmed gut choice: {action}")
+                    
+                    # Check for stream conflict detection
+                    if deliberation_result.stream_conflict_detected:
+                        logger.info(f"[DELIBERATION] Stream conflict detected: {deliberation_result.stream_conflict_resolution}")
+                    
+                    # Check for missing primitive signal (report to CODS)
+                    if deliberation_result.missing_primitive_signal:
+                        logger.warning(f"[DELIBERATION->CODS] Missing primitive: {deliberation_result.missing_primitive_signal}")
+                    
+                    # -------------------------------------------------------
+                    # THEORY COMMITMENT (Friston-inspired Occam's Razor)
+                    # -------------------------------------------------------
+                    # If a theory has ratio > 0.85 with 10+ observations, commit to it.
+                    # This stops perpetual exploration and enables faster decisions.
+                    # -------------------------------------------------------
+                    if committed_theory and hasattr(self, 'science_engine'):
+                        try:
+                            # Update theory status to committed/confident
+                            theory_id = getattr(committed_theory, 'theory_id', None)
+                            if theory_id:
+                                self.db.execute_query("""
+                                    UPDATE agent_theories 
+                                    SET status = 'SUPPORTED', 
+                                        confidence = CASE WHEN confidence < 0.85 THEN 0.85 ELSE confidence END
+                                    WHERE theory_id = ?
+                                """, (theory_id,))
+                                
+                                logger.info(f"[THEORY-COMMIT] Committed to theory {theory_id} - "
+                                           f"stopping alternative exploration")
+                                
+                                # Mark other theories as lower priority
+                                self.db.execute_query("""
+                                    UPDATE agent_theories 
+                                    SET confidence = confidence * 0.5
+                                    WHERE game_type = ? AND level_number = ? 
+                                      AND theory_id != ? AND is_active = 1
+                                """, (_tg_game_type, _tg_level, theory_id))
+                        except Exception as commit_err:
+                            logger.debug(f"Theory commit failed: {commit_err}")
+                    
+                    # Reset deliberation mode (one-shot, not continuous)
+                    self._deliberation_mode_active = False
+                    self._deliberation_trigger_reason = None
+                    
+                except Exception as delib_err:
+                    logger.warning(f"[FIX5-DELIBERATION] Failed: {delib_err}")
+                    # Reset on error to prevent stuck state
+                    self._deliberation_mode_active = False
+            
+            # ===============================================================
             # FIX #8 (CHECKLIST): I-THREAD SYNTHESIS
             # FIX #18: Include w_R resonance weight in decision formula
             # When streams conflict, synthesize using wA/wB/wR weights
@@ -11691,6 +12002,40 @@ class GameplayEngine:
                         dm_biases[action_num] = dm_biases.get(action_num, 0) + 0.15
                 
                 # ---------------------------------------------------------
+                # DM-3.5: Q4 THEORY FALSIFICATION -> Radical Strategy Change
+                # ===================================================================
+                # FIX #4 & #6 (lp85): If Q4 detected theory falsification (100+ null 
+                # frames), we MUST override all biases and try completely different
+                # actions. The current approach is proven wrong.
+                # ===================================================================
+                q4_data = emergent_reasoning.get('q4_working_theory', {})
+                if q4_data.get('is_theory_falsified'):
+                    # THEORY IS DEAD - clear all biases and force random exploration
+                    logger.warning(f"[DM-3.5] Theory falsified - clearing all biases, forcing random exploration")
+                    dm_biases.clear()
+                    
+                    # Strong boost for ACTION6 (click) - if movement isn't working, try clicking
+                    dm_biases[6] = 0.7
+                    dm_biases[5] = 0.3  # Wait might help too
+                    
+                    # Penalize actions that were being used (they clearly don't work)
+                    recent_actions = list(getattr(self, '_recent_actions', []))[-20:]
+                    action_counts = {}
+                    for a in recent_actions:
+                        action_counts[a] = action_counts.get(a, 0) + 1
+                    
+                    # Heavily penalize most-used actions
+                    for action, count in action_counts.items():
+                        if count >= 3 and action in dm_biases:
+                            dm_biases[action] = dm_biases.get(action, 0) - 0.4
+                            
+                elif q4_data.get('is_theory_challenged'):
+                    # Theory is failing - boost alternatives
+                    logger.info(f"[DM-3.5] Theory challenged - boosting alternative actions")
+                    dm_biases[6] = dm_biases.get(6, 0) + 0.3  # Boost click
+                    dm_biases[5] = dm_biases.get(5, 0) + 0.15  # Boost wait
+                
+                # ---------------------------------------------------------
                 # DM-4: Inferred Goals -> Navigate Toward
                 # If goals are detected, bias navigation toward them
                 # ---------------------------------------------------------
@@ -11787,9 +12132,89 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Stream arbitration error: {e}")
         
+        # ---------------------------------------------------------
+        # DM-7: RESONANCE PATTERN_TYPE -> Action Bias
+        # ===================================================================
+        # FIX #2 (lp85): pattern_type='click_puzzle' appeared in every frame
+        # but never influenced action selection. Now we use it.
+        # ===================================================================
+        # If resonance data indicates this is a "click_puzzle" game type,
+        # strongly bias toward ACTION6 (click). This uses network wisdom
+        # about what KIND of puzzle this is.
+        # ---------------------------------------------------------
+        if emergent_reasoning and agent_id:
+            try:
+                # Check for resonance in the stored reasoning
+                # resonance is built via _build_resonance_context
+                resonance = getattr(self, '_last_resonance_context', {})
+                if not resonance:
+                    # Try to get from API payload if available
+                    api_payload = getattr(self, '_last_api_reasoning', {})
+                    resonance = api_payload.get('4.5_resonance', {})
+                
+                pattern_type = resonance.get('pattern_type', '').lower()
+                resonance_score = resonance.get('resonance_score', 0)
+                
+                if pattern_type:
+                    # Apply action biases based on pattern_type
+                    if 'click' in pattern_type or 'selection' in pattern_type or 'pick' in pattern_type:
+                        # This is a clicking/selection game - boost ACTION6
+                        boost = 0.35 * max(0.5, resonance_score)  # Scale by resonance confidence
+                        dm_biases[6] = dm_biases.get(6, 0) + boost
+                        logger.info(f"[DM-7] Resonance pattern_type='{pattern_type}' -> ACTION6 +{boost:.2f}")
+                    
+                    elif 'navigation' in pattern_type or 'maze' in pattern_type or 'path' in pattern_type:
+                        # This is a navigation/maze game - boost directional actions
+                        for dir_action in [1, 2, 3, 4]:
+                            dm_biases[dir_action] = dm_biases.get(dir_action, 0) + 0.15
+                        logger.debug(f"[DM-7] Resonance pattern_type='{pattern_type}' -> directions +0.15")
+                    
+                    elif 'timing' in pattern_type or 'rhythm' in pattern_type or 'wait' in pattern_type:
+                        # This is a timing game - boost ACTION5 (wait/pass)
+                        dm_biases[5] = dm_biases.get(5, 0) + 0.3
+                        logger.debug(f"[DM-7] Resonance pattern_type='{pattern_type}' -> ACTION5 +0.3")
+                    
+                    elif 'puzzle' in pattern_type:
+                        # Generic puzzle - slight boost to click and wait
+                        dm_biases[6] = dm_biases.get(6, 0) + 0.2
+                        dm_biases[5] = dm_biases.get(5, 0) + 0.1
+                        logger.debug(f"[DM-7] Resonance pattern_type='{pattern_type}' -> A6+0.2, A5+0.1")
+                        
+            except Exception as e:
+                logger.debug(f"DM-7 resonance pattern error: {e}")
+        
+        # ---------------------------------------------------------
+        # DM-8: Q3 PRIOR LEVEL SUCCESS MEMORY -> Strong Action Bias
+        # ===================================================================
+        # FIX #1 (lp85 AMNESIA): Q3 now remembers what worked in prior levels.
+        # If Q3 found that ACTION6 caused many score increases in Level 1,
+        # it sets recommended_action='ACTION6'. We MUST use this strongly.
+        # ===================================================================
+        if emergent_reasoning:
+            try:
+                q3_data = emergent_reasoning.get('q3_salient_target', {})
+                recommended_action = q3_data.get('recommended_action')
+                what_worked = q3_data.get('Q3_what_worked_before')
+                
+                if recommended_action:
+                    # Extract action number from recommended_action (e.g., "ACTION6" -> 6)
+                    action_str = str(recommended_action).upper()
+                    if 'ACTION' in action_str:
+                        try:
+                            action_num = int(action_str.replace('ACTION', ''))
+                            # STRONG boost - this action WORKED in prior levels
+                            boost = 0.5  # Very strong - prior success is highly predictive
+                            dm_biases[action_num] = dm_biases.get(action_num, 0) + boost
+                            logger.info(f"[DM-8] Q3 memory: {recommended_action} worked before ({what_worked}) -> +{boost}")
+                        except ValueError:
+                            pass
+            except Exception as e:
+                logger.debug(f"DM-8 Q3 memory error: {e}")
+        
         # PHASE 3: Get viral package and pariah influence
         action_weights = {}
         action_penalties = {}
+
         
         if agent_id:
             try:
@@ -12841,6 +13266,9 @@ class GameplayEngine:
                         # ================================================================
                         game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
                         
+                        # FIX #7: Pass prior level hint for cross-level object recognition
+                        _prior_hint = getattr(self, '_prior_level_object_hint', None)
+                        
                         discovery_result = self.agent_self_model.execute_object_discovery(
                             frame_before=game_state.frame,
                             frame_after=new_state.frame,
@@ -12848,7 +13276,8 @@ class GameplayEngine:
                             click_coords=(x, y),
                             game_type=game_type,
                             level=current_level,
-                            agent_id=agent_id
+                            agent_id=agent_id,
+                            prior_level_hint=_prior_hint
                         )
                         
                         # Record symmetry experiment result if this was a symmetry test
@@ -13046,6 +13475,9 @@ class GameplayEngine:
                             game_type = game_id.split('-')[0] if game_id and '-' in game_id else (game_id or 'unknown')[:4]
                             agent_id = self.game_config.get('agent_id')
                             
+                            # FIX #7: Pass prior level hint for cross-level object recognition
+                            _prior_hint = getattr(self, '_prior_level_object_hint', None)
+                            
                             # Execute discovery - observes movement and shares to network
                             discovery_result = self.agent_self_model.execute_object_discovery(
                                 frame_before=frame_before,
@@ -13054,13 +13486,16 @@ class GameplayEngine:
                                 click_coords=None,  # Not a click action
                                 game_type=game_type,
                                 level=current_level,
-                                agent_id=agent_id
+                                agent_id=agent_id,
+                                prior_level_hint=_prior_hint
                             )
                             
                             if discovery_result and discovery_result.get('discovered_control'):
+                                # FIX #7: Log cross-level match if detected
+                                cross_match_str = " (CROSS-LEVEL MATCH!)" if discovery_result.get('cross_level_match') else ""
                                 logger.info(
                                     f"[DISCOVERY] {action} controls {discovery_result['object_id']} "
-                                    f"(shared to network for {game_type} L{current_level})"
+                                    f"(shared to network for {game_type} L{current_level}){cross_match_str}"
                                 )
                     except Exception as e:
                         logger.debug(f"Discovery phase observation failed (non-critical): {e}")
@@ -14286,6 +14721,101 @@ class GameplayEngine:
                                 reasoning_parts.append(f"CODS suggests A{cods_action}")
                 except Exception as e:
                     logger.debug(f"CODS escape suggestion failed: {e}")
+            
+            # ===================================================================
+            # FIX #3 (lp85 AMNESIA): DIRECT STUCK-STATE ACTION BOOST + DELIBERATION
+            # ===================================================================
+            # Problem: prefer_actions=[6] appeared in failure_insights but was ignored.
+            # Root cause: prefer_actions was only consumed inside network hypothesis loop,
+            # and the stuck-state detection relied on database hypotheses existing.
+            # 
+            # Enhanced Solution:
+            # 1. Query failure_insights for actual preferred actions (not just hardcoded ACTION6)
+            # 2. If stuck for extended period, trigger deliberation mode to re-examine strategy
+            # 3. Use network wisdom about this game type to guide escape
+            # ===================================================================
+            no_frame_change_count = getattr(self, '_no_frame_change_count', 0)
+            
+            if no_frame_change_count > 20:
+                # We've had 20+ frames with no change - need to escape
+                stuck_boost = min(0.8, 0.4 + (no_frame_change_count / 100))
+                reasoning_parts.append(f"STUCK({no_frame_change_count})")
+                
+                # ============================================================
+                # STEP 1: Get preferred actions from failure_insights
+                # ============================================================
+                preferred_actions = []
+                avoid_actions = []
+                
+                # Query network_wisdom context for failure_insights
+                network_wisdom = getattr(self, '_last_network_wisdom_context', {})
+                failure_insights = network_wisdom.get('failure_insights', [])
+                
+                if failure_insights:
+                    for insight in failure_insights:
+                        actionable = insight.get('actionable', {})
+                        preferred_actions.extend(actionable.get('prefer_actions', []))
+                        avoid_actions.extend(actionable.get('avoid_actions', []))
+                
+                # Also check resonance pattern_type for game-type-specific hints
+                resonance = getattr(self, '_last_resonance_context', {})
+                pattern_type = resonance.get('pattern_type', '').lower()
+                
+                if 'click' in pattern_type or 'selection' in pattern_type or 'pick' in pattern_type:
+                    if 6 not in preferred_actions:
+                        preferred_actions.append(6)
+                elif 'navigation' in pattern_type or 'maze' in pattern_type:
+                    for dir_action in [1, 2, 3, 4]:
+                        if dir_action not in preferred_actions:
+                            preferred_actions.append(dir_action)
+                elif 'timing' in pattern_type or 'wait' in pattern_type:
+                    if 5 not in preferred_actions:
+                        preferred_actions.append(5)
+                
+                # Remove duplicates while preserving order
+                preferred_actions = list(dict.fromkeys(preferred_actions))
+                avoid_actions = list(dict.fromkeys(avoid_actions))
+                
+                # ============================================================
+                # STEP 2: Apply boosts based on preferred actions
+                # ============================================================
+                if preferred_actions:
+                    # Use network-recommended preferred actions
+                    for pref_action in preferred_actions:
+                        if pref_action in action_scores and pref_action not in avoid_actions:
+                            action_scores[pref_action] += stuck_boost
+                            reasoning_parts.append(f"PREF_A{pref_action}+{stuck_boost:.2f}")
+                    logger.info(f"[ESCAPE-STUCK] Using failure_insights prefer_actions: {preferred_actions}")
+                else:
+                    # Fallback: Default to ACTION6 (click) as most likely escape
+                    if 6 in action_scores:
+                        action_scores[6] += stuck_boost
+                        reasoning_parts.append(f"A6+{stuck_boost:.2f}(default)")
+                    logger.info(f"[ESCAPE-STUCK] No prefer_actions found, defaulting to ACTION6")
+                
+                # Apply avoid_actions penalties
+                for avoid_action in avoid_actions:
+                    if avoid_action in action_scores:
+                        action_scores[avoid_action] -= 0.4
+                
+                # Penalize directional actions that haven't changed anything
+                for dir_action in [1, 2, 3, 4]:
+                    if dir_action in recent_actions[-10:] and dir_action not in preferred_actions:
+                        action_scores[dir_action] -= 0.3
+                
+                # ============================================================
+                # STEP 3: TRIGGER DELIBERATION MODE for extended stuck periods
+                # ============================================================
+                if no_frame_change_count >= 50:
+                    # Extended stuck - trigger deliberation mode
+                    self._deliberation_mode_active = True
+                    self._deliberation_trigger_reason = f"Extended stuck: {no_frame_change_count} null frames"
+                    
+                    # Force strategy re-examination
+                    self._force_strategy_reexamination = True
+                    
+                    logger.warning(f"[DELIBERATION] Triggered by {no_frame_change_count} null frames - re-examining strategy")
+                    reasoning_parts.append("DELIBERATION_MODE")
             
             # === TRY Q5 SCORE-INCREASING ACTIONS ===
             # Actions that previously caused score increases are good candidates
@@ -16513,6 +17043,84 @@ class GameplayEngine:
                 except Exception:
                     pass
             
+            # ===================================================================
+            # FIX #1 (lp85 AMNESIA): PRIOR LEVEL SUCCESS MEMORY
+            # ===================================================================
+            # Problem: After completing Level 1 with 53x ACTION6 clicks, Level 2
+            # started fresh with no memory of what worked. Q3 only analyzed
+            # current frame rarity, ignoring that clicking was the winning strategy.
+            # 
+            # Solution: Query action_traces for what actions led to score increases
+            # in PREVIOUS levels of this game. If ACTION6 (click) repeatedly
+            # caused level wins, it's extremely salient for this game type.
+            # ===================================================================
+            try:
+                game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                current_level = int(game_state.score or 0) + 1
+                
+                if game_id and current_level > 1:
+                    # Query what actions led to score increases in previous levels
+                    prior_success_actions = self.db.execute_query("""
+                        SELECT action_type, COUNT(*) as success_count
+                        FROM action_traces
+                        WHERE game_id = ? 
+                          AND level_number < ?
+                          AND score_change > 0
+                        GROUP BY action_type
+                        ORDER BY success_count DESC
+                        LIMIT 5
+                    """, (game_id, current_level))
+                    
+                    if prior_success_actions:
+                        for success in prior_success_actions:
+                            action_type = success.get('action_type', '')
+                            success_count = success.get('success_count', 0)
+                            
+                            if success_count >= 3:  # Significant number of successes
+                                # This action worked multiple times in previous levels!
+                                # Add as highly salient "prior success" target
+                                prior_salience = min(0.95, 0.6 + (success_count / 50))
+                                
+                                salience_targets.append({
+                                    'type': f'prior_success_{action_type}',
+                                    'position': None,
+                                    'salience': prior_salience,
+                                    'reason': f'{action_type} caused {success_count} score increases in L1-L{current_level-1}',
+                                    'recommended_action': action_type
+                                })
+                                
+                                logger.info(f"[Q3-MEMORY] Prior level success: {action_type} worked {success_count}x -> salience={prior_salience:.2f}")
+                    
+                    # Also check for winning sequence patterns from this game type
+                    game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                    winning_actions = self.db.execute_query("""
+                        SELECT action_type, COUNT(*) as win_count
+                        FROM winning_sequences ws
+                        JOIN action_traces at ON ws.game_id = at.game_id AND ws.level = at.level_number
+                        WHERE ws.game_type = ?
+                          AND at.score_change > 0
+                        GROUP BY action_type
+                        ORDER BY win_count DESC
+                        LIMIT 3
+                    """, (game_type,))
+                    
+                    if winning_actions:
+                        for win_action in winning_actions:
+                            action_type = win_action.get('action_type', '')
+                            win_count = win_action.get('win_count', 0)
+                            
+                            if win_count >= 2:
+                                # This action is part of winning patterns for this game type
+                                salience_targets.append({
+                                    'type': f'winning_pattern_{action_type}',
+                                    'position': None,
+                                    'salience': min(0.85, 0.5 + (win_count / 20)),
+                                    'reason': f'{action_type} appears in {win_count} winning sequences for {game_type}',
+                                    'recommended_action': action_type
+                                })
+            except Exception as e:
+                logger.debug(f"Prior level success query failed: {e}")
+            
             # Sort by salience and pick top target
             salience_targets.sort(key=lambda x: x['salience'], reverse=True)
             
@@ -16528,7 +17136,14 @@ class GameplayEngine:
                 
                 # Plan interaction with most salient target
                 pos = top_target.get('position')
-                if pos:
+                recommended_action = top_target.get('recommended_action')
+                
+                if recommended_action:
+                    # FIX #1 (lp85): Prior success has a recommended action
+                    result['planned_interaction'] = f"Repeat {recommended_action} (proven in prior levels)"
+                    result['recommended_action'] = recommended_action
+                    result['Q3_what_worked_before'] = top_target['reason']
+                elif pos:
                     result['planned_interaction'] = f"Consider ACTION6 at position {pos}"
                 
                 result['confidence'] = min(0.9, top_target['salience'])
@@ -16557,6 +17172,7 @@ class GameplayEngine:
         - Learned rules from rule_induction_engine
         - Historical action success rates
         - FIX #26: Accumulated failure count to detect stuck state
+        - FIX #4 (lp85): Extended no-frame-change detection forces theory revision
         
         Returns:
             Q4 context dictionary with working theory
@@ -16573,6 +17189,53 @@ class GameplayEngine:
         }
         
         # ===================================================================
+        # FIX #4 & #6 (lp85): EXTENDED NULL FRAME DETECTION
+        # ===================================================================
+        # Problem: Agent had 997 consecutive "NULL - 304 Not Modified" frames
+        # but theory stayed "I control 1 objects" with no revision.
+        # 
+        # Solution: When _no_frame_change_count is very high, FORCE theory
+        # revision to something completely different. The current theory
+        # is PROVEN WRONG by the evidence of 997 failures.
+        # ===================================================================
+        no_frame_change_count = getattr(self, '_no_frame_change_count', 0)
+        
+        if no_frame_change_count >= 100:
+            # CRITICAL: 100+ frames with no change means our theory is DEAD WRONG
+            result['theory'] = f"THEORY FALSIFIED: {no_frame_change_count} frames with ZERO effect - current approach is 100% wrong"
+            result['hypothesis_source'] = 'theory_falsification'
+            result['confidence'] = 0.0  # Zero confidence - we know nothing works
+            result['working_hypothesis'] = "ABANDON ALL ASSUMPTIONS - everything tried so far has failed"
+            result['is_theory_falsified'] = True
+            
+            # Force random/exploration actions - nothing we've tried works
+            for action_num in range(1, 7):
+                result['action_recommendations'][f'ACTION{action_num}'] = 'try_random'
+            
+            # Extra emphasis on ACTION6 (click) since navigation clearly isn't working
+            result['action_recommendations']['ACTION6'] = 'try_desperately'
+            
+            # Store pain signal for emotional system
+            self._theory_pain_signal = min(1.0, no_frame_change_count / 200)
+            
+            logger.warning(f"[Q4-FALSIFIED] Theory abandoned after {no_frame_change_count} null frames")
+            return result
+            
+        elif no_frame_change_count >= 50:
+            # SERIOUS: 50+ frames with no change - theory is failing
+            result['theory'] = f"THEORY FAILING: {no_frame_change_count} frames with no effect - need different approach"
+            result['hypothesis_source'] = 'theory_challenge'
+            result['confidence'] = 0.2
+            result['working_hypothesis'] = "Current theory isn't working - try alternative approaches"
+            result['is_theory_challenged'] = True
+            
+            # Boost ACTION6 (click) as alternative to directional movement
+            result['action_recommendations']['ACTION6'] = 'try_alternative'
+            
+            self._theory_pain_signal = min(0.5, no_frame_change_count / 100)
+            logger.info(f"[Q4-CHALLENGED] Theory under challenge after {no_frame_change_count} null frames")
+        
+        # ===================================================================
         # FIX #26: CHECK ACCUMULATED FAILURES TO CHANGE STRATEGY
         # ===================================================================
         # Problem: Q4 shows "Exploring to discover rules" for 152 frames
@@ -16583,8 +17246,8 @@ class GameplayEngine:
         recent_failures = tracker.get('no_progress_count', 0)
         is_in_escape = getattr(self, '_escape_mode_active', False)
         
-        # Detect stuck state
-        if recent_failures >= 50 or (frame_count > 50 and is_in_escape):
+        # Detect stuck state (only if not already handling null frames above)
+        if not result.get('theory') and (recent_failures >= 50 or (frame_count > 50 and is_in_escape)):
             # We're stuck - exploring is NOT working
             result['theory'] = f"STUCK: Exploration failed after {recent_failures} attempts - need radical strategy change"
             result['hypothesis_source'] = 'stuck_detection'
@@ -16605,7 +17268,7 @@ class GameplayEngine:
                     result['action_recommendations'][f'ACTION{action_num}'] = 'overused_avoid'
             
             return result
-        elif recent_failures >= 20:
+        elif not result.get('theory') and recent_failures >= 20:
             # Getting stuck - diversify approach
             result['theory'] = f"Approaching stuck: {recent_failures} failures - diversifying actions"
             result['hypothesis_source'] = 'failure_accumulation'

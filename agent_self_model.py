@@ -2431,7 +2431,8 @@ class AgentSelfModel:
         click_coords: Optional[Tuple[int, int]] = None,
         game_type: Optional[str] = None,
         level: Optional[int] = None,
-        agent_id: Optional[str] = None
+        agent_id: Optional[str] = None,
+        prior_level_hint: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Analyze a single action to discover object control relationships.
@@ -2446,6 +2447,9 @@ class AgentSelfModel:
             game_type: Game type for storing results
             level: Level number
             agent_id: Agent doing the discovery
+            prior_level_hint: Optional hint from prior level containing:
+                {'color': int, 'signature': str, 'confidence': float, 'source_level': int}
+                If provided and discovered object matches, confidence is boosted.
             
         Returns:
             Discovery result:
@@ -2454,7 +2458,8 @@ class AgentSelfModel:
                 'object_id': str or None,
                 'control_type': 'direct'|'after_select'|'button'|None,
                 'movement_matches_action': bool,
-                'confidence': float
+                'confidence': float,
+                'cross_level_match': bool  # NEW: True if matched prior level hint
             }
         """
         from seed_primitives import get_seed_primitives
@@ -2465,7 +2470,8 @@ class AgentSelfModel:
             'object_id': None,
             'control_type': None,
             'movement_matches_action': False,
-            'confidence': 0.0
+            'confidence': 0.0,
+            'cross_level_match': False  # Track if this matches prior level
         }
         
         # Get objects in both frames
@@ -2518,6 +2524,33 @@ class AgentSelfModel:
                     # Requires 3+ observations to reach high confidence (0.7+)
                     # Note: Movement is less deterministic than toggles (0.35 vs 0.6)
                     result['confidence'] = 0.35  # Single observation only
+                    
+                    # =========================================================
+                    # FIX #7: CROSS-LEVEL OBJECT RECURRENCE BOOST
+                    # =========================================================
+                    # If this object matches the prior level's self-object,
+                    # boost confidence significantly - it's likely the same
+                    # controllable object recurring across levels.
+                    # =========================================================
+                    if prior_level_hint:
+                        try:
+                            discovered_color = int(obj_id.replace('obj_', ''))
+                            hint_color = prior_level_hint.get('color')
+                            hint_confidence = prior_level_hint.get('confidence', 0)
+                            
+                            if discovered_color == hint_color and hint_confidence > 0.3:
+                                # Same color as prior level's controlled object!
+                                cross_level_boost = 0.35 * hint_confidence  # Up to 0.35 extra
+                                result['confidence'] = min(0.85, result['confidence'] + cross_level_boost)
+                                result['cross_level_match'] = True
+                                
+                                logger.info(
+                                    f"[FIX7-CROSSLEVEL] Object color_{discovered_color} matches prior level "
+                                    f"(L{prior_level_hint.get('source_level')}) -> "
+                                    f"confidence boosted by +{cross_level_boost:.2f}"
+                                )
+                        except Exception as e:
+                            logger.debug(f"Cross-level matching failed: {e}")
                     
                     # Store discovery locally
                     if game_type and level:

@@ -104,7 +104,7 @@ class CounterfactualAnalyzer:
         action_history: List[Dict[str, Any]],
         session_id: str = "",
         generation: int = 0,
-        max_counterfactuals: int = None  # Ignored, kept for backward compat
+        max_counterfactuals: Optional[int] = None  # Ignored, kept for backward compat
     ) -> List[Dict[str, Any]]:
         """
         Generate lessons from a completed game (win or loss).

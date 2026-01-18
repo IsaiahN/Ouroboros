@@ -37,9 +37,13 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from database_interface import DatabaseInterface
+
+# TYPE_CHECKING import to avoid circular dependency
+if TYPE_CHECKING:
+    from symbolic_reasoning_engine import WorldModel
 
 logger = logging.getLogger(__name__)
 
@@ -1002,6 +1006,12 @@ class DeliberationResult:
     changed_from_gut: bool = False
     gut_action: Optional[str] = None  # What gut would have chosen
     change_reason: Optional[str] = None  # Why we changed
+    
+    # World Model simulation results (TRUE deliberation)
+    simulations_run: int = 0  # How many actions were mentally simulated
+    best_simulated_action: Optional[str] = None  # Action with best predicted outcome
+    best_simulated_score: float = 0.0  # Predicted score change
+    simulation_used: bool = False  # Whether simulation influenced decision
 
 
 @dataclass
@@ -1429,13 +1439,18 @@ class DeliberationEngine:
         game_context: Dict[str, Any],
         agent_id: str,
         w_a: float,
-        w_b: float
+        w_b: float,
+        world_model: Optional['WorldModel'] = None
     ) -> DeliberationResult:
         """
         Conduct careful, effortful deliberation (System 2).
         
         This examines evidence, consults streams, tests theories,
-        and produces a reasoned decision.
+        and produces a reasoned decision. NOW WITH WORLD MODEL SIMULATION.
+        
+        TRUE DELIBERATION: Uses WorldModel.predict_state() to mentally
+        simulate each candidate action BEFORE choosing. This is counterfactual
+        reasoning - "what would happen if I did X?"
         
         Args:
             gut_result: The initial gut response
@@ -1444,6 +1459,7 @@ class DeliberationEngine:
             game_context: Context including game_type, level, frame, etc.
             agent_id: Agent performing deliberation
             w_a, w_b: Stream weights
+            world_model: WorldModel instance for counterfactual simulation
             
         Returns:
             DeliberationResult with reasoned decision
@@ -1595,6 +1611,99 @@ class DeliberationEngine:
         except Exception as e:
             pass  # Primitives are optional
         
+        # =====================================================================
+        # Step 5.5: WORLD MODEL SIMULATION (TRUE DELIBERATION)
+        # =====================================================================
+        # This is where REAL reasoning happens - mentally simulate each action
+        # and predict what would happen BEFORE committing. This is counterfactual
+        # reasoning: "If I do X, what happens? If I do Y, what happens?"
+        # =====================================================================
+        simulations_run = 0
+        best_simulated_action = None
+        best_simulated_score = -999.0
+        simulation_used = False
+        simulation_predictions = {}  # action -> (predicted_score_change, predicted_position, surprise_risk)
+        
+        if world_model is not None:
+            try:
+                reasoning_steps.append("[SIMULATION] Running counterfactual predictions...")
+                
+                for action_str in available_actions:
+                    # Convert ACTION1 -> 1, ACTION2 -> 2, etc.
+                    try:
+                        action_int = int(action_str.replace('ACTION', ''))
+                    except ValueError:
+                        continue
+                    
+                    # Use world model to predict outcome of this action
+                    # predict_state() simulates the action sequence and returns resulting state
+                    try:
+                        predicted_state = world_model.predict_state([action_int])
+                        simulations_run += 1
+                        
+                        # Calculate predicted score change
+                        current_score = world_model.state.score if world_model.state else 0
+                        predicted_score = predicted_state.score if predicted_state else current_score
+                        score_change = predicted_score - current_score
+                        
+                        # Get predicted position
+                        predicted_agent = predicted_state.get_agent() if predicted_state else None
+                        predicted_pos = predicted_agent.position if predicted_agent else None
+                        
+                        # Estimate surprise risk based on belief confidence
+                        # High surprise = prediction likely wrong = risky action
+                        surprise_risk = 0.0
+                        if hasattr(world_model, 'beliefs') and world_model.beliefs:
+                            # If we have low-confidence beliefs about this action, it's risky
+                            for belief in world_model.beliefs.values():
+                                content = belief.content if hasattr(belief, 'content') else {}
+                                if content.get('trigger_action') == action_int:
+                                    surprise_risk = max(surprise_risk, 1.0 - belief.confidence)
+                        
+                        simulation_predictions[action_str] = {
+                            'score_change': score_change,
+                            'predicted_position': predicted_pos,
+                            'surprise_risk': surprise_risk,
+                            'is_positive': score_change > 0
+                        }
+                        
+                        # Track best action by predicted outcome
+                        # Favor positive score changes, penalize high surprise risk
+                        effective_score = score_change - (surprise_risk * 0.5)
+                        if effective_score > best_simulated_score:
+                            best_simulated_score = effective_score
+                            best_simulated_action = action_str
+                            
+                    except Exception as pred_err:
+                        # Prediction failed for this action - log but continue
+                        reasoning_steps.append(f"[SIM] {action_str} prediction failed: {str(pred_err)[:30]}")
+                        continue
+                
+                # Log simulation results
+                if simulations_run > 0:
+                    # Find actions predicted to gain score
+                    positive_actions = [a for a, p in simulation_predictions.items() if p.get('is_positive')]
+                    
+                    if positive_actions:
+                        reasoning_steps.append(
+                            f"[SIMULATION] Positive outcomes predicted for: {', '.join(positive_actions)}"
+                        )
+                    
+                    if best_simulated_action:
+                        pred = simulation_predictions.get(best_simulated_action, {})
+                        reasoning_steps.append(
+                            f"[SIMULATION] Best: {best_simulated_action} "
+                            f"(+{pred.get('score_change', 0):.1f} score, "
+                            f"{pred.get('surprise_risk', 0):.1%} risk)"
+                        )
+                else:
+                    reasoning_steps.append("[SIMULATION] No valid predictions generated")
+                    
+            except Exception as sim_err:
+                reasoning_steps.append(f"[SIMULATION] Failed: {str(sim_err)[:50]}")
+        else:
+            reasoning_steps.append("[SIMULATION] No world model available - using statistical reasoning only")
+        
         # Step 6: Form theory and test prediction
         if examined_past >= 5:
             # Form a theory based on patterns
@@ -1611,23 +1720,47 @@ class DeliberationEngine:
         change_reason = None
         changed_from_gut = False
         
-        # Priority 1: Stream conflict resolution
-        if stream_conflict:
+        # Priority 0: SIMULATION PREDICTS POSITIVE OUTCOME (highest priority)
+        # If world model predicts an action will gain score, trust the simulation
+        if best_simulated_action and best_simulated_score > 0:
+            pred = simulation_predictions.get(best_simulated_action, {})
+            # Only use simulation if surprise risk is acceptable
+            if pred.get('surprise_risk', 1.0) < 0.5:
+                final_action = best_simulated_action
+                change_reason = f"Simulation predicts +{pred.get('score_change', 0):.1f} score"
+                simulation_used = True
+                reasoning_steps.append(f"[DECISION] Using simulated best action: {final_action}")
+        
+        # Priority 1: Stream conflict resolution (if simulation didn't decide)
+        if not simulation_used and stream_conflict:
             if w_b > w_a and network_recommendation:
                 final_action = network_recommendation
             elif w_a > w_b and private_recommendation:
                 final_action = private_recommendation
         
         # Priority 2: Strong evidence from experience
-        elif 'best_action' in dir() and best_action and 'best_ratio' in dir():
+        elif not simulation_used and 'best_action' in dir() and best_action and 'best_ratio' in dir():
             if best_ratio > 0.6:  # Strong evidence
                 final_action = best_action
                 change_reason = f"Strong evidence: {best_ratio:.0%} success rate"
         
         # Priority 3: Network recommendation if trusted
-        elif network_recommendation and w_b > 0.6:
+        elif not simulation_used and network_recommendation and w_b > 0.6:
             final_action = network_recommendation
             change_reason = f"High network trust (w_b={w_b:.2f})"
+        
+        # Priority 4: Simulation suggests avoiding gut action (defensive)
+        # If gut action has negative predicted outcome, consider alternatives
+        if not simulation_used and gut_result.action in simulation_predictions:
+            gut_pred = simulation_predictions[gut_result.action]
+            if gut_pred.get('score_change', 0) < 0 or gut_pred.get('surprise_risk', 0) > 0.7:
+                # Gut action looks bad - find a safer alternative
+                for alt_action, alt_pred in simulation_predictions.items():
+                    if alt_pred.get('score_change', 0) >= 0 and alt_pred.get('surprise_risk', 0) < 0.5:
+                        final_action = alt_action
+                        change_reason = f"Avoiding gut ({gut_result.action}) due to predicted negative outcome"
+                        simulation_used = True
+                        break
         
         # Check if we changed from gut
         if final_action != gut_result.action:
@@ -1645,6 +1778,10 @@ class DeliberationEngine:
             base_confidence += 0.1
         if examined_memories > 0:
             base_confidence += 0.05  # Memories add small confidence boost
+        # Simulation boost: successful simulations increase confidence
+        if simulation_used and simulations_run > 0:
+            base_confidence += 0.15  # Significant boost for simulation-backed decisions
+            reasoning_steps.append("[CONFIDENCE] +15% boost from world model simulation")
         
         final_confidence = min(0.95, base_confidence)
         
@@ -1670,7 +1807,12 @@ class DeliberationEngine:
             missing_primitive_signal=missing_primitive,
             changed_from_gut=changed_from_gut,
             gut_action=gut_result.action if changed_from_gut else None,
-            change_reason=change_reason
+            change_reason=change_reason,
+            # World Model simulation results
+            simulations_run=simulations_run,
+            best_simulated_action=best_simulated_action,
+            best_simulated_score=best_simulated_score,
+            simulation_used=simulation_used
         )
     
     def _query_episodic_memories(
