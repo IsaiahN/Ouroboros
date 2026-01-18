@@ -12697,16 +12697,29 @@ class GameplayEngine:
                 logger.debug(f"Meta-learning error (falling back to default): {e}")
         
         # Check if we have queued pattern actions
-        # FIX #10: Don't pop here - pop happens at ACTION6 coordinate retrieval (line ~10066)
-        # This block just signals that we WANT to continue the pattern
+        # FIX 2026-01-18: Pop at decision time, not execution time
+        # The old approach caused infinite loops because:
+        #   1. We'd return ACTION6 here
+        #   2. _finalize_ladder_and_return would override it to ACTION1-4 (deliberation/theory-gate)
+        #   3. The actual action executed was ACTION1-4, not ACTION6
+        #   4. The queue pop only happened in ACTION6 handler, so it never popped
+        #   5. Next iteration, queue still has items -> infinite loop
+        # FIX: Pop here, store coordinates for ACTION6 handler to use
         if hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
-            next_action = self._pattern_action_queue[0]  # Peek, don't pop
+            next_action = self._pattern_action_queue[0]  # Peek first
             if isinstance(next_action, dict) and next_action.get('type') == 'ACTION6':
+                # POP NOW - consume the action regardless of what _finalize_ladder_and_return does
+                self._pattern_action_queue.pop(0)
+                
+                # Store coordinates for ACTION6 handler (if ACTION6 actually executes)
+                coord = next_action.get('coordinate') or (0, 0)
+                self._meta_pattern_coords = coord  # New: store for later
+                
                 # Track application count
                 if hasattr(self, '_meta_pattern_tracker'):
                     self._meta_pattern_tracker['applications'] += 1
                 reasoning = f"Continuing meta-learned pattern: {next_action.get('reason', 'pattern action')}"
-                logger.info(f" {reasoning}: ACTION6 at {next_action.get('coordinate', 'TBD')}")
+                logger.info(f" {reasoning}: ACTION6 at {coord}")
                 return _finalize_ladder_and_return("ACTION6", reasoning, 'heuristic')
         elif hasattr(self, '_meta_pattern_tracker') and self._meta_pattern_tracker.get('current_pattern_id'):
             # Queue is empty but pattern was active - pattern completed naturally
@@ -13434,22 +13447,14 @@ class GameplayEngine:
                     full_reasoning = f"{reasoning} | Selection: {reason}"
                     logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
                 del self._selection_target  # Clear after use
-            # Priority 2: Check if we have meta-learned coordinates to use
-            elif hasattr(self, '_pattern_action_queue') and self._pattern_action_queue:
-                next_action = self._pattern_action_queue.pop(0)  # Pop (consume) action after using coords
-                if isinstance(next_action, dict) and next_action.get('type') == 'ACTION6':
-                    coord = next_action.get('coordinate') or (0, 0)
-                    x, y = coord if isinstance(coord, (list, tuple)) and len(coord) == 2 else (0, 0)
-                    reason = next_action.get('reason', 'meta-pattern')
-                    full_reasoning = f"{reasoning} | Meta-pattern: {reason}"
-                    logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
-                else:
-                    x, y, reason = self.action_handler.get_smart_coordinates(
-                        game_state.frame,
-                        strategy="visual"
-                    )
-                    full_reasoning = f"{reasoning} | Visual: {reason}"
-                    logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
+            # Priority 2: Check if we have meta-learned coordinates stored (from get_best_action)
+            # FIX 2026-01-18: Queue is now popped at decision time, coords stored in _meta_pattern_coords
+            elif hasattr(self, '_meta_pattern_coords') and self._meta_pattern_coords:
+                coord = self._meta_pattern_coords
+                self._meta_pattern_coords = None  # Clear after use
+                x, y = coord if isinstance(coord, (list, tuple)) and len(coord) == 2 else (0, 0)
+                full_reasoning = f"{reasoning} | Meta-pattern coords"
+                logger.info(f"ACTION6 at ({x}, {y}): {full_reasoning}")
             elif getattr(self, '_pending_action6_target', None):
                 target = self._pending_action6_target or {}
                 x, y = target.get('x'), target.get('y')
