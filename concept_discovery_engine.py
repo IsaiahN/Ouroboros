@@ -711,6 +711,393 @@ class ConceptDiscoveryEngine:
         }
 
 
+# =============================================================================
+# STRUCTURAL PATTERN LIBRARY
+# =============================================================================
+# Fast-indexed library of structural patterns for analogical reasoning.
+# Patterns are indexed by structural hash for O(1) lookup.
+# =============================================================================
+
+@dataclass
+class StructuralPattern:
+    """A structural pattern with its associated outcomes."""
+    pattern_id: str
+    structural_hash: str           # Hash of the relational structure
+    object_graph: Dict[str, Any]   # Relational graph of objects
+    outcomes: List[Dict[str, Any]] # What happened when this pattern was seen
+    game_types: Set[str]           # Games where this pattern appeared
+    success_count: int = 0
+    failure_count: int = 0
+    created_at: datetime = field(default_factory=datetime.now)
+    last_matched: Optional[datetime] = None
+
+
+class StructuralPatternLibrary:
+    """
+    Fast-indexed library of structural patterns for analogical reasoning.
+    
+    Patterns are indexed by structural hash for O(1) lookup.
+    Supports:
+    - Pattern storage with outcome tracking
+    - Fast structural matching via hash index
+    - Pattern generalization across games
+    - Success/failure rate tracking per pattern
+    """
+    
+    def __init__(self, db: Optional[DatabaseInterface] = None, db_path: str = "core_data.db"):
+        self.db = db or DatabaseInterface(db_path)
+        self.patterns: Dict[str, StructuralPattern] = {}
+        self.hash_index: Dict[str, List[str]] = {}  # structural_hash -> [pattern_ids]
+        
+        self._ensure_schema()
+        self._load_patterns()
+        
+        logger.info(f"[PATTERN-LIB] Initialized with {len(self.patterns)} patterns")
+    
+    def _ensure_schema(self) -> None:
+        """Create structural pattern tables."""
+        self.db.execute_query("""
+            CREATE TABLE IF NOT EXISTS structural_patterns (
+                pattern_id TEXT PRIMARY KEY,
+                structural_hash TEXT NOT NULL,
+                object_graph TEXT,     -- JSON serialized graph
+                outcomes TEXT,         -- JSON list of outcomes
+                game_types TEXT,       -- JSON list of game types
+                success_count INTEGER DEFAULT 0,
+                failure_count INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_matched DATETIME
+            )
+        """)
+        
+        # Index for fast hash lookup
+        self.db.execute_query("""
+            CREATE INDEX IF NOT EXISTS idx_structural_patterns_hash
+            ON structural_patterns(structural_hash)
+        """)
+    
+    def _load_patterns(self) -> None:
+        """Load existing patterns from database."""
+        results = self.db.execute_query("""
+            SELECT * FROM structural_patterns
+            ORDER BY success_count DESC
+            LIMIT 10000
+        """)
+        
+        for row in results or []:
+            pattern = StructuralPattern(
+                pattern_id=row['pattern_id'],
+                structural_hash=row['structural_hash'],
+                object_graph=json.loads(row['object_graph'] or '{}'),
+                outcomes=json.loads(row['outcomes'] or '[]'),
+                game_types=set(json.loads(row['game_types'] or '[]')),
+                success_count=row['success_count'],
+                failure_count=row['failure_count']
+            )
+            self.patterns[pattern.pattern_id] = pattern
+            
+            # Build hash index
+            if pattern.structural_hash not in self.hash_index:
+                self.hash_index[pattern.structural_hash] = []
+            self.hash_index[pattern.structural_hash].append(pattern.pattern_id)
+    
+    def compute_structural_hash(self, objects: List[Dict[str, Any]], frame: Optional[List[List[int]]] = None) -> str:
+        """
+        Compute a structural hash that captures relational properties.
+        
+        Hash is based on:
+        - Object count by color
+        - Relative positions (not absolute)
+        - Adjacency relationships
+        - Size distributions
+        
+        This allows matching structurally similar patterns even if
+        they differ in absolute positions or colors.
+        """
+        import hashlib
+        
+        if not objects:
+            return "empty"
+        
+        # Feature vector for hashing
+        features = []
+        
+        # 1. Object count by relative size (small/medium/large)
+        sizes = [len(obj.get('positions', [])) for obj in objects if obj.get('positions')]
+        if sizes:
+            avg_size = sum(sizes) / len(sizes)
+            size_dist = {
+                'small': sum(1 for s in sizes if s < avg_size * 0.5),
+                'medium': sum(1 for s in sizes if avg_size * 0.5 <= s <= avg_size * 1.5),
+                'large': sum(1 for s in sizes if s > avg_size * 1.5)
+            }
+            features.append(f"sizes:{size_dist['small']},{size_dist['medium']},{size_dist['large']}")
+        
+        # 2. Color diversity (how many unique colors)
+        colors = set(obj.get('color') for obj in objects if obj.get('color') is not None)
+        features.append(f"colors:{len(colors)}")
+        
+        # 3. Spatial distribution (clustered vs spread)
+        centroids = [obj.get('centroid') for obj in objects if obj.get('centroid')]
+        if len(centroids) >= 2:
+            # Calculate average distance between objects
+            total_dist = 0
+            count = 0
+            for i, c1 in enumerate(centroids):
+                for c2 in centroids[i+1:]:
+                    if c1 and c2 and len(c1) >= 2 and len(c2) >= 2:
+                        dist = abs(c1[0] - c2[0]) + abs(c1[1] - c2[1])
+                        total_dist += dist
+                        count += 1
+            avg_dist = total_dist / count if count > 0 else 0
+            spread = 'tight' if avg_dist < 5 else ('medium' if avg_dist < 15 else 'spread')
+            features.append(f"spread:{spread}")
+        
+        # 4. Adjacency count (how many objects touch each other)
+        adjacencies = 0
+        for i, obj1 in enumerate(objects):
+            pos1 = set(tuple(p) for p in obj1.get('positions', []))
+            for obj2 in objects[i+1:]:
+                pos2 = set(tuple(p) for p in obj2.get('positions', []))
+                # Check if any positions are adjacent
+                for p in pos1:
+                    neighbors = [(p[0]+dx, p[1]+dy) for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]]
+                    if any(n in pos2 for n in neighbors):
+                        adjacencies += 1
+                        break
+        features.append(f"adj:{adjacencies}")
+        
+        # 5. Object count
+        features.append(f"count:{len(objects)}")
+        
+        # Create hash
+        feature_str = "|".join(sorted(features))
+        return hashlib.md5(feature_str.encode()).hexdigest()[:16]
+    
+    def index_pattern(
+        self,
+        objects: List[Dict[str, Any]],
+        outcome: Dict[str, Any],
+        game_type: str,
+        success: bool,
+        frame: Optional[List[List[int]]] = None
+    ) -> str:
+        """
+        Index a new pattern or update existing one.
+        
+        Args:
+            objects: List of objects in the pattern
+            outcome: What happened (action taken, result)
+            game_type: Game type where pattern was observed
+            success: Whether the outcome was successful
+            frame: Optional frame for additional context
+            
+        Returns:
+            Pattern ID (new or existing)
+        """
+        structural_hash = self.compute_structural_hash(objects, frame)
+        
+        # Check if we have a matching pattern
+        existing_ids = self.hash_index.get(structural_hash, [])
+        
+        for pid in existing_ids:
+            if pid in self.patterns:
+                # Update existing pattern
+                pattern = self.patterns[pid]
+                pattern.outcomes.append(outcome)
+                pattern.game_types.add(game_type)
+                if success:
+                    pattern.success_count += 1
+                else:
+                    pattern.failure_count += 1
+                pattern.last_matched = datetime.now()
+                
+                self._save_pattern(pattern)
+                return pid
+        
+        # Create new pattern
+        import uuid
+        pattern_id = f"pat_{uuid.uuid4().hex[:12]}"
+        
+        # Build object graph (simplified relational representation)
+        object_graph = {
+            'objects': [
+                {
+                    'color': obj.get('color'),
+                    'size': len(obj.get('positions', [])),
+                    'centroid': obj.get('centroid')
+                }
+                for obj in objects
+            ],
+            'object_count': len(objects),
+            'hash': structural_hash
+        }
+        
+        pattern = StructuralPattern(
+            pattern_id=pattern_id,
+            structural_hash=structural_hash,
+            object_graph=object_graph,
+            outcomes=[outcome],
+            game_types={game_type},
+            success_count=1 if success else 0,
+            failure_count=0 if success else 1
+        )
+        
+        self.patterns[pattern_id] = pattern
+        
+        if structural_hash not in self.hash_index:
+            self.hash_index[structural_hash] = []
+        self.hash_index[structural_hash].append(pattern_id)
+        
+        self._save_pattern(pattern)
+        
+        logger.debug(f"[PATTERN-LIB] Indexed new pattern {pattern_id} (hash={structural_hash[:8]})")
+        return pattern_id
+    
+    def find_matching_patterns(
+        self,
+        objects: List[Dict[str, Any]],
+        frame: Optional[List[List[int]]] = None,
+        min_success_rate: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """
+        Find all stored patterns structurally similar to query.
+        
+        Args:
+            objects: Query objects to match
+            frame: Optional frame for context
+            min_success_rate: Minimum success rate to include pattern
+            
+        Returns:
+            List of matching patterns with their outcomes and stats
+        """
+        structural_hash = self.compute_structural_hash(objects, frame)
+        
+        matching_ids = self.hash_index.get(structural_hash, [])
+        results = []
+        
+        for pid in matching_ids:
+            if pid not in self.patterns:
+                continue
+                
+            pattern = self.patterns[pid]
+            total = pattern.success_count + pattern.failure_count
+            success_rate = pattern.success_count / total if total > 0 else 0
+            
+            if success_rate >= min_success_rate:
+                results.append({
+                    'pattern_id': pattern.pattern_id,
+                    'structural_hash': pattern.structural_hash,
+                    'success_rate': success_rate,
+                    'success_count': pattern.success_count,
+                    'failure_count': pattern.failure_count,
+                    'game_types': list(pattern.game_types),
+                    'outcomes': pattern.outcomes[-5:],  # Last 5 outcomes
+                    'cross_game': len(pattern.game_types) > 1
+                })
+        
+        # Sort by success rate and cross-game applicability
+        results.sort(key=lambda x: (x['cross_game'], x['success_rate']), reverse=True)
+        
+        return results
+    
+    def get_suggested_action(
+        self,
+        objects: List[Dict[str, Any]],
+        frame: Optional[List[List[int]]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get best action suggestion based on matching patterns.
+        
+        Returns the most successful action from matching patterns.
+        """
+        matches = self.find_matching_patterns(objects, frame)
+        
+        if not matches:
+            return None
+        
+        # Aggregate actions across all matching patterns
+        action_scores: Dict[str, float] = {}
+        
+        for match in matches:
+            weight = match['success_rate'] * (1.5 if match['cross_game'] else 1.0)
+            
+            for outcome in match['outcomes']:
+                action = outcome.get('action')
+                if action:
+                    action_key = str(action)
+                    if action_key not in action_scores:
+                        action_scores[action_key] = 0
+                    action_scores[action_key] += weight
+        
+        if not action_scores:
+            return None
+        
+        best_action = max(action_scores.items(), key=lambda x: x[1])
+        
+        return {
+            'suggested_action': best_action[0],
+            'confidence': best_action[1] / sum(action_scores.values()),
+            'pattern_count': len(matches),
+            'source': 'structural_pattern_library'
+        }
+    
+    def _save_pattern(self, pattern: StructuralPattern) -> None:
+        """Save pattern to database."""
+        self.db.execute_query("""
+            INSERT OR REPLACE INTO structural_patterns
+            (pattern_id, structural_hash, object_graph, outcomes, game_types,
+             success_count, failure_count, created_at, last_matched)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            pattern.pattern_id,
+            pattern.structural_hash,
+            json.dumps(pattern.object_graph),
+            json.dumps(pattern.outcomes[-100:]),  # Keep last 100 outcomes
+            json.dumps(list(pattern.game_types)),
+            pattern.success_count,
+            pattern.failure_count,
+            pattern.created_at.isoformat(),
+            pattern.last_matched.isoformat() if pattern.last_matched else None
+        ))
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get library statistics."""
+        total_patterns = len(self.patterns)
+        cross_game_patterns = sum(1 for p in self.patterns.values() if len(p.game_types) > 1)
+        
+        return {
+            'total_patterns': total_patterns,
+            'unique_hashes': len(self.hash_index),
+            'cross_game_patterns': cross_game_patterns,
+            'top_patterns': [
+                {
+                    'id': p.pattern_id[:12],
+                    'hash': p.structural_hash[:8],
+                    'success_rate': p.success_count / max(p.success_count + p.failure_count, 1),
+                    'games': len(p.game_types)
+                }
+                for p in sorted(
+                    self.patterns.values(),
+                    key=lambda x: x.success_count,
+                    reverse=True
+                )[:5]
+            ]
+        }
+
+
+# Global instance
+_pattern_library: Optional[StructuralPatternLibrary] = None
+
+
+def get_pattern_library(db_path: str = "core_data.db") -> StructuralPatternLibrary:
+    """Get or create the global structural pattern library."""
+    global _pattern_library
+    if _pattern_library is None:
+        _pattern_library = StructuralPatternLibrary(db_path=db_path)
+    return _pattern_library
+
+
 # Global instance
 _concept_engine: Optional[ConceptDiscoveryEngine] = None
 

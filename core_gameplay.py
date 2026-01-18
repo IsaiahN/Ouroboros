@@ -12975,6 +12975,30 @@ class GameplayEngine:
 
         return _finalize_ladder_and_return(base_action, final_reasoning, 'heuristic')
 
+    def _infer_direction_from_action(self, action_type: int) -> Optional[str]:
+        """
+        Infer movement direction from action type.
+        
+        Standard ARC action mapping:
+        - ACTION1: Up
+        - ACTION2: Down  
+        - ACTION3: Left
+        - ACTION4: Right
+        - ACTION5: Click/interact at position
+        - ACTION6: Click at specific coordinate
+        - ACTION7: No-op / wait
+        
+        Returns:
+            Direction string ('up', 'down', 'left', 'right') or None for non-movement actions
+        """
+        direction_map = {
+            1: 'up',
+            2: 'down',
+            3: 'left',
+            4: 'right'
+        }
+        return direction_map.get(action_type)
+
     async def _execute_action(self, action: str, game_state: GameState, reasoning: str = "", current_level: int = 1) -> GameState:
         """Execute an action with reasoning sent to ARC API.
 
@@ -21951,6 +21975,57 @@ class GameplayEngine:
                             logger.debug(f"[REPLAY-LEARN] Action {idx} marked as potentially wasted (no effect)")
                         if replay_prediction.prediction_correct:
                             logger.debug(f"[REPLAY-LEARN] Prediction CORRECT at action {idx} (confidence now {replay_prediction.confidence:.2f})")
+                        
+                        # ============================================================
+                        # PHYSICS DISCOVERY PIPELINE: Feed learned rules to WorldModel
+                        # ============================================================
+                        # Connect replay_learning_engine discoveries to WorldModel
+                        # This wires up the physics rule pipeline so learned effects
+                        # become available for predict_state() counterfactual reasoning
+                        # ============================================================
+                        if learning_result.get('inferred_rule') and hasattr(self, '_world_model') and self._world_model:
+                            try:
+                                rule_text = learning_result['inferred_rule']
+                                primitive_candidate = learning_result.get('primitive_candidate')
+                                action_type = learning_result.get('action_type', replay_prediction.action_type)
+                                
+                                # Convert inferred rule to physics rule format for WorldModel
+                                if primitive_candidate == 'object_control' and 'moves' in rule_text.lower():
+                                    # Movement rule: "ACTION1 moves controlled object"
+                                    self._world_model.add_physics_rule({
+                                        'type': 'movement',
+                                        'trigger': f'action_{action_type}',
+                                        'effect': 'controlled_object_moves',
+                                        'direction': self._infer_direction_from_action(action_type),
+                                        'source': 'replay_learning',
+                                        'confidence': replay_prediction.confidence
+                                    })
+                                    logger.debug(f"[PHYSICS-PIPELINE] Added movement rule for action_{action_type}")
+                                    
+                                elif primitive_candidate == 'toggle_interaction' and 'toggle' in rule_text.lower():
+                                    # Toggle rule: "Clicking color X toggles state"
+                                    self._world_model.add_trigger_rule({
+                                        'trigger_type': 'click',
+                                        'trigger_action': action_type,
+                                        'trigger_position': replay_prediction.coordinate if replay_prediction.coordinate else None,
+                                        'effect': 'toggle_state',
+                                        'source': 'replay_learning',
+                                        'confidence': replay_prediction.confidence
+                                    })
+                                    logger.debug(f"[PHYSICS-PIPELINE] Added toggle rule for action_{action_type}")
+                                    
+                                elif primitive_candidate == 'level_completion_trigger':
+                                    # Level completion: store as trigger rule
+                                    self._world_model.add_trigger_rule({
+                                        'trigger_type': 'level_complete',
+                                        'trigger_action': action_type,
+                                        'effect': 'score_increase',
+                                        'source': 'replay_learning',
+                                        'confidence': 0.9  # High confidence for observed completions
+                                    })
+                                    logger.debug(f"[PHYSICS-PIPELINE] Added level completion trigger")
+                            except Exception as physics_err:
+                                logger.debug(f"[PHYSICS-PIPELINE] Failed to add physics rule: {physics_err}")
                     except Exception as e:
                         logger.debug(f"[REPLAY-LEARN] Outcome recording failed: {e}")
                 

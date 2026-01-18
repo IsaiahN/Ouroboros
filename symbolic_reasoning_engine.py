@@ -1268,6 +1268,137 @@ class ActionPlanner:
         """Calculate heuristic for A* (distance to goal)."""
         return self.goal_evaluator.get_distance_to_goal(state)
     
+    def mcts_search(self, budget: int = 100, exploration_constant: float = 1.414) -> Optional[List[int]]:
+        """
+        Monte Carlo Tree Search for probabilistic planning.
+        
+        Better than A* when:
+        - Outcomes are uncertain/stochastic
+        - Action space is large
+        - Need to balance exploration vs exploitation
+        
+        Uses UCB1 for selection and random rollouts for evaluation.
+        
+        Args:
+            budget: Number of simulations to run
+            exploration_constant: UCB1 exploration parameter (sqrt(2) is standard)
+            
+        Returns:
+            Best action sequence found, or None
+        """
+        import math
+        import random
+        
+        class MCTSNode:
+            """Node in the MCTS tree."""
+            __slots__ = ['state', 'parent', 'action', 'children', 'visits', 'value', 'untried_actions']
+            
+            def __init__(self, state: WorldState, parent=None, action: Optional[int] = None):
+                self.state = state
+                self.parent = parent
+                self.action = action
+                self.children: Dict[int, 'MCTSNode'] = {}
+                self.visits = 0
+                self.value = 0.0
+                self.untried_actions = [1, 2, 3, 4]  # Movement actions
+        
+        def ucb1(node: MCTSNode, parent_visits: int, c: float) -> float:
+            """Upper Confidence Bound for Trees."""
+            if node.visits == 0:
+                return float('inf')
+            exploitation = node.value / node.visits
+            exploration = c * math.sqrt(math.log(parent_visits) / node.visits)
+            return exploitation + exploration
+        
+        def select(node: MCTSNode) -> MCTSNode:
+            """Select best child using UCB1."""
+            while node.untried_actions == [] and node.children:
+                node = max(node.children.values(), key=lambda n: ucb1(n, node.visits, exploration_constant))
+            return node
+        
+        def expand(node: MCTSNode) -> MCTSNode:
+            """Expand a new child node."""
+            if not node.untried_actions:
+                return node
+            action = random.choice(node.untried_actions)
+            node.untried_actions.remove(action)
+            
+            # Use world model to predict next state
+            temp_model = WorldModel(node.state.clone(), self.world_model.agent_id)
+            new_state = temp_model.apply_action(action)
+            
+            child = MCTSNode(new_state, parent=node, action=action)
+            node.children[action] = child
+            return child
+        
+        def rollout(state: WorldState, max_rollout_depth: int = 20) -> float:
+            """Random rollout to estimate value."""
+            temp_state = state.clone()
+            
+            for _ in range(max_rollout_depth):
+                # Check if goal reached
+                if self.goal_evaluator.evaluate(temp_state):
+                    return 1.0  # Win!
+                
+                # Random action
+                action = random.choice([1, 2, 3, 4])
+                temp_model = WorldModel(temp_state, self.world_model.agent_id)
+                temp_state = temp_model.apply_action(action)
+            
+            # Return heuristic value (closer to goal = higher value)
+            distance = self.goal_evaluator.get_distance_to_goal(temp_state)
+            return 1.0 / (1.0 + distance)  # Normalize to [0, 1]
+        
+        def backpropagate(node: MCTSNode, value: float):
+            """Backpropagate value up the tree."""
+            while node:
+                node.visits += 1
+                node.value += value
+                node = node.parent
+        
+        # Initialize root
+        root = MCTSNode(self.world_model.state.clone())
+        
+        # Run simulations
+        for _ in range(budget):
+            # Selection
+            node = select(root)
+            
+            # Expansion
+            if node.untried_actions and node.visits > 0:
+                node = expand(node)
+            
+            # Simulation (rollout)
+            value = rollout(node.state)
+            
+            # Backpropagation
+            backpropagate(node, value)
+            
+            self.nodes_explored += 1
+        
+        # Extract best path
+        if not root.children:
+            return None
+        
+        # Build action sequence by following most-visited children
+        actions = []
+        node = root
+        while node.children:
+            # Select child with most visits (most robust)
+            best_child = max(node.children.values(), key=lambda n: n.visits)
+            actions.append(best_child.action)
+            node = best_child
+            
+            # Check if this path leads to goal
+            if self.goal_evaluator.evaluate(node.state):
+                self.solution_found = True
+                break
+            
+            if len(actions) >= self.max_depth:
+                break
+        
+        return actions if actions else None
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get planning statistics."""
         return {

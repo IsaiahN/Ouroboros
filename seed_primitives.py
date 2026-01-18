@@ -3382,39 +3382,241 @@ class SeedPrimitiveRegistry:
         target_a: Any
     ) -> Dict[str, Any]:
         """
-        'This is to that as X is to Y' reasoning.
+        'This is to that as X is to Y' reasoning with structural graph matching.
+        
+        Enhanced to support:
+        1. Color transformations (numeric shift)
+        2. Object property transformations (scale, position)
+        3. Structural/relational transformations (graph isomorphism)
+        4. Grid pattern transformations (rotate, flip, translate)
         
         Returns:
             {
                 'inferred_target_b': Any,
                 'transformation_type': str,
                 'confidence': float,
-                'mapping': Dict
+                'mapping': Dict,
+                'structural_match': bool
             }
         """
         result = {
             'inferred_target_b': None,
             'transformation_type': 'unknown',
             'confidence': 0.0,
-            'mapping': {}
+            'mapping': {},
+            'structural_match': False
         }
         
-        # Detect transformation between source_a and source_b
+        # ==================================================================
+        # CASE 1: Numeric/Color transformation
+        # ==================================================================
         if isinstance(source_a, int) and isinstance(source_b, int):
-            # Color transformation
             diff = source_b - source_a
             result['transformation_type'] = 'color_shift'
             result['mapping'] = {'shift': diff}
             result['inferred_target_b'] = target_a + diff if isinstance(target_a, int) else target_a
             result['confidence'] = 0.8
+            return result
         
-        elif isinstance(source_a, dict) and isinstance(source_b, dict):
-            # Object transformation
+        # ==================================================================
+        # CASE 2: Object/Dict transformation (property-based)
+        # ==================================================================
+        if isinstance(source_a, dict) and isinstance(source_b, dict):
+            transformations = []
+            
+            # Size transformation
             if 'size' in source_a and 'size' in source_b:
                 scale = source_b.get('size', 1) / max(source_a.get('size', 1), 1)
-                result['transformation_type'] = 'scale'
-                result['mapping'] = {'scale_factor': scale}
+                if scale != 1.0:
+                    transformations.append(('scale', {'factor': scale}))
+            
+            # Position transformation
+            if 'position' in source_a and 'position' in source_b:
+                pos_a, pos_b = source_a['position'], source_b['position']
+                if isinstance(pos_a, (list, tuple)) and isinstance(pos_b, (list, tuple)):
+                    dx = pos_b[0] - pos_a[0] if len(pos_b) > 0 and len(pos_a) > 0 else 0
+                    dy = pos_b[1] - pos_a[1] if len(pos_b) > 1 and len(pos_a) > 1 else 0
+                    if dx != 0 or dy != 0:
+                        transformations.append(('translate', {'dx': dx, 'dy': dy}))
+            
+            # Color transformation
+            if 'color' in source_a and 'color' in source_b:
+                if source_a['color'] != source_b['color']:
+                    transformations.append(('recolor', {'from': source_a['color'], 'to': source_b['color']}))
+            
+            # Apply transformations to target
+            if transformations and isinstance(target_a, dict):
+                result['transformation_type'] = 'multi_transform'
+                result['mapping'] = {'transforms': transformations}
+                result['inferred_target_b'] = self._apply_transforms(target_a, transformations)
                 result['confidence'] = 0.7
+                return result
+        
+        # ==================================================================
+        # CASE 3: Grid/Pattern transformation (structural matching)
+        # ==================================================================
+        if isinstance(source_a, list) and isinstance(source_b, list):
+            if source_a and isinstance(source_a[0], list):  # 2D grid
+                structural_result = self._find_grid_transformation(source_a, source_b, target_a)
+                if structural_result['found']:
+                    result['transformation_type'] = structural_result['type']
+                    result['mapping'] = structural_result['mapping']
+                    result['inferred_target_b'] = structural_result['target_b']
+                    result['confidence'] = structural_result['confidence']
+                    result['structural_match'] = True
+                    return result
+        
+        # ==================================================================
+        # CASE 4: Relational/Graph structure matching
+        # ==================================================================
+        # Extract relational structure and find bijection
+        if isinstance(source_a, (list, dict)) and isinstance(source_b, (list, dict)):
+            graph_result = self._find_relational_mapping(source_a, source_b, target_a)
+            if graph_result['found']:
+                result['transformation_type'] = 'relational'
+                result['mapping'] = graph_result['mapping']
+                result['inferred_target_b'] = graph_result['target_b']
+                result['confidence'] = graph_result['confidence']
+                result['structural_match'] = True
+                return result
+        
+        return result
+    
+    def _apply_transforms(self, obj: Dict, transforms: List[Tuple[str, Dict]]) -> Dict:
+        """Apply a sequence of transformations to an object."""
+        result = dict(obj)  # Shallow copy
+        
+        for transform_type, params in transforms:
+            if transform_type == 'scale' and 'size' in result:
+                result['size'] = int(result['size'] * params['factor'])
+            elif transform_type == 'translate' and 'position' in result:
+                pos = list(result['position'])
+                if len(pos) >= 2:
+                    pos[0] += params['dx']
+                    pos[1] += params['dy']
+                    result['position'] = tuple(pos)
+            elif transform_type == 'recolor' and 'color' in result:
+                if result['color'] == params['from']:
+                    result['color'] = params['to']
+        
+        return result
+    
+    def _find_grid_transformation(self, source_a: List, source_b: List, target_a: Any) -> Dict:
+        """Find transformation between two grids and apply to target."""
+        result = {'found': False, 'type': 'unknown', 'mapping': {}, 'target_b': None, 'confidence': 0.0}
+        
+        if not source_a or not source_b:
+            return result
+        
+        h_a, w_a = len(source_a), len(source_a[0]) if source_a else 0
+        h_b, w_b = len(source_b), len(source_b[0]) if source_b else 0
+        
+        # Check for rotation (90, 180, 270 degrees)
+        if h_a == w_b and w_a == h_b:  # Dimensions suggest rotation
+            # Test 90-degree clockwise rotation
+            rotated = [[source_a[h_a - 1 - j][i] for j in range(h_a)] for i in range(w_a)]
+            if rotated == source_b:
+                result['found'] = True
+                result['type'] = 'rotate_90'
+                result['mapping'] = {'angle': 90}
+                result['confidence'] = 0.9
+                if isinstance(target_a, list) and target_a and isinstance(target_a[0], list):
+                    t_h, t_w = len(target_a), len(target_a[0]) if target_a else 0
+                    result['target_b'] = [[target_a[t_h - 1 - j][i] for j in range(t_h)] for i in range(t_w)]
+                return result
+        
+        # Check for horizontal flip
+        if h_a == h_b and w_a == w_b:
+            flipped_h = [row[::-1] for row in source_a]
+            if flipped_h == source_b:
+                result['found'] = True
+                result['type'] = 'flip_horizontal'
+                result['mapping'] = {'axis': 'horizontal'}
+                result['confidence'] = 0.9
+                if isinstance(target_a, list):
+                    result['target_b'] = [row[::-1] if isinstance(row, list) else row for row in target_a]
+                return result
+            
+            # Check for vertical flip
+            flipped_v = source_a[::-1]
+            if flipped_v == source_b:
+                result['found'] = True
+                result['type'] = 'flip_vertical'
+                result['mapping'] = {'axis': 'vertical'}
+                result['confidence'] = 0.9
+                if isinstance(target_a, list):
+                    result['target_b'] = target_a[::-1]
+                return result
+            
+            # Check for color remapping
+            color_map = {}
+            match = True
+            for y in range(h_a):
+                for x in range(w_a):
+                    c_a, c_b = source_a[y][x], source_b[y][x]
+                    if c_a in color_map:
+                        if color_map[c_a] != c_b:
+                            match = False
+                            break
+                    else:
+                        color_map[c_a] = c_b
+                if not match:
+                    break
+            
+            if match and color_map:
+                result['found'] = True
+                result['type'] = 'color_remap'
+                result['mapping'] = {'color_map': color_map}
+                result['confidence'] = 0.85
+                if isinstance(target_a, list) and target_a and isinstance(target_a[0], list):
+                    result['target_b'] = [
+                        [color_map.get(c, c) for c in row]
+                        for row in target_a
+                    ]
+                return result
+        
+        return result
+    
+    def _find_relational_mapping(self, source_a: Any, source_b: Any, target_a: Any) -> Dict:
+        """Find relational/structural mapping between complex structures."""
+        result = {'found': False, 'mapping': {}, 'target_b': None, 'confidence': 0.0}
+        
+        # Extract structural fingerprint (simplified graph isomorphism)
+        def get_structure(obj, depth=0):
+            """Extract structural fingerprint recursively."""
+            if depth > 5:  # Prevent infinite recursion
+                return ('leaf', type(obj).__name__)
+            if isinstance(obj, dict):
+                return ('dict', tuple(sorted((k, get_structure(v, depth+1)) for k, v in obj.items())))
+            elif isinstance(obj, (list, tuple)):
+                return ('seq', len(obj), tuple(get_structure(x, depth+1) for x in obj[:10]))  # Limit to 10
+            elif isinstance(obj, (int, float)):
+                return ('num', type(obj).__name__)
+            else:
+                return ('other', type(obj).__name__)
+        
+        struct_a = get_structure(source_a)
+        struct_b = get_structure(source_b)
+        
+        # If structures match, we can find element-wise mapping
+        if struct_a[0] == struct_b[0]:  # Same top-level type
+            if struct_a[0] == 'dict' and len(struct_a[1]) == len(struct_b[1]):
+                # Dict with same number of keys - try to find key mapping
+                keys_a = sorted(source_a.keys())
+                keys_b = sorted(source_b.keys())
+                if len(keys_a) == len(keys_b):
+                    key_map = dict(zip(keys_a, keys_b))
+                    result['found'] = True
+                    result['mapping'] = {'key_bijection': key_map}
+                    result['confidence'] = 0.6
+                    if isinstance(target_a, dict):
+                        result['target_b'] = {key_map.get(k, k): v for k, v in target_a.items()}
+            
+            elif struct_a[0] == 'seq' and struct_a[1] == struct_b[1]:
+                # Sequences of same length - element-wise mapping
+                result['found'] = True
+                result['mapping'] = {'element_wise': True, 'length': struct_a[1]}
+                result['confidence'] = 0.5
         
         return result
     
