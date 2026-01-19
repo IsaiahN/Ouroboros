@@ -34,10 +34,14 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 import random
 import hashlib
 import json
+import logging
 import numpy as np
 from typing import List, Any, Dict, Optional, Callable, Tuple, Union
 from dataclasses import dataclass, field
 from enum import Enum
+
+# Logger for this module
+logger = logging.getLogger(__name__)
 
 
 class PrimitiveCategory(Enum):
@@ -92,6 +96,10 @@ class PrimitiveCategory(Enum):
     PENETRATION = "penetration"       # Piercing, passing through, projectiles
     SENSING = "sensing"               # Visibility, transparency, layering, occlusion
     TEXTURE = "texture"               # Surface patterns, gradients, regularity
+    # === SYMBOLIC MECHANICS: UNIVERSAL PUZZLE PRIMITIVES ===
+    SYMBOLIC = "symbolic"             # Symbolic state tracking (shape, color, orientation as symbols)
+    REMOTE_CAUSATION = "remote_causation"  # Action-at-distance effect detection
+    UI_DETECTION = "ui_detection"     # HUD parsing, health bars, action limits
 
 
 @dataclass
@@ -2630,7 +2638,7 @@ class SeedPrimitiveRegistry:
             name="relation_history",
             category=PrimitiveCategory.RELATIONAL,
             description="Get history of relationships between two objects. BIRTHRIGHT.",
-            func=self._relation_history,
+            func=self._get_relation_history,
             input_types=["object_a", "object_b"],
             output_type="dict",
             unlock_level="seed",
@@ -3689,6 +3697,213 @@ class SeedPrimitiveRegistry:
             unlock_level="seed",
             piaget_stage="sensorimotor"
         ))
+        
+        # ==================================================================
+        # SYMBOLIC MECHANICS: SYMBOLIC REASONING PRIMITIVES (P0 - BIRTHRIGHT)
+        # ==================================================================
+        # Many puzzle games require understanding that:
+        # 1. The "key" object's SHAPE must match the "lock" object's SHAPE
+        # 2. Walking into tools TRANSFORMS the key's symbolic state
+        # 3. Changes happen at a DISTANCE (remote causation)
+        # These primitives enable symbolic puzzle reasoning for ALL games.
+        # ==================================================================
+        
+        self._register(Primitive(
+            name="get_symbolic_state",
+            category=PrimitiveCategory.SYMBOLIC,
+            description="Extract symbolic properties (shape, color, orientation) of an object region.",
+            func=self._get_symbolic_state,
+            input_types=["frame", "region_bbox"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="compare_symbolic_pattern",
+            category=PrimitiveCategory.SYMBOLIC,
+            description="Compare symbolic states of two regions (key vs lock matching).",
+            func=self._compare_symbolic_pattern,
+            input_types=["state_a", "state_b"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="detect_symbolic_change",
+            category=PrimitiveCategory.SYMBOLIC,
+            description="Detect if symbolic state (shape/color/orientation) changed between frames.",
+            func=self._detect_symbolic_change,
+            input_types=["frame_before", "frame_after", "region_bbox"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="detect_tool_object",
+            category=PrimitiveCategory.SYMBOLIC,
+            description="Identify objects that act as transformation tools (have effects when touched).",
+            func=self._detect_tool_object,
+            input_types=["frame", "known_tool_signatures"],
+            output_type="list",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="classify_symbolic_role",
+            category=PrimitiveCategory.SYMBOLIC,
+            description="Classify object role: key (controllable), lock (target), tool (transformer), gate.",
+            func=self._classify_symbolic_role,
+            input_types=["frame", "object_positions", "controlled_objects"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        # ==================================================================
+        # SYMBOLIC MECHANICS: REMOTE CAUSATION PRIMITIVES (P0 - BIRTHRIGHT)
+        # ==================================================================
+        # Action-at-distance is a key insight for many puzzle games.
+        # Agent touches a tool HERE, change happens THERE.
+        # ==================================================================
+        
+        self._register(Primitive(
+            name="detect_action_at_distance",
+            category=PrimitiveCategory.REMOTE_CAUSATION,
+            description="Detect if an action caused change at a remote location.",
+            func=self._detect_action_at_distance,
+            input_types=["trigger_position", "frame_before", "frame_after"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="find_remote_effect_region",
+            category=PrimitiveCategory.REMOTE_CAUSATION,
+            description="Find the region where remote effect occurred after trigger.",
+            func=self._find_remote_effect_region,
+            input_types=["trigger_position", "frame_before", "frame_after", "min_distance"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="correlate_trigger_effect",
+            category=PrimitiveCategory.REMOTE_CAUSATION,
+            description="Build causal chain: trigger object -> remote effect.",
+            func=self._correlate_trigger_effect,
+            input_types=["trigger_position", "trigger_object", "effect_region", "effect_type"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        # ==================================================================
+        # SYMBOLIC MECHANICS: UI DETECTION PRIMITIVES (P0 - BIRTHRIGHT)
+        # ==================================================================
+        # Many games have HUD elements: health bars, action limits, lives.
+        # Agent needs to parse these to understand constraints.
+        # ==================================================================
+        
+        self._register(Primitive(
+            name="detect_ui_element",
+            category=PrimitiveCategory.UI_DETECTION,
+            description="Detect static UI elements (counters, bars, indicators) typically at screen edges.",
+            func=self._detect_ui_element,
+            input_types=["frame"],
+            output_type="list",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="parse_counter_display",
+            category=PrimitiveCategory.UI_DETECTION,
+            description="Parse dot/square counters (lives, actions remaining).",
+            func=self._parse_counter_display,
+            input_types=["frame", "ui_region"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="map_indicator_to_state",
+            category=PrimitiveCategory.UI_DETECTION,
+            description="Map UI indicator changes to game state (e.g., fewer dots = fewer actions).",
+            func=self._map_indicator_to_state,
+            input_types=["indicator_before", "indicator_after", "action_taken"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="detect_ui_region_change",
+            category=PrimitiveCategory.UI_DETECTION,
+            description="Detect if a UI region changed (health depleted, timer tick).",
+            func=self._detect_ui_region_change,
+            input_types=["frame_before", "frame_after", "ui_region"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        # ==================================================================
+        # SYMBOLIC MECHANICS: GOAL REASONING PRIMITIVES (P1 - EARLY UNLOCK)
+        # ==================================================================
+        # Compound goals require subgoal decomposition.
+        # Example goal: "match key to lock" = subgoal1: "transform key shape" + subgoal2: "reach lock"
+        # ==================================================================
+        
+        self._register(Primitive(
+            name="detect_compound_goal",
+            category=PrimitiveCategory.GOAL,
+            description="Detect if game has compound goal requiring multiple conditions.",
+            func=self._detect_compound_goal,
+            input_types=["frame", "game_context"],
+            output_type="dict",
+            unlock_level="early",
+            piaget_stage="preoperational"
+        ))
+        
+        self._register(Primitive(
+            name="measure_subgoal_progress",
+            category=PrimitiveCategory.GOAL,
+            description="Measure progress toward a specific subgoal (0.0 to 1.0).",
+            func=self._measure_subgoal_progress,
+            input_types=["current_state", "target_state", "subgoal_type"],
+            output_type="float",
+            unlock_level="early",
+            piaget_stage="preoperational"
+        ))
+        
+        self._register(Primitive(
+            name="calculate_resource_path",
+            category=PrimitiveCategory.GOAL,
+            description="Calculate path through resource space (actions needed for transformation).",
+            func=self._calculate_resource_path,
+            input_types=["current_symbolic_state", "target_symbolic_state", "available_tools"],
+            output_type="dict",
+            unlock_level="early",
+            piaget_stage="preoperational"
+        ))
+        
+        self._register(Primitive(
+            name="decompose_goal",
+            category=PrimitiveCategory.GOAL,
+            description="Break compound goal into ordered subgoals.",
+            func=self._decompose_goal,
+            input_types=["compound_goal", "available_primitives"],
+            output_type="list",
+            unlock_level="early",
+            piaget_stage="preoperational"
+        ))
     
     # ======================================================================
     # PRIMITIVE IMPLEMENTATION HELPERS
@@ -4303,13 +4518,13 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _find_similar_objects(
+    def _find_similar_objects_basic(
         self,
         reference_object: Dict[str, Any],
         frame: List[List[int]]
     ) -> List[Dict[str, Any]]:
         """
-        Find all objects similar to a reference object.
+        Find all objects similar to a reference object (basic version).
         
         Similarity based on color, size, shape approximation.
         Useful for finding "all objects like this one" for puzzles.
@@ -5818,12 +6033,12 @@ class SeedPrimitiveRegistry:
         self,
         positions_a: List[Tuple[int, int]],
         positions_b: List[Tuple[int, int]]
-    ) -> int:
+    ) -> float:
         """Helper: Get minimum Manhattan distance between two position sets."""
         if not positions_a or not positions_b:
             return float('inf')
         
-        min_dist = float('inf')
+        min_dist: float = float('inf')
         for ax, ay in positions_a:
             for bx, by in positions_b:
                 dist = abs(ax - bx) + abs(ay - by)
@@ -6329,7 +6544,7 @@ class SeedPrimitiveRegistry:
         start_pos: Tuple[int, int],
         end_pos: Tuple[int, int],
         frame: List[List[int]],
-        passable_colors: List[int] = None
+        passable_colors: Optional[List[int]] = None
     ) -> Dict[str, Any]:
         """
         BIRTHRIGHT: Detect if traversable path exists between two positions.
@@ -7732,7 +7947,7 @@ class SeedPrimitiveRegistry:
                     color_counts[c] = color_counts.get(c, 0) + 1
             result['region_colors'] = color_counts
             if color_counts:
-                result['dominant_color'] = max(color_counts, key=color_counts.get)
+                result['dominant_color'] = max(color_counts.keys(), key=lambda k: color_counts[k])
                 result['unique_colors'] = list(color_counts.keys())
         else:
             # Sample whole frame
@@ -7742,7 +7957,7 @@ class SeedPrimitiveRegistry:
                     color_counts[c] = color_counts.get(c, 0) + 1
             result['region_colors'] = color_counts
             if color_counts:
-                result['dominant_color'] = max(color_counts, key=color_counts.get)
+                result['dominant_color'] = max(color_counts.keys(), key=lambda k: color_counts[k])
                 result['unique_colors'] = list(color_counts.keys())
         
         return result
@@ -8242,8 +8457,10 @@ class SeedPrimitiveRegistry:
         struct_b = get_structure(source_b)
         
         # If structures match, we can find element-wise mapping
-        if struct_a[0] == struct_b[0]:  # Same top-level type
-            if struct_a[0] == 'dict' and len(struct_a[1]) == len(struct_b[1]):
+        if isinstance(struct_a, tuple) and isinstance(struct_b, tuple) and len(struct_a) >= 2 and len(struct_b) >= 2 and struct_a[0] == struct_b[0]:  # Same top-level type
+            struct_a_data = struct_a[1]
+            struct_b_data = struct_b[1]
+            if struct_a[0] == 'dict' and isinstance(struct_a_data, tuple) and isinstance(struct_b_data, tuple) and len(struct_a_data) == len(struct_b_data):
                 # Dict with same number of keys - try to find key mapping
                 keys_a = sorted(source_a.keys())
                 keys_b = sorted(source_b.keys())
@@ -8916,13 +9133,13 @@ class SeedPrimitiveRegistry:
         
         if target_color is None:
             # Find most common non-background color
-            colors = {}
+            colors: Dict[int, int] = {}
             for row in frame:
                 for c in row:
                     if c != 0:
                         colors[c] = colors.get(c, 0) + 1
             if colors:
-                target_color = max(colors, key=colors.get)
+                target_color = max(colors.keys(), key=lambda k: colors[k])
         
         if target_color is None:
             return result
@@ -10571,7 +10788,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _relation_history(
+    def _get_relation_history(
         self,
         object_a: str,
         object_b: str
@@ -10579,14 +10796,14 @@ class SeedPrimitiveRegistry:
         """
         Get history of relationships between two objects.
         """
-        result = {
+        result: Dict[str, Any] = {
             'history': [],
             'history_length': 0,
             'most_common_relation': None
         }
         
         # Query all relation types between these objects
-        relation_counts = {}
+        relation_counts: Dict[str, int] = {}
         
         for key, history in self._relation_history.items():
             if object_a in key and object_b in key:
@@ -10597,7 +10814,7 @@ class SeedPrimitiveRegistry:
         
         result['history_length'] = len(result['history'])
         if relation_counts:
-            result['most_common_relation'] = max(relation_counts, key=relation_counts.get)
+            result['most_common_relation'] = max(relation_counts.keys(), key=lambda k: relation_counts[k])
         
         return result
     
@@ -11692,9 +11909,9 @@ class SeedPrimitiveRegistry:
         # Would need object tracking
         return result
     
-    def _detect_pushing(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
-        """Detect if one object pushes another."""
-        result = {
+    def _detect_pushing_frame(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
+        """Detect if one object pushes another (frame-based version)."""
+        result: Dict[str, Any] = {
             'primitive': 'detect_pushing',
             'pushing_detected': False,
             'pusher_color': None,
@@ -12082,9 +12299,9 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _detect_merging(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
-        """Detect pieces merging into one object."""
-        result = {
+    def _detect_merging_frame(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
+        """Detect pieces merging into one object (frame-based version)."""
+        result: Dict[str, Any] = {
             'primitive': 'detect_merging',
             'merging_detected': False,
             'pieces_before': 0,
@@ -12305,12 +12522,12 @@ class SeedPrimitiveRegistry:
             return result
         
         # If consistent direction, might be moving toward something
-        direction_counts = {}
+        direction_counts: Dict[str, int] = {}
         for d in directions:
             direction_counts[d] = direction_counts.get(d, 0) + 1
         
         if direction_counts:
-            most_common = max(direction_counts, key=direction_counts.get)
+            most_common = max(direction_counts.keys(), key=lambda k: direction_counts[k])
             consistency = direction_counts[most_common] / len(directions)
             
             if consistency > 0.7:
@@ -12561,9 +12778,9 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _detect_subdivision(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
-        """Detect controlled division into regular parts."""
-        result = {
+    def _detect_subdivision_frame(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
+        """Detect controlled division into regular parts (frame-based version)."""
+        result: Dict[str, Any] = {
             'primitive': 'detect_subdivision',
             'subdivision_detected': False,
             'division_type': None,
@@ -12659,9 +12876,9 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _detect_aggregation(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
-        """Detect pieces coming together into larger whole."""
-        result = {
+    def _detect_aggregation_frame(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
+        """Detect pieces coming together into larger whole (frame-based version)."""
+        result: Dict[str, Any] = {
             'primitive': 'detect_aggregation',
             'aggregation_detected': False,
             'pieces_before': 0,
@@ -12925,9 +13142,9 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _detect_layering(self, frame_history: List[List[List[int]]]) -> Dict[str, Any]:
-        """Detect objects stacked in layers (z-order)."""
-        result = {
+    def _detect_layering_history(self, frame_history: List[List[List[int]]]) -> Dict[str, Any]:
+        """Detect objects stacked in layers (z-order) from frame history."""
+        result: Dict[str, Any] = {
             'primitive': 'detect_layering',
             'layering_detected': False,
             'layer_order': [],
@@ -13095,7 +13312,7 @@ class SeedPrimitiveRegistry:
     # TEXTURE & SURFACE PATTERN IMPLEMENTATIONS
     # ======================================================================
     
-    def _detect_stripe_pattern(self, frame: List[List[int]], region: List[tuple] = None) -> Dict[str, Any]:
+    def _detect_stripe_pattern(self, frame: List[List[int]], region: Optional[List[tuple]] = None) -> Dict[str, Any]:
         """Detect alternating stripe pattern (horizontal or vertical)."""
         result = {
             'primitive': 'detect_stripe_pattern',
@@ -13171,7 +13388,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _detect_checker_pattern(self, frame: List[List[int]], region: List[tuple] = None) -> Dict[str, Any]:
+    def _detect_checker_pattern(self, frame: List[List[int]], region: Optional[List[tuple]] = None) -> Dict[str, Any]:
         """Detect checkerboard/alternating grid pattern."""
         result = {
             'primitive': 'detect_checker_pattern',
@@ -13207,7 +13424,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _detect_gradient(self, frame: List[List[int]], region: List[tuple] = None) -> Dict[str, Any]:
+    def _detect_gradient(self, frame: List[List[int]], region: Optional[List[tuple]] = None) -> Dict[str, Any]:
         """Detect color value changing gradually across region."""
         result = {
             'primitive': 'detect_gradient',
@@ -13266,7 +13483,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _measure_pattern_regularity(self, frame: List[List[int]], region: List[tuple] = None) -> Dict[str, Any]:
+    def _measure_pattern_regularity(self, frame: List[List[int]], region: Optional[List[tuple]] = None) -> Dict[str, Any]:
         """Measure how regular/repeated a pattern is."""
         result = {
             'primitive': 'measure_pattern_regularity',
@@ -13405,7 +13622,7 @@ class SeedPrimitiveRegistry:
         result['has_pipes'] = len(result['pipe_cells']) > 5
         return result
     
-    def _detect_valve(self, frame: List[List[int]], frame_history: List[List[List[int]]] = None) -> Dict[str, Any]:
+    def _detect_valve(self, frame: List[List[int]], frame_history: Optional[List[List[List[int]]]] = None) -> Dict[str, Any]:
         """Find controllable flow points (valves, gates, switches)."""
         result = {
             'primitive': 'detect_valve',
@@ -13457,7 +13674,7 @@ class SeedPrimitiveRegistry:
         result['has_valves'] = len(result['valve_positions']) > 0
         return result
     
-    def _predict_flow_path(self, frame: List[List[int]], source_position: tuple = None, channel_map: dict = None) -> Dict[str, Any]:
+    def _predict_flow_path(self, frame: List[List[int]], source_position: Optional[tuple] = None, channel_map: Optional[dict] = None) -> Dict[str, Any]:
         """Predict where fluid/color will flow next based on channels."""
         result = {
             'primitive': 'predict_flow_path',
@@ -13514,7 +13731,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _detect_pour_target(self, frame: List[List[int]], source_color: int = None, goal_region: List[tuple] = None) -> Dict[str, Any]:
+    def _detect_pour_target(self, frame: List[List[int]], source_color: Optional[int] = None, goal_region: Optional[List[tuple]] = None) -> Dict[str, Any]:
         """Identify where to pour/transfer material to achieve goal (VC33)."""
         result = {
             'primitive': 'detect_pour_target',
@@ -13660,7 +13877,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _detect_complementary_shape(self, frame: List[List[int]], shape_color: int = None, background_color: int = 0) -> Dict[str, Any]:
+    def _detect_complementary_shape(self, frame: List[List[int]], shape_color: Optional[int] = None, background_color: int = 0) -> Dict[str, Any]:
         """Find shape that matches/fills negative space of another (AS66)."""
         result = {
             'primitive': 'detect_complementary_shape',
@@ -13725,7 +13942,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _count_symmetry_axes(self, frame: List[List[int]], region: List[tuple] = None) -> Dict[str, Any]:
+    def _count_symmetry_axes(self, frame: List[List[int]], region: Optional[List[tuple]] = None) -> Dict[str, Any]:
         """Count number of symmetry axes in pattern (LP55)."""
         result = {
             'primitive': 'count_symmetry_axes',
@@ -13786,7 +14003,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _predict_symmetric_position(self, frame: List[List[int]], existing_positions: List[tuple] = None, symmetry_center: tuple = None) -> Dict[str, Any]:
+    def _predict_symmetric_position(self, frame: List[List[int]], existing_positions: Optional[List[tuple]] = None, symmetry_center: Optional[tuple] = None) -> Dict[str, Any]:
         """Predict where next element should be to maintain symmetry (LP55)."""
         result = {
             'primitive': 'predict_symmetric_position',
@@ -14028,7 +14245,7 @@ class SeedPrimitiveRegistry:
         
         return result
     
-    def _chain_primitives(self, primitive_list: List[str], frame: List[List[int]], context: Dict[str, Any] = None) -> Dict[str, Any]:
+    def _chain_primitives(self, primitive_list: List[str], frame: List[List[int]], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Compose multiple primitives into a solution chain."""
         result = {
             'primitive': 'chain_primitives',
@@ -14084,6 +14301,807 @@ class SeedPrimitiveRegistry:
         result['success'] = all(r.get('success', False) for r in chain_results)
         
         return result
+    
+    # ======================================================================
+    # SYMBOLIC MECHANICS: SYMBOLIC REASONING IMPLEMENTATIONS
+    # ======================================================================
+    
+    def _get_symbolic_state(self, frame: List[List[int]], region_bbox: Optional[List[int]] = None) -> Dict[str, Any]:
+        """Extract symbolic properties (shape, color, orientation) of an object region."""
+        result = {
+            'primitive': 'get_symbolic_state',
+            'shape_signature': None,
+            'dominant_color': None,
+            'orientation': None,
+            'pixel_count': 0,
+            'aspect_ratio': 0.0,
+            'centroid': None
+        }
+        
+        if not frame:
+            return result
+        
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
+        # Define region
+        if region_bbox:
+            x1, y1, x2, y2 = region_bbox
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(width, x2), min(height, y2)
+        else:
+            x1, y1, x2, y2 = 0, 0, width, height
+        
+        # Extract pixels in region
+        pixels = []
+        color_counts = {}
+        for y in range(y1, y2):
+            for x in range(x1, x2):
+                c = frame[y][x]
+                if c != 0:  # Non-background
+                    pixels.append((x, y, c))
+                    color_counts[c] = color_counts.get(c, 0) + 1
+        
+        if not pixels:
+            return result
+        
+        result['pixel_count'] = len(pixels)
+        
+        # Dominant color
+        if color_counts:
+            result['dominant_color'] = max(color_counts.keys(), key=lambda k: color_counts[k])
+        
+        # Centroid
+        cx = sum(p[0] for p in pixels) / len(pixels)
+        cy = sum(p[1] for p in pixels) / len(pixels)
+        result['centroid'] = (cx, cy)
+        
+        # Aspect ratio
+        xs = [p[0] for p in pixels]
+        ys = [p[1] for p in pixels]
+        w = max(xs) - min(xs) + 1 if xs else 1
+        h = max(ys) - min(ys) + 1 if ys else 1
+        result['aspect_ratio'] = w / h if h > 0 else 1.0
+        
+        # Shape signature: normalized pixel positions relative to centroid
+        normalized = []
+        for x, y, c in pixels:
+            nx = (x - cx) / max(w, 1)
+            ny = (y - cy) / max(h, 1)
+            normalized.append((round(nx, 2), round(ny, 2)))
+        normalized.sort()
+        result['shape_signature'] = hash(tuple(normalized))
+        
+        # Orientation: based on principal axis
+        if len(pixels) >= 3:
+            # Simple orientation based on aspect ratio and spread
+            if w > h * 1.5:
+                result['orientation'] = 'horizontal'
+            elif h > w * 1.5:
+                result['orientation'] = 'vertical'
+            else:
+                result['orientation'] = 'square'
+        
+        return result
+    
+    def _compare_symbolic_pattern(self, state_a: Dict[str, Any], state_b: Dict[str, Any]) -> Dict[str, Any]:
+        """Compare symbolic states of two regions (key vs lock matching)."""
+        result = {
+            'primitive': 'compare_symbolic_pattern',
+            'shape_match': False,
+            'color_match': False,
+            'orientation_match': False,
+            'overall_match': False,
+            'match_score': 0.0,
+            'differences': []
+        }
+        
+        if not state_a or not state_b:
+            return result
+        
+        matches = 0
+        total = 0
+        
+        # Shape comparison
+        if state_a.get('shape_signature') and state_b.get('shape_signature'):
+            total += 1
+            if state_a['shape_signature'] == state_b['shape_signature']:
+                result['shape_match'] = True
+                matches += 1
+            else:
+                result['differences'].append('shape')
+        
+        # Color comparison
+        if state_a.get('dominant_color') is not None and state_b.get('dominant_color') is not None:
+            total += 1
+            if state_a['dominant_color'] == state_b['dominant_color']:
+                result['color_match'] = True
+                matches += 1
+            else:
+                result['differences'].append('color')
+        
+        # Orientation comparison
+        if state_a.get('orientation') and state_b.get('orientation'):
+            total += 1
+            if state_a['orientation'] == state_b['orientation']:
+                result['orientation_match'] = True
+                matches += 1
+            else:
+                result['differences'].append('orientation')
+        
+        result['match_score'] = matches / total if total > 0 else 0.0
+        result['overall_match'] = result['match_score'] >= 0.67  # 2/3 attributes match
+        
+        return result
+    
+    def _detect_symbolic_change(self, frame_before: List[List[int]], frame_after: List[List[int]], region_bbox: Optional[List[int]] = None) -> Dict[str, Any]:
+        """Detect if symbolic state (shape/color/orientation) changed between frames."""
+        result = {
+            'primitive': 'detect_symbolic_change',
+            'changed': False,
+            'shape_changed': False,
+            'color_changed': False,
+            'orientation_changed': False,
+            'before_state': None,
+            'after_state': None
+        }
+        
+        if not frame_before or not frame_after:
+            return result
+        
+        before_state = self._get_symbolic_state(frame_before, region_bbox)
+        after_state = self._get_symbolic_state(frame_after, region_bbox)
+        
+        result['before_state'] = before_state
+        result['after_state'] = after_state
+        
+        # Check shape change
+        if before_state.get('shape_signature') != after_state.get('shape_signature'):
+            result['shape_changed'] = True
+            result['changed'] = True
+        
+        # Check color change
+        if before_state.get('dominant_color') != after_state.get('dominant_color'):
+            result['color_changed'] = True
+            result['changed'] = True
+        
+        # Check orientation change
+        if before_state.get('orientation') != after_state.get('orientation'):
+            result['orientation_changed'] = True
+            result['changed'] = True
+        
+        return result
+    
+    def _detect_tool_object(self, frame: List[List[int]], known_tool_signatures: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+        """Identify objects that act as transformation tools."""
+        tools = []
+        
+        if not frame:
+            return tools
+        
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
+        # Find all distinct objects
+        visited = set()
+        objects = []
+        
+        for y in range(height):
+            for x in range(width):
+                c = frame[y][x]
+                if c != 0 and (x, y) not in visited:
+                    # Flood fill to find connected object
+                    obj_cells = []
+                    stack = [(x, y)]
+                    while stack:
+                        px, py = stack.pop()
+                        if (px, py) in visited or px < 0 or py < 0 or px >= width or py >= height:
+                            continue
+                        if frame[py][px] != c:
+                            continue
+                        visited.add((px, py))
+                        obj_cells.append((px, py))
+                        stack.extend([(px+1, py), (px-1, py), (px, py+1), (px, py-1)])
+                    
+                    if obj_cells:
+                        objects.append({'color': c, 'cells': obj_cells})
+        
+        # Heuristic: small, isolated objects are likely tools
+        for obj in objects:
+            cells = obj['cells']
+            cell_count = len(cells)
+            
+            # Small objects (1-9 cells) could be tools
+            if 1 <= cell_count <= 9:
+                min_x = min(c[0] for c in cells)
+                max_x = max(c[0] for c in cells)
+                min_y = min(c[1] for c in cells)
+                max_y = max(c[1] for c in cells)
+                
+                tool_info = {
+                    'color': obj['color'],
+                    'position': (min_x, min_y),
+                    'bbox': [min_x, min_y, max_x + 1, max_y + 1],
+                    'cell_count': cell_count,
+                    'is_known_tool': False
+                }
+                
+                # Check if matches known tool signature
+                if known_tool_signatures:
+                    state = self._get_symbolic_state(frame, tool_info['bbox'])
+                    if state.get('shape_signature') in known_tool_signatures:
+                        tool_info['is_known_tool'] = True
+                
+                tools.append(tool_info)
+        
+        return tools
+    
+    def _classify_symbolic_role(self, frame: List[List[int]], object_positions: Optional[Dict[str, List[tuple]]] = None, controlled_objects: Optional[List[int]] = None) -> Dict[str, Any]:
+        """Classify object role: key (controllable), lock (target), tool (transformer), gate."""
+        result = {
+            'primitive': 'classify_symbolic_role',
+            'roles': {},
+            'keys': [],
+            'locks': [],
+            'tools': [],
+            'gates': []
+        }
+        
+        if not frame:
+            return result
+        
+        controlled = set(controlled_objects) if controlled_objects else set()
+        
+        # Find all objects
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
+        color_positions = {}
+        for y in range(height):
+            for x in range(width):
+                c = frame[y][x]
+                if c != 0:
+                    if c not in color_positions:
+                        color_positions[c] = []
+                    color_positions[c].append((x, y))
+        
+        for color, positions in color_positions.items():
+            cell_count = len(positions)
+            
+            # Controlled objects are "keys"
+            if color in controlled:
+                result['roles'][color] = 'key'
+                result['keys'].append(color)
+            # Small isolated objects are likely tools
+            elif cell_count <= 4:
+                result['roles'][color] = 'tool'
+                result['tools'].append(color)
+            # Large connected structures are likely walls/gates
+            elif cell_count >= 20:
+                result['roles'][color] = 'gate'
+                result['gates'].append(color)
+            # Medium sized static objects are likely locks
+            else:
+                result['roles'][color] = 'lock'
+                result['locks'].append(color)
+        
+        return result
+    
+    # ======================================================================
+    # SYMBOLIC MECHANICS: REMOTE CAUSATION IMPLEMENTATIONS
+    # ======================================================================
+    
+    def _detect_action_at_distance(self, trigger_position: tuple, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
+        """Detect if an action caused change at a remote location."""
+        result = {
+            'primitive': 'detect_action_at_distance',
+            'remote_change_detected': False,
+            'trigger_position': trigger_position,
+            'change_regions': [],
+            'max_distance': 0
+        }
+        
+        if not frame_before or not frame_after or not trigger_position:
+            return result
+        
+        height = len(frame_before)
+        width = len(frame_before[0]) if frame_before else 0
+        tx, ty = trigger_position
+        
+        # Find all changed pixels
+        changed_pixels = []
+        for y in range(height):
+            for x in range(width):
+                if frame_before[y][x] != frame_after[y][x]:
+                    dist = abs(x - tx) + abs(y - ty)  # Manhattan distance
+                    changed_pixels.append((x, y, dist))
+        
+        # Filter for remote changes (distance > 3)
+        remote_changes = [(x, y, d) for x, y, d in changed_pixels if d > 3]
+        
+        if remote_changes:
+            result['remote_change_detected'] = True
+            result['max_distance'] = max(c[2] for c in remote_changes)
+            
+            # Group into regions
+            regions = []
+            for x, y, d in remote_changes:
+                added = False
+                for region in regions:
+                    # Check if adjacent to existing region
+                    for rx, ry in region['pixels']:
+                        if abs(x - rx) <= 1 and abs(y - ry) <= 1:
+                            region['pixels'].append((x, y))
+                            added = True
+                            break
+                    if added:
+                        break
+                if not added:
+                    regions.append({'pixels': [(x, y)], 'distance': d})
+            
+            result['change_regions'] = [
+                {
+                    'bbox': [min(p[0] for p in r['pixels']), min(p[1] for p in r['pixels']),
+                             max(p[0] for p in r['pixels']) + 1, max(p[1] for p in r['pixels']) + 1],
+                    'pixel_count': len(r['pixels']),
+                    'min_distance': min(abs(p[0]-tx)+abs(p[1]-ty) for p in r['pixels'])
+                }
+                for r in regions
+            ]
+        
+        return result
+    
+    def _find_remote_effect_region(self, trigger_position: tuple, frame_before: List[List[int]], frame_after: List[List[int]], min_distance: int = 3) -> Dict[str, Any]:
+        """Find the region where remote effect occurred after trigger."""
+        result = {
+            'primitive': 'find_remote_effect_region',
+            'found': False,
+            'effect_region': None,
+            'effect_type': None,
+            'distance_from_trigger': 0
+        }
+        
+        action_result = self._detect_action_at_distance(trigger_position, frame_before, frame_after)
+        
+        if not action_result['remote_change_detected']:
+            return result
+        
+        # Find the largest change region
+        regions = action_result.get('change_regions', [])
+        if regions:
+            largest = max(regions, key=lambda r: r['pixel_count'])
+            result['found'] = True
+            result['effect_region'] = largest['bbox']
+            result['distance_from_trigger'] = largest['min_distance']
+            
+            # Determine effect type
+            before_state = self._get_symbolic_state(frame_before, largest['bbox'])
+            after_state = self._get_symbolic_state(frame_after, largest['bbox'])
+            
+            if before_state.get('shape_signature') != after_state.get('shape_signature'):
+                result['effect_type'] = 'shape_change'
+            elif before_state.get('dominant_color') != after_state.get('dominant_color'):
+                result['effect_type'] = 'color_change'
+            elif before_state.get('orientation') != after_state.get('orientation'):
+                result['effect_type'] = 'orientation_change'
+            else:
+                result['effect_type'] = 'unknown'
+        
+        return result
+    
+    def _correlate_trigger_effect(self, trigger_position: tuple, trigger_object: int, effect_region: List[int], effect_type: str) -> Dict[str, Any]:
+        """Build causal chain: trigger object -> remote effect."""
+        result = {
+            'primitive': 'correlate_trigger_effect',
+            'causal_chain': [],
+            'hypothesis': None,
+            'confidence': 0.0
+        }
+        
+        if not trigger_position or not effect_region:
+            return result
+        
+        result['causal_chain'] = [
+            {'step': 1, 'action': 'overlap_trigger', 'position': trigger_position, 'object': trigger_object},
+            {'step': 2, 'action': 'remote_effect', 'region': effect_region, 'type': effect_type}
+        ]
+        
+        result['hypothesis'] = {
+            'trigger_color': trigger_object,
+            'trigger_position': trigger_position,
+            'effect_region': effect_region,
+            'effect_type': effect_type,
+            'rule': f"touching_color_{trigger_object}_causes_{effect_type}"
+        }
+        
+        result['confidence'] = 0.5  # Single observation
+        
+        return result
+    
+    # ======================================================================
+    # SYMBOLIC MECHANICS: UI DETECTION IMPLEMENTATIONS
+    # ======================================================================
+    
+    def _detect_ui_element(self, frame: List[List[int]]) -> List[Dict[str, Any]]:
+        """Detect static UI elements (counters, bars, indicators) typically at screen edges."""
+        elements = []
+        
+        if not frame:
+            return elements
+        
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
+        # UI elements are typically in rows/columns near edges
+        # Check top row (y=0), bottom row (y=height-1), left col (x=0), right col (x=width-1)
+        
+        # Top edge
+        top_row_colors = {}
+        for x in range(width):
+            c = frame[0][x]
+            if c != 0:
+                top_row_colors[c] = top_row_colors.get(c, 0) + 1
+        
+        if top_row_colors:
+            elements.append({
+                'region': 'top',
+                'bbox': [0, 0, width, 2],
+                'colors': top_row_colors,
+                'possible_type': 'status_bar'
+            })
+        
+        # Bottom edge
+        bottom_row_colors = {}
+        for x in range(width):
+            c = frame[height-1][x]
+            if c != 0:
+                bottom_row_colors[c] = bottom_row_colors.get(c, 0) + 1
+        
+        if bottom_row_colors:
+            elements.append({
+                'region': 'bottom',
+                'bbox': [0, height-2, width, height],
+                'colors': bottom_row_colors,
+                'possible_type': 'status_bar'
+            })
+        
+        # Check for dot patterns (common UI counters)
+        for y in range(min(3, height)):
+            consecutive_dots = []
+            for x in range(width):
+                c = frame[y][x]
+                if c != 0:
+                    consecutive_dots.append((x, y, c))
+                elif consecutive_dots:
+                    if len(consecutive_dots) >= 3:
+                        elements.append({
+                            'region': 'top_dots',
+                            'bbox': [consecutive_dots[0][0], y, consecutive_dots[-1][0]+1, y+1],
+                            'dot_count': len(consecutive_dots),
+                            'dot_color': consecutive_dots[0][2],
+                            'possible_type': 'counter'
+                        })
+                    consecutive_dots = []
+        
+        return elements
+    
+    def _parse_counter_display(self, frame: List[List[int]], ui_region: Optional[List[int]] = None) -> Dict[str, Any]:
+        """Parse dot/square counters (lives, actions remaining)."""
+        result = {
+            'primitive': 'parse_counter_display',
+            'count': 0,
+            'counter_color': None,
+            'counter_type': None,
+            'positions': []
+        }
+        
+        if not frame:
+            return result
+        
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
+        # Define region
+        if ui_region:
+            x1, y1, x2, y2 = ui_region
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(width, x2), min(height, y2)
+        else:
+            x1, y1, x2, y2 = 0, 0, width, min(3, height)
+        
+        # Count non-background pixels by color
+        color_counts = {}
+        color_positions = {}
+        for y in range(y1, y2):
+            for x in range(x1, x2):
+                c = frame[y][x]
+                if c != 0:
+                    color_counts[c] = color_counts.get(c, 0) + 1
+                    if c not in color_positions:
+                        color_positions[c] = []
+                    color_positions[c].append((x, y))
+        
+        if color_counts:
+            # Most common color is likely the counter
+            counter_color = max(color_counts.keys(), key=lambda k: color_counts[k])
+            result['counter_color'] = counter_color
+            result['count'] = color_counts[counter_color]
+            result['positions'] = color_positions[counter_color]
+            
+            # Determine type based on arrangement
+            positions = color_positions[counter_color]
+            if len(positions) >= 2:
+                xs = [p[0] for p in positions]
+                ys = [p[1] for p in positions]
+                if max(xs) - min(xs) > max(ys) - min(ys):
+                    result['counter_type'] = 'horizontal_dots'
+                else:
+                    result['counter_type'] = 'vertical_dots'
+        
+        return result
+    
+    def _map_indicator_to_state(self, indicator_before: Dict[str, Any], indicator_after: Dict[str, Any], action_taken: Optional[int] = None) -> Dict[str, Any]:
+        """Map UI indicator changes to game state."""
+        result = {
+            'primitive': 'map_indicator_to_state',
+            'indicator_changed': False,
+            'direction': None,  # 'decreased', 'increased', 'unchanged'
+            'change_amount': 0,
+            'possible_meaning': None
+        }
+        
+        count_before = indicator_before.get('count', 0) if indicator_before else 0
+        count_after = indicator_after.get('count', 0) if indicator_after else 0
+        
+        change = count_after - count_before
+        
+        if change != 0:
+            result['indicator_changed'] = True
+            result['change_amount'] = abs(change)
+            
+            if change < 0:
+                result['direction'] = 'decreased'
+                result['possible_meaning'] = 'resource_depleted'
+            else:
+                result['direction'] = 'increased'
+                result['possible_meaning'] = 'resource_gained'
+        else:
+            result['direction'] = 'unchanged'
+        
+        return result
+    
+    def _detect_ui_region_change(self, frame_before: List[List[int]], frame_after: List[List[int]], ui_region: Optional[List[int]] = None) -> Dict[str, Any]:
+        """Detect if a UI region changed."""
+        result = {
+            'primitive': 'detect_ui_region_change',
+            'changed': False,
+            'pixels_changed': 0,
+            'before_count': 0,
+            'after_count': 0
+        }
+        
+        before_counter = self._parse_counter_display(frame_before, ui_region)
+        after_counter = self._parse_counter_display(frame_after, ui_region)
+        
+        result['before_count'] = before_counter.get('count', 0)
+        result['after_count'] = after_counter.get('count', 0)
+        result['changed'] = result['before_count'] != result['after_count']
+        result['pixels_changed'] = abs(result['after_count'] - result['before_count'])
+        
+        return result
+    
+    # ======================================================================
+    # SYMBOLIC MECHANICS: GOAL REASONING IMPLEMENTATIONS
+    # ======================================================================
+    
+    def _detect_compound_goal(self, frame: List[List[int]], game_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Detect if game has compound goal requiring multiple conditions."""
+        result = {
+            'primitive': 'detect_compound_goal',
+            'is_compound': False,
+            'detected_subgoals': [],
+            'goal_structure': None,
+            'confidence': 0.0
+        }
+        
+        if not frame:
+            return result
+        
+        # Analyze frame for goal indicators
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
+        # Look for key-lock patterns (matching shapes/colors)
+        roles = self._classify_symbolic_role(frame)
+        
+        subgoals = []
+        
+        # If there are keys and locks, likely a matching goal
+        if roles['keys'] and roles['locks']:
+            subgoals.append({
+                'type': 'match_pattern',
+                'description': 'Match key to lock',
+                'keys': roles['keys'],
+                'locks': roles['locks']
+            })
+        
+        # If there are tools, likely a transformation goal
+        if roles['tools']:
+            subgoals.append({
+                'type': 'use_tool',
+                'description': 'Use tools to transform',
+                'tools': roles['tools']
+            })
+        
+        # Check for UI elements (action limits)
+        ui_elements = self._detect_ui_element(frame)
+        counters = [e for e in ui_elements if e.get('possible_type') == 'counter']
+        if counters:
+            subgoals.append({
+                'type': 'resource_constraint',
+                'description': 'Complete within action limit',
+                'counter_regions': [c['bbox'] for c in counters]
+            })
+        
+        result['detected_subgoals'] = subgoals
+        result['is_compound'] = len(subgoals) > 1
+        
+        if subgoals:
+            result['goal_structure'] = {
+                'primary': subgoals[0] if subgoals else None,
+                'constraints': subgoals[1:] if len(subgoals) > 1 else []
+            }
+            result['confidence'] = min(0.3 * len(subgoals), 0.9)
+        
+        return result
+    
+    def _measure_subgoal_progress(self, current_state: Dict[str, Any], target_state: Dict[str, Any], subgoal_type: Optional[str] = None) -> float:
+        """Measure progress toward a specific subgoal (0.0 to 1.0)."""
+        if not current_state or not target_state:
+            return 0.0
+        
+        if subgoal_type == 'match_pattern':
+            # Progress = similarity between current key state and target lock state
+            comparison = self._compare_symbolic_pattern(current_state, target_state)
+            return comparison.get('match_score', 0.0)
+        
+        elif subgoal_type == 'reach_goal':
+            # Progress = inverse of distance to goal
+            current_pos = current_state.get('position', (0, 0))
+            target_pos = target_state.get('position', (0, 0))
+            distance = abs(current_pos[0] - target_pos[0]) + abs(current_pos[1] - target_pos[1])
+            max_dist = current_state.get('max_distance', 20)
+            return max(0.0, 1.0 - distance / max(max_dist, 1))
+        
+        elif subgoal_type == 'resource_constraint':
+            # Progress = resources remaining / resources needed
+            remaining = current_state.get('remaining', 0)
+            needed = target_state.get('needed', 1)
+            return min(1.0, remaining / max(needed, 1))
+        
+        return 0.0
+    
+    def _calculate_resource_path(self, current_symbolic_state: Dict[str, Any], target_symbolic_state: Dict[str, Any], available_tools: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """Calculate path through resource space (actions needed for transformation)."""
+        result = {
+            'primitive': 'calculate_resource_path',
+            'path_found': False,
+            'steps': [],
+            'estimated_cost': 0,
+            'missing_tools': []
+        }
+        
+        if not current_symbolic_state or not target_symbolic_state:
+            return result
+        
+        # Compare current to target
+        comparison = self._compare_symbolic_pattern(current_symbolic_state, target_symbolic_state)
+        
+        if comparison.get('overall_match'):
+            result['path_found'] = True
+            result['steps'] = [{'action': 'already_matched', 'cost': 0}]
+            return result
+        
+        # Identify what needs to change
+        differences = comparison.get('differences', [])
+        steps = []
+        
+        for diff in differences:
+            if diff == 'shape':
+                steps.append({
+                    'action': 'transform_shape',
+                    'from': current_symbolic_state.get('shape_signature'),
+                    'to': target_symbolic_state.get('shape_signature'),
+                    'requires_tool': True,
+                    'cost': 1
+                })
+            elif diff == 'color':
+                steps.append({
+                    'action': 'transform_color',
+                    'from': current_symbolic_state.get('dominant_color'),
+                    'to': target_symbolic_state.get('dominant_color'),
+                    'requires_tool': True,
+                    'cost': 1
+                })
+            elif diff == 'orientation':
+                steps.append({
+                    'action': 'rotate',
+                    'from': current_symbolic_state.get('orientation'),
+                    'to': target_symbolic_state.get('orientation'),
+                    'requires_tool': True,
+                    'cost': 1
+                })
+        
+        result['steps'] = steps
+        result['estimated_cost'] = sum(s.get('cost', 1) for s in steps)
+        result['path_found'] = len(steps) > 0
+        
+        # Check if we have required tools
+        if available_tools:
+            tool_types = {t.get('effect_type') for t in available_tools if t.get('effect_type')}
+            for step in steps:
+                action = step.get('action', '')
+                if action == 'transform_shape' and 'shape_change' not in tool_types:
+                    result['missing_tools'].append('shape_transformer')
+                elif action == 'transform_color' and 'color_change' not in tool_types:
+                    result['missing_tools'].append('color_transformer')
+        
+        return result
+    
+    def _decompose_goal(self, compound_goal: Dict[str, Any], available_primitives: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Break compound goal into ordered subgoals."""
+        subgoals = []
+        
+        if not compound_goal:
+            return subgoals
+        
+        goal_type = compound_goal.get('type', 'unknown')
+        
+        if goal_type == 'match_and_reach':
+            # Order: transform first, then navigate
+            if compound_goal.get('transformation_needed'):
+                subgoals.append({
+                    'order': 1,
+                    'type': 'transform',
+                    'target': compound_goal.get('target_state'),
+                    'primitives': ['detect_tool_object', 'get_symbolic_state', 'compare_symbolic_pattern']
+                })
+            subgoals.append({
+                'order': 2,
+                'type': 'navigate',
+                'target': compound_goal.get('goal_position'),
+                'primitives': ['direction_to_goal', 'detect_obstacle']
+            })
+        
+        elif goal_type == 'collect_and_use':
+            # Order: collect first, then use
+            subgoals.append({
+                'order': 1,
+                'type': 'collect',
+                'target': compound_goal.get('collectible'),
+                'primitives': ['detect_tool_object', 'direction_to_goal']
+            })
+            subgoals.append({
+                'order': 2,
+                'type': 'use',
+                'target': compound_goal.get('use_location'),
+                'primitives': ['detect_action_at_distance', 'correlate_trigger_effect']
+            })
+        
+        else:
+            # Generic decomposition
+            subgoals.append({
+                'order': 1,
+                'type': 'analyze',
+                'primitives': ['detect_compound_goal', 'classify_symbolic_role']
+            })
+            subgoals.append({
+                'order': 2,
+                'type': 'execute',
+                'primitives': ['direction_to_goal']
+            })
+        
+        return subgoals
     
     # ======================================================================
     # PUBLIC API

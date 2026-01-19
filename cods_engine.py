@@ -160,6 +160,549 @@ class BayesianHypothesis:
     operator_id: Optional[str] = None
 
 
+# ============================================================================
+# SYMBOLIC MECHANICS: REMOTE EFFECT LEARNER (All Games)
+# ============================================================================
+
+class RemoteEffectLearner:
+    """
+    Learns action-at-distance causal relationships.
+    
+    SYMBOLIC MECHANICS - Universal Component
+    
+    In many puzzle games, touching object A causes change at distant location B.
+    This is "action-at-distance" or "remote causation" - fundamentally different
+    from direct contact effects.
+    
+    This learner:
+    1. Detects when actions cause remote changes (distance > 3 cells)
+    2. Correlates trigger objects with effect types
+    3. Builds a causal model: trigger_signature -> effect_description
+    4. Shares validated effects to the network database
+    
+    Applicable to ALL games, not just specific game types.
+    """
+    
+    def __init__(self, game_type: str = None, db: Optional[DatabaseInterface] = None, db_path: str = "core_data.db"):
+        self.game_type = game_type
+        self.db = db or DatabaseInterface(db_path)
+        
+        # Local observation tracking
+        self.observations: List[Dict[str, Any]] = []
+        self.trigger_effect_map: Dict[str, List[Dict[str, Any]]] = {}
+        
+        # Validated hypotheses
+        self.validated_effects: Dict[str, Dict[str, Any]] = {}
+        
+    def observe_action(
+        self,
+        frame_before: List[List[int]],
+        frame_after: List[List[int]],
+        action_position: Tuple[int, int],
+        action_type: int,
+        overlap_color: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Observe the effect of an action and detect remote changes.
+        
+        Args:
+            frame_before: Frame before action
+            frame_after: Frame after action
+            action_position: Where agent was when action occurred
+            action_type: Action taken (1-7)
+            overlap_color: Color of object overlapped (if any)
+            
+        Returns:
+            Dict describing any detected remote effect
+        """
+        result = {
+            'remote_effect_detected': False,
+            'trigger_position': action_position,
+            'trigger_color': overlap_color,
+            'effect_regions': [],
+            'effect_type': None
+        }
+        
+        if not frame_before or not frame_after:
+            return result
+        
+        height = len(frame_before)
+        width = len(frame_before[0]) if frame_before else 0
+        ax, ay = action_position
+        
+        # Find all changed pixels
+        changes = []
+        for y in range(height):
+            for x in range(width):
+                if frame_before[y][x] != frame_after[y][x]:
+                    distance = abs(x - ax) + abs(y - ay)
+                    changes.append({
+                        'position': (x, y),
+                        'before': frame_before[y][x],
+                        'after': frame_after[y][x],
+                        'distance': distance
+                    })
+        
+        # Filter for remote changes (distance > 3)
+        remote_changes = [c for c in changes if c['distance'] > 3]
+        
+        if remote_changes:
+            result['remote_effect_detected'] = True
+            
+            # Group into regions
+            regions = self._group_changes_into_regions(remote_changes)
+            result['effect_regions'] = regions
+            
+            # Determine effect type
+            result['effect_type'] = self._classify_effect_type(regions, frame_before, frame_after)
+            
+            # Store observation
+            observation = {
+                'trigger_position': action_position,
+                'trigger_color': overlap_color,
+                'action_type': action_type,
+                'effect_regions': regions,
+                'effect_type': result['effect_type'],
+                'timestamp': time.time()
+            }
+            self.observations.append(observation)
+            
+            # Update trigger-effect map
+            trigger_key = f"color_{overlap_color}" if overlap_color else f"pos_{ax}_{ay}"
+            if trigger_key not in self.trigger_effect_map:
+                self.trigger_effect_map[trigger_key] = []
+            self.trigger_effect_map[trigger_key].append(observation)
+        
+        return result
+    
+    def _group_changes_into_regions(self, changes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Group changed pixels into connected regions."""
+        if not changes:
+            return []
+        
+        regions = []
+        used = set()
+        
+        for change in changes:
+            if id(change) in used:
+                continue
+            
+            # Start new region with this change
+            region_pixels = [change['position']]
+            used.add(id(change))
+            
+            # Add adjacent changes
+            for other in changes:
+                if id(other) in used:
+                    continue
+                ox, oy = other['position']
+                for px, py in region_pixels:
+                    if abs(ox - px) <= 1 and abs(oy - py) <= 1:
+                        region_pixels.append(other['position'])
+                        used.add(id(other))
+                        break
+            
+            # Create region summary
+            xs = [p[0] for p in region_pixels]
+            ys = [p[1] for p in region_pixels]
+            regions.append({
+                'bbox': [min(xs), min(ys), max(xs) + 1, max(ys) + 1],
+                'pixel_count': len(region_pixels),
+                'min_distance': min(c['distance'] for c in changes if c['position'] in region_pixels)
+            })
+        
+        return regions
+    
+    def _classify_effect_type(
+        self, 
+        regions: List[Dict[str, Any]], 
+        frame_before: List[List[int]], 
+        frame_after: List[List[int]]
+    ) -> str:
+        """Classify what type of effect occurred in the regions."""
+        if not regions:
+            return 'unknown'
+        
+        # Analyze the largest region
+        largest = max(regions, key=lambda r: r['pixel_count'])
+        bbox = largest['bbox']
+        
+        # Compare symbolic states
+        before_colors = set()
+        after_colors = set()
+        
+        for y in range(bbox[1], bbox[3]):
+            for x in range(bbox[0], bbox[2]):
+                if 0 <= y < len(frame_before) and 0 <= x < len(frame_before[0]):
+                    before_colors.add(frame_before[y][x])
+                    after_colors.add(frame_after[y][x])
+        
+        # Determine effect type
+        before_non_bg = before_colors - {0}
+        after_non_bg = after_colors - {0}
+        
+        if after_non_bg - before_non_bg:
+            return 'spawn'  # New colors appeared
+        elif before_non_bg - after_non_bg:
+            return 'destroy'  # Colors disappeared
+        elif before_non_bg == after_non_bg:
+            return 'transform'  # Same colors, different arrangement
+        else:
+            return 'unknown'
+    
+    def get_effect_for_trigger(self, trigger_color: int) -> Optional[Dict[str, Any]]:
+        """
+        Get the learned effect for touching an object of given color.
+        
+        Returns the most reliable effect if multiple have been observed.
+        """
+        trigger_key = f"color_{trigger_color}"
+        observations = self.trigger_effect_map.get(trigger_key, [])
+        
+        if not observations:
+            return None
+        
+        # Count effect types
+        effect_counts: Dict[str, int] = {}
+        for obs in observations:
+            effect_type = obs.get('effect_type', 'unknown')
+            effect_counts[effect_type] = effect_counts.get(effect_type, 0) + 1
+        
+        # Return most common effect
+        best_effect = max(effect_counts.keys(), key=lambda k: effect_counts[k])
+        
+        return {
+            'trigger_color': trigger_color,
+            'effect_type': best_effect,
+            'observation_count': len(observations),
+            'confidence': effect_counts[best_effect] / len(observations)
+        }
+    
+    def validate_and_share(self, min_observations: int = 3) -> int:
+        """
+        Validate observed effects and share to network database.
+        
+        An effect is validated if observed consistently (same effect type)
+        at least min_observations times.
+        
+        Returns number of effects shared.
+        """
+        shared_count = 0
+        
+        for trigger_key, observations in self.trigger_effect_map.items():
+            if len(observations) < min_observations:
+                continue
+            
+            # Count effect types
+            effect_counts: Dict[str, int] = {}
+            for obs in observations:
+                effect_type = obs.get('effect_type', 'unknown')
+                effect_counts[effect_type] = effect_counts.get(effect_type, 0) + 1
+            
+            # Check for consistent effect
+            total = len(observations)
+            for effect_type, count in effect_counts.items():
+                if count >= min_observations and count / total >= 0.7:
+                    # This effect is consistent enough to share
+                    self._share_to_network(trigger_key, effect_type, count, total)
+                    shared_count += 1
+                    
+                    # Mark as validated
+                    self.validated_effects[trigger_key] = {
+                        'effect_type': effect_type,
+                        'confidence': count / total,
+                        'observations': count
+                    }
+        
+        return shared_count
+    
+    def _share_to_network(self, trigger_key: str, effect_type: str, count: int, total: int):
+        """Share a validated remote effect to the network database."""
+        try:
+            # Extract trigger info from key
+            if trigger_key.startswith('color_'):
+                trigger_color = int(trigger_key.replace('color_', ''))
+                trigger_position = None
+            else:
+                trigger_color = None
+                parts = trigger_key.replace('pos_', '').split('_')
+                trigger_position = f"[{parts[0]}, {parts[1]}]"
+            
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO remote_effect_hypotheses (
+                    game_type, level_number, trigger_position, trigger_object,
+                    effect_region, effect_type, observation_count, reliability, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+            """, (
+                self.game_type or 'unknown',
+                0,  # Level 0 means game-wide
+                trigger_position,
+                str(trigger_color) if trigger_color else None,
+                '[]',  # Effect region varies
+                effect_type,
+                count,
+                count / total
+            ))
+        except Exception as e:
+            logger.warning(f"Failed to share remote effect: {e}")
+    
+    def query_network_effects(self, game_type: str = None) -> List[Dict[str, Any]]:
+        """Query the network for known remote effects."""
+        game = game_type or self.game_type or 'unknown'
+        
+        try:
+            results = self.db.execute_query("""
+                SELECT trigger_object, effect_type, observation_count, reliability
+                FROM remote_effect_hypotheses
+                WHERE game_type = ? AND is_active = TRUE
+                ORDER BY reliability DESC
+            """, (game,))
+            
+            return [
+                {
+                    'trigger_color': int(r[0]) if r[0] and r[0].isdigit() else None,
+                    'effect_type': r[1],
+                    'observation_count': r[2],
+                    'reliability': r[3]
+                }
+                for r in results
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to query network effects: {e}")
+            return []
+    
+    def reset(self):
+        """Reset learner for new game."""
+        self.observations = []
+        self.trigger_effect_map = {}
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize learner state."""
+        return {
+            'game_type': self.game_type,
+            'observation_count': len(self.observations),
+            'trigger_count': len(self.trigger_effect_map),
+            'validated_effects': self.validated_effects
+        }
+
+
+# ============================================================================
+# EXECUTION TRACE MINER - Discovers Primitive Composition Patterns
+# ============================================================================
+
+class ExecutionTraceMiner:
+    """
+    Mines agent execution logs to find frequent primitive sequences.
+    
+    Similar to market basket analysis - finds patterns like:
+    "When agents succeed, they often do: detect_object -> get_position -> calculate_distance"
+    
+    This is the MISSING LINK in the composition system - it generates composition
+    candidates that the existing validation infrastructure can then test.
+    
+    DEDUPLICATION: Tracks which patterns have already been turned into compositions
+    to avoid redundant mining. Logging is NOT deduplicated because multiple
+    observations build confidence scores.
+    """
+    
+    def __init__(self, db: DatabaseInterface, min_frequency: int = 5):
+        self.db = db
+        self.min_frequency = min_frequency
+        self.execution_log: List[Dict[str, Any]] = []
+        self.sequence_counts: Dict[tuple, Dict[str, Any]] = {}
+        self._max_log_size = 5000  # Prevent unbounded growth
+        
+        # DEDUPLICATION: Track patterns already converted to compositions
+        # Key: tuple of primitive names, Value: composition_id or True
+        self._composed_patterns: Dict[tuple, str] = {}
+        self._load_existing_compositions()
+        
+    def _load_existing_compositions(self):
+        """Load existing compositions to avoid re-mining known patterns."""
+        if not self.db:
+            return
+        try:
+            existing = self.db.execute_query("""
+                SELECT operator_id, composition_tree FROM composed_operators
+                WHERE status = 'active'
+            """)
+            if existing:
+                for row in existing:
+                    try:
+                        tree = json.loads(row['composition_tree']) if isinstance(row['composition_tree'], str) else row['composition_tree']
+                        operators = tree.get('operators', [])
+                        sequence = tuple(
+                            op.get('name', '') for op in operators 
+                            if op.get('type') == 'primitive'
+                        )
+                        if sequence and len(sequence) >= 2:
+                            self._composed_patterns[sequence] = row['operator_id']
+                    except (json.JSONDecodeError, TypeError, KeyError):
+                        continue
+                logger.debug(f"[MINER] Loaded {len(self._composed_patterns)} existing composition patterns")
+        except Exception as e:
+            logger.debug(f"[MINER] Failed to load existing compositions: {e}")
+    
+    def mark_pattern_composed(self, sequence: List[str], operator_id: str):
+        """Mark a pattern as already composed (avoid re-mining)."""
+        self._composed_patterns[tuple(sequence)] = operator_id
+    
+    def is_pattern_composed(self, sequence: List[str]) -> bool:
+        """Check if a pattern has already been turned into a composition."""
+        return tuple(sequence) in self._composed_patterns
+    
+    def log_primitive_call(
+        self, 
+        primitive_name: str,
+        success: bool,
+        context: Dict[str, Any]
+    ):
+        """
+        Log primitive execution with AGGREGATED counts (not individual rows).
+        
+        Instead of storing 10 identical log entries, we:
+        1. Keep a small rolling buffer (last 20 calls) for sequence detection
+        2. When a sequence is detected, increment its count in sequence_counts
+        
+        This gives us O(1) memory for pattern tracking vs O(n) for raw logs.
+        """
+        # Add to rolling buffer (small, fixed size)
+        self.execution_log.append({
+            'primitive': primitive_name,
+            'success': success,
+            'timestamp': time.time(),
+            'score_before': context.get('score_before', 0),
+            'score_after': context.get('score_after', 0),
+        })
+        
+        # Keep rolling buffer small (just enough for sequence detection)
+        max_buffer = 20
+        if len(self.execution_log) > max_buffer:
+            self.execution_log = self.execution_log[-max_buffer:]
+        
+        # AGGREGATED COUNTING: Detect sequences in rolling buffer and count them
+        # Check for sequences of length 2, 3, 4
+        for window_size in [2, 3, 4]:
+            if len(self.execution_log) >= window_size:
+                window = self.execution_log[-window_size:]
+                seq = tuple(entry['primitive'] for entry in window)
+                
+                # Skip if same primitive repeated
+                if len(set(seq)) == 1:
+                    continue
+                
+                # Track success (did score increase during this window?)
+                score_before = window[0].get('score_before', 0) or 0
+                score_after = window[-1].get('score_after', 0) or 0
+                is_success = score_after > score_before
+                
+                # UPSERT into sequence_counts (one row per unique sequence)
+                if seq not in self.sequence_counts:
+                    self.sequence_counts[seq] = {
+                        'count': 0,
+                        'successes': 0,
+                        'last_seen': 0,
+                        'first_seen': time.time()
+                    }
+                
+                self.sequence_counts[seq]['count'] += 1
+                if is_success:
+                    self.sequence_counts[seq]['successes'] += 1
+                self.sequence_counts[seq]['last_seen'] = time.time()
+        
+    def mine_sequences(
+        self, 
+        window_size: int = 3,
+        min_frequency: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Return frequent primitive sequences from AGGREGATED counts.
+        
+        No more sliding window over raw logs - just query the pre-aggregated data.
+        Much faster: O(unique_sequences) instead of O(total_calls).
+        
+        Args:
+            window_size: Filter to sequences of this length (2-5 typical)
+            min_frequency: Minimum times pattern must appear
+            
+        Returns:
+            List of {sequence: ['prim1', 'prim2'], count: 10, success_rate: 0.8}
+        """
+        min_freq = min_frequency or self.min_frequency
+        results = []
+        
+        for seq, stats in self.sequence_counts.items():
+            # Filter by sequence length if specified
+            if window_size and len(seq) != window_size:
+                continue
+                
+            if stats['count'] >= min_freq:
+                success_rate = stats['successes'] / stats['count'] if stats['count'] > 0 else 0
+                # Only keep patterns that correlate with success (60%+)
+                if success_rate >= 0.6:
+                    results.append({
+                        'sequence': list(seq),
+                        'count': stats['count'],
+                        'success_rate': success_rate,
+                        'confidence': self._calculate_confidence(stats['count']),
+                        'first_seen': stats.get('first_seen'),
+                        'last_seen': stats.get('last_seen'),
+                    })
+        
+        # Sort by combination of frequency and success rate
+        results.sort(key=lambda x: x['count'] * x['success_rate'], reverse=True)
+        return results
+    
+    def _calculate_confidence(self, count: int) -> float:
+        """Wilson score confidence interval approximation."""
+        if count == 0:
+            return 0.0
+        # More observations = higher confidence (full confidence at 20+)
+        return min(1.0, count / 20.0)
+    
+    def mine_success_patterns(self) -> List[Dict[str, Any]]:
+        """
+        Return patterns that correlate with success from AGGREGATED data.
+        
+        No more re-scanning raw logs - just filter sequence_counts by success_rate.
+        """
+        results = []
+        
+        for seq, stats in self.sequence_counts.items():
+            if stats['count'] >= 3:  # Need at least 3 observations
+                success_rate = stats['successes'] / stats['count'] if stats['count'] > 0 else 0
+                if success_rate >= 0.5:  # 50%+ success correlation
+                    results.append({
+                        'sequence': list(seq),
+                        'success_episodes': stats['successes'],
+                        'total_episodes': stats['count'],
+                        'correlation': success_rate
+                    })
+        
+        # Sort by correlation strength
+        results.sort(key=lambda x: x['correlation'], reverse=True)
+        return results[:20]  # Top 20
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get current mining statistics."""
+        total_observations = sum(s['count'] for s in self.sequence_counts.values())
+        return {
+            'unique_sequences': len(self.sequence_counts),
+            'total_observations': total_observations,
+            'buffer_size': len(self.execution_log),
+            'composed_patterns': len(self._composed_patterns),
+        }
+    
+    def clear_log(self):
+        """Clear the rolling buffer (aggregated counts are preserved)."""
+        self.execution_log = []
+    
+    def clear_all(self):
+        """Clear everything including aggregated counts."""
+        self.execution_log = []
+        self.sequence_counts = {}
+
+
 class CODSEngine:
     """
     Main orchestrator for the Cognitive Operator Discovery System.
@@ -210,6 +753,15 @@ class CODSEngine:
         
         # Operator execution stats
         self._execution_stats: Dict[str, Dict] = {}
+        
+        # =====================================================================
+        # EXECUTION TRACE MINER - Composition Discovery System
+        # =====================================================================
+        self.execution_miner = ExecutionTraceMiner(self.db, min_frequency=5)
+        self._last_score: float = 0.0  # Track for score delta in logging
+        self._last_discovery_action: int = 0  # Rate limit discovery triggers
+        self._composition_discovery_enabled = True  # Can be disabled for testing
+        self._score_history: List[float] = []  # Track for plateau detection
         
         # =====================================================================
         # WORLD-MODEL INTEGRATION (from agent_consciousness_synthesis.md)
@@ -304,6 +856,10 @@ class CODSEngine:
         # Set episode context in seed primitives
         self.seeds.set_episode_context(game_id)
         self.seeds.reset_episode()
+        
+        # Reset score history for plateau detection (per-game)
+        self._score_history = []
+        self._last_score = 0.0
     
     def update_frame(
         self,
@@ -354,8 +910,14 @@ class CODSEngine:
         relevant_operators = None  # None means test all
         
         # Trigger 1: Agent reasoning mentions patterns we have operators for
+        # FIX #4: Add rate limiting - don't trigger on every single mention
+        # Only trigger if we haven't tested this pattern trigger type in the last 5 actions
         if reasoning:
             reasoning_lower = reasoning.lower()
+            
+            # Rate limit tracking (stored on context)
+            if not hasattr(self, '_last_pattern_trigger_action'):
+                self._last_pattern_trigger_action = {}
             
             # Check if reasoning mentions visual patterns
             pattern_triggers = {
@@ -369,10 +931,14 @@ class CODSEngine:
             
             for pattern, ops in pattern_triggers.items():
                 if pattern in reasoning_lower:
-                    should_test = True
-                    test_reason = f"reasoning_mentions_{pattern}"
-                    relevant_operators = ops
-                    logger.info(f"[CODS] Testing triggered by reasoning mention: '{pattern}'")
+                    # Rate limit: Only trigger if 5+ actions since last trigger for this pattern
+                    last_trigger = self._last_pattern_trigger_action.get(pattern, -10)
+                    if (action_count or 0) - last_trigger >= 5:
+                        should_test = True
+                        test_reason = f"reasoning_mentions_{pattern}"
+                        relevant_operators = ops
+                        self._last_pattern_trigger_action[pattern] = action_count or 0
+                        logger.debug(f"[CODS] Testing triggered by reasoning mention: '{pattern}'")
                     break
             
             # Check for discovery/exploration keywords
@@ -428,6 +994,49 @@ class CODSEngine:
                     )
             except Exception as e:
                 logger.warning(f"[CODS] Operator testing failed: {e}")
+        
+        # =====================================================================
+        # COMPOSITION DISCOVERY TRIGGERS
+        # Check if we should mine for new compositions
+        # =====================================================================
+        if self._composition_discovery_enabled and action_count is not None:
+            should_discover = False
+            discovery_trigger = ""
+            
+            # Always track score history for plateau detection
+            current_score = self._context.score if self._context else 0.0
+            self._score_history.append(current_score)
+            if len(self._score_history) > 100:
+                self._score_history = self._score_history[-100:]
+            
+            # Trigger 1: Score increased (capture what worked!)
+            if score_delta > 0:
+                should_discover = True
+                discovery_trigger = "score_increase"
+            
+            # Trigger 2: Periodic discovery (every 50 actions)
+            elif action_count > 0 and action_count % 50 == 0:
+                # Rate limit: don't discover too frequently
+                if action_count - self._last_discovery_action >= 50:
+                    should_discover = True
+                    discovery_trigger = "periodic"
+            
+            # Trigger 3: Score plateau (no progress in 30+ actions)
+            elif action_count > 30 and len(self._score_history) >= 30:
+                recent_scores = self._score_history[-30:]
+                if len(set(recent_scores)) == 1:  # All same score
+                    should_discover = True
+                    discovery_trigger = "score_plateau"
+            
+            # Execute discovery
+            if should_discover:
+                self._last_discovery_action = action_count
+                try:
+                    new_compositions = self.discover_compositions(trigger=discovery_trigger)
+                    if new_compositions:
+                        logger.info(f"[CODS] Auto-discovered {len(new_compositions)} compositions (trigger={discovery_trigger})")
+                except Exception as e:
+                    logger.debug(f"[CODS] Composition discovery failed: {e}")
     
     def record_action(self, action: int):
         """Record an action taken."""
@@ -752,6 +1361,236 @@ class CODSEngine:
         
         return None
     
+    # ======================================================================
+    # AUTOMATIC COMPOSITION DISCOVERY (Pattern Mining)
+    # ======================================================================
+    
+    def discover_compositions(
+        self,
+        trigger: str = "periodic"
+    ) -> List[ComposedOperator]:
+        """
+        Mine execution logs and propose new compositions automatically.
+        
+        This is the MISSING LINK that activates the composition system.
+        Uses ExecutionTraceMiner to find frequent primitive sequences
+        that correlate with success, then creates compositions from them.
+        
+        Triggers:
+        - periodic: Every 50 actions (default check)
+        - score_increase: After score went up (capture what worked)
+        - level_complete: Agent beat a level (capture winning strategy)
+        - score_plateau: No progress in 30+ actions (try new patterns)
+        - manual: Explicit call to discover
+        
+        Args:
+            trigger: What triggered this discovery attempt
+            
+        Returns:
+            List of newly created ComposedOperators
+        """
+        if not self._composition_discovery_enabled:
+            return []
+        
+        logger.info(f"[CODS] Discovering compositions (trigger={trigger})")
+        
+        # Mine frequent sequences from execution log
+        patterns = self.execution_miner.mine_sequences(
+            window_size=3,  # Start with 3-primitive sequences
+            min_frequency=5  # Need to see pattern at least 5 times
+        )
+        
+        # Also mine success-correlated patterns (patterns before score increases)
+        success_patterns = self.execution_miner.mine_success_patterns()
+        
+        # Combine and deduplicate
+        all_patterns = patterns + success_patterns
+        unique_patterns = self._deduplicate_patterns(all_patterns)
+        
+        # Create compositions for top patterns
+        new_compositions: List[ComposedOperator] = []
+        for pattern in unique_patterns[:10]:  # Top 10 patterns
+            sequence = pattern['sequence']
+            
+            # DEDUPLICATION: Skip if already composed (fast in-memory check)
+            if self.execution_miner.is_pattern_composed(sequence):
+                continue
+            
+            # Check if this composition already exists (slower DB check - fallback)
+            if self._composition_exists(sequence):
+                # Mark as composed so we don't DB-check again
+                self.execution_miner.mark_pattern_composed(sequence, "exists")
+                continue
+            
+            # Check if all primitives in sequence are available
+            if not self._primitives_available(sequence):
+                logger.debug(f"[CODS] Skipping composition - primitives not available: {sequence}")
+                continue
+            
+            try:
+                # Create composed operator
+                name = self._generate_composition_name(sequence)
+                composition = self.compose_operator(
+                    primitives=sequence,
+                    name=name
+                )
+                
+                # Store metadata about discovery
+                if composition:
+                    # Record in database that this was auto-discovered
+                    try:
+                        self.db.execute_query("""
+                            UPDATE composed_operators
+                            SET created_by_agent = ?,
+                                created_at_generation = ?
+                            WHERE operator_id = ?
+                        """, (
+                            f"auto_discovery_{trigger}",
+                            self._context.generation if self._context else 0,
+                            composition.operator_id
+                        ))
+                    except Exception:
+                        pass  # Non-critical
+                    
+                    # DEDUPLICATION: Mark pattern as composed (avoid re-mining)
+                    self.execution_miner.mark_pattern_composed(sequence, composition.operator_id)
+                    
+                    new_compositions.append(composition)
+                    
+                    logger.info(
+                        f"[CODS] Discovered composition: {name} = {' -> '.join(sequence)} "
+                        f"(freq={pattern.get('count', 0)}, success={pattern.get('success_rate', 0):.2f})"
+                    )
+            except Exception as e:
+                logger.debug(f"[CODS] Failed to create composition from {sequence}: {e}")
+        
+        if new_compositions:
+            logger.info(f"[CODS] Created {len(new_compositions)} new compositions from pattern mining")
+        
+        return new_compositions
+    
+    def _deduplicate_patterns(self, patterns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Remove duplicate patterns, keeping the one with highest success rate."""
+        seen: Dict[tuple, Dict[str, Any]] = {}
+        
+        for pattern in patterns:
+            seq = tuple(pattern['sequence'])
+            if seq not in seen:
+                seen[seq] = pattern
+            else:
+                # Keep the one with higher success correlation
+                existing_rate = seen[seq].get('success_rate', 0) or seen[seq].get('correlation', 0)
+                new_rate = pattern.get('success_rate', 0) or pattern.get('correlation', 0)
+                if new_rate > existing_rate:
+                    seen[seq] = pattern
+        
+        # Sort by success rate * frequency
+        result = list(seen.values())
+        result.sort(
+            key=lambda x: (x.get('success_rate', 0) or x.get('correlation', 0)) * x.get('count', 1),
+            reverse=True
+        )
+        return result
+    
+    def _composition_exists(self, sequence: List[str]) -> bool:
+        """Check if a composition with this exact sequence already exists."""
+        # The composition_tree stores operators as:
+        # {"composition_type": "compose", "operators": [{"type": "primitive", "name": "X"}, ...]}
+        # We need to check if all names appear in order
+        
+        try:
+            # Get all compositions and check their structure
+            existing = self.db.execute_query("""
+                SELECT operator_id, composition_tree FROM composed_operators
+                WHERE status = 'active'
+            """)
+            
+            if not existing:
+                return False
+            
+            for row in existing:
+                try:
+                    tree = json.loads(row['composition_tree']) if isinstance(row['composition_tree'], str) else row['composition_tree']
+                    operators = tree.get('operators', [])
+                    
+                    # Extract primitive names from the tree
+                    existing_sequence = []
+                    for op in operators:
+                        if op.get('type') == 'primitive':
+                            existing_sequence.append(op.get('name', ''))
+                    
+                    # Check if sequences match exactly
+                    if existing_sequence == sequence:
+                        return True
+                except (json.JSONDecodeError, TypeError, KeyError):
+                    continue
+            
+            return False
+        except Exception:
+            return False
+    
+    def _primitives_available(self, sequence: List[str]) -> bool:
+        """Check if all primitives in sequence are available for composition."""
+        for prim_name in sequence:
+            # Check seed primitives
+            if self.seeds.get(prim_name) is not None:
+                continue
+            # Check unlocked/grandfathered
+            status = self.unlock_manager.get_status(prim_name)
+            if status in [PrimitiveStatus.UNLOCKED, PrimitiveStatus.GRANDFATHERED]:
+                continue
+            # Check if it's a composed operator
+            if self.composer.get_operator(prim_name) or self.composer.get_operator_by_name(prim_name):
+                continue
+            # Not available
+            return False
+        return True
+    
+    def _generate_composition_name(self, sequence: List[str]) -> str:
+        """Generate descriptive name for composition based on primitives."""
+        # Extract key words from primitive names
+        words = []
+        for prim in sequence:
+            # Take last meaningful word (e.g., 'detect_object' -> 'object')
+            parts = prim.replace('_', ' ').split()
+            if parts:
+                words.append(parts[-1] if len(parts) > 1 else parts[0])
+        
+        # Create name
+        if len(words) == 0:
+            name = "comp_unknown"
+        elif len(words) == 1:
+            name = f"comp_{words[0]}"
+        elif len(words) == 2:
+            name = f"comp_{words[0]}_{words[1]}"
+        else:
+            name = f"comp_{words[0]}_to_{words[-1]}"
+        
+        # Add unique suffix
+        suffix = uuid.uuid4().hex[:6]
+        return f"{name}_{suffix}"
+    
+    def get_composition_discovery_stats(self) -> Dict[str, Any]:
+        """Get statistics about composition discovery."""
+        miner_stats = self.execution_miner.get_stats()
+        
+        # Count auto-discovered compositions
+        try:
+            auto_discovered = self.db.execute_query("""
+                SELECT COUNT(*) as cnt FROM composed_operators
+                WHERE created_by_agent LIKE 'auto_discovery_%'
+            """)
+            auto_count = auto_discovered[0]['cnt'] if auto_discovered else 0
+        except Exception:
+            auto_count = 0
+        
+        return {
+            'miner': miner_stats,
+            'auto_discovered_compositions': auto_count,
+            'discovery_enabled': self._composition_discovery_enabled,
+            'last_discovery_action': self._last_discovery_action,
+        }
+
     def bootstrap_operators_from_patterns(self, limit: int = 10) -> int:
         """
         Bootstrap initial operators from successful game patterns.
@@ -4105,7 +4944,7 @@ class CODSEngine:
     # ======================================================================
     
     def _record_usage(self, name: str, success: bool, exec_time: float):
-        """Record operator usage statistics."""
+        """Record operator usage statistics and log for pattern mining."""
         if name not in self._execution_stats:
             self._execution_stats[name] = {
                 'calls': 0, 'successes': 0, 'total_time': 0.0
@@ -4118,6 +4957,23 @@ class CODSEngine:
         
         # Also track in database
         self.unlock_manager.track_primitive_usage(name, success)
+        
+        # =====================================================================
+        # LOG TO EXECUTION MINER FOR COMPOSITION DISCOVERY
+        # =====================================================================
+        if self._composition_discovery_enabled and self._context:
+            current_score = self._context.score or 0.0
+            self.execution_miner.log_primitive_call(
+                primitive_name=name,
+                success=success,
+                context={
+                    'agent_id': self._context.agent_id,
+                    'game_id': self._context.game_id,
+                    'score_before': self._last_score,
+                    'score_after': current_score,
+                }
+            )
+            self._last_score = current_score
     
     def _extract_primitives_from_tree(self, tree: Dict[str, Any]) -> List[str]:
         """

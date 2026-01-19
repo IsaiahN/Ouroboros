@@ -42,6 +42,928 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# SYMBOLIC MECHANICS: SYMBOLIC STATE TRACKER (All Games)
+# ============================================================================
+
+class SymbolicStateTracker:
+    """
+    Tracks symbolic state of key/lock objects across frames.
+    
+    SYMBOLIC MECHANICS - Universal Component
+    
+    In symbolic transformation puzzles, the agent must:
+    1. Identify "key" objects (controllable) and "lock" objects (target)
+    2. Track their symbolic properties: shape, color, orientation
+    3. Understand that key must MATCH lock to win
+    4. Detect when touching tools changes key's symbolic state
+    
+    This tracker maintains the symbolic state over time and detects
+    meaningful changes (transformations) vs. noise (movement).
+    
+    Applicable to ALL games, not just specific game types.
+    """
+    
+    def __init__(self, game_type: str = None, db_path: str = "core_data.db"):
+        self.game_type = game_type
+        self.db_path = db_path
+        
+        # Current state tracking
+        self.key_objects: Dict[str, Dict[str, Any]] = {}  # object_id -> symbolic state
+        self.lock_objects: Dict[str, Dict[str, Any]] = {}
+        self.tool_objects: Dict[str, Dict[str, Any]] = {}
+        
+        # State history for change detection
+        self.state_history: List[Dict[str, Any]] = []
+        self.transformation_log: List[Dict[str, Any]] = []
+        
+        # Match tracking
+        self.current_match_score: float = 0.0
+        self.match_history: List[float] = []
+        
+    def identify_symbolic_objects(
+        self, 
+        frame: List[List[int]], 
+        controlled_colors: List[int] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Identify key, lock, and tool objects in the frame.
+        
+        Key objects: Objects controlled by the agent
+        Lock objects: Static objects the key must match
+        Tool objects: Small objects that transform the key when touched
+        """
+        result = {'keys': {}, 'locks': {}, 'tools': {}}
+        
+        if not frame or not frame[0]:
+            return result
+        
+        height = len(frame)
+        width = len(frame[0])
+        controlled = set(controlled_colors or [])
+        
+        # Find all connected objects by color
+        visited = set()
+        objects = []
+        
+        for y in range(height):
+            for x in range(width):
+                c = frame[y][x]
+                if c != 0 and (x, y) not in visited:
+                    # Flood fill to find connected component
+                    obj_cells = []
+                    stack = [(x, y)]
+                    while stack:
+                        px, py = stack.pop()
+                        if (px, py) in visited:
+                            continue
+                        if px < 0 or py < 0 or px >= width or py >= height:
+                            continue
+                        if frame[py][px] != c:
+                            continue
+                        visited.add((px, py))
+                        obj_cells.append((px, py))
+                        stack.extend([(px+1, py), (px-1, py), (px, py+1), (px, py-1)])
+                    
+                    if obj_cells:
+                        objects.append({
+                            'color': c,
+                            'cells': obj_cells,
+                            'cell_count': len(obj_cells)
+                        })
+        
+        # Classify objects
+        for obj in objects:
+            obj_id = f"obj_{obj['color']}_{len(obj['cells'])}"
+            
+            # Extract symbolic state
+            cells = obj['cells']
+            min_x = min(c[0] for c in cells)
+            max_x = max(c[0] for c in cells)
+            min_y = min(c[1] for c in cells)
+            max_y = max(c[1] for c in cells)
+            
+            symbolic_state = {
+                'color': obj['color'],
+                'cell_count': obj['cell_count'],
+                'bbox': [min_x, min_y, max_x + 1, max_y + 1],
+                'centroid': (
+                    sum(c[0] for c in cells) / len(cells),
+                    sum(c[1] for c in cells) / len(cells)
+                ),
+                'aspect_ratio': (max_x - min_x + 1) / max((max_y - min_y + 1), 1),
+                'shape_signature': self._compute_shape_signature(cells)
+            }
+            
+            # Classify based on size and control
+            if obj['color'] in controlled:
+                result['keys'][obj_id] = symbolic_state
+            elif obj['cell_count'] <= 4:
+                result['tools'][obj_id] = symbolic_state
+            else:
+                result['locks'][obj_id] = symbolic_state
+        
+        # Update internal state
+        self.key_objects = result['keys']
+        self.lock_objects = result['locks']
+        self.tool_objects = result['tools']
+        
+        return result
+    
+    def _compute_shape_signature(self, cells: List[Tuple[int, int]]) -> int:
+        """Compute a hash signature for the shape (position-independent)."""
+        if not cells:
+            return 0
+        
+        # Normalize to origin
+        min_x = min(c[0] for c in cells)
+        min_y = min(c[1] for c in cells)
+        normalized = sorted((c[0] - min_x, c[1] - min_y) for c in cells)
+        
+        return hash(tuple(normalized))
+    
+    def update_state(
+        self, 
+        frame: List[List[int]], 
+        controlled_colors: List[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Update symbolic state tracking with new frame.
+        
+        Returns dict indicating what changed.
+        """
+        previous_keys = dict(self.key_objects)
+        previous_locks = dict(self.lock_objects)
+        
+        # Identify current objects
+        current_objects = self.identify_symbolic_objects(frame, controlled_colors)
+        
+        changes = {
+            'key_changed': False,
+            'lock_changed': False,
+            'key_shape_changed': False,
+            'key_color_changed': False,
+            'match_improved': False,
+            'match_decreased': False
+        }
+        
+        # Compare key objects
+        for key_id, key_state in current_objects['keys'].items():
+            if key_id in previous_keys:
+                prev = previous_keys[key_id]
+                if key_state['shape_signature'] != prev['shape_signature']:
+                    changes['key_changed'] = True
+                    changes['key_shape_changed'] = True
+                    self.transformation_log.append({
+                        'type': 'shape_change',
+                        'object': key_id,
+                        'before': prev['shape_signature'],
+                        'after': key_state['shape_signature'],
+                        'timestamp': time.time()
+                    })
+                if key_state['color'] != prev['color']:
+                    changes['key_changed'] = True
+                    changes['key_color_changed'] = True
+        
+        # Calculate match score
+        new_match_score = self.calculate_match_score()
+        if new_match_score > self.current_match_score + 0.1:
+            changes['match_improved'] = True
+        elif new_match_score < self.current_match_score - 0.1:
+            changes['match_decreased'] = True
+        
+        self.current_match_score = new_match_score
+        self.match_history.append(new_match_score)
+        
+        # Store in history
+        self.state_history.append({
+            'keys': dict(self.key_objects),
+            'locks': dict(self.lock_objects),
+            'match_score': new_match_score,
+            'timestamp': time.time()
+        })
+        
+        # Limit history size
+        if len(self.state_history) > 100:
+            self.state_history = self.state_history[-100:]
+        
+        return changes
+    
+    def calculate_match_score(self) -> float:
+        """
+        Calculate how well key objects match lock objects.
+        
+        For ls20-style puzzles, this is the core metric:
+        - 1.0 = perfect match (key shape == lock shape)
+        - 0.0 = no match
+        """
+        if not self.key_objects or not self.lock_objects:
+            return 0.0
+        
+        best_match = 0.0
+        
+        for key_id, key_state in self.key_objects.items():
+            for lock_id, lock_state in self.lock_objects.items():
+                # Compare shape signatures
+                shape_match = 1.0 if key_state['shape_signature'] == lock_state['shape_signature'] else 0.0
+                
+                # Compare colors (some puzzles require color match too)
+                color_match = 1.0 if key_state['color'] == lock_state['color'] else 0.0
+                
+                # Compare aspect ratios
+                aspect_diff = abs(key_state['aspect_ratio'] - lock_state['aspect_ratio'])
+                aspect_match = max(0.0, 1.0 - aspect_diff)
+                
+                # Weighted combination
+                match_score = shape_match * 0.6 + aspect_match * 0.3 + color_match * 0.1
+                best_match = max(best_match, match_score)
+        
+        return best_match
+    
+    def get_transformation_needed(self) -> Dict[str, Any]:
+        """
+        Determine what transformation is needed to match key to lock.
+        
+        Returns information about what needs to change.
+        """
+        result = {
+            'transformation_needed': False,
+            'target_shape': None,
+            'current_shape': None,
+            'steps_estimate': 0
+        }
+        
+        if not self.key_objects or not self.lock_objects:
+            return result
+        
+        # Get first key and lock (simplification)
+        key_state = next(iter(self.key_objects.values()))
+        lock_state = next(iter(self.lock_objects.values()))
+        
+        if key_state['shape_signature'] != lock_state['shape_signature']:
+            result['transformation_needed'] = True
+            result['current_shape'] = key_state['shape_signature']
+            result['target_shape'] = lock_state['shape_signature']
+            
+            # Estimate steps based on shape difference
+            # This is a heuristic - actual steps depend on available tools
+            result['steps_estimate'] = 1 + abs(
+                key_state['cell_count'] - lock_state['cell_count']
+            )
+        
+        return result
+    
+    def detect_tool_effect(
+        self, 
+        frame_before: List[List[int]], 
+        frame_after: List[List[int]],
+        tool_position: Tuple[int, int],
+        controlled_colors: List[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Detect what effect a tool had on the key object.
+        
+        Call this after agent touched a tool to learn the tool's effect.
+        """
+        result = {
+            'effect_detected': False,
+            'effect_type': None,
+            'tool_position': tool_position,
+            'before_state': None,
+            'after_state': None,
+            'tool_color': None
+        }
+        
+        # Try to get tool color at position
+        if tool_position and frame_before:
+            try:
+                tx, ty = tool_position
+                if 0 <= ty < len(frame_before) and 0 <= tx < len(frame_before[0]):
+                    result['tool_color'] = frame_before[ty][tx]
+            except Exception:
+                pass
+        
+        # Get states before and after
+        before_objects = self.identify_symbolic_objects(frame_before, controlled_colors)
+        after_objects = self.identify_symbolic_objects(frame_after, controlled_colors)
+        
+        # Compare key objects
+        for key_id in before_objects['keys']:
+            if key_id in after_objects['keys']:
+                before = before_objects['keys'][key_id]
+                after = after_objects['keys'][key_id]
+                
+                result['before_state'] = before
+                result['after_state'] = after
+                
+                if before['shape_signature'] != after['shape_signature']:
+                    result['effect_detected'] = True
+                    result['effect_type'] = 'shape_change'
+                elif before['color'] != after['color']:
+                    result['effect_detected'] = True
+                    result['effect_type'] = 'color_change'
+        
+        if result['effect_detected']:
+            # Log this tool effect
+            self.transformation_log.append({
+                'type': 'tool_effect',
+                'tool_position': tool_position,
+                'tool_color': result.get('tool_color'),
+                'effect_type': result['effect_type'],
+                'before': result['before_state'],
+                'after': result['after_state'],
+                'timestamp': time.time()
+            })
+            
+            # Track unique tool effects for network sharing
+            if not hasattr(self, '_tool_effects_to_save'):
+                self._tool_effects_to_save = []
+            self._tool_effects_to_save.append({
+                'tool_color': result.get('tool_color'),
+                'effect_type': result['effect_type'],
+                'tool_position': tool_position,
+                'state_before_signature': before.get('shape_signature') if before else None,
+                'state_after_signature': after.get('shape_signature') if after else None,
+            })
+        
+        return result
+    
+    def get_match_progress(self) -> Dict[str, Any]:
+        """Get progress toward matching key to lock."""
+        return {
+            'current_match_score': self.current_match_score,
+            'match_history': self.match_history[-10:] if self.match_history else [],
+            'improving': (
+                len(self.match_history) >= 2 and 
+                self.match_history[-1] > self.match_history[-2]
+            ),
+            'transformations_made': len(self.transformation_log),
+            'transformation_needed': self.get_transformation_needed()
+        }
+    
+    def reset(self):
+        """Reset tracker for new level."""
+        self.key_objects = {}
+        self.lock_objects = {}
+        self.tool_objects = {}
+        self.state_history = []
+        self.transformation_log = []
+        self.current_match_score = 0.0
+        self.match_history = []
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize tracker state."""
+        return {
+            'game_type': self.game_type,
+            'key_objects': self.key_objects,
+            'lock_objects': self.lock_objects,
+            'tool_objects': self.tool_objects,
+            'current_match_score': self.current_match_score,
+            'transformations_made': len(self.transformation_log)
+        }
+    
+    def save_discoveries_to_network(self, agent_id: Optional[str] = None, generation: Optional[int] = None) -> int:
+        """
+        Save key/lock/tool discoveries to the network database.
+        
+        Allows other agents to benefit from symbolic object identification.
+        
+        Returns:
+            Number of discoveries saved
+        """
+        if not self.game_type:
+            return 0
+        
+        saved = 0
+        
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Save key objects
+            for obj_id, state in self.key_objects.items():
+                cursor.execute("""
+                    INSERT OR REPLACE INTO symbolic_state_hypotheses (
+                        game_type, object_id, object_role, region_bbox,
+                        shape_signature, dominant_color, discovered_by_agent,
+                        discovery_generation, confidence, is_active
+                    ) VALUES (?, ?, 'key', ?, ?, ?, ?, ?, 0.7, TRUE)
+                """, (
+                    self.game_type,
+                    obj_id,
+                    json.dumps(state.get('bbox', [])),
+                    str(state.get('shape_signature', '')),
+                    state.get('color'),
+                    agent_id,
+                    generation
+                ))
+                saved += 1
+            
+            # Save lock objects
+            for obj_id, state in self.lock_objects.items():
+                cursor.execute("""
+                    INSERT OR REPLACE INTO symbolic_state_hypotheses (
+                        game_type, object_id, object_role, region_bbox,
+                        shape_signature, dominant_color, discovered_by_agent,
+                        discovery_generation, confidence, is_active
+                    ) VALUES (?, ?, 'lock', ?, ?, ?, ?, ?, 0.7, TRUE)
+                """, (
+                    self.game_type,
+                    obj_id,
+                    json.dumps(state.get('bbox', [])),
+                    str(state.get('shape_signature', '')),
+                    state.get('color'),
+                    agent_id,
+                    generation
+                ))
+                saved += 1
+            
+            # Save tool objects
+            for obj_id, state in self.tool_objects.items():
+                cursor.execute("""
+                    INSERT OR REPLACE INTO symbolic_state_hypotheses (
+                        game_type, object_id, object_role, region_bbox,
+                        shape_signature, dominant_color, discovered_by_agent,
+                        discovery_generation, confidence, is_active
+                    ) VALUES (?, ?, 'tool', ?, ?, ?, ?, ?, 0.6, TRUE)
+                """, (
+                    self.game_type,
+                    obj_id,
+                    json.dumps(state.get('bbox', [])),
+                    str(state.get('shape_signature', '')),
+                    state.get('color'),
+                    agent_id,
+                    generation
+                ))
+                saved += 1
+            
+            # Save tool effects to tool_effect_hypotheses (Phase 3.3 LS20 Defeat Plan)
+            if hasattr(self, '_tool_effects_to_save') and self._tool_effects_to_save:
+                for effect in self._tool_effects_to_save:
+                    try:
+                        tool_sig = f"color_{effect.get('tool_color', 'unknown')}"
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO tool_effect_hypotheses (
+                                game_type, tool_signature, effect_type, 
+                                state_before_signature, state_after_signature,
+                                observation_count, confidence, discovered_by_agent,
+                                discovery_generation, is_active
+                            ) VALUES (?, ?, ?, ?, ?, 
+                                      COALESCE((SELECT observation_count + 1 FROM tool_effect_hypotheses 
+                                                WHERE game_type = ? AND tool_signature = ?), 1),
+                                      0.6, ?, ?, TRUE)
+                        """, (
+                            self.game_type,
+                            tool_sig,
+                            effect.get('effect_type'),
+                            str(effect.get('state_before_signature', ''))[:50],
+                            str(effect.get('state_after_signature', ''))[:50],
+                            self.game_type,
+                            tool_sig,
+                            agent_id,
+                            generation
+                        ))
+                        saved += 1
+                    except Exception as te:
+                        import logging
+                        logging.getLogger(__name__).debug(f"Failed to save tool effect: {te}")
+                
+                # Clear saved effects
+                self._tool_effects_to_save = []
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to save symbolic discoveries: {e}")
+        
+        return saved
+
+
+class CompletionPredictor:
+    """
+    Predicts steps to completion for symbolic transformation puzzles.
+    
+    SYMBOLIC MECHANICS - Phase 3.4 of LS20 Defeat Plan
+    
+    Given current key state + known tool effects, this class:
+    1. Calculates minimum tool uses needed to match key to lock
+    2. Plans optimal tool visit order based on agent position
+    3. Estimates total actions required for completion
+    
+    Uses network knowledge from tool_effect_hypotheses table to make
+    informed predictions about which tools produce which effects.
+    """
+    
+    def __init__(self, db_path: str = "core_data.db"):
+        self.db_path = db_path
+        self._tool_effect_cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._cache_expiry: float = 0.0
+        self.CACHE_TTL = 60.0  # Refresh cache every 60 seconds
+    
+    def _get_tool_effects(self, game_type: str) -> List[Dict[str, Any]]:
+        """
+        Get known tool effects for a game type from network.
+        
+        Returns list of:
+        {
+            'tool_signature': 'color_5',
+            'effect_type': 'shape_change' | 'color_change',
+            'state_before_signature': str,
+            'state_after_signature': str,
+            'observation_count': int,
+            'confidence': float
+        }
+        """
+        import time
+        current_time = time.time()
+        
+        # Check cache
+        if game_type in self._tool_effect_cache and current_time < self._cache_expiry:
+            return self._tool_effect_cache[game_type]
+        
+        effects = []
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT tool_signature, effect_type, state_before_signature,
+                       state_after_signature, observation_count, confidence
+                FROM tool_effect_hypotheses
+                WHERE game_type = ? AND is_active = TRUE AND confidence > 0.3
+                ORDER BY observation_count DESC, confidence DESC
+            """, (game_type,))
+            
+            for row in cursor.fetchall():
+                effects.append({
+                    'tool_signature': row['tool_signature'],
+                    'effect_type': row['effect_type'],
+                    'state_before_signature': row['state_before_signature'],
+                    'state_after_signature': row['state_after_signature'],
+                    'observation_count': row['observation_count'],
+                    'confidence': row['confidence']
+                })
+            
+            conn.close()
+            
+            # Update cache
+            self._tool_effect_cache[game_type] = effects
+            self._cache_expiry = current_time + self.CACHE_TTL
+            
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Failed to get tool effects: {e}")
+        
+        return effects
+    
+    def predict_steps_to_completion(
+        self,
+        game_type: str,
+        key_state: Dict[str, Any],
+        lock_state: Dict[str, Any],
+        known_tool_effects: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Predict minimum steps needed to transform key to match lock.
+        
+        Args:
+            game_type: Game type for querying tool effects
+            key_state: Current key object state (from SymbolicStateTracker)
+            lock_state: Target lock object state
+            known_tool_effects: Optional override of tool effects (otherwise queries DB)
+            
+        Returns:
+            {
+                'steps_needed': int,  # Minimum tool uses estimated
+                'transformations_required': List[str],  # What needs to change
+                'tools_to_use': List[str],  # Which tools to use
+                'confidence': float,  # How confident in this prediction
+                'achievable': bool,  # Whether we have tools to achieve this
+                'reasoning': str  # Explanation of prediction
+            }
+        """
+        result = {
+            'steps_needed': 0,
+            'transformations_required': [],
+            'tools_to_use': [],
+            'confidence': 0.0,
+            'achievable': False,
+            'reasoning': ''
+        }
+        
+        if not key_state or not lock_state:
+            result['reasoning'] = 'Missing key or lock state'
+            return result
+        
+        # Get tool effects from network if not provided
+        if known_tool_effects is None:
+            known_tool_effects = self._get_tool_effects(game_type)
+        
+        # Determine what transformations are needed
+        transformations_needed = []
+        
+        # Check shape difference
+        key_shape = key_state.get('shape_signature')
+        lock_shape = lock_state.get('shape_signature')
+        if key_shape != lock_shape:
+            transformations_needed.append({
+                'type': 'shape_change',
+                'from': key_shape,
+                'to': lock_shape
+            })
+        
+        # Check color difference
+        key_color = key_state.get('color')
+        lock_color = lock_state.get('color')
+        if key_color != lock_color:
+            transformations_needed.append({
+                'type': 'color_change',
+                'from': key_color,
+                'to': lock_color
+            })
+        
+        # Check aspect ratio difference (may need shape change)
+        key_aspect = key_state.get('aspect_ratio', 1.0)
+        lock_aspect = lock_state.get('aspect_ratio', 1.0)
+        if abs(key_aspect - lock_aspect) > 0.2 and 'shape_change' not in [t['type'] for t in transformations_needed]:
+            transformations_needed.append({
+                'type': 'shape_change',
+                'from': f'aspect_{key_aspect:.1f}',
+                'to': f'aspect_{lock_aspect:.1f}'
+            })
+        
+        result['transformations_required'] = [f"{t['type']}: {t['from']} -> {t['to']}" for t in transformations_needed]
+        
+        if not transformations_needed:
+            result['steps_needed'] = 0
+            result['achievable'] = True
+            result['confidence'] = 1.0
+            result['reasoning'] = 'Key already matches lock - no transformation needed'
+            return result
+        
+        # Match transformations to known tool effects
+        tools_for_transform: Dict[str, List[str]] = {
+            'shape_change': [],
+            'color_change': []
+        }
+        
+        for effect in known_tool_effects:
+            effect_type = effect.get('effect_type', '')
+            tool_sig = effect.get('tool_signature', '')
+            confidence = effect.get('confidence', 0.0)
+            
+            if effect_type in tools_for_transform:
+                tools_for_transform[effect_type].append({
+                    'tool': tool_sig,
+                    'confidence': confidence,
+                    'observations': effect.get('observation_count', 1)
+                })
+        
+        # Calculate steps needed
+        steps = 0
+        tools_to_use = []
+        total_confidence = 0.0
+        confidence_samples = 0
+        
+        for transform in transformations_needed:
+            transform_type = transform['type']
+            available_tools = tools_for_transform.get(transform_type, [])
+            
+            if available_tools:
+                # Use the most confident tool for this transformation
+                best_tool = max(available_tools, key=lambda t: t['confidence'])
+                tools_to_use.append(best_tool['tool'])
+                total_confidence += best_tool['confidence']
+                confidence_samples += 1
+                steps += 1  # Each transformation requires at least one tool use
+            else:
+                # No known tool for this transformation - estimate 2 steps (find + use)
+                tools_to_use.append(f'unknown_{transform_type}_tool')
+                steps += 2  # Need to discover the tool first
+                total_confidence += 0.3  # Low confidence
+                confidence_samples += 1
+        
+        result['steps_needed'] = steps
+        result['tools_to_use'] = tools_to_use
+        result['achievable'] = all(t['type'] in [e.get('effect_type') for e in known_tool_effects] for t in transformations_needed) or len(known_tool_effects) > 0
+        result['confidence'] = total_confidence / max(confidence_samples, 1)
+        
+        # Build reasoning
+        if result['achievable']:
+            result['reasoning'] = f"Need {steps} tool use(s): {', '.join(tools_to_use)}"
+        else:
+            result['reasoning'] = f"Need {steps} step(s) but missing tools for: {[t['type'] for t in transformations_needed if t['type'] not in [e.get('effect_type') for e in known_tool_effects]]}"
+        
+        return result
+    
+    def plan_tool_visit_order(
+        self,
+        agent_position: Tuple[int, int],
+        tool_locations: Dict[str, Dict[str, Any]],
+        required_tools: List[str],
+        frame_width: int = 64,
+        frame_height: int = 64
+    ) -> Dict[str, Any]:
+        """
+        Plan optimal order to visit tools based on agent position.
+        
+        Args:
+            agent_position: Current (x, y) position of agent
+            tool_locations: Dict of tool_id -> {centroid, color, ...}
+            required_tools: List of tool signatures needed (e.g., ['color_5', 'color_8'])
+            frame_width: Frame width for distance calculations
+            frame_height: Frame height for distance calculations
+            
+        Returns:
+            {
+                'visit_order': List[str],  # Tool IDs in order to visit
+                'estimated_actions': int,  # Total movement actions estimated
+                'path_segments': List[Dict],  # Each segment with from/to/distance
+                'total_distance': int  # Manhattan distance total
+            }
+        """
+        result = {
+            'visit_order': [],
+            'estimated_actions': 0,
+            'path_segments': [],
+            'total_distance': 0
+        }
+        
+        if not agent_position or not tool_locations or not required_tools:
+            return result
+        
+        # Match required tools to available tool locations
+        available_tools = []
+        for tool_id, tool_state in tool_locations.items():
+            tool_color = tool_state.get('color', 0)
+            tool_sig = f"color_{tool_color}"
+            
+            # Check if this tool is one we need
+            if tool_sig in required_tools or any(req in tool_id for req in required_tools):
+                centroid = tool_state.get('centroid')
+                if centroid:
+                    available_tools.append({
+                        'tool_id': tool_id,
+                        'tool_sig': tool_sig,
+                        'position': centroid
+                    })
+        
+        if not available_tools:
+            # No matching tools found - return empty plan
+            return result
+        
+        # Greedy nearest-neighbor ordering
+        current_pos = agent_position
+        remaining_tools = available_tools.copy()
+        visit_order = []
+        path_segments = []
+        total_distance = 0
+        
+        while remaining_tools:
+            # Find nearest tool
+            nearest = None
+            nearest_dist = float('inf')
+            
+            for tool in remaining_tools:
+                tx, ty = tool['position']
+                dist = abs(tx - current_pos[0]) + abs(ty - current_pos[1])  # Manhattan
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest = tool
+            
+            if nearest:
+                # Add to visit order
+                visit_order.append(nearest['tool_id'])
+                path_segments.append({
+                    'from': current_pos,
+                    'to': nearest['position'],
+                    'tool_id': nearest['tool_id'],
+                    'distance': int(nearest_dist)
+                })
+                total_distance += int(nearest_dist)
+                current_pos = nearest['position']
+                remaining_tools.remove(nearest)
+        
+        # Estimate actions: distance + some overhead for tool interaction
+        # Assume each step = 1 action, plus 1-2 actions per tool use
+        estimated_actions = total_distance + len(visit_order) * 2
+        
+        result['visit_order'] = visit_order
+        result['estimated_actions'] = estimated_actions
+        result['path_segments'] = path_segments
+        result['total_distance'] = total_distance
+        
+        return result
+    
+    def get_completion_estimate(
+        self,
+        game_type: str,
+        symbolic_tracker: 'SymbolicStateTracker',
+        agent_position: Optional[Tuple[int, int]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get full completion estimate combining step prediction and path planning.
+        
+        This is the main entry point for completion prediction.
+        
+        Args:
+            game_type: Game type for tool effect lookup
+            symbolic_tracker: SymbolicStateTracker with current key/lock state
+            agent_position: Optional agent position for path planning
+            
+        Returns:
+            {
+                'completion_possible': bool,
+                'steps_to_match': int,  # Tool uses needed
+                'actions_estimated': int,  # Total actions including movement
+                'transformations': List[str],
+                'tool_visit_order': List[str],
+                'confidence': float,
+                'match_progress': float,  # Current match score
+                'summary': str
+            }
+        """
+        result = {
+            'completion_possible': False,
+            'steps_to_match': 0,
+            'actions_estimated': 0,
+            'transformations': [],
+            'tool_visit_order': [],
+            'confidence': 0.0,
+            'match_progress': 0.0,
+            'summary': ''
+        }
+        
+        if not symbolic_tracker:
+            result['summary'] = 'No symbolic tracker available'
+            return result
+        
+        # Get current match progress
+        result['match_progress'] = symbolic_tracker.current_match_score
+        
+        # If already matched, no steps needed
+        if result['match_progress'] >= 0.95:
+            result['completion_possible'] = True
+            result['confidence'] = 1.0
+            result['summary'] = 'Key matches lock - seek gate to complete'
+            return result
+        
+        # Get key and lock states
+        key_state = next(iter(symbolic_tracker.key_objects.values()), None) if symbolic_tracker.key_objects else None
+        lock_state = next(iter(symbolic_tracker.lock_objects.values()), None) if symbolic_tracker.lock_objects else None
+        
+        if not key_state or not lock_state:
+            result['summary'] = 'Key or lock not yet identified'
+            return result
+        
+        # Predict steps needed
+        step_prediction = self.predict_steps_to_completion(
+            game_type=game_type,
+            key_state=key_state,
+            lock_state=lock_state
+        )
+        
+        result['steps_to_match'] = step_prediction['steps_needed']
+        result['transformations'] = step_prediction['transformations_required']
+        result['confidence'] = step_prediction['confidence']
+        result['completion_possible'] = step_prediction['achievable']
+        
+        # Plan tool visit order if we have position and tools
+        if agent_position and symbolic_tracker.tool_objects:
+            path_plan = self.plan_tool_visit_order(
+                agent_position=agent_position,
+                tool_locations=symbolic_tracker.tool_objects,
+                required_tools=step_prediction['tools_to_use']
+            )
+            
+            result['tool_visit_order'] = path_plan['visit_order']
+            result['actions_estimated'] = path_plan['estimated_actions']
+        else:
+            # Estimate without path: assume 10 actions per tool use average
+            result['actions_estimated'] = step_prediction['steps_needed'] * 10
+        
+        # Build summary
+        if result['completion_possible']:
+            result['summary'] = (
+                f"Need {result['steps_to_match']} tool use(s), "
+                f"~{result['actions_estimated']} actions. "
+                f"Match at {result['match_progress']:.0%}. "
+                f"Confidence: {result['confidence']:.0%}"
+            )
+        else:
+            result['summary'] = (
+                f"Completion uncertain - need to discover tools. "
+                f"Transformations needed: {', '.join(result['transformations'])}"
+            )
+        
+        return result
+
+
 class AgentSelfModel:
     """
     Tracks which objects agents control in games.
@@ -2571,7 +3493,8 @@ class AgentSelfModel:
                             action_to_direction = {1: 'up', 2: 'down', 3: 'left', 4: 'right'}
                             direction = action_to_direction.get(action_num, movement)
                             
-                            self.learn_from_movement_correlation(
+                            # FIX: Capture return value to get observation_count for deduplication
+                            movement_result = self.learn_from_movement_correlation(
                                 agent_id=agent_id or 'discovery',
                                 game_id=f"{game_type}-discovery",
                                 level=level,
@@ -2580,11 +3503,13 @@ class AgentSelfModel:
                                 controlled_color=controlled_color,
                                 generation=0
                             )
-                            # Log message now in learn_from_movement_correlation based on observation count
+                            # Pass observation_count to caller for log deduplication
+                            if movement_result and isinstance(movement_result, dict):
+                                result['observation_count'] = movement_result.get('observation_count', 1)
                         except Exception as e:
                             logger.debug(f"Network sharing failed (non-critical): {e}")
                     
-                    logger.info(f"[DISCOVERY] Found control: {obj_id} responds to {action_taken}")
+                    # NOTE: Log moved to core_gameplay.py with deduplication (only obs 1 and 3)
                     break
         
         # For ACTION6 (click), check if we selected something or caused ANY change
@@ -2693,6 +3618,81 @@ class AgentSelfModel:
         if spurious_movers:
             result['spurious_movers'] = spurious_movers
             result['spurious_count'] = len(spurious_movers)
+        
+        # ===================================================================
+        # SYMBOLIC MECHANICS PHASE 2.1: DETECT SYMBOLIC OBJECTS
+        # ===================================================================
+        # If an object's appearance changed WITHOUT movement, it's likely a
+        # symbolic state object (key/lock). Promote to key_candidate or 
+        # lock_candidate based on whether it's controlled or static.
+        # ===================================================================
+        try:
+            # Get SymbolicStateTracker if available
+            tracker = getattr(self, '_symbolic_state_tracker', None)
+            if tracker is None and hasattr(self, 'db'):
+                from agent_self_model import SymbolicStateTracker
+                self._symbolic_state_tracker = SymbolicStateTracker(game_type, self.db.db_path)
+                tracker = self._symbolic_state_tracker
+            
+            if tracker:
+                # Get controlled colors from current discoveries
+                controlled_colors = []
+                if result.get('object_id'):
+                    try:
+                        controlled_colors.append(int(result['object_id'].replace('obj_', '')))
+                    except (ValueError, AttributeError):
+                        pass
+                
+                # Update symbolic state and check for changes
+                symbolic_changes = tracker.update_state(frame_after, controlled_colors)
+                
+                # If key object changed its appearance, this is significant!
+                if symbolic_changes.get('key_changed') or symbolic_changes.get('key_shape_changed'):
+                    result['symbolic_change_detected'] = True
+                    result['key_transformed'] = True
+                    
+                    # Log the symbolic change
+                    if symbolic_changes.get('key_shape_changed'):
+                        logger.info(
+                            f"[SYMBOLIC] KEY SHAPE CHANGED after {action_taken}! "
+                            f"Match progress: {tracker.current_match_score:.2f}"
+                        )
+                    
+                    # If match improved, this action is valuable
+                    if symbolic_changes.get('match_improved'):
+                        result['symbolic_progress'] = True
+                        result['match_score'] = tracker.current_match_score
+                        logger.info(
+                            f"[SYMBOLIC] MATCH IMPROVED to {tracker.current_match_score:.2f} "
+                            f"after {action_taken}!"
+                        )
+                
+                # Detect non-moving objects that changed (potential lock/key candidates)
+                for obj_before in objects_before:
+                    obj_id = obj_before['object_id']
+                    # Check if object exists but didn't move
+                    movement = primitives.call('get_object_movement', obj_id, frame_before, frame_after)
+                    if movement == 'none':
+                        # Check for appearance change (color/shape)
+                        obj_color_before = obj_before.get('color')
+                        obj_after = next((o for o in objects_after if o['object_id'] == obj_id), None)
+                        if obj_after and obj_after.get('color') != obj_color_before:
+                            # Object changed appearance without moving!
+                            # This is characteristic of symbolic state objects
+                            symbolic_role = 'key_candidate' if obj_color_before in controlled_colors else 'lock_candidate'
+                            result['symbolic_object_detected'] = {
+                                'object_id': obj_id,
+                                'role': symbolic_role,
+                                'color_before': obj_color_before,
+                                'color_after': obj_after.get('color'),
+                                'reason': 'appearance_change_without_movement'
+                            }
+                            logger.info(
+                                f"[SYMBOLIC] Detected {symbolic_role}: {obj_id} "
+                                f"(color {obj_color_before} -> {obj_after.get('color')})"
+                            )
+        except Exception as sym_err:
+            logger.debug(f"[SYMBOLIC] Symbolic detection failed (non-critical): {sym_err}")
         
         return result
     

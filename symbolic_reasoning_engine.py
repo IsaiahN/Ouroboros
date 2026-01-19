@@ -1325,6 +1325,179 @@ class GoalEvaluator:
                 min_distance = min(min_distance, distance)
         
         return min_distance if min_distance != float('inf') else 0
+    
+    # =========================================================================
+    # NETWORK PERSISTENCE (LS20 Defeat Plan Gap Fix)
+    # =========================================================================
+    # Share discovered goal structures to network so other agents can learn
+    # what kind of goals exist in this game type (match, reach, collect, etc.)
+    # =========================================================================
+    
+    def save_goal_structure_to_network(
+        self,
+        game_type: str,
+        db_path: str = "core_data.db",
+        win_validated: bool = False
+    ) -> bool:
+        """
+        Save the discovered goal structure to the network.
+        
+        Called when:
+        1. A game is won (win_validated=True)
+        2. Significant goal progress is detected
+        
+        Args:
+            game_type: The game type (first 4 chars of game_id)
+            db_path: Path to database
+            win_validated: Whether this goal structure led to a win
+            
+        Returns:
+            True if saved successfully
+        """
+        import sqlite3
+        import json
+        
+        if not self.goals or not self.goals.subgoals:
+            return False
+        
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            # Determine goal type from subgoals
+            goal_types = [g.goal_type for g in self.goals.subgoals]
+            primary_goal_type = goal_types[0] if goal_types else 'unknown'
+            
+            # Check if this is a compound goal
+            is_compound = len(self.goals.subgoals) > 1
+            
+            # Serialize sub-goals
+            sub_goals_json = json.dumps([
+                {
+                    'type': g.goal_type,
+                    'condition': g.condition,
+                    'target_objects': g.target_objects,
+                    'target_position': g.target_position
+                }
+                for g in self.goals.subgoals
+            ])
+            
+            # Completion condition
+            completion_condition = json.dumps({
+                'composition_type': self.goals.composition_type,
+                'all_required': self.goals.composition_type == 'AND'
+            })
+            
+            # Dependency order (subgoal sequence)
+            dependency_order = json.dumps([g.goal_type for g in self.goals.subgoals])
+            
+            # Save or update - use SELECT first since table may not have unique constraint
+            cursor.execute("""
+                SELECT id, observation_count, confidence, win_validated 
+                FROM goal_structure_hypotheses 
+                WHERE game_type = ? AND goal_type = ? AND is_active = TRUE
+            """, (game_type, primary_goal_type))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing
+                existing_id, obs_count, old_confidence, old_win = existing
+                new_confidence = min(0.95, old_confidence + (0.2 if win_validated else 0.05))
+                cursor.execute("""
+                    UPDATE goal_structure_hypotheses SET
+                        is_compound = ?,
+                        sub_goals = ?,
+                        completion_condition = ?,
+                        dependency_order = ?,
+                        confidence = ?,
+                        win_validated = ? OR win_validated,
+                        observation_count = observation_count + 1
+                    WHERE id = ?
+                """, (
+                    is_compound,
+                    sub_goals_json,
+                    completion_condition,
+                    dependency_order,
+                    new_confidence,
+                    win_validated,
+                    existing_id
+                ))
+            else:
+                # Insert new
+                cursor.execute("""
+                    INSERT INTO goal_structure_hypotheses (
+                        game_type, goal_type, is_compound, sub_goals,
+                        completion_condition, dependency_order, confidence,
+                        win_validated, observation_count, is_active
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, TRUE)
+                """, (
+                    game_type,
+                    primary_goal_type,
+                    is_compound,
+                    sub_goals_json,
+                    completion_condition,
+                    dependency_order,
+                    0.7 if win_validated else 0.4,
+                    win_validated
+                ))
+            
+            conn.commit()
+            conn.close()
+            return True
+            
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Goal structure save failed: {e}")
+            return False
+    
+    @staticmethod
+    def load_goal_structure_from_network(
+        game_type: str,
+        db_path: str = "core_data.db"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Load known goal structure for a game type from network.
+        
+        Returns:
+            Dict with goal structure info, or None if not found
+        """
+        import sqlite3
+        import json
+        
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT goal_type, is_compound, sub_goals, completion_condition,
+                       dependency_order, confidence, win_validated
+                FROM goal_structure_hypotheses
+                WHERE game_type = ? AND is_active = TRUE
+                ORDER BY win_validated DESC, confidence DESC
+                LIMIT 1
+            """, (game_type,))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return {
+                    'goal_type': row['goal_type'],
+                    'is_compound': bool(row['is_compound']),
+                    'sub_goals': json.loads(row['sub_goals']),
+                    'completion_condition': json.loads(row['completion_condition']),
+                    'dependency_order': json.loads(row['dependency_order']),
+                    'confidence': row['confidence'],
+                    'win_validated': bool(row['win_validated'])
+                }
+            
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Goal structure load failed: {e}")
+        
+        return None
 
 
 class ActionPlanner:
@@ -1843,11 +2016,31 @@ class SymbolicReasoningEngine:
         """
         Infer goals from initial state.
         
+        First checks network for known goal structures (Phase 4.4 LS20 Defeat Plan),
+        then falls back to heuristics.
+        
         Heuristics:
         - Goal objects should be reached
         - Collectibles should be collected
         - If no explicit goals, reach opposite corner
         """
+        # First, try to load known goal structure from network
+        known_goals = GoalEvaluator.load_goal_structure_from_network(self.game_type)
+        if known_goals and known_goals.get('win_validated'):
+            # Reconstruct goals from network knowledge
+            subgoals = []
+            for sub in known_goals.get('sub_goals', []):
+                subgoals.append(Goal(
+                    goal_type=sub.get('type', 'reach'),
+                    target_objects=sub.get('targets', []),
+                    condition=sub.get('condition', 'reach')
+                ))
+            if subgoals:
+                logic = 'AND' if known_goals.get('is_compound') else 'AND'
+                logger.info(f"Loaded {len(subgoals)} goal(s) from network for {self.game_type}")
+                return CompositionalGoal(subgoals=subgoals, logic=logic)
+        
+        # Fall back to heuristic inference
         subgoals = []
         
         for obj in state.objects.values():

@@ -105,12 +105,13 @@ except ImportError:
     RuleInductionEngine = None
 
 try:
-    from symbolic_reasoning_engine import SymbolicReasoningEngine, WorldModel as SymbolicWorldModel
+    from symbolic_reasoning_engine import SymbolicReasoningEngine, WorldModel as SymbolicWorldModel, GoalEvaluator
     SYMBOLIC_REASONING_AVAILABLE = True
 except ImportError:
     SYMBOLIC_REASONING_AVAILABLE = False
     SymbolicReasoningEngine = None
     SymbolicWorldModel = None
+    GoalEvaluator = None
 
 # Games-as-Teachers import
 try:
@@ -198,6 +199,37 @@ except ImportError as e:
     ReplayLearningEngine = None
     ReplayLearningContext = None
     print(f"[IMPORT-WARN] replay_learning_engine not available: {e}")
+
+# SYMBOLIC MECHANICS: UI Detection and HUD Parsing (all games)
+try:
+    from ui_detector import UIDetector, create_ui_detector
+    UI_DETECTOR_AVAILABLE = True
+except ImportError as e:
+    UI_DETECTOR_AVAILABLE = False
+    UIDetector = None
+    create_ui_detector = None
+    print(f"[IMPORT-WARN] ui_detector not available: {e}")
+
+# SYMBOLIC MECHANICS: SymbolicStateTracker for key/lock matching (all games)
+try:
+    from agent_self_model import SymbolicStateTracker, CompletionPredictor
+    SYMBOLIC_STATE_TRACKER_AVAILABLE = True
+    COMPLETION_PREDICTOR_AVAILABLE = True
+except ImportError as e:
+    SYMBOLIC_STATE_TRACKER_AVAILABLE = False
+    COMPLETION_PREDICTOR_AVAILABLE = False
+    SymbolicStateTracker = None
+    CompletionPredictor = None
+    print(f"[IMPORT-WARN] SymbolicStateTracker not available: {e}")
+
+# SYMBOLIC MECHANICS: RemoteEffectLearner for action-at-distance (all games)
+try:
+    from cods_engine import RemoteEffectLearner
+    REMOTE_EFFECT_LEARNER_AVAILABLE = True
+except ImportError as e:
+    REMOTE_EFFECT_LEARNER_AVAILABLE = False
+    RemoteEffectLearner = None
+    print(f"[IMPORT-WARN] RemoteEffectLearner not available: {e}")
 
 # Network Knowledge Synthesis - network-level insights
 try:
@@ -1770,6 +1802,54 @@ class GameplayEngine:
             self.subgoal_planner = None
             logger.debug("Subgoal planner not available")
         
+        # SYMBOLIC MECHANICS: UI Detector - HUD parsing and action limit detection
+        # Many games have UI indicators that constrain gameplay (action limits, health)
+        if UI_DETECTOR_AVAILABLE and create_ui_detector is not None:
+            try:
+                self.ui_detector = create_ui_detector()  # type: ignore[misc]
+                logger.info("UI detector initialized (HUD parsing for action limits)")
+            except Exception as e:
+                self.ui_detector = None
+                logger.debug(f"UI detector init failed: {e}")
+        else:
+            self.ui_detector = None
+        
+        # SYMBOLIC MECHANICS: Symbolic State Tracker - Key/lock matching
+        # Tracks symbolic properties (shape, color, orientation) for matching puzzles
+        if SYMBOLIC_STATE_TRACKER_AVAILABLE and SymbolicStateTracker is not None:
+            try:
+                self.symbolic_state_tracker = SymbolicStateTracker()  # type: ignore[misc]
+                logger.info("Symbolic state tracker initialized (key/lock matching)")
+            except Exception as e:
+                self.symbolic_state_tracker = None
+                logger.debug(f"Symbolic state tracker init failed: {e}")
+        else:
+            self.symbolic_state_tracker = None
+        
+        # SYMBOLIC MECHANICS: Completion Predictor - Steps to match estimation
+        # Predicts minimum tool uses and actions needed to complete transformation
+        if COMPLETION_PREDICTOR_AVAILABLE and CompletionPredictor is not None:
+            try:
+                self.completion_predictor = CompletionPredictor()  # type: ignore[misc]
+                logger.info("Completion predictor initialized (step estimation)")
+            except Exception as e:
+                self.completion_predictor = None
+                logger.debug(f"Completion predictor init failed: {e}")
+        else:
+            self.completion_predictor = None
+        
+        # SYMBOLIC MECHANICS: Remote Effect Learner - Action-at-distance causation
+        # Learns causal chains: touch tool HERE -> change happens THERE
+        if REMOTE_EFFECT_LEARNER_AVAILABLE and RemoteEffectLearner is not None:
+            try:
+                self.remote_effect_learner = RemoteEffectLearner()  # type: ignore[misc]
+                logger.info("Remote effect learner initialized (action-at-distance detection)")
+            except Exception as e:
+                self.remote_effect_learner = None
+                logger.debug(f"Remote effect learner init failed: {e}")
+        else:
+            self.remote_effect_learner = None
+        
         self.game_config = {
             'max_actions_per_level': 200,  # Max actions per level (REDUCED: force efficiency, ~20min game target)
             'max_total_actions': 1500,  # Max total actions across all levels (REDUCED: 2000→1500 for ~20min games)
@@ -3053,6 +3133,22 @@ class GameplayEngine:
                 # If we just store the reference, frame mutations would make both point to same data
                 self._previous_frame = [row[:] for row in game_state.frame] if game_state.frame else None
                 
+                # ================================================================
+                # SYMBOLIC MECHANICS: TRACK AGENT POSITION AND OVERLAP BEFORE ACTION
+                # ================================================================
+                # Store position and overlap color for _analyze_symbolic_mechanics to use.
+                # This enables detection of action-at-distance effects.
+                # ================================================================
+                self._last_action_position = getattr(self, '_current_agent_position', None)
+                self._last_overlap_color = None
+                if self._last_action_position and game_state.frame:
+                    px, py = self._last_action_position
+                    if 0 <= py < len(game_state.frame) and 0 <= px < len(game_state.frame[0]):
+                        pixel_color = game_state.frame[py][px]
+                        # Only record non-background colors as "overlap"
+                        if pixel_color != 0:
+                            self._last_overlap_color = pixel_color
+                
                 game_state = await self._execute_action(action, game_state, reasoning, loop_state.current_level)
             
             loop_state.consecutive_api_errors = 0
@@ -3198,6 +3294,27 @@ class GameplayEngine:
                             
                 except Exception as e:
                     logger.debug(f"Hypothesis feedback tracking failed: {e}")
+            
+            # ================================================================
+            # SYMBOLIC MECHANICS: STATE AND REMOTE EFFECT ANALYSIS
+            # ================================================================
+            # After each action, analyze:
+            # 1. UI changes (action limits, health indicators)
+            # 2. Symbolic state changes (key/lock matching progress)
+            # 3. Remote effects (action-at-distance causation)
+            # This enables learning for symbolic transformation puzzles (all games).
+            # ================================================================
+            try:
+                self._analyze_symbolic_mechanics(
+                    frame_before=getattr(self, '_previous_frame', None),
+                    frame_after=game_state.frame if game_state else None,
+                    action_position=getattr(self, '_last_action_position', None),
+                    action_taken=action,
+                    overlap_color=getattr(self, '_last_overlap_color', None),
+                    controlled_colors=getattr(self.agent_self_model, 'objects_agent_controls', []) if hasattr(self, 'agent_self_model') else []
+                )
+            except Exception as e:
+                logger.debug(f"Symbolic mechanics analysis failed (non-critical): {e}")
             
             # ================================================================
             # METACOGNITIVE: EVALUATE PREDICTION & RECORD FAILURES
@@ -4427,6 +4544,31 @@ class GameplayEngine:
                     
             except Exception as e:
                 logger.debug(f"Post-win reflection failed (non-critical): {e}")
+        
+        # ===================================================================
+        # GOAL STRUCTURE PERSISTENCE (LS20 Defeat Plan Gap Fix)
+        # ===================================================================
+        # On game win, save the discovered goal structure to network so other
+        # agents know what kind of goals this game type requires.
+        # ===================================================================
+        if game_state.state == "WIN":
+            try:
+                # Check if we have a goal evaluator (from symbolic engine)
+                goal_eval = None
+                if hasattr(self, 'symbolic_engine') and self.symbolic_engine:
+                    if hasattr(self.symbolic_engine, 'goal_evaluator'):
+                        goal_eval = self.symbolic_engine.goal_evaluator
+                
+                if goal_eval and hasattr(goal_eval, 'save_goal_structure_to_network'):
+                    game_type = game_id[:4] if game_id else 'unknown'
+                    saved = goal_eval.save_goal_structure_to_network(
+                        game_type=game_type,
+                        win_validated=True
+                    )
+                    if saved:
+                        logger.info(f"[SYMBOLIC] Saved win-validated goal structure for {game_type}")
+            except Exception as e:
+                logger.debug(f"Goal structure save failed (non-critical): {e}")
 
         # Rule Induction: Extract transferable rules from wins
         # This enables the network to learn abstract strategies that generalize
@@ -4652,8 +4794,12 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Counterfactual analysis failed (non-critical): {e}")
 
+        # FIX: Clarify that level_completions is how many levels were BEATEN, not X/total
+        levels_info = f"Levels Beaten: {loop_state.level_completions}" if loop_state.level_completions > 0 else "No Levels Beaten"
+        if loop_state.level_completions > 0 and game_state.state == 'GAME_OVER' and game_state.score == 0:
+            levels_info += f" (failed on L{loop_state.current_level + 1})"
         logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
-                   f"Actions: {loop_state.action_count}, Levels Completed: {loop_state.level_completions}/{loop_state.current_level}")
+                   f"Actions: {loop_state.action_count}, {levels_info}")
         return results
 
     async def _handle_viral_evolution(
@@ -5151,6 +5297,30 @@ class GameplayEngine:
                 )
             except Exception as e:
                 logger.debug(f"CODS context init failed (non-critical): {e}")
+        
+        # ================================================================
+        # MORTALITY STATE INITIALIZATION (Jan 17 - Five Types of Death)
+        # ================================================================
+        # Initialize mortality awareness for this agent. This tracks:
+        # - cull_distance: How close to being culled
+        # - death_persona: End-of-life behavior if near death
+        # - vitality: Current existential energy
+        # ================================================================
+        if agent_id and hasattr(self, 'i_thread') and self.i_thread:
+            try:
+                agent_mode = self.game_config.get('mode', 'generalist')
+                mortality_state = self.i_thread.get_mortality_state(agent_id, agent_mode)
+                # Store on i_thread for later access
+                self.i_thread._mortality_state = mortality_state
+                
+                # Check for death persona activation
+                if mortality_state.cull_distance < 0.2:
+                    persona = mortality_state.check_death_persona_activation()
+                    if persona:
+                        logger.info(f"[MORTALITY] Death persona activated: {persona.persona_name} "
+                                   f"(goal: {persona.goal})")
+            except Exception as e:
+                logger.debug(f"Mortality state init failed (non-critical): {e}")
         
         # ================================================================
         # FIX 1.1: BOOTSTRAP EMERGENT REASONING
@@ -7240,7 +7410,7 @@ class GameplayEngine:
                                     # primitive suggestions based on our failure history.
                                     # ================================================================
                                     try:
-                                        self._trigger_stuck_survey(game_state, loop_state)
+                                        self._trigger_stuck_survey(game_state, self.loop_state)
                                     except Exception as survey_err:
                                         logger.debug(f"Stuck survey failed: {survey_err}")
                                     
@@ -8350,8 +8520,12 @@ class GameplayEngine:
                 except Exception as spine_exc:
                     logger.debug(f"Spine attempt_end log failed: {spine_exc}")
 
+            # FIX: Clarify that level_completions is how many levels were BEATEN
+            levels_info = f"Levels Beaten: {level_completions}" if level_completions > 0 else "No Levels Beaten"
+            if level_completions > 0 and game_state.state == 'GAME_OVER' and game_state.score == 0:
+                levels_info += f" (failed on L{current_level + 1})"
             logger.info(f"Game {game_id} completed: {game_state.state}, Score: {game_state.score}, "
-                       f"Actions: {action_count}, Levels Completed: {level_completions}/{current_level}")
+                       f"Actions: {action_count}, {levels_info}")
             return results
 
         except Exception as e:
@@ -9700,6 +9874,8 @@ class GameplayEngine:
             'viability': {'status': 'skipped', 'reason': 'viability gate disabled'},
             'observer': {'status': 'pending', 'reason': 'observer readout', 'persona_type': 'observer'},
             'strategy': {'status': 'pending', 'reason': 'problem classifier', 'persona_type': 'classifier'},
+            'symbolic_goal_chaser': {'status': 'pending', 'reason': 'DM-9 symbolic mechanics'},  # SYMBOLIC MECHANICS
+            'resource_planner': {'status': 'pending', 'reason': 'DM-10 resource awareness'},  # SYMBOLIC MECHANICS
             'selected_by_scorer': None,
             'best_alternative': None,
             'two_streams': {'wA': wA_decision, 'wB': wB_decision},  # Fix #7: Track in trace
@@ -9916,7 +10092,8 @@ class GameplayEngine:
                         pass
                     
                     _wt_fn = getattr(self.science_engine, 'get_working_theory', None)
-                    working_theory = _wt_fn(_tg_game_type, _tg_level) if callable(_wt_fn) else None
+                    _wt_result = _wt_fn(_tg_game_type, _tg_level) if callable(_wt_fn) else None
+                    working_theory: Optional[Dict[str, Any]] = _wt_result if isinstance(_wt_result, dict) else None
                     
                     if working_theory:
                         stage = working_theory.get('stage', 'exploring')
@@ -10029,7 +10206,8 @@ class GameplayEngine:
                             # Get all active theories for this level
                             _get_theories_fn = getattr(self.science_engine, '_get_theories_for_level', None)
                             if callable(_get_theories_fn) and _tg_game_type:
-                                theories = _get_theories_fn(_tg_game_type, _tg_level)
+                                _theories_result = _get_theories_fn(_tg_game_type, _tg_level)
+                                theories: Optional[List[Any]] = _theories_result if isinstance(_theories_result, list) else None
                                 competing_theory_count = len(theories) if theories else 1
                                 
                                 # Check for committed theory (evidence ratio > 0.85, total > 10)
@@ -10229,7 +10407,8 @@ class GameplayEngine:
                             game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
                             if game_id:
                                 game_type = game_id.split('-')[0] if '-' in str(game_id) else str(game_id)
-                                transferable = universal_fn(game_type, limit=10) or []
+                                _transferable_result = universal_fn(game_type, limit=10)
+                                transferable: List[Dict[str, Any]] = _transferable_result if isinstance(_transferable_result, list) else []
                                 for pattern in transferable:
                                     if pattern.get('action') == action_num:
                                         pattern_reliability = pattern.get('reliability', 0.3)
@@ -10341,12 +10520,24 @@ class GameplayEngine:
                     _qe_theory = {}
                     _qe_obs_flags = getattr(self, '_last_observer_flags', {}) or {}
                     _qe_action_count = getattr(self.loop_state, 'action_count', 0) if hasattr(self, 'loop_state') and self.loop_state else 0
+                    _qe_game_id: Optional[str] = None
+                    _qe_level: int = 1
+                    
+                    # Get game_id and level first (needed for both self_identity and theory)
+                    if hasattr(self, 'session_manager') and self.session_manager:
+                        gid = getattr(self.session_manager, 'current_game_id', None)
+                        if gid:
+                            _qe_game_id = gid.split('-')[0] if '-' in str(gid) else str(gid)
+                    if hasattr(self, 'loop_state') and self.loop_state:
+                        _qe_level = getattr(self.loop_state, 'current_level', 1) or 1
                     
                     if hasattr(self, 'agent_self_model') and self.agent_self_model:
                         try:
                             agent_id = self.game_config.get('agent_id')
                             if agent_id:
-                                _qe_self_id = self.agent_self_model.get_self_identity_snapshot(agent_id) or {}
+                                _qe_self_id = self.agent_self_model.get_self_identity_snapshot(
+                                    agent_id, _qe_game_id, _qe_level
+                                ) or {}
                         except Exception:
                             pass
                     
@@ -10354,15 +10545,8 @@ class GameplayEngine:
                         try:
                             _wt_fn = getattr(self.science_engine, 'get_working_theory', None)
                             if callable(_wt_fn):
-                                _qe_game_type = None
-                                _qe_level = 1
-                                if hasattr(self, 'session_manager') and self.session_manager:
-                                    gid = getattr(self.session_manager, 'current_game_id', None)
-                                    if gid:
-                                        _qe_game_type = gid.split('-')[0] if '-' in str(gid) else str(gid)
-                                if hasattr(self, 'loop_state') and self.loop_state:
-                                    _qe_level = getattr(self.loop_state, 'current_level', 1) or 1
-                                _qe_theory = _wt_fn(_qe_game_type, _qe_level) or {}
+                                _qe_theory_result = _wt_fn(_qe_game_id, _qe_level)
+                                _qe_theory = _qe_theory_result if isinstance(_qe_theory_result, dict) else {}
                         except Exception:
                             pass
                     
@@ -10430,7 +10614,7 @@ class GameplayEngine:
                                 # ISSUE FIX #1: Mark that action was blocked so prediction logic knows
                                 # to adjust expected outcome (don't expect 'object_control' from ACTION6)
                                 self._action_was_blocked = True
-                                self._blocked_original_action = original_action
+                                self._blocked_original_action = original_action  # type: ignore[attr-defined]
                                 
                                 logger.info(f"[QUESTIONING] {original_action} blocked by {blocking_qs}, substituting {action}")
                 except Exception as qe_err:
@@ -12021,9 +12205,6 @@ class GameplayEngine:
                     logger.debug(f"[CODS-SURVEY] Ran fallback survey (no cached survey available)")
             except Exception as survey_err:
                 logger.debug(f"CODS fallback survey error: {survey_err}")
-                                    
-            except Exception as survey_err:
-                logger.debug(f"CODS environment survey error: {survey_err}")
         
         # ===================================================================
         # NETWORK FAILURE HYPOTHESES: Learn from others' failures
@@ -12047,6 +12228,26 @@ class GameplayEngine:
                     # Add bias from CODS primitive suggestion
                     hypothesis_biases[action_num] = hypothesis_biases.get(action_num, 0) + 0.25 * confidence
                     logger.debug(f"[CODS->BIAS] ACTION{action_num} +{0.25 * confidence:.2f} from primitives")
+        
+        # ===================================================================
+        # DEATH PERSONA BIAS (Jan 17 - Five Types of Death)
+        # If agent is near death and has active death persona, apply its biases
+        # Pioneer near death -> more exploration (ACTION1-4)
+        # Optimizer near death -> more refinement (existing sequence actions)
+        # ===================================================================
+        if hasattr(self, 'i_thread') and self.i_thread:
+            mortality_state = getattr(self.i_thread, '_mortality_state', None)
+            if mortality_state:
+                death_bias = mortality_state.get_death_persona_bias()
+                if death_bias:
+                    for action_str, bias in death_bias.items():
+                        try:
+                            action_num = int(action_str.replace('ACTION', ''))
+                            if 1 <= action_num <= 7:
+                                hypothesis_biases[action_num] = hypothesis_biases.get(action_num, 0) + bias
+                                logger.debug(f"[DEATH-PERSONA->BIAS] ACTION{action_num} +{bias:.2f}")
+                        except (ValueError, AttributeError):
+                            pass
         
         if current_game_id and agent_id:
             try:
@@ -12681,6 +12882,180 @@ class GameplayEngine:
                             pass
             except Exception as e:
                 logger.debug(f"DM-8 Q3 memory error: {e}")
+        
+        # ---------------------------------------------------------
+        # DM-9: SYMBOLIC GOAL CHASER (Phase 2.4 of LS20 Defeat Plan)
+        # ===================================================================
+        # Use symbolic state tracking to guide action selection:
+        # - If key != lock: seek tools to transform key
+        # - If key == lock: seek gate/goal
+        # - If resources low: seek pickups
+        # This is the BEHAVIORAL integration of symbolic mechanics.
+        # ===================================================================
+        symbolic_action_bias: Dict[int, float] = {}
+        completion_estimate = None
+        try:
+            if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+                tracker = self.symbolic_state_tracker
+                
+                # Get current match status
+                match_score = tracker.current_match_score
+                transformation_info = tracker.get_transformation_needed()
+                
+                # Get agent position from _current_agent_position (set by object tracking)
+                agent_pos = getattr(self, '_current_agent_position', None)
+                
+                # Use CompletionPredictor for smarter tool ordering
+                if hasattr(self, 'completion_predictor') and self.completion_predictor:
+                    try:
+                        game_type = self.session_manager.current_game_id[:4] if self.session_manager.current_game_id else 'unknown'
+                        completion_estimate = self.completion_predictor.get_completion_estimate(
+                            game_type=game_type,
+                            symbolic_tracker=tracker,
+                            agent_position=agent_pos
+                        )
+                        
+                        if completion_estimate and completion_estimate.get('steps_to_match', 0) > 0:
+                            logger.debug(
+                                f"[DM-9] CompletionPredictor: {completion_estimate.get('summary', '')}"
+                            )
+                    except Exception as cp_err:
+                        logger.debug(f"[DM-9] CompletionPredictor error: {cp_err}")
+                
+                if transformation_info.get('transformation_needed'):
+                    # KEY != LOCK: Need to find and use tools
+                    tool_locations = tracker.tool_objects
+                    
+                    if tool_locations and agent_pos:
+                        # Use CompletionPredictor's tool visit order if available
+                        target_tools = []
+                        if completion_estimate and completion_estimate.get('tool_visit_order'):
+                            target_tools = completion_estimate['tool_visit_order']
+                        
+                        # If we have a specific tool order, bias toward first tool
+                        if target_tools:
+                            first_tool = target_tools[0]
+                            tool_state = tool_locations.get(first_tool)
+                            if tool_state and 'centroid' in tool_state:
+                                tool_x, tool_y = tool_state['centroid']
+                                dx = tool_x - agent_pos[0]
+                                dy = tool_y - agent_pos[1]
+                                
+                                tool_boost = 0.4  # Strong bias for predicted optimal tool
+                                if abs(dx) > abs(dy):
+                                    if dx > 0:
+                                        symbolic_action_bias[4] = symbolic_action_bias.get(4, 0) + tool_boost
+                                    else:
+                                        symbolic_action_bias[3] = symbolic_action_bias.get(3, 0) + tool_boost
+                                else:
+                                    if dy > 0:
+                                        symbolic_action_bias[2] = symbolic_action_bias.get(2, 0) + tool_boost
+                                    else:
+                                        symbolic_action_bias[1] = symbolic_action_bias.get(1, 0) + tool_boost
+                                
+                                logger.info(
+                                    f"[DM-9] SYMBOLIC: Using CompletionPredictor - "
+                                    f"targeting {first_tool} ({completion_estimate.get('steps_to_match', '?')} steps to match)"
+                                )
+                        else:
+                            # Fallback: Calculate direction biases toward any tools
+                            for tool_id, tool_state in list(tool_locations.items())[:3]:
+                                if 'centroid' in tool_state:
+                                    tool_x, tool_y = tool_state['centroid']
+                                    dx = tool_x - agent_pos[0]
+                                    dy = tool_y - agent_pos[1]
+                                    
+                                    tool_boost = 0.3
+                                    if abs(dx) > abs(dy):
+                                        if dx > 0:
+                                            symbolic_action_bias[4] = symbolic_action_bias.get(4, 0) + tool_boost
+                                        else:
+                                            symbolic_action_bias[3] = symbolic_action_bias.get(3, 0) + tool_boost
+                                    else:
+                                        if dy > 0:
+                                            symbolic_action_bias[2] = symbolic_action_bias.get(2, 0) + tool_boost
+                                        else:
+                                            symbolic_action_bias[1] = symbolic_action_bias.get(1, 0) + tool_boost
+                            
+                            logger.info(f"[DM-9] SYMBOLIC: Key != Lock (match={match_score:.2f}), seeking tools")
+                    elif tool_locations:
+                        # Tools found but no agent position yet - explore to find them
+                        for action in [1, 2, 3, 4]:
+                            symbolic_action_bias[action] = symbolic_action_bias.get(action, 0) + 0.15
+                        logger.debug(f"[DM-9] SYMBOLIC: Need tools, no position known")
+                    else:
+                        # No tools found yet - explore to find them
+                        for action in [1, 2, 3, 4]:
+                            symbolic_action_bias[action] = symbolic_action_bias.get(action, 0) + 0.15
+                        logger.debug(f"[DM-9] SYMBOLIC: Need tools but none found, exploring")
+                        
+                elif match_score >= 0.9:
+                    # KEY == LOCK: Seek the gate/goal
+                    # Look for lock objects (they often indicate gate direction)
+                    lock_locations = tracker.lock_objects
+                    
+                    if lock_locations and agent_pos:
+                        for lock_id, lock_state in list(lock_locations.items())[:1]:
+                            if 'centroid' in lock_state:
+                                lock_x, lock_y = lock_state['centroid']
+                                dx = lock_x - agent_pos[0]
+                                dy = lock_y - agent_pos[1]
+                                
+                                gate_boost = 0.4  # Strong bias when key matches
+                                if abs(dx) > abs(dy):
+                                    if dx > 0:
+                                        symbolic_action_bias[4] = gate_boost
+                                    else:
+                                        symbolic_action_bias[3] = gate_boost
+                                else:
+                                    if dy > 0:
+                                        symbolic_action_bias[2] = gate_boost
+                                    else:
+                                        symbolic_action_bias[1] = gate_boost
+                        
+                        logger.info(f"[DM-9] SYMBOLIC: Key MATCHES Lock! Seeking gate")
+                
+                # Apply symbolic biases to dm_biases
+                for action, bias in symbolic_action_bias.items():
+                    dm_biases[action] = dm_biases.get(action, 0) + bias
+                    
+        except Exception as sym_err:
+            logger.debug(f"[DM-9] Symbolic goal chaser error: {sym_err}")
+        
+        # ---------------------------------------------------------
+        # DM-10: RESOURCE-AWARE PLANNING (Phase 3.2 of LS20 Defeat Plan)
+        # ===================================================================
+        # If resources are low, prioritize finding pickups over goals.
+        # Uses UIDetector to track action limits and health.
+        # ===================================================================
+        try:
+            if hasattr(self, 'ui_detector') and self.ui_detector:
+                action_status = self.ui_detector.get_action_limit_status()
+                health_status = self.ui_detector.get_health_status()
+                
+                is_action_critical = action_status.get('is_critical', False) if action_status else False
+                is_health_critical = health_status.get('is_critical', False) if health_status else False
+                
+                if is_action_critical or is_health_critical:
+                    # SURVIVAL MODE: Need to find resource pickups
+                    # In most games, pickups are scattered - encourage exploration
+                    resource_urgency = 0.35 if is_health_critical else 0.25
+                    
+                    # Spread exploration bias
+                    for action in [1, 2, 3, 4]:
+                        dm_biases[action] = dm_biases.get(action, 0) + resource_urgency * 0.5
+                    
+                    # If we know pickup locations from symbolic tracker, bias toward them
+                    if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+                        # Resource pickups are often small objects (tools category)
+                        pickups = self.symbolic_state_tracker.tool_objects
+                        if pickups:
+                            logger.info(f"[DM-10] RESOURCE CRITICAL - seeking {len(pickups)} potential pickups")
+                    else:
+                        logger.info(f"[DM-10] RESOURCE CRITICAL - {'health' if is_health_critical else 'actions'} low, exploring for pickups")
+                        
+        except Exception as res_err:
+            logger.debug(f"[DM-10] Resource-aware planning error: {res_err}")
         
         # PHASE 3: Get viral package and pariah influence
         action_weights = {}
@@ -14039,10 +14414,21 @@ class GameplayEngine:
                             if discovery_result and discovery_result.get('discovered_control'):
                                 # FIX #7: Log cross-level match if detected
                                 cross_match_str = " (CROSS-LEVEL MATCH!)" if discovery_result.get('cross_level_match') else ""
-                                logger.info(
-                                    f"[DISCOVERY] {action} controls {discovery_result['object_id']} "
-                                    f"(shared to network for {game_type} L{current_level}){cross_match_str}"
-                                )
+                                # FIX: Only log on FIRST observation or when VALIDATED (3+ obs)
+                                # The learn_from_movement_correlation returns observation_count
+                                obs_count = discovery_result.get('observation_count', 1)
+                                is_new = obs_count == 1
+                                is_validated = obs_count == 3  # Log once when reaching validation threshold
+                                if is_new:
+                                    logger.info(
+                                        f"[DISCOVERY-NEW] {action} controls {discovery_result['object_id']} "
+                                        f"(first observation for {game_type} L{current_level}){cross_match_str}"
+                                    )
+                                elif is_validated:
+                                    logger.info(
+                                        f"[DISCOVERY-VALIDATED] {action} controls {discovery_result['object_id']} "
+                                        f"(3+ observations for {game_type} L{current_level}){cross_match_str}"
+                                    )
                     except Exception as e:
                         logger.debug(f"Discovery phase observation failed (non-critical): {e}")
                 
@@ -16489,7 +16875,12 @@ class GameplayEngine:
             'agent_position': None,
             'network_hypotheses': [],
             'active_beliefs': [],    # Phase 2: Competing beliefs from ActiveBeliefGraph
-            'belief_conflict_count': 0  # How many competing hypotheses
+            'belief_conflict_count': 0,  # How many competing hypotheses
+            # SYMBOLIC MECHANICS: Key/lock matching and tool tracking
+            'symbolic_state': None,      # Current key/lock match progress
+            'tool_locations': [],        # Known tool positions
+            'resource_state': None,      # UI-detected resources (actions, lives)
+            'remote_effects': []         # Known action-at-distance effects
         }
         
         # Get world state from SymbolicReasoningEngine (if initialized)
@@ -16693,6 +17084,160 @@ class GameplayEngine:
         except Exception as e:
             logger.debug(f"Failure hypotheses query failed: {e}")
         
+        # ===================================================================
+        # SYMBOLIC MECHANICS: Populate key/lock match state and tool locations
+        # ===================================================================
+        # This closes the loop: the agent learns about symbolic mechanics in
+        # _analyze_symbolic_mechanics(), and now can USE that knowledge for
+        # action selection via this world model context.
+        # ===================================================================
+        
+        # 1. Get symbolic state from SymbolicStateTracker
+        if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+            try:
+                match_progress = self.symbolic_state_tracker.get_match_progress()
+                transformation_needed = self.symbolic_state_tracker.get_transformation_needed()
+                
+                context['symbolic_state'] = {
+                    'match_score': round(match_progress.get('current_match_score', 0), 2),
+                    'key_count': match_progress.get('key_count', 0),
+                    'lock_count': match_progress.get('lock_count', 0),
+                    'transformation_needed': transformation_needed.get('transformation_needed', False),
+                    'steps_estimate': transformation_needed.get('steps_estimate', 0)
+                }
+                
+                # Extract tool locations
+                if self.symbolic_state_tracker.tool_objects:
+                    context['tool_locations'] = [
+                        {
+                            'id': tool_id[:20],
+                            'color': state.get('color'),
+                            'position': state.get('centroid')
+                        }
+                        for tool_id, state in list(self.symbolic_state_tracker.tool_objects.items())[:5]
+                    ]
+            except Exception as e:
+                logger.debug(f"Symbolic state context failed: {e}")
+        
+        # 2. Get UI-detected resource state
+        if hasattr(self, 'ui_detector') and self.ui_detector and frame:
+            try:
+                resource_state = {}
+                
+                # Get action limit status
+                action_status = self.ui_detector.get_action_limit_status(frame)
+                if action_status.get('has_action_limit'):
+                    resource_state['actions_remaining'] = action_status.get('remaining_actions')
+                    resource_state['actions_max'] = action_status.get('max_actions')
+                    resource_state['actions_critical'] = action_status.get('is_critical', False)
+                
+                # Get health/lives status
+                health_status = self.ui_detector.get_health_status(frame)
+                if health_status.get('has_health'):
+                    resource_state['health'] = health_status.get('current_health')
+                    resource_state['health_max'] = health_status.get('max_health')
+                    resource_state['health_critical'] = health_status.get('is_critical', False)
+                
+                if resource_state:
+                    context['resource_state'] = resource_state
+            except Exception as e:
+                logger.debug(f"Resource state context failed: {e}")
+        
+        # 3. Get known remote effects from RemoteEffectLearner
+        if hasattr(self, 'remote_effect_learner') and self.remote_effect_learner:
+            try:
+                # Get validated effects
+                validated = self.remote_effect_learner.validated_effects
+                if validated:
+                    context['remote_effects'] = [
+                        {
+                            'trigger': trigger_key,
+                            'effect_type': info.get('effect_type'),
+                            'confidence': round(info.get('confidence', 0), 2)
+                        }
+                        for trigger_key, info in list(validated.items())[:5]
+                    ]
+                
+                # Also query network for this game type
+                if not context['remote_effects']:
+                    game_type = game_id[:4] if game_id else None
+                    if game_type:
+                        network_effects = self.remote_effect_learner.query_network_effects(game_type)
+                        if network_effects:
+                            context['remote_effects'] = [
+                                {
+                                    'trigger': f"color_{e.get('trigger_color')}",
+                                    'effect_type': e.get('effect_type'),
+                                    'confidence': round(e.get('reliability', 0), 2)
+                                }
+                                for e in network_effects[:5]
+                            ]
+            except Exception as e:
+                logger.debug(f"Remote effects context failed: {e}")
+        
+        # 4. Get goal evaluation from SymbolicReasoningEngine (Phase 3.1 LS20 Defeat Plan)
+        if hasattr(self, 'symbolic_engine') and self.symbolic_engine:
+            try:
+                # Get goal progress if engine has goal_evaluator
+                if hasattr(self.symbolic_engine, 'goal_evaluator') and self.symbolic_engine.goal_evaluator:
+                    goal_eval = self.symbolic_engine.goal_evaluator
+                    if hasattr(goal_eval, 'goals') and goal_eval.goals:
+                        goal_progress = goal_eval.goals.get_progress()
+                        unsatisfied = goal_eval.goals.get_unsatisfied()
+                        
+                        context['goal_evaluation'] = {
+                            'progress': round(goal_progress, 2),
+                            'unsatisfied_count': len(unsatisfied),
+                            'unsatisfied_goals': [
+                                {
+                                    'type': g.goal_type,
+                                    'condition': g.condition,
+                                    'priority': g.priority
+                                }
+                                for g in unsatisfied[:3]  # Top 3 unsatisfied goals
+                            ] if unsatisfied else []
+                        }
+                        
+                        # If we have goals and a world model, get distance heuristic
+                        if hasattr(self.symbolic_engine, 'world_model') and self.symbolic_engine.world_model:
+                            wm = self.symbolic_engine.world_model
+                            if wm.state:
+                                distance = goal_eval.get_distance_to_goal(wm.state)
+                                if distance != float('inf'):
+                                    context['goal_evaluation']['distance_to_goal'] = round(distance, 1)
+            except Exception as e:
+                logger.debug(f"Goal evaluation context failed: {e}")
+        
+        # 5. Get completion prediction from CompletionPredictor (Phase 3.4 LS20 Defeat Plan)
+        if hasattr(self, 'completion_predictor') and self.completion_predictor:
+            try:
+                if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+                    # Get agent position from _current_agent_position (set by object tracking)
+                    agent_pos = getattr(self, '_current_agent_position', None)
+                    
+                    # Get game type
+                    game_type = game_id[:4] if game_id else 'unknown'
+                    
+                    # Get full completion estimate
+                    completion_est = self.completion_predictor.get_completion_estimate(
+                        game_type=game_type,
+                        symbolic_tracker=self.symbolic_state_tracker,
+                        agent_position=agent_pos
+                    )
+                    
+                    if completion_est:
+                        context['completion_prediction'] = {
+                            'possible': completion_est.get('completion_possible', False),
+                            'steps_to_match': completion_est.get('steps_to_match', 0),
+                            'actions_estimated': completion_est.get('actions_estimated', 0),
+                            'match_progress': round(completion_est.get('match_progress', 0), 2),
+                            'confidence': round(completion_est.get('confidence', 0), 2),
+                            'tool_order': completion_est.get('tool_visit_order', [])[:3],
+                            'summary': completion_est.get('summary', '')[:100]
+                        }
+            except Exception as e:
+                logger.debug(f"Completion prediction context failed: {e}")
+        
         return context
 
     # ========================================================================
@@ -16832,6 +17377,297 @@ class GameplayEngine:
             
         except Exception as e:
             logger.debug(f"Error building primitives context: {e}")
+        
+        return context
+
+    def _build_survey_context(self) -> Dict[str, Any]:
+        """
+        Build survey context for API reasoning payload (Tier 9).
+        
+        Includes the CODS environment survey and primitive suggestions that
+        were computed at level start or when stuck was detected.
+        
+        Returns:
+            Dict with survey data and suggested primitives
+        """
+        context: Dict[str, Any] = {
+            'surveyed': False,
+            'trigger': None,
+            'game_signature': None,
+            'detected_features': {},
+            'suggested_primitives': [],
+            'primitive_chains': [],
+            'action_suggestions': [],
+            'strategy_hints': []
+        }
+        
+        try:
+            # Get cached survey from level start or stuck detection
+            survey = getattr(self, '_current_level_survey', None)
+            suggestions = getattr(self, '_current_primitive_suggestions', None)
+            
+            if survey and not survey.get('error'):
+                context['surveyed'] = True
+                context['trigger'] = survey.get('trigger', 'unknown')
+                context['game_signature'] = survey.get('game_signature', 'unknown')
+                
+                # Extract detected features
+                context['detected_features'] = {
+                    'has_pipes': survey.get('has_pipes', False),
+                    'has_containers': survey.get('has_containers', False),
+                    'has_symmetry': survey.get('has_symmetry', False),
+                    'has_templates': survey.get('has_templates', False),
+                    'has_holes': survey.get('has_holes', False),
+                    'unique_colors': survey.get('unique_colors', 0),
+                    'dominant_color': survey.get('dominant_color'),
+                    'rare_colors': survey.get('rare_colors', [])[:3],  # Limit size
+                    'edge_density': survey.get('edge_density', 0),
+                    'symmetry_axes': survey.get('symmetry_axes', 0)
+                }
+                
+                # Strategy hints from survey
+                if survey.get('strategy_hints'):
+                    context['strategy_hints'] = survey.get('strategy_hints', [])[:5]
+            
+            if suggestions and not suggestions.get('error'):
+                # Suggested primitives
+                if suggestions.get('suggested_primitives'):
+                    context['suggested_primitives'] = [
+                        {
+                            'primitive': p.get('primitive'),
+                            'reason': p.get('reason', '')[:50],  # Truncate
+                            'priority': p.get('priority', 0)
+                        }
+                        for p in suggestions['suggested_primitives'][:5]
+                    ]
+                
+                # Primitive chains
+                if suggestions.get('primitive_chains'):
+                    context['primitive_chains'] = [
+                        {
+                            'chain': c.get('chain', [])[:3],  # Max 3 in chain
+                            'applies_to': c.get('applies_to', '')[:30]
+                        }
+                        for c in suggestions['primitive_chains'][:3]
+                    ]
+                
+                # Action suggestions from primitives
+                if suggestions.get('suggested_actions'):
+                    context['action_suggestions'] = [
+                        {
+                            'action': a.get('action'),
+                            'reason': a.get('reason', '')[:50],
+                            'confidence': a.get('confidence', 0)
+                        }
+                        for a in suggestions['suggested_actions'][:5]
+                    ]
+                    
+        except Exception as e:
+            logger.debug(f"Error building survey context: {e}")
+            context['error'] = str(e)[:100]
+        
+        return context
+
+    def _build_mortality_context(self, agent_id: Optional[str]) -> Dict[str, Any]:
+        """
+        Build mortality context for API reasoning payload.
+        
+        Surfaces the agent's awareness of its own mortality:
+        - cull_distance: How close to being culled (0.0 = safe, 1.0 = imminent death)
+        - predicted_death_type: Why the agent expects to die
+        - death_persona_active: Whether end-of-life persona is active
+        - death_persona_goal: What the agent is trying to accomplish before death
+        
+        From Jan 17 session: "Five Types of Death & Death-Triggered Personas"
+        
+        Returns:
+            Dict with mortality state
+        """
+        context: Dict[str, Any] = {
+            'cull_distance': None,
+            'predicted_death_type': None,
+            'death_persona_active': False,
+            'death_persona_goal': None,
+            'social_relevance': None,
+            'legacy_score': None
+        }
+        
+        if not agent_id:
+            return context
+            
+        try:
+            # Check if I-Thread has mortality state
+            if hasattr(self, 'i_thread') and self.i_thread:
+                mortality = getattr(self.i_thread, '_mortality_state', None)
+                if mortality:
+                    context['cull_distance'] = getattr(mortality, 'cull_distance', None)
+                    context['predicted_death_type'] = getattr(mortality, 'predicted_death_type', None)
+                    context['death_persona_active'] = getattr(mortality, 'death_persona_active', False)
+                    context['social_relevance'] = getattr(mortality, 'social_relevance_score', None)
+                    context['legacy_score'] = getattr(mortality, 'legacy_score', None)
+                    
+                    # Get persona goal if active
+                    persona = getattr(mortality, 'death_persona', None)
+                    if persona and context['death_persona_active']:
+                        context['death_persona_goal'] = getattr(persona, 'goal', None)
+                        context['death_persona_name'] = getattr(persona, 'name', None)
+        except Exception as e:
+            logger.debug(f"Error building mortality context: {e}")
+        
+        return context
+
+    def _build_episodic_context(self, agent_id: Optional[str], game_id: Optional[str]) -> Dict[str, Any]:
+        """
+        Build episodic memory context for API reasoning payload.
+        
+        Surfaces the agent's autobiographical memory:
+        - core_beliefs: What the agent believes based on experience
+        - dominant_emotion: Current emotional state from memories
+        - games_played: Total experience
+        - breakthroughs: Count of significant discoveries
+        - narrative_snippet: Brief autobiography
+        
+        From Jan 13 session: "Episodic Memory for Continuous Agent Existence"
+        
+        Returns:
+            Dict with episodic memory state
+        """
+        context: Dict[str, Any] = {
+            'has_autobiography': False,
+            'core_beliefs': [],
+            'dominant_emotion': None,
+            'games_played': 0,
+            'breakthroughs': 0,
+            'narrative_snippet': None
+        }
+        
+        if not agent_id:
+            return context
+            
+        try:
+            # Check if episodic memory system is available
+            if hasattr(self, 'episodic_memory') and self.episodic_memory:
+                # Try to get cached autobiography from game start (stored in game_config)
+                autobiography = None
+                if hasattr(self, 'game_config') and self.game_config:
+                    autobiography = self.game_config.get('agent_autobiography')
+                
+                if autobiography and isinstance(autobiography, dict):
+                    context['has_autobiography'] = True
+                    context['core_beliefs'] = autobiography.get('core_beliefs', [])[:3]  # Limit size
+                    context['dominant_emotion'] = autobiography.get('dominant_emotion')
+                    context['games_played'] = autobiography.get('total_games_played', 0)
+                    context['breakthroughs'] = autobiography.get('total_breakthroughs', 0)
+                    
+                    # Truncate narrative for API
+                    narrative = autobiography.get('autobiography_narrative', '')
+                    if narrative and len(narrative) > 100:
+                        context['narrative_snippet'] = narrative[:97] + '...'
+                    elif narrative:
+                        context['narrative_snippet'] = narrative
+        except Exception as e:
+            logger.debug(f"Error building episodic context: {e}")
+        
+        return context
+
+    def _build_deliberation_context(self) -> Dict[str, Any]:
+        """
+        Build deliberation context for API reasoning payload.
+        
+        Surfaces the TRM-inspired iterative refinement process:
+        - refinement_passes: How many passes were used
+        - refinement_confidence: Margin between #1 and #2 action
+        - consensus_actions: Actions supported by multiple sources
+        - convergence_achieved: Whether early convergence happened
+        
+        From Jan 18 session: "TRM Paper Integration"
+        
+        Returns:
+            Dict with deliberation state
+        """
+        context: Dict[str, Any] = {
+            'refinement_passes': 0,
+            'refinement_confidence': 0.0,
+            'consensus_actions': [],
+            'convergence_achieved': False,
+            'time_budget_used': None
+        }
+        
+        try:
+            # Get last deliberation result - stored in self, not i_thread
+            last_deliberation = getattr(self, '_last_deliberation_result', None)
+            if last_deliberation:
+                # DeliberationResult is a dataclass, use getattr
+                context['refinement_passes'] = getattr(last_deliberation, 'refinement_passes', 0)
+                context['refinement_confidence'] = round(getattr(last_deliberation, 'refinement_confidence', 0.0), 3)
+                context['convergence_achieved'] = getattr(last_deliberation, 'convergence_achieved', False)
+                context['time_budget_used'] = round(getattr(last_deliberation, 'time_spent_seconds', 0), 3)
+                
+                # Get actions that had consensus (supported by 2+ sources)
+                consensus = getattr(last_deliberation, 'consensus_actions', [])
+                if consensus:
+                    context['consensus_actions'] = consensus[:3]  # Limit size
+        except Exception as e:
+            logger.debug(f"Error building deliberation context: {e}")
+        
+        return context
+
+    def _build_replay_learning_context(self) -> Dict[str, Any]:
+        """
+        Build replay learning context for API reasoning payload.
+        
+        Surfaces prediction-based learning during sequence replay:
+        - is_replay: Whether currently replaying a sequence
+        - prediction_accuracy: How well predictions matched reality
+        - rules_inferred: Rules discovered during replay
+        - wasted_actions: Actions identified as redundant
+        
+        From Jan 13 session: "Replay Learning Engine Implementation"
+        
+        Returns:
+            Dict with replay learning state
+        """
+        context: Dict[str, Any] = {
+            'is_replay': False,
+            'replay_sequence_id': None,
+            'prediction_accuracy': None,
+            'rules_inferred': 0,
+            'wasted_actions': 0,
+            'current_prediction': None
+        }
+        
+        try:
+            # Check if we're in replay mode
+            is_replaying = getattr(self, '_is_replaying_sequence', False)
+            context['is_replay'] = is_replaying
+            
+            if is_replaying:
+                context['replay_sequence_id'] = getattr(self, '_current_replay_sequence_id', None)
+                
+                # Get replay learning engine state
+                if hasattr(self, 'replay_learning_engine') and self.replay_learning_engine:
+                    engine = self.replay_learning_engine
+                    learning_ctx = getattr(engine, '_current_context', None)
+                    if learning_ctx:
+                        # Calculate current accuracy
+                        correct = getattr(learning_ctx, 'correct_predictions', 0)
+                        total = getattr(learning_ctx, 'total_predictions', 0)
+                        if total > 0:
+                            context['prediction_accuracy'] = round(correct / total, 2)
+                        
+                        context['rules_inferred'] = len(getattr(learning_ctx, 'inferred_rules', []))
+                        context['wasted_actions'] = len(getattr(learning_ctx, 'wasted_actions', []))
+                        
+                        # Get current prediction if available
+                        current_pred = getattr(engine, '_current_prediction', None)
+                        if current_pred:
+                            context['current_prediction'] = {
+                                'action': getattr(current_pred, 'action_name', None),
+                                'expected_effect': getattr(current_pred, 'predicted_object_effect', None),
+                                'hypothesis': getattr(current_pred, 'hypothesized_rule', '')[:50]
+                            }
+        except Exception as e:
+            logger.debug(f"Error building replay learning context: {e}")
         
         return context
 
@@ -18833,7 +19669,15 @@ class GameplayEngine:
                 'exploration_rate': genome.get('exploration_rate') if genome else self._null_status(425),
                 'learning_rate': genome.get('learning_rate') if genome else self._null_status(425),
                 'species': genome.get('species') if genome else None
-            } if genome else {'status': self._null_status(404)}
+            } if genome else {'status': self._null_status(404)},
+            # ===============================================================
+            # MORTALITY STATE (Jan 17 - Five Types of Death)
+            # ===============================================================
+            'mortality': self._build_mortality_context(agent_id),
+            # ===============================================================
+            # EPISODIC MEMORY / AWAKENING (Jan 13 - Continuous Existence)
+            # ===============================================================
+            'episodic': self._build_episodic_context(agent_id, game_id)
         }
         
         # ===================================================================
@@ -19205,6 +20049,21 @@ class GameplayEngine:
         primitives_tier = self._build_primitives_context()
         
         # ===================================================================
+        # TIER 9: SURVEY - CODS environment survey and primitive suggestions
+        # ===================================================================
+        survey_tier = self._build_survey_context()
+        
+        # ===================================================================
+        # TIER 10: DELIBERATION - TRM-inspired iterative refinement (Jan 18)
+        # ===================================================================
+        deliberation_tier = self._build_deliberation_context()
+        
+        # ===================================================================
+        # TIER 11: REPLAY LEARNING - Prediction-based learning during replay
+        # ===================================================================
+        replay_tier = self._build_replay_learning_context()
+        
+        # ===================================================================
         # ASSEMBLE PAYLOAD (Priority Order)
         # ===================================================================
         reasoning_obj = {
@@ -19216,7 +20075,10 @@ class GameplayEngine:
             '5_context': context,
             '6_environment': environment,
             '7_action': action_tier,
-            '8_primitives': primitives_tier
+            '8_primitives': primitives_tier,
+            '9_survey': survey_tier,
+            '10_deliberation': deliberation_tier,
+            '11_replay_learning': replay_tier
         }
         
         # Store for next delta calculation - DEEP COPY to avoid reference issues
@@ -20307,6 +21169,180 @@ class GameplayEngine:
         except Exception as e:
             # Column may not exist yet - log but don't crash
             logger.debug(f"Failed to update hypothesis best score: {e}")
+    
+    def _analyze_symbolic_mechanics(
+        self,
+        frame_before: Optional[List[List[int]]],
+        frame_after: Optional[List[List[int]]],
+        action_position: Optional[Tuple[int, int]],
+        action_taken: Optional[str],
+        overlap_color: Optional[int],
+        controlled_colors: Optional[List[int]] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze frame changes for symbolic mechanics (all games).
+        
+        This method integrates three universal game analysis systems:
+        1. UI Detector - Track action limits, health bars, etc.
+        2. Symbolic State Tracker - Track key/lock matching progress
+        3. Remote Effect Learner - Detect action-at-distance causation
+        
+        Called after each action to learn about any game's mechanics.
+        
+        Args:
+            frame_before: Frame before action
+            frame_after: Frame after action
+            action_position: Where agent was when action occurred
+            action_taken: The action string (e.g., 'ACTION1')
+            overlap_color: Color of object agent overlapped (if any)
+            controlled_colors: List of colors the agent controls
+            
+        Returns:
+            Dict with analysis results
+        """
+        result: Dict[str, Any] = {
+            'ui_changes': None,
+            'symbolic_changes': None,
+            'remote_effects': None,
+            'match_progress': None
+        }
+        
+        if not frame_before or not frame_after:
+            return result
+        
+        # 1. UI Detection - Track action limits and health
+        if hasattr(self, 'ui_detector') and self.ui_detector:
+            try:
+                action_num = int(action_taken.replace('ACTION', '')) if action_taken and action_taken.startswith('ACTION') else None
+                ui_changes = self.ui_detector.detect_ui_change(
+                    frame_before, frame_after, action_taken=action_num
+                )
+                result['ui_changes'] = ui_changes
+                
+                # Log significant UI changes
+                if ui_changes:
+                    for change in ui_changes:
+                        if change.change_type == 'decrease':
+                            region_meaning = self.ui_detector.learned_meanings.get(
+                                f"{change.region.position}_{change.region.color}",
+                                change.region.meaning
+                            )
+                            if region_meaning == 'action_limit':
+                                logger.debug(f"[SYMBOLIC] Action limit decreased: {change.old_value} -> {change.new_value}")
+                            elif region_meaning == 'health':
+                                logger.debug(f"[SYMBOLIC] Health decreased: {change.old_value} -> {change.new_value}")
+                
+                # Periodically learn meanings from patterns
+                if hasattr(self, '_symbolic_ui_analysis_count'):
+                    self._symbolic_ui_analysis_count += 1
+                else:
+                    self._symbolic_ui_analysis_count = 1
+                
+                if self._symbolic_ui_analysis_count % 20 == 0:
+                    self.ui_detector.learn_meaning_from_changes()
+                
+                # Periodically save UI layouts to network (LS20 Gap Fix)
+                if self._symbolic_ui_analysis_count % 100 == 0:
+                    game_type = self.session_manager.current_game_id[:4] if self.session_manager.current_game_id else None
+                    if game_type and hasattr(self.ui_detector, 'save_to_network'):
+                        try:
+                            self.ui_detector.game_type = game_type  # Ensure game_type is set
+                            saved = self.ui_detector.save_to_network(
+                                agent_id=getattr(self, '_current_agent_id', None),
+                                generation=getattr(self, '_current_generation', None)
+                            )
+                            if saved > 0:
+                                logger.info(f"[SYMBOLIC] Saved {saved} UI region(s) to network")
+                        except Exception as ui_save_err:
+                            logger.debug(f"UI save to network failed: {ui_save_err}")
+                    
+            except Exception as e:
+                logger.debug(f"UI detection failed: {e}")
+        
+        # 2. Symbolic State Tracking - Key/lock matching
+        if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+            try:
+                controlled = controlled_colors or []
+                
+                # Update state with new frame
+                changes = self.symbolic_state_tracker.update_state(
+                    frame_after, controlled_colors=controlled
+                )
+                result['symbolic_changes'] = changes
+                
+                # Get match progress
+                match_progress = self.symbolic_state_tracker.get_match_progress()
+                result['match_progress'] = match_progress
+                
+                # Log significant symbolic changes
+                if changes.get('key_shape_changed'):
+                    logger.info(f"[SYMBOLIC] KEY SHAPE CHANGED! Match score: {match_progress.get('current_match_score', 0):.2f}")
+                
+                if changes.get('match_improved'):
+                    logger.info(f"[SYMBOLIC] MATCH IMPROVED! Score: {match_progress.get('current_match_score', 0):.2f}")
+                
+                # If we overlapped an object, check if it was a tool
+                if overlap_color and action_position:
+                    tool_effect = self.symbolic_state_tracker.detect_tool_effect(
+                        frame_before, frame_after,
+                        tool_position=action_position,
+                        controlled_colors=controlled
+                    )
+                    if tool_effect.get('effect_detected'):
+                        logger.info(f"[SYMBOLIC] TOOL EFFECT DETECTED: {tool_effect.get('effect_type')} at position {action_position}")
+                
+                # Periodically save symbolic discoveries to network
+                if hasattr(self, '_symbolic_state_analysis_count'):
+                    self._symbolic_state_analysis_count += 1
+                else:
+                    self._symbolic_state_analysis_count = 1
+                
+                if self._symbolic_state_analysis_count % 100 == 0:
+                    agent_id_for_save = getattr(self, '_current_agent_id', None)
+                    generation_for_save = getattr(self, '_current_generation', None)
+                    saved = self.symbolic_state_tracker.save_discoveries_to_network(
+                        agent_id=agent_id_for_save,
+                        generation=generation_for_save
+                    )
+                    if saved > 0:
+                        logger.info(f"[SYMBOLIC] Saved {saved} symbolic discovery(ies) to network")
+                        
+            except Exception as e:
+                logger.debug(f"Symbolic state tracking failed: {e}")
+        
+        # 3. Remote Effect Learning - Action-at-distance
+        if hasattr(self, 'remote_effect_learner') and self.remote_effect_learner and action_position:
+            try:
+                action_num = int(action_taken.replace('ACTION', '')) if action_taken and action_taken.startswith('ACTION') else 0
+                
+                remote_result = self.remote_effect_learner.observe_action(
+                    frame_before, frame_after,
+                    action_position=action_position,
+                    action_type=action_num,
+                    overlap_color=overlap_color
+                )
+                result['remote_effects'] = remote_result
+                
+                # Log remote effects
+                if remote_result.get('remote_effect_detected'):
+                    regions = remote_result.get('effect_regions', [])
+                    logger.info(f"[SYMBOLIC] REMOTE EFFECT DETECTED: {len(regions)} regions, type={remote_result.get('effect_type')}")
+                
+                # Periodically validate and share effects
+                if hasattr(self, '_symbolic_remote_analysis_count'):
+                    self._symbolic_remote_analysis_count += 1
+                else:
+                    self._symbolic_remote_analysis_count = 1
+                
+                if self._symbolic_remote_analysis_count % 50 == 0:
+                    shared = self.remote_effect_learner.validate_and_share()
+                    if shared > 0:
+                        logger.info(f"[SYMBOLIC] Shared {shared} remote effect(s) to network")
+                        
+            except Exception as e:
+                logger.debug(f"Remote effect learning failed: {e}")
+        
+        return result
     
     def _parse_actionable_from_hypothesis(
         self,
@@ -22292,7 +23328,41 @@ class GameplayEngine:
             recent_frame_hashes = []  # Track last N frame hashes
             max_frame_history = 10  # How many frames to remember
             
+            # ================================================================
+            # LEARNING REPLAY MODE: Force exploration to capture decision patterns
+            # ================================================================
+            # Old sequences have proven actions but no logged primitive calls.
+            # To train the composition system, we need DECISION patterns:
+            # - What primitives did the agent call to DECIDE on an action?
+            # - This is different from perception (which happens during replay).
+            #
+            # SOLUTION: 50% of replays force exploration throughout the sequence.
+            # This captures the full primitive chain for composition mining
+            # while still having the safety net of known sequences.
+            #
+            # Benefits:
+            # - Captures decision-making primitives (not just perception)
+            # - Feeds ExecutionTraceMiner with rich context
+            # - Network learns WHY sequences work, not just WHAT they do
+            # - Applies to ALL LEVELS - each level has unique mechanics to learn
+            #
+            # Safety: Abort on GAME_OVER or score drop protects at any level.
+            # ================================================================
+            import random as _random
+            learning_replay_mode = _random.random() < 0.50  # 50% of replays
+            learning_actions_budget = 9999  # Explore entire sequence (no budget limit)
+            learning_actions_used = 0
+            
+            # REMOVED: L1-only restriction
+            # All levels have unique mechanics worth learning
+            # Safety mechanisms protect us at any level
+            
+            if learning_replay_mode:
+                logger.info(f"[LEARNING-REPLAY] Enabled for L{level_number} sequence {sequence_id[:12]} - "
+                           f"exploring with full decision chain logging")
+            
             def compute_frame_hash(frame):
+
                 """Simple frame hash for novelty detection."""
                 try:
                     if isinstance(frame, list):
@@ -22503,8 +23573,54 @@ class GameplayEngine:
                 # This avoids unnecessary overhead during proven sequence portions.
                 # ================================================================
                 action_to_execute = action_num
+                used_learning_mode = False  # Track if this action used learning mode
                 sequence_progress = (idx + 1) / len(actions) if len(actions) > 0 else 1.0
                 remaining_actions = len(actions) - idx - 1
+                
+                # ================================================================
+                # LEARNING REPLAY MODE: Use agent's own decision-making
+                # ================================================================
+                # Instead of blindly following sequence, let agent decide.
+                # This captures the full primitive call chain for composition mining.
+                # Falls back to sequence action if exploration goes badly.
+                # ================================================================
+                if learning_replay_mode and learning_actions_used < learning_actions_budget:
+                    try:
+                        # Create a temporary loop_state for action selection
+                        temp_loop_state = GameLoopState(
+                            action_count=action_count,
+                            current_level=actual_level,
+                            level_start_actions=0,
+                            last_score=float(game_state.score),
+                            consecutive_same_actions=0,
+                            no_change_count=0,
+                            score_gained=0.0,
+                            highest_score=float(highest_score_achieved),
+                            unique_frames_this_level=set(),
+                            api_error_backoff=0,
+                            last_action=None
+                        )
+                        
+                        # Let agent decide (this calls CODS primitives, logs to ExecutionTraceMiner!)
+                        explored_action, explored_reasoning = await self._select_action(game_state, temp_loop_state)
+                        
+                        # Extract action number
+                        if explored_action and explored_action.upper().startswith('ACTION'):
+                            explored_action_num = int(explored_action.upper().replace('ACTION', ''))
+                            action_to_execute = explored_action_num
+                            used_learning_mode = True
+                            learning_actions_used += 1
+                            
+                            # Log the learning mode action
+                            logger.debug(f"[LEARNING-REPLAY] Action {learning_actions_used}/{learning_actions_budget}: "
+                                        f"Agent chose ACTION{explored_action_num} (sequence had ACTION{action_num})")
+                            
+                            # If agent chose SAME action as sequence, that's validation!
+                            if explored_action_num == action_num:
+                                logger.debug(f"[LEARNING-REPLAY] Agent independently chose same action as sequence!")
+                    except Exception as e:
+                        logger.debug(f"[LEARNING-REPLAY] Action selection failed, using sequence: {e}")
+                        used_learning_mode = False
                 
                 # Determine if we should check foresight
                 should_check_foresight = (
@@ -22796,6 +23912,23 @@ class GameplayEngine:
                         elif divergence_score >= max_divergence * 0.5:
                             logger.debug(f"[OUTCOME-VALIDATION] Frame divergence detected at action {action_count} "
                                         f"(similarity={similarity:.1%}, divergence={divergence_score:.1f}/{max_divergence})")
+                
+                # ================================================================
+                # LEARNING REPLAY SAFETY: Abort if causing problems
+                # ================================================================
+                # If learning mode caused a GAME_OVER or score drop, abort it
+                # and resume normal sequence replay for the rest of this run.
+                # ================================================================
+                if used_learning_mode and learning_replay_mode:
+                    if game_state.state == "GAME_OVER":
+                        logger.warning(f"[LEARNING-REPLAY] GAME_OVER caused by exploration - aborting learning mode")
+                        learning_replay_mode = False  # Disable for rest of replay
+                    elif game_state.score < score_before_action:
+                        logger.warning(f"[LEARNING-REPLAY] Score dropped during exploration - aborting learning mode")
+                        learning_replay_mode = False
+                    elif action_to_execute != action_num and game_state.frame == frame_before_action:
+                        # Explored action had no effect (frame unchanged) - not harmful, but note it
+                        logger.debug(f"[LEARNING-REPLAY] Explored action had no effect (frame unchanged)")
                 
                 # ================================================================
                 # FIX: REFRESH EMERGENT REASONING DURING SEQUENCE REPLAY

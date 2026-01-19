@@ -1041,6 +1041,15 @@ class DeliberationResult:
     simulation_used: bool = False  # Whether simulation influenced decision
     
     # =========================================================================
+    # TRM-INSPIRED ITERATIVE REFINEMENT (Jan 18 - Less is More paper)
+    # Track how many passes were used and consensus achieved
+    # =========================================================================
+    refinement_passes: int = 0  # How many refinement passes were run
+    refinement_confidence: float = 0.0  # Margin between #1 and #2 action
+    consensus_actions: List[str] = field(default_factory=list)  # Actions supported by 2+ sources
+    convergence_achieved: bool = False  # Whether early convergence happened
+    
+    # =========================================================================
     # COGNITIVE EXPERIENCE FIELDS (Agent-Centric Integration Plan)
     # These capture HOW the agent FEELS during deliberation, not just what it computed.
     # The agent IS the synthesis - these are facets of unified experience.
@@ -1937,6 +1946,7 @@ class DeliberationEngine:
         convergence_threshold = 0.05  # Stop if top action score changes < 5%
         previous_best_score = -1.0
         refinement_passes_used = 0
+        convergence_achieved = False  # Track if early convergence happened
         
         for refinement_pass in range(max_refinement_passes):
             refinement_passes_used += 1
@@ -1999,8 +2009,15 @@ class DeliberationEngine:
             current_best = max(action_scores.values()) if action_scores else 0
             if refinement_pass > 0 and abs(current_best - previous_best_score) < convergence_threshold:
                 reasoning_steps.append(f"[REFINEMENT] Converged at pass {refinement_pass + 1}")
+                convergence_achieved = True
                 break
             previous_best_score = current_best
+        
+        # Identify consensus actions (supported by 2+ sources)
+        consensus_actions_list = [
+            action_str for action_str, sources in action_sources.items()
+            if len(sources) >= 2
+        ]
         
         # Log refinement result
         if refinement_passes_used > 1:
@@ -2136,6 +2153,11 @@ class DeliberationEngine:
             best_simulated_action=best_simulated_action,
             best_simulated_score=best_simulated_score,
             simulation_used=simulation_used,
+            # TRM-inspired iterative refinement (Jan 18)
+            refinement_passes=refinement_passes_used,
+            refinement_confidence=refinement_confidence,
+            consensus_actions=consensus_actions_list,
+            convergence_achieved=convergence_achieved,
             # Cognitive experience fields (Agent-Centric Integration)
             predictions_felt=predictions_felt,
             expectation_match=None,  # Filled in after action outcome
