@@ -3575,6 +3575,28 @@ class GameplayEngine:
         loop_state.level_api_resets = 0
         
         # ================================================================
+        # CODS ENVIRONMENT SURVEY AT LEVEL COMPLETION
+        # ================================================================
+        # Survey the NEW level's environment. Each level may have:
+        #   - Different game mechanics (new obstacles, new rules)
+        #   - Different object configurations
+        #   - Different required strategies
+        # The survey helps the agent adapt primitives to the new context.
+        # ================================================================
+        next_level = loop_state.current_level + 1
+        if hasattr(self, 'cods_engine') and self.cods_engine and game_state.frame:
+            try:
+                self._perform_level_survey(
+                    frame=game_state.frame,
+                    level_number=next_level,
+                    game_id=game_id,
+                    trigger='level_complete',
+                    previous_level_actions=loop_state.level_action_count
+                )
+            except Exception as survey_err:
+                logger.debug(f"Level completion survey failed: {survey_err}")
+        
+        # ================================================================
         # TRIGGER SEQUENCE FINALIZATION (Added 2025-12-08)
         # ================================================================
         # Save the trigger sequence that led to this level win.
@@ -5109,6 +5131,24 @@ class GameplayEngine:
                     if bootstrap_count > 0:
                         logger.info(f"[CODS] Bootstrapped {bootstrap_count} operators for {game_id}")
                 logger.debug(f"[CODS] Context initialized for {game_id} level 1 (frontier={is_level_1_frontier})")
+                
+                # ================================================================
+                # CODS ENVIRONMENT SURVEY AT GAME START (Level 1)
+                # ================================================================
+                # Survey the initial environment to understand game type.
+                # This is CRITICAL for selecting appropriate primitives.
+                # Survey happens at:
+                #   1. Game start (here) - understand what kind of game this is
+                #   2. Level completion - environment may change between levels
+                #   3. When stuck - re-evaluate if approach is wrong
+                #   4. Major frame changes - environment transformation
+                # ================================================================
+                self._perform_level_survey(
+                    frame=game_state.frame,
+                    level_number=1,
+                    game_id=game_id,
+                    trigger='game_start'
+                )
             except Exception as e:
                 logger.debug(f"CODS context init failed (non-critical): {e}")
         
@@ -7188,6 +7228,21 @@ class GameplayEngine:
                                         f"   Current score: {game_state.score:.1f}, Actions taken: {action_count}, "
                                         f"Level {current_level} actions: {level_action_count}"
                                     )
+                                    
+                                    # ================================================================
+                                    # CODS RE-SURVEY ON STUCK DETECTION
+                                    # ================================================================
+                                    # When stuck, re-survey the environment. We may have:
+                                    # - Missed something in the initial survey
+                                    # - Environment changed without us noticing
+                                    # - Need different primitives than we thought
+                                    # The re-survey gives us fresh perspective and new
+                                    # primitive suggestions based on our failure history.
+                                    # ================================================================
+                                    try:
+                                        self._trigger_stuck_survey(game_state, loop_state)
+                                    except Exception as survey_err:
+                                        logger.debug(f"Stuck survey failed: {survey_err}")
                                     
                                     # Fix #4: Spawn stuckness_detector persona when stuck for 30+ frames
                                     # Checklist Phase 6 requires persona spawning on stuckness
@@ -11409,11 +11464,29 @@ class GameplayEngine:
                         frame_height = len(game_state.frame)
                         frame_width = len(game_state.frame[0]) if game_state.frame else 0
                         
+                        # ===============================================================
+                        # BIRTHRIGHT: SYSTEMATIC EXPLORATION TRACKING
+                        # Track visited positions to enable systematic map exploration.
+                        # This is fundamental - an agent that moves MUST track where it's been.
+                        # ===============================================================
+                        track_key = f"{current_game_id}_{current_level}"
+                        if not hasattr(self, '_visited_positions'):
+                            self._visited_positions = {}
+                        if track_key not in self._visited_positions:
+                            self._visited_positions[track_key] = set()
+                        
+                        # Add current position to visited set
+                        self._visited_positions[track_key].add((avg_x, avg_y))
+                        visited_set = self._visited_positions[track_key]
+                        
+                        # Calculate exploration coverage
+                        total_cells = (frame_width // 5) * (frame_height // 5) or 1
+                        coverage = len(visited_set) / (total_cells * 25)  # Approximate
+                        
                         # Look for goals/rare colors in frame
                         goals = self._infer_goals_from_frame(game_state.frame)
                         
                         # Initialize direction tracking if needed
-                        track_key = f"{current_game_id}_{current_level}"
                         if not hasattr(self, '_self_model_direction_history'):
                             self._self_model_direction_history = {}
                         if track_key not in self._self_model_direction_history:
@@ -11467,48 +11540,92 @@ class GameplayEngine:
                                 self._self_model_drove_action = len(controlled)
                                 return _finalize_ladder_and_return(action, reasoning, 'heuristic')
                         
-                        # Strategy 2: No goals visible - explore systematically
-                        # Prefer directions away from edges, toward center
+                        # ===============================================================
+                        # BIRTHRIGHT: SYSTEMATIC EXPLORATION (No goals visible)
+                        # When no goals are detected, explore the map systematically.
+                        # This is fundamental - agents MUST explore to find objectives.
+                        # ===============================================================
                         else:
-                            # Calculate distance to each edge
-                            dist_top = avg_y
-                            dist_bottom = frame_height - avg_y - 1
-                            dist_left = avg_x
-                            dist_right = frame_width - avg_x - 1
+                            # Check exploration coverage - if low, prioritize unexplored areas
+                            frame_bounds = (frame_width, frame_height)
                             
-                            # Build action preferences based on room to move
+                            # Check if edges need exploration (many goals are at edges)
+                            edge_visits = 0
+                            total_edges = 0
+                            for x in range(0, frame_width, 5):
+                                total_edges += 2
+                                if (x, 0) in visited_set or (x, 1) in visited_set:
+                                    edge_visits += 1
+                                if (x, frame_height-1) in visited_set or (x, frame_height-2) in visited_set:
+                                    edge_visits += 1
+                            for y in range(0, frame_height, 5):
+                                total_edges += 2
+                                if (0, y) in visited_set or (1, y) in visited_set:
+                                    edge_visits += 1
+                                if (frame_width-1, y) in visited_set or (frame_width-2, y) in visited_set:
+                                    edge_visits += 1
+                            
+                            edges_explored = (edge_visits / total_edges) if total_edges > 0 else 0
+                            
+                            # Build exploration preferences based on UNEXPLORED directions
                             preferences = []
-                            if dist_top > 3:
-                                preferences.append(("ACTION1", "up", dist_top))
-                            if dist_bottom > 3:
-                                preferences.append(("ACTION2", "down", dist_bottom))
-                            if dist_left > 3:
-                                preferences.append(("ACTION3", "left", dist_left))
-                            if dist_right > 3:
-                                preferences.append(("ACTION4", "right", dist_right))
+                            
+                            # Count unexplored cells in each direction (5-cell lookahead)
+                            directions = [
+                                ("ACTION1", "up", (avg_x, max(0, avg_y - 5))),
+                                ("ACTION2", "down", (avg_x, min(frame_height-1, avg_y + 5))),
+                                ("ACTION3", "left", (max(0, avg_x - 5), avg_y)),
+                                ("ACTION4", "right", (min(frame_width-1, avg_x + 5), avg_y)),
+                            ]
+                            
+                            for action, dir_name, (nx, ny) in directions:
+                                # Count unexplored cells in a window around target
+                                unexplored_count = 0
+                                for dx in range(-3, 4):
+                                    for dy in range(-3, 4):
+                                        check_pos = (nx + dx, ny + dy)
+                                        if 0 <= check_pos[0] < frame_width and 0 <= check_pos[1] < frame_height:
+                                            if check_pos not in visited_set:
+                                                unexplored_count += 1
+                                
+                                # Also consider distance to edges (explore edges first!)
+                                edge_bonus = 0
+                                if edges_explored < 0.5:
+                                    if dir_name == "up" and avg_y > frame_height * 0.6:
+                                        edge_bonus = 10
+                                    elif dir_name == "down" and avg_y < frame_height * 0.4:
+                                        edge_bonus = 10
+                                    elif dir_name == "left" and avg_x > frame_width * 0.6:
+                                        edge_bonus = 10
+                                    elif dir_name == "right" and avg_x < frame_width * 0.4:
+                                        edge_bonus = 10
+                                
+                                preferences.append((action, dir_name, unexplored_count + edge_bonus))
                             
                             if preferences:
-                                # Pick direction with most room, avoiding recent directions
-                                recent_dirs = direction_history[-4:] if direction_history else []
-                                
-                                # Prefer unexplored directions
-                                unexplored = [p for p in preferences if p[1] not in recent_dirs]
-                                if unexplored:
-                                    preferences = unexplored
-                                
-                                # Sort by available space (most room first)
+                                # Sort by unexplored count (most unexplored first)
                                 preferences.sort(key=lambda x: x[2], reverse=True)
                                 
-                                action, direction, _ = preferences[0]
-                                direction_history.append(direction)
-                                if len(direction_history) > 10:
-                                    direction_history.pop(0)
+                                # Avoid oscillation - don't immediately reverse
+                                recent_dirs = direction_history[-3:] if direction_history else []
+                                opposite_dirs = {'up': 'down', 'down': 'up', 'left': 'right', 'right': 'left'}
                                 
-                                reasoning = f"[SELF-MODEL] Exploring {direction} with {len(controlled)} controlled objects (pos: {avg_x},{avg_y})"
-                                logger.info(reasoning)
-                                # Track for decision_contributors
-                                self._self_model_drove_action = len(controlled)
-                                return _finalize_ladder_and_return(action, reasoning, 'heuristic')
+                                for action, direction, score in preferences:
+                                    # Skip if this would reverse the last move
+                                    if recent_dirs and opposite_dirs.get(direction) == recent_dirs[-1]:
+                                        continue
+                                    
+                                    direction_history.append(direction)
+                                    if len(direction_history) > 10:
+                                        direction_history.pop(0)
+                                    
+                                    reasoning = (
+                                        f"[BIRTHRIGHT-EXPLORE] Systematic exploration {direction} "
+                                        f"(unexplored: {score}, coverage: {coverage:.1%}, edges: {edges_explored:.1%})"
+                                    )
+                                    logger.info(reasoning)
+                                    self._self_model_drove_action = len(controlled)
+                                    return _finalize_ladder_and_return(action, reasoning, 'heuristic')
                         
             except Exception as e:
                 logger.debug(f"Self-model driven action failed: {e}")
@@ -11560,8 +11677,10 @@ class GameplayEngine:
                                     min_dist = dist
                                     closest_goal = goal
                         
-                        # If goal is close enough and we're not on it, move toward it
-                        if closest_goal and min_dist > 0 and min_dist < 20:
+                        # BIRTHRIGHT FIX: Always move toward goals regardless of distance!
+                        # Old bug: min_dist < 20 meant far goals were ignored
+                        # New: Move toward ANY visible goal - exploration is fundamental
+                        if closest_goal and min_dist > 0:
                             goal_pos = closest_goal.get('position', [])
                             gx, gy = goal_pos[0], goal_pos[1]
                             ax, ay = agent_pos
@@ -11869,6 +11988,44 @@ class GameplayEngine:
                     logger.debug(f"Phase 4.5 sensation error: {e}")
         
         # ===================================================================
+        # CODS ENVIRONMENT SURVEY: Use cached level survey or run minimal update
+        # ===================================================================
+        # The full survey is done at:
+        #   - Game start (_perform_level_survey with trigger='game_start')
+        #   - Level completion (_perform_level_survey with trigger='level_complete')
+        #   - Stuck detection (_trigger_stuck_survey)
+        #
+        # During action selection, we USE the cached survey rather than
+        # re-running the full survey every action. This is more efficient
+        # and the environment rarely changes dramatically mid-level.
+        # ===================================================================
+        cods_survey = getattr(self, '_current_level_survey', None)
+        cods_primitive_suggestions = getattr(self, '_current_primitive_suggestions', None)
+        
+        # If no cached survey, run a quick one (shouldn't happen normally)
+        if not cods_survey and hasattr(self, 'cods_engine') and self.cods_engine and game_state.frame:
+            try:
+                cods_survey = self.cods_engine.survey_environment(game_state.frame)
+                
+                if cods_survey and not cods_survey.get('error'):
+                    recent_fails = [f"ACTION{a}" for a in getattr(self, '_recent_failed_actions', [])]
+                    cods_primitive_suggestions = self.cods_engine.query_primitive_suggestions(
+                        survey=cods_survey,
+                        recent_failures=recent_fails
+                    )
+                    
+                    # Cache for future actions
+                    self._current_level_survey = cods_survey
+                    self._current_primitive_suggestions = cods_primitive_suggestions
+                    
+                    logger.debug(f"[CODS-SURVEY] Ran fallback survey (no cached survey available)")
+            except Exception as survey_err:
+                logger.debug(f"CODS fallback survey error: {survey_err}")
+                                    
+            except Exception as survey_err:
+                logger.debug(f"CODS environment survey error: {survey_err}")
+        
+        # ===================================================================
         # NETWORK FAILURE HYPOTHESES: Learn from others' failures
         # Query what other agents learned when they failed on this game/level
         # Use their insights to bias action selection BEFORE other strategies
@@ -11877,6 +12034,19 @@ class GameplayEngine:
         hypothesis_reasoning = None
         current_level = int(game_state.score) + 1
         current_game_id = self.session_manager.current_game_id
+        
+        # ===================================================================
+        # CODS PRIMITIVE SUGGESTIONS -> ACTION BIASES
+        # Convert CODS primitive suggestions into action biases
+        # ===================================================================
+        if cods_primitive_suggestions and cods_primitive_suggestions.get('suggested_actions'):
+            for suggestion in cods_primitive_suggestions['suggested_actions'][:5]:
+                action_num = suggestion.get('action')
+                confidence = suggestion.get('confidence', 0.3)
+                if action_num and 1 <= action_num <= 7:
+                    # Add bias from CODS primitive suggestion
+                    hypothesis_biases[action_num] = hypothesis_biases.get(action_num, 0) + 0.25 * confidence
+                    logger.debug(f"[CODS->BIAS] ACTION{action_num} +{0.25 * confidence:.2f} from primitives")
         
         if current_game_id and agent_id:
             try:
@@ -14999,7 +15169,7 @@ class GameplayEngine:
         
         return action_scores
     
-    def _get_intelligent_escape_action(
+    def _get_intelligent_escape_action( # pyright: ignore[reportGeneralTypeIssues] # type: ignore
         self, 
         agent_id: Optional[str], 
         game_id: str, 
@@ -20767,6 +20937,221 @@ class GameplayEngine:
         except Exception as e:
             logger.debug(f"Error checking frontier status: {e}")
             return True  # Assume frontier on error
+
+    def _perform_level_survey(
+        self,
+        frame: List[List[int]],
+        level_number: int,
+        game_id: str,
+        trigger: str = 'manual',
+        previous_level_actions: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Survey the environment for a level using CODS primitives.
+        
+        This is called at key moments to help the agent understand what kind
+        of game/level it's dealing with and select appropriate primitives.
+        
+        TRIGGER POINTS (when survey is most valuable):
+        
+        1. GAME START (trigger='game_start'):
+           - First contact with environment
+           - Establish baseline understanding of game type
+           - Select initial primitive toolkit
+           - USE CASE: "Is this a maze? A puzzle? A physics sim?"
+        
+        2. LEVEL COMPLETE (trigger='level_complete'):
+           - Environment may change drastically between levels
+           - New mechanics may be introduced
+           - Previous strategies may not work
+           - USE CASE: "Level 1 was maze, is Level 2 also maze or something new?"
+        
+        3. STUCK DETECTION (trigger='stuck'):
+           - Current approach isn't working
+           - Need to re-evaluate environment
+           - Maybe we missed something in initial survey
+           - USE CASE: "Why am I stuck? Let me look at the environment differently"
+        
+        4. HYPOTHESIS FAILURE (trigger='hypothesis_failed'):
+           - Our theory about the game was wrong
+           - Need fresh perspective on what the game actually is
+           - USE CASE: "I thought this was symmetry game but symmetry doesn't work"
+        
+        5. MAJOR FRAME CHANGE (trigger='transformation'):
+           - Environment transformed significantly
+           - Rules may have changed
+           - USE CASE: "The whole board just changed - what are the new rules?"
+        
+        MAX VALUE SCENARIOS:
+        
+        - When survey detects PIPES: Agent should try flow-related actions,
+          look for valves, predict where liquid will go. Don't waste time
+          trying random movement - use pipe-navigation primitives.
+        
+        - When survey detects SYMMETRY: Agent should mirror actions across
+          the symmetry axis, predict where objects should be placed to
+          maintain pattern. Use symmetry-completion primitives.
+        
+        - When survey detects CONTAINERS: Agent should look for pour sources
+          and targets, understand fill levels, use fluid-transfer primitives.
+        
+        - When survey detects SHAPES: Agent should analyze fitting, look for
+          complementary shapes, use rotation/translation primitives.
+        
+        - When survey detects MAZE: Agent should find path endpoints, identify
+          walls vs traversable space, use navigation primitives.
+        
+        Args:
+            frame: Current game frame to survey
+            level_number: Which level we're surveying
+            game_id: Game identifier
+            trigger: What triggered this survey (for logging/analysis)
+            previous_level_actions: How many actions the previous level took
+            
+        Returns:
+            Survey results dict with signature, features, suggested primitives
+        """
+        if not hasattr(self, 'cods_engine') or not self.cods_engine:
+            return {'error': 'No CODS engine available'}
+        
+        if not frame:
+            return {'error': 'No frame to survey'}
+        
+        # Initialize survey cache if not exists
+        if not hasattr(self, '_level_surveys'):
+            self._level_surveys = {}
+        
+        survey_key = f"{game_id}:L{level_number}"
+        
+        try:
+            # Perform the survey using CODS
+            survey = self.cods_engine.survey_environment(frame)
+            
+            if survey and not survey.get('error'):
+                # Enrich survey with context
+                survey['trigger'] = trigger
+                survey['level_number'] = level_number
+                survey['game_id'] = game_id
+                survey['previous_level_actions'] = previous_level_actions
+                
+                # Cache for this level (can be re-queried)
+                self._level_surveys[survey_key] = survey
+                
+                # Also cache as current survey for action selection
+                self._current_level_survey = survey
+                
+                # Log survey results
+                features_active = [k for k, v in survey.get('features', {}).items() if v and k not in ('frame_size', 'color_count', 'density', 'dominant_color')]
+                game_types = [t[0] if isinstance(t, tuple) else t for t in survey.get('suggested_game_types', [])[:2]]
+                primitives_count = len(survey.get('suggested_primitives', []))
+                chains_count = len(survey.get('primitive_chains', []))
+                
+                logger.info(f"[SURVEY] L{level_number} ({trigger}): "
+                           f"type={game_types}, features={features_active}, "
+                           f"primitives={primitives_count}, chains={chains_count}")
+                
+                # ================================================================
+                # ADAPTIVE PRIMITIVE SELECTION
+                # ================================================================
+                # Based on survey, query CODS for primitive suggestions and
+                # cache them for use during action selection.
+                # ================================================================
+                recent_failures = getattr(self, '_recent_failed_actions', [])
+                fail_strings = [f"ACTION{a}" for a in recent_failures]
+                
+                primitive_suggestions = self.cods_engine.query_primitive_suggestions(
+                    survey=survey,
+                    recent_failures=fail_strings
+                )
+                
+                if primitive_suggestions:
+                    self._current_primitive_suggestions = primitive_suggestions
+                    survey['primitive_suggestions'] = primitive_suggestions
+                    
+                    # Log top primitive recommendations
+                    top_prims = [p['name'] for p in primitive_suggestions.get('ranked_primitives', [])[:3]]
+                    logger.debug(f"[SURVEY] Recommended primitives: {top_prims}")
+                
+                # ================================================================
+                # STRATEGY HINTS FROM SURVEY
+                # ================================================================
+                # Translate survey features into actionable hints for the agent.
+                # These help agents understand WHAT to do, not just WHAT primitives.
+                # ================================================================
+                strategy_hints = []
+                features = survey.get('features', {})
+                
+                if features.get('has_pipes'):
+                    strategy_hints.append("PIPES DETECTED: Look for flow paths, valves, and endpoints")
+                    strategy_hints.append("Try following pipe structures - liquid flows through connected channels")
+                
+                if features.get('has_containers'):
+                    strategy_hints.append("CONTAINERS DETECTED: Look for pour sources and fill targets")
+                    strategy_hints.append("Match liquid colors to container requirements")
+                
+                if features.get('has_symmetry'):
+                    strategy_hints.append("SYMMETRY DETECTED: Actions may need to be mirrored")
+                    strategy_hints.append("Look for incomplete patterns that need symmetric completion")
+                
+                density = features.get('density', 0.5)
+                if density < 0.3:
+                    strategy_hints.append("SPARSE LAYOUT: Likely maze or path-finding - find route through empty space")
+                elif density > 0.7:
+                    strategy_hints.append("DENSE LAYOUT: Likely puzzle or transformation - objects interact closely")
+                
+                color_count = features.get('color_count', 0)
+                if color_count >= 4:
+                    strategy_hints.append("MANY COLORS: Each color likely has different meaning/behavior")
+                    strategy_hints.append("Track what each color does when interacted with")
+                
+                survey['strategy_hints'] = strategy_hints
+                
+                # Store hints for agent reasoning
+                self._current_strategy_hints = strategy_hints
+                
+                return survey
+            else:
+                logger.debug(f"[SURVEY] Failed for L{level_number}: {survey.get('error', 'unknown')}")
+                return survey or {'error': 'Survey returned None'}
+                
+        except Exception as e:
+            logger.warning(f"[SURVEY] Error surveying L{level_number}: {e}")
+            return {'error': str(e)}
+    
+    def _trigger_stuck_survey(self, game_state: 'GameState', loop_state: GameLoopState) -> Optional[Dict[str, Any]]:
+        """
+        Trigger a survey when agent appears stuck.
+        
+        Called when stuck detection fires. Re-surveys environment to:
+        - Check if we missed something in the initial survey
+        - See if environment changed while we weren't paying attention
+        - Get fresh primitive suggestions after failures
+        
+        Args:
+            game_state: Current game state
+            loop_state: Current loop state
+            
+        Returns:
+            New survey results or None if survey fails
+        """
+        if not game_state.frame:
+            return None
+        
+        game_id = getattr(self.session_manager, 'current_game_id', 'unknown')
+        level = loop_state.current_level
+        
+        # Get recent failed actions for the query
+        recent_fails = list(getattr(self, '_failed_actions_set', set()))[-10:]
+        
+        logger.info(f"[SURVEY] Re-surveying L{level} due to stuck detection")
+        
+        return self._perform_level_survey(
+            frame=game_state.frame,
+            level_number=level,
+            game_id=game_id,
+            trigger='stuck',
+            previous_level_actions=loop_state.level_action_count
+        )
 
     # ========================================================================
     # PATTERN LEARNING METHODS (Rule 10: Integrated into existing file)

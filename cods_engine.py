@@ -1423,6 +1423,202 @@ class CODSEngine:
     # ANALYSIS & INSIGHT
     # ======================================================================
     
+    def survey_environment(
+        self,
+        frame: Optional[List[List[int]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Survey the game environment to build a signature for CODS querying.
+        
+        FLOW: Agent calls this FIRST to analyze the environment, THEN
+        queries CODS with the survey results to get primitive suggestions.
+        
+        This uses the birthright primitives to detect:
+        - Game type signature (LS20, AS66, FT09, LP55, SP80, VC33, etc.)
+        - Environmental features (pipes, containers, symmetry, shapes)
+        - Relevant primitive chains for this type of game
+        
+        Args:
+            frame: Current game frame (uses context frame if None)
+            
+        Returns:
+            Dict with 'signature', 'features', 'suggested_game_types', 'suggested_primitives'
+        """
+        frame = frame or (self._context.current_frame if self._context else None)
+        if not frame:
+            return {'error': 'No frame available for survey'}
+        
+        survey_result = {
+            'frame_size': (len(frame[0]) if frame else 0, len(frame)),
+            'signature': {},
+            'features': {},
+            'suggested_game_types': [],
+            'suggested_primitives': [],
+            'primitive_chains': [],
+            'survey_confidence': 0.0
+        }
+        
+        try:
+            # Step 1: Use detect_game_signature to analyze environment
+            game_sig = self.seeds.call('detect_game_signature', frame)
+            
+            if game_sig:
+                survey_result['signature'] = game_sig.get('signature', {})
+                survey_result['features'] = game_sig.get('features', {})
+                survey_result['suggested_game_types'] = game_sig.get('suggested_game_types', [])
+                
+                # Step 2: Use suggest_primitives_for_game to get recommended primitives
+                primitive_suggestions = self.seeds.call('suggest_primitives_for_game', game_sig)
+                
+                if primitive_suggestions:
+                    survey_result['suggested_primitives'] = primitive_suggestions.get('suggested_primitives', [])
+                    survey_result['primitive_chains'] = primitive_suggestions.get('primitive_chains', [])
+                    survey_result['survey_confidence'] = primitive_suggestions.get('confidence', 0.0)
+            
+            # Step 3: Run specific detection primitives for more detail
+            # These provide additional context beyond the signature
+            
+            # Check for pipes/flow games (SP80, VC33)
+            if survey_result['features'].get('has_pipes'):
+                pipe_info = self.seeds.call('detect_pipe_structure', frame)
+                if pipe_info.get('has_pipes'):
+                    survey_result['pipe_info'] = pipe_info
+            
+            # Check for containers (VC33)
+            if survey_result['features'].get('has_containers'):
+                pour_info = self.seeds.call('detect_pour_target', frame)
+                if pour_info.get('target_found'):
+                    survey_result['pour_info'] = pour_info
+            
+            # Check for symmetry (LP55)
+            if survey_result['features'].get('has_symmetry'):
+                sym_info = self.seeds.call('count_symmetry_axes', frame)
+                if sym_info.get('axes_count', 0) > 0:
+                    survey_result['symmetry_info'] = sym_info
+            
+            # Log survey results for debugging
+            top_game_type = survey_result['suggested_game_types'][0] if survey_result['suggested_game_types'] else 'unknown'
+            logger.debug(f"[CODS-SURVEY] Environment: {top_game_type}, "
+                        f"features={list(k for k,v in survey_result['features'].items() if v)}, "
+                        f"primitives={len(survey_result['suggested_primitives'])}")
+                        
+        except Exception as e:
+            logger.warning(f"[CODS-SURVEY] Survey failed: {e}")
+            survey_result['error'] = str(e)
+        
+        return survey_result
+    
+    def query_primitive_suggestions(
+        self,
+        survey: Dict[str, Any],
+        current_hypothesis: Optional[Dict[str, Any]] = None,
+        recent_failures: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        Query CODS for primitive suggestions based on environment survey.
+        
+        FLOW: Agent calls survey_environment() first, then passes results here.
+        CODS returns:
+        - Ranked primitives to try
+        - Primitive chains (formulas) that may solve this game type
+        - Actions suggested by the primitives
+        
+        Args:
+            survey: Output from survey_environment()
+            current_hypothesis: Agent's current hypothesis (if any)
+            recent_failures: List of recently failed actions to avoid
+            
+        Returns:
+            Dict with 'ranked_primitives', 'chains', 'suggested_actions', 'reasoning'
+        """
+        result = {
+            'ranked_primitives': [],
+            'chains': [],
+            'suggested_actions': [],
+            'reasoning': '',
+            'confidence': 0.0
+        }
+        
+        if not survey or survey.get('error'):
+            result['reasoning'] = 'No valid survey data'
+            return result
+        
+        recent_failures = recent_failures or []
+        
+        try:
+            # Get suggested primitives from survey
+            suggested = survey.get('suggested_primitives', [])
+            chains = survey.get('primitive_chains', [])
+            
+            # Rank primitives by relevance to detected features
+            ranked = []
+            features = survey.get('features', {})
+            
+            for prim_name in suggested:
+                score = 1.0  # Base score
+                
+                # Boost primitives matching detected features
+                if 'pipe' in prim_name and features.get('has_pipes'):
+                    score += 0.5
+                if 'flow' in prim_name and features.get('has_pipes'):
+                    score += 0.4
+                if 'valve' in prim_name and features.get('has_pipes'):
+                    score += 0.3
+                if 'symmetr' in prim_name and features.get('has_symmetry'):
+                    score += 0.5
+                if 'container' in prim_name and features.get('has_containers'):
+                    score += 0.4
+                if 'pour' in prim_name and features.get('has_containers'):
+                    score += 0.4
+                if 'fitting' in prim_name and features.get('color_count', 0) >= 3:
+                    score += 0.3
+                
+                # Penalize if primitive led to recent failures
+                for failure in recent_failures:
+                    if prim_name in failure:
+                        score -= 0.3
+                
+                ranked.append((prim_name, score))
+            
+            # Sort by score descending
+            ranked.sort(key=lambda x: x[1], reverse=True)
+            result['ranked_primitives'] = [{'name': n, 'score': s} for n, s in ranked[:15]]
+            
+            # Include chains (primitive formulas)
+            result['chains'] = chains
+            
+            # Generate action suggestions from top primitives
+            # This is where primitives translate to actual ACTION1-ACTION7
+            frame = self._context.current_frame if self._context else None
+            if frame and ranked:
+                for prim_name, _ in ranked[:5]:
+                    action_suggestion = self._primitive_to_action_suggestion(prim_name)
+                    if action_suggestion and action_suggestion.get('action'):
+                        # Skip if in recent failures
+                        action_str = f"ACTION{action_suggestion['action']}"
+                        if action_str not in recent_failures:
+                            result['suggested_actions'].append(action_suggestion)
+            
+            # Build reasoning string
+            top_game = survey.get('suggested_game_types', [('unknown', 0)])[0] if survey.get('suggested_game_types') else ('unknown', 0)
+            game_name = top_game[0] if isinstance(top_game, tuple) else top_game
+            result['reasoning'] = (
+                f"Survey detected {game_name}-type game. "
+                f"Suggesting {len(result['ranked_primitives'])} primitives, "
+                f"{len(chains)} chains available."
+            )
+            
+            result['confidence'] = survey.get('survey_confidence', 0.0)
+            
+            logger.debug(f"[CODS-QUERY] Returning {len(result['suggested_actions'])} action suggestions, "
+                        f"{len(result['ranked_primitives'])} ranked primitives")
+                        
+        except Exception as e:
+            logger.warning(f"[CODS-QUERY] Query failed: {e}")
+            result['reasoning'] = f'Query error: {e}'
+        
+        return result
+
     def analyze_frame(
         self,
         frame: Optional[List[List[int]]] = None
@@ -1478,6 +1674,7 @@ class CODSEngine:
         self,
         frame: Optional[List[List[int]]] = None
     ) -> Optional[Dict[str, Any]]:
+
         """
         Use cognitive operators to suggest an action.
         
