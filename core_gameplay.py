@@ -16692,6 +16692,24 @@ class GameplayEngine:
                 # Task 3: Aggregate coordinates to meaningful object IDs
                 if frame is not None:
                     context['aggregated_controlled'] = self._aggregate_controlled_objects(controlled, frame)
+                    
+                    # FIX: Set agent_position from aggregated controlled objects
+                    # The feedback showed agent_position is ALWAYS null because the position
+                    # inference code couldn't parse "toggleable_color_X" format.
+                    # But _aggregate_controlled_objects DOES parse it and has the positions.
+                    # So use aggregated_controlled to set agent_position.
+                    if context['aggregated_controlled'] and context.get('agent_position') is None:
+                        # Get first controlled object's position as agent position
+                        first_obj = context['aggregated_controlled'][0]
+                        if 'position' in first_obj and first_obj['position']:
+                            pos = first_obj['position']
+                            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                                context['agent_position'] = [int(pos[0]), int(pos[1])]
+                                # Also set _current_agent_position for symbolic bias calculation
+                                self._current_agent_position = (int(pos[0]), int(pos[1]))
+                                logger.debug(
+                                    f"[AGENT_POS] Set from aggregated_controlled: {context['agent_position']}"
+                                )
                 
                 # FIX: Use calculate_control_confidence() which includes toggleable objects
                 # Previously only queried agent_object_control (movement only)
