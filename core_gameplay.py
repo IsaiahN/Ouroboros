@@ -11065,14 +11065,34 @@ class GameplayEngine:
             self._stuck_detection_history = []
             
             # Force symbolic analysis on the current frame
-            if hasattr(self, 'symbolic_tracker') and self.symbolic_tracker and game_state.frame:
+            if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker and game_state.frame:
                 try:
                     frame = game_state.frame
                     if not isinstance(frame, np.ndarray):
                         frame = np.array(frame)
-                    self.symbolic_tracker.identify_symbolic_objects(frame)
-                    match_state = self.symbolic_tracker.get_match_progress()
-                    logger.info(f"[LOOP-SYMBOLIC] Emergency symbolic analysis: keys={match_state.get('key_count', 0)}, locks={match_state.get('lock_count', 0)}, tools={match_state.get('tool_count', 0)}")
+                    
+                    # FIX: Get controlled_colors from self_model so keys can be detected!
+                    # Without controlled_colors, identify_symbolic_objects treats EVERYTHING as locks/tools.
+                    controlled_colors = []
+                    agent_id = self.game_config.get('agent_id')
+                    game_id = self.game_config.get('game_id')
+                    level = self.game_config.get('level', 0)
+                    if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model:
+                        controlled_objs = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
+                        if controlled_objs:
+                            for ctrl in controlled_objs:
+                                if isinstance(ctrl, tuple) and len(ctrl) >= 1:
+                                    controlled_colors.append(ctrl[0])
+                                elif isinstance(ctrl, str):
+                                    # Handle "color_X_at_Y_Z" or "toggleable_color_X" format
+                                    import re
+                                    match = re.search(r'color_(\d+)', ctrl)
+                                    if match:
+                                        controlled_colors.append(int(match.group(1)))
+                    
+                    self.symbolic_state_tracker.identify_symbolic_objects(frame, controlled_colors=controlled_colors)
+                    match_state = self.symbolic_state_tracker.get_match_progress()
+                    logger.info(f"[LOOP-SYMBOLIC] Emergency symbolic analysis: keys={match_state.get('key_count', 0)}, locks={match_state.get('lock_count', 0)}, tools={match_state.get('tool_count', 0)} (controlled_colors={controlled_colors})")
                 except Exception as e:
                     logger.debug(f"[LOOP-SYMBOLIC] Emergency analysis failed: {e}")
             
@@ -12113,6 +12133,39 @@ class GameplayEngine:
                                 else:
                                     action = "ACTION1"  # Up
                                     dir_name = "up"
+                            
+                            # =======================================================
+                            # FIX #3: OBSTACLE AVOIDANCE (Feedback 6)
+                            # =======================================================
+                            # Problem: Agent navigates toward goal but hits wall, then
+                            # repeats the same blocked action 60% of the time (177/295 frames).
+                            # Solution: If last action caused no frame change AND we're
+                            # about to repeat it, try perpendicular direction instead.
+                            # =======================================================
+                            no_change_count = getattr(self, '_no_frame_change_count', 0)
+                            last_action = getattr(self, '_last_action_taken', None)
+                            
+                            if no_change_count >= 2 and last_action == action:
+                                # We're blocked! Try perpendicular direction
+                                blocked_actions = getattr(self, '_blocked_goal_actions', set())
+                                blocked_actions.add(action)
+                                self._blocked_goal_actions = blocked_actions
+                                
+                                # Choose perpendicular: if blocked horizontally, try vertical (and vice versa)
+                                if action in ("ACTION3", "ACTION4"):  # Horizontal blocked
+                                    # Try vertical
+                                    action = "ACTION1" if gy < ay else "ACTION2"
+                                    dir_name = "up (obstacle avoidance)" if action == "ACTION1" else "down (obstacle avoidance)"
+                                else:  # Vertical blocked
+                                    # Try horizontal
+                                    action = "ACTION3" if gx < ax else "ACTION4"
+                                    dir_name = "left (obstacle avoidance)" if action == "ACTION3" else "right (obstacle avoidance)"
+                                
+                                logger.info(f"[OBSTACLE-AVOID] Blocked {last_action}, trying perpendicular {action}")
+                            else:
+                                # Clear blocked actions if we successfully moved
+                                if no_change_count == 0:
+                                    self._blocked_goal_actions = set()
                             
                             goal_reason = closest_goal.get('reason', 'rare object')
                             reasoning = f"[INFERRED GOAL] Moving {dir_name} toward {goal_reason} at ({gx},{gy}), dist={min_dist}"
@@ -17482,6 +17535,41 @@ class GameplayEngine:
         # 1. Get symbolic state from SymbolicStateTracker
         if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
             try:
+                # =============================================================
+                # FIX: REFRESH SYMBOLIC OBJECTS when new controlled colors discovered
+                # =============================================================
+                # Problem (Feedback 6): key_count=0, lock_count=8 throughout 295 frames.
+                # Root cause: At game start, controlled_colors might be empty (agent
+                # hasn't discovered control yet). Once control is learned, we need
+                # to RE-IDENTIFY objects so the controlled object becomes a "key".
+                # =============================================================
+                current_controlled_colors = []
+                agent_id = self.game_config.get('agent_id')
+                if agent_id and hasattr(self, 'agent_self_model') and self.agent_self_model and frame:
+                    controlled_objs = self.agent_self_model.get_controlled_objects(agent_id, game_id, level)
+                    if controlled_objs:
+                        import re
+                        for ctrl in controlled_objs:
+                            if isinstance(ctrl, tuple) and len(ctrl) >= 1:
+                                current_controlled_colors.append(ctrl[0])
+                            elif isinstance(ctrl, str):
+                                match = re.search(r'color_(\d+)', ctrl)
+                                if match:
+                                    current_controlled_colors.append(int(match.group(1)))
+                
+                # Check if we have new controlled colors that weren't in the tracker
+                tracker_keys = set(self.symbolic_state_tracker.key_objects.keys()) if self.symbolic_state_tracker.key_objects else set()
+                needs_refresh = (
+                    len(current_controlled_colors) > 0 and
+                    len(self.symbolic_state_tracker.key_objects) == 0
+                )
+                
+                if needs_refresh and frame:
+                    # Re-identify objects with updated controlled colors
+                    frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
+                    self.symbolic_state_tracker.identify_symbolic_objects(frame_arr, controlled_colors=current_controlled_colors)
+                    logger.info(f"[SYMBOLIC-REFRESH] Re-identified with controlled_colors={current_controlled_colors}")
+                
                 match_progress = self.symbolic_state_tracker.get_match_progress()
                 transformation_needed = self.symbolic_state_tracker.get_transformation_needed()
                 
@@ -20392,6 +20480,13 @@ class GameplayEngine:
         # ===================================================================
         world_model = self._build_world_model_context(game_id, current_level, game_state.frame)
         environment = world_model or {'status': self._null_status(425)}
+        
+        # FIX #2: Sync agent_position from self_model to environment
+        # Feedback showed self_model.agent_position was [35,50] but 6_environment.agent_position was null.
+        # This caused symbolic override to not trigger (it checks environment's position).
+        if self_model and self_model.get('agent_position') and not environment.get('agent_position'):
+            environment['agent_position'] = self_model['agent_position']
+            logger.debug(f"[ENV-SYNC] Synced agent_position from self_model: {environment['agent_position']}")
 
         # Merge inferred goals into stream-aware perception to keep goals visible in identity
         try:

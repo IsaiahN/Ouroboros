@@ -1714,11 +1714,19 @@ class AutonomousEvolutionRunner:
                                 if self.counterfactual_analyzer and not result.get('win', False) and final_score < 15:
                                     try:
                                         session_id = engine_slot.session_manager.current_session_id or "unknown"
+                                        # Build action_history from engine if available
+                                        action_history = []
+                                        if hasattr(engine_slot, '_action_history') and engine_slot._action_history:
+                                            action_history = list(engine_slot._action_history)
+                                        elif hasattr(engine_slot, '_recent_actions') and engine_slot._recent_actions:
+                                            action_history = [{'action': a, 'index': i} for i, a in enumerate(engine_slot._recent_actions)]
                                         learning_ids = self.counterfactual_analyzer.analyze_failure(
                                             agent_id=agent_id,
                                             game_id=game_id,
-                                            session_id=session_id,
+                                            game_type=game_type,
                                             final_score=final_score,
+                                            action_history=action_history,
+                                            session_id=session_id,
                                             generation=self.current_generation,
                                         )
                                         if learning_ids and hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:
