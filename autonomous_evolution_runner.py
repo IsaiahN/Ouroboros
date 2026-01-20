@@ -159,6 +159,7 @@ class AutonomousEvolutionRunner:
         target_game: str | None = None,  # NEW: Focus on specific game (e.g., "as66")
         replay_validation_batch: bool = False,  # Run REPLAY_VALIDATION pass over replay_index (no live play)
         replay_validation_limit: Optional[int] = None,  # Optional cap on validations
+        skip_sequence_retrieval: bool = False,  # Skip sequence replay but still capture on win
     ):
         """
         Initialize autonomous runner.
@@ -245,6 +246,7 @@ class AutonomousEvolutionRunner:
         self.target_game = target_game  # Focus on specific game (e.g., "as66")
         self.replay_validation_batch = replay_validation_batch
         self.replay_validation_limit = replay_validation_limit
+        self.skip_sequence_retrieval = skip_sequence_retrieval  # Skip sequence replay but capture on win
         
         self.current_generation = 0
         self.total_games_played = 0
@@ -1616,6 +1618,7 @@ class AutonomousEvolutionRunner:
                                     max_total_actions=game_budget,
                                     enable_random_exploration=True,
                                     enable_pattern_learning=True,
+                                    skip_sequence_retrieval=self.skip_sequence_retrieval,
                                     diversity_mode=self.agi_mode,
                                     enforce_game_diversity=self.agi_mode,
                                     max_repeats_per_game=5 if self.agi_mode else 999,

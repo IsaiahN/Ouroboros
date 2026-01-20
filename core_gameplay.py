@@ -1228,6 +1228,266 @@ class PrimitiveHelper:
         
         return result
 
+    # ========================================================================
+    # EXPLORATION STRATEGY PRIMITIVES (LS20 - Stuck Detection)
+    # ========================================================================
+    # These primitives support the exploration phase system by detecting
+    # when the agent is stuck oscillating in a small region (safe zone trap).
+    # ========================================================================
+    
+    def detect_stuck_pattern(
+        self,
+        position_history: List[Tuple[int, int]],
+        threshold: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Detect if agent is stuck oscillating in a small region.
+        
+        From stuck_in_safe_zone_analysis.md: "The agent is like a person who
+        sees a prize through a window, keeps walking into the window, and 
+        never looks around for the door."
+        
+        Args:
+            position_history: List of (x, y) positions (most recent last)
+            threshold: Size threshold (x_range + y_range) to be "stuck"
+            
+        Returns:
+            Dict with:
+            - is_stuck: True if stuck in small region
+            - region_size: Total movement range (x_range + y_range)
+            - bounding_box: (min_x, min_y, max_x, max_y)
+            - stuck_duration: Frames at current position
+            - oscillation_count: Positions visited more than once
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'is_stuck': False}
+        
+        try:
+            result = registry.call('detect_stuck_pattern', position_history, threshold)
+            if isinstance(result, dict):
+                return {'available': True, **result}
+            return {
+                'available': True,
+                'is_stuck': bool(result),
+                'region_size': 0,
+                'bounding_box': None,
+                'stuck_duration': 0,
+                'oscillation_count': 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] detect_stuck_pattern failed: {e}")
+            return {'available': False, 'is_stuck': False, 'error': str(e)}
+    
+    def select_unexplored_target(
+        self,
+        agent_position: Tuple[int, int],
+        unexplored_regions: List[Dict[str, Any]],
+        visited_history: Optional[set] = None
+    ) -> Dict[str, Any]:
+        """
+        Select the best unexplored region to target next.
+        
+        Args:
+            agent_position: Current (x, y) position
+            unexplored_regions: List of dicts with 'x', 'y', 'priority' (grid coords)
+            visited_history: Set of previously visited (x, y) positions
+            
+        Returns:
+            Dict with:
+            - target_position: (x, y) position to explore (pixel coords)
+            - distance: Manhattan distance to target
+            - priority: Combined score
+            - reason: Why this target was selected
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'target_position': None}
+        
+        try:
+            result = registry.call(
+                'select_unexplored_target', 
+                agent_position, 
+                unexplored_regions, 
+                visited_history or set()
+            )
+            if isinstance(result, dict):
+                return {'available': True, **result}
+            return {
+                'available': True,
+                'target_position': result,
+                'distance': 0,
+                'priority': 0.5,
+                'reason': 'unknown'
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] select_unexplored_target failed: {e}")
+            return {'available': False, 'target_position': None, 'error': str(e)}
+    
+    def estimate_exploration_budget(
+        self,
+        actions_remaining: int,
+        actions_max: int,
+        coverage_percent: float = 0.0
+    ) -> Dict[str, Any]:
+        """
+        Estimate what fraction of budget should go to exploration vs exploitation.
+        
+        Args:
+            actions_remaining: Actions remaining in budget
+            actions_max: Total action budget (starting amount)
+            coverage_percent: 0-100, what % of map has been explored
+            
+        Returns:
+            Dict with:
+            - explore_weight: 0.0-1.0 exploration probability
+            - exploit_weight: 0.0-1.0 exploitation probability
+            - phase: 'discovery', 'optimization', or 'critical'
+            - urgency: 'low', 'medium', or 'high'
+            - progress: 0.0-1.0, how far through budget
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'explore_weight': 0.3, 'phase': 'unknown'}
+        
+        try:
+            result = registry.call(
+                'estimate_exploration_budget', 
+                actions_remaining, 
+                actions_max, 
+                coverage_percent
+            )
+            if isinstance(result, dict):
+                return {'available': True, **result}
+            return {
+                'available': True,
+                'explore_weight': float(result) if result is not None else 0.3,
+                'exploit_weight': 1.0 - (float(result) if result is not None else 0.3),
+                'phase': 'unknown',
+                'urgency': 'medium',
+                'progress': 0.5
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] estimate_exploration_budget failed: {e}")
+            return {'available': False, 'explore_weight': 0.3, 'phase': 'unknown', 'error': str(e)}
+    
+    def calculate_reachability(
+        self,
+        agent_pos: Tuple[int, int],
+        goal_pos: Tuple[int, int],
+        known_obstacles: Optional[set] = None,
+        frame: Optional[List] = None
+    ) -> Dict[str, Any]:
+        """
+        Calculate if a goal is reachable from start given obstacles.
+        
+        Args:
+            agent_pos: Starting (x, y) position
+            goal_pos: Target (x, y) position
+            known_obstacles: Set of (x, y) obstacle positions
+            frame: Optional frame data for additional obstacle detection
+            
+        Returns:
+            Dict with:
+            - is_reachable: True if goal appears reachable (even with detour)
+            - path_clear: True if direct path has no obstacles
+            - obstacle_detected: True if any obstacle in path
+            - obstacles_in_path: Number of obstacles blocking direct path
+            - estimated_detour: Extra actions needed (0 if clear)
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'path_clear': True}
+        
+        try:
+            result = registry.call(
+                'calculate_reachability', 
+                agent_pos, 
+                goal_pos, 
+                known_obstacles or set(),
+                frame
+            )
+            if isinstance(result, dict):
+                return {'available': True, **result}
+            return {
+                'available': True,
+                'is_reachable': True,
+                'path_clear': bool(result),
+                'obstacle_detected': not bool(result),
+                'obstacles_in_path': 0,
+                'estimated_detour': 0
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] calculate_reachability failed: {e}")
+            return {'available': False, 'path_clear': True, 'error': str(e)}
+    
+    def get_strategic_exploration_action(
+        self,
+        position_history: List[Tuple[int, int]],
+        unexplored_regions: List[Dict[str, Any]],
+        actions_used: int,
+        actions_max: int,
+        coverage_percent: float,
+        current_pos: Tuple[int, int],
+        frame: Optional[List] = None
+    ) -> Dict[str, Any]:
+        """
+        Executive function: Combine all exploration primitives to decide action.
+        
+        This is the "executive function" that synthesizes:
+        - detect_stuck_pattern (am I stuck?)
+        - estimate_exploration_budget (should I explore?)
+        - select_unexplored_target (where to go?)
+        - calculate_reachability (can I get there?)
+        
+        Args:
+            position_history: List of recent (x, y) positions
+            unexplored_regions: Regions not yet visited (from exploration tracker)
+            actions_used: Actions taken so far
+            actions_max: Total action budget
+            coverage_percent: 0-100, what % of map explored
+            current_pos: Current (x, y) position
+            frame: Optional current frame for obstacle detection
+            
+        Returns:
+            Dict with:
+            - should_explore: True if exploration should override goal-seeking
+            - reason: Why exploration is/isn't needed
+            - action: Suggested action (ACTION1-4) if exploring
+            - stuck_info: Stuck detection results
+            - budget_info: Budget phase results
+            - target_info: Target selection results
+        """
+        registry = self._registry
+        if not self.available or registry is None:
+            return {'available': False, 'should_explore': False, 'reason': 'primitives unavailable'}
+        
+        try:
+            result = registry.call(
+                'get_strategic_exploration_action',
+                position_history,
+                unexplored_regions,
+                actions_used,
+                actions_max,
+                coverage_percent,
+                current_pos,
+                frame
+            )
+            if isinstance(result, dict):
+                return {'available': True, **result}
+            return {
+                'available': True,
+                'should_explore': bool(result),
+                'reason': 'primitive result',
+                'action': None,
+                'stuck_info': None,
+                'budget_info': None,
+                'target_info': None
+            }
+        except Exception as e:
+            logger.debug(f"[PRIMITIVES] get_strategic_exploration_action failed: {e}")
+            return {'available': False, 'should_explore': False, 'error': str(e)}
+
 
 # Global primitive helper instance
 _primitive_helper: Optional[PrimitiveHelper] = None
@@ -1860,6 +2120,7 @@ class GameplayEngine:
             'enable_random_exploration': True,
             'coordinate_retry_limit': 3,
             'enable_pattern_learning': True,  # Toggle pattern learning
+            'skip_sequence_retrieval': False,  # Skip sequence replay but still capture new sequences
             'learning_mode': 'smart_exploration',  # 'exploit', 'explore', 'smart_exploration'
             'enable_sensation_navigation': True,  # Phase 4.5: Toggle sensation-based emotional intelligence
             'enable_observability_plugins': False,  # Observability plugins off by default
@@ -4275,6 +4536,49 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Imagination budget update failed (non-critical): {e}")
 
+        # ================================================================
+        # ACTION BUDGET LEARNING: Record observed action counts per level
+        # ================================================================
+        # Learn how many actions each game_type/level typically takes.
+        # This builds the budget range (min, avg, max) that informs
+        # exploration phase calculations in future games.
+        # ================================================================
+        try:
+            game_type = game_id[:4] if game_id else 'unknown'
+            is_game_over = game_state.state == 'GAME_OVER'
+            
+            # Record total game observation for level 1 (always have L1 data)
+            if loop_state.action_count > 0:
+                # For multi-level games, we need per-level action counts
+                # Use level_action_counts if available, otherwise use total
+                level_action_counts = getattr(loop_state, 'level_action_counts', None)
+                
+                if level_action_counts and isinstance(level_action_counts, dict):
+                    # Record each level's actions individually
+                    for level_num, actions in level_action_counts.items():
+                        was_level_won = level_num < loop_state.current_level
+                        self._record_action_budget_observation(
+                            game_type=game_type,
+                            level_number=level_num,
+                            actions_used=actions,
+                            was_game_over=(is_game_over and level_num == loop_state.current_level),
+                            was_level_win=was_level_won
+                        )
+                else:
+                    # Fallback: record total for current level
+                    self._record_action_budget_observation(
+                        game_type=game_type,
+                        level_number=loop_state.current_level,
+                        actions_used=loop_state.action_count,
+                        was_game_over=is_game_over,
+                        was_level_win=(loop_state.level_completions > 0)
+                    )
+            
+            logger.debug(f"[ACTION-BUDGET] Recorded game end: {game_type} L{loop_state.current_level} "
+                        f"{loop_state.action_count} actions, state={game_state.state}")
+        except Exception as e:
+            logger.debug(f"Action budget learning failed (non-critical): {e}")
+
         attempt_id = self.game_config.get('attempt_id')
         mode_for_spine = self.game_config.get('mode', 'LIVE')
         staged_recording: Optional[Dict[str, Any]] = None
@@ -4893,6 +5197,541 @@ class GameplayEngine:
                     
                     for target in nearby_agents:
                         viral_engine.spread_pariah_awareness(pariah_id, agent_id, target['agent_id'], generation)
+
+    # =========================================================================
+    # EXPLORATION PHASE SYSTEM (2026-01-20)
+    # =========================================================================
+    # Implements three-layer exploration control:
+    # 1. Phase Budget: Discovery (70% explore) -> Optimization (30%) -> Critical (10%)
+    # 2. Regional Stuck Override: Force exploration when oscillating in small area
+    # 3. Learned Action Budgets: Track budget ranges per game_type/level
+    # =========================================================================
+    
+    def _ensure_action_budget_table(self) -> None:
+        """Create the game_action_budgets table if it doesn't exist."""
+        try:
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS game_action_budgets (
+                    budget_id TEXT PRIMARY KEY,
+                    game_type TEXT NOT NULL,
+                    level_number INTEGER NOT NULL,
+                    
+                    -- Learned budget range (not fixed - some games give MORE time for good play)
+                    min_actions INTEGER DEFAULT 0,
+                    max_actions INTEGER DEFAULT 0,
+                    avg_actions REAL DEFAULT 0.0,
+                    
+                    -- Observation counts
+                    observations INTEGER DEFAULT 0,
+                    level_wins INTEGER DEFAULT 0,
+                    game_overs INTEGER DEFAULT 0,
+                    
+                    -- Confidence (degrades for later levels with less data)
+                    confidence REAL DEFAULT 0.0,
+                    
+                    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(game_type, level_number)
+                )
+            """)
+            
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_action_budgets_game_level
+                ON game_action_budgets(game_type, level_number)
+            """)
+        except Exception as e:
+            logger.debug(f"[ACTION-BUDGET] Table creation failed (may already exist): {e}")
+    
+    def _record_action_budget_observation(
+        self,
+        game_type: str,
+        level_number: int,
+        actions_used: int,
+        was_game_over: bool = False,
+        was_level_win: bool = False
+    ) -> None:
+        """
+        Record an observation of action usage for budget learning.
+        
+        Called from _finalize_game() when game ends to learn budget ranges.
+        
+        Args:
+            game_type: Game type (e.g., 'ls20')
+            level_number: Which level this observation is for
+            actions_used: How many actions were used on this level
+            was_game_over: True if game ended (budget exhausted or failure)
+            was_level_win: True if level was completed successfully
+        """
+        import uuid
+        
+        self._ensure_action_budget_table()
+        
+        try:
+            # Check existing budget data
+            existing = self.db.execute_query("""
+                SELECT min_actions, max_actions, avg_actions, observations, 
+                       level_wins, game_overs
+                FROM game_action_budgets
+                WHERE game_type = ? AND level_number = ?
+            """, (game_type, level_number))
+            
+            if existing:
+                row = existing[0]
+                old_min = row['min_actions'] or actions_used
+                old_max = row['max_actions'] or actions_used
+                old_avg = row['avg_actions'] or float(actions_used)
+                old_obs = row['observations'] or 0
+                old_wins = row['level_wins'] or 0
+                old_overs = row['game_overs'] or 0
+                
+                # Update range
+                new_min = min(old_min, actions_used) if actions_used > 0 else old_min
+                new_max = max(old_max, actions_used)
+                new_obs = old_obs + 1
+                new_avg = ((old_avg * old_obs) + actions_used) / new_obs
+                new_wins = old_wins + (1 if was_level_win else 0)
+                new_overs = old_overs + (1 if was_game_over else 0)
+                
+                # Confidence: higher for more observations, lower for later levels
+                # Level 1 gets full confidence, later levels get less (less data)
+                level_factor = 1.0 / (1.0 + (level_number - 1) * 0.1)
+                new_confidence = min(1.0, (new_obs / 10.0) * level_factor)
+                
+                self.db.execute_query("""
+                    UPDATE game_action_budgets
+                    SET min_actions = ?, max_actions = ?, avg_actions = ?,
+                        observations = ?, level_wins = ?, game_overs = ?,
+                        confidence = ?, last_updated = datetime('now')
+                    WHERE game_type = ? AND level_number = ?
+                """, (new_min, new_max, new_avg, new_obs, new_wins, new_overs,
+                      new_confidence, game_type, level_number))
+            else:
+                # Insert new row
+                budget_id = f"budget_{uuid.uuid4().hex[:12]}"
+                confidence = 0.1  # Low confidence with first observation
+                
+                self.db.execute_query("""
+                    INSERT INTO game_action_budgets 
+                    (budget_id, game_type, level_number, min_actions, max_actions, 
+                     avg_actions, observations, level_wins, game_overs, confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (budget_id, game_type, level_number, actions_used, actions_used,
+                      float(actions_used), 1,
+                      1 if was_level_win else 0,
+                      1 if was_game_over else 0,
+                      confidence))
+            
+            logger.debug(f"[ACTION-BUDGET] Recorded: {game_type} L{level_number} = {actions_used} actions "
+                        f"(game_over={was_game_over}, level_win={was_level_win})")
+        except Exception as e:
+            logger.debug(f"[ACTION-BUDGET] Recording failed: {e}")
+    
+    def _get_learned_budget(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> Dict[str, Any]:
+        """
+        Get the learned action budget range for a game/level.
+        
+        Returns:
+            Dict with:
+            - min_actions: Minimum observed
+            - max_actions: Maximum observed (may INCREASE for good play!)
+            - avg_actions: Average across observations
+            - confidence: How much to trust this estimate (0-1)
+            - observations: How many data points
+        """
+        self._ensure_action_budget_table()
+        
+        try:
+            result = self.db.execute_query("""
+                SELECT min_actions, max_actions, avg_actions, confidence, observations
+                FROM game_action_budgets
+                WHERE game_type = ? AND level_number = ?
+            """, (game_type, level_number))
+            
+            if result:
+                row = result[0]
+                return {
+                    'min_actions': row['min_actions'] or 2000,
+                    'max_actions': row['max_actions'] or 2000,
+                    'avg_actions': row['avg_actions'] or 2000.0,
+                    'confidence': row['confidence'] or 0.0,
+                    'observations': row['observations'] or 0,
+                    'has_data': True
+                }
+        except Exception as e:
+            logger.debug(f"[ACTION-BUDGET] Query failed: {e}")
+        
+        # Default fallback - assume 2000 actions (standard ARC budget)
+        return {
+            'min_actions': 2000,
+            'max_actions': 2000,
+            'avg_actions': 2000.0,
+            'confidence': 0.0,
+            'observations': 0,
+            'has_data': False
+        }
+    
+    def _detect_regional_stuck(
+        self,
+        position_history: List[Tuple[int, int]],
+        region_size: int = 10,
+        min_positions: int = 15
+    ) -> Dict[str, Any]:
+        """
+        Detect if agent is stuck oscillating in a small region.
+        
+        DELEGATES TO SEED PRIMITIVE: detect_stuck_pattern
+        
+        From stuck_in_safe_zone_analysis.md: "The agent is like a person who
+        sees a prize through a window, keeps walking into the window, and 
+        never looks around for the door."
+        
+        Args:
+            position_history: List of (x, y) positions (most recent last)
+            region_size: Size threshold (x_range + y_range) to be "stuck"
+            min_positions: Minimum positions to check before declaring stuck
+            
+        Returns:
+            Dict with:
+            - is_stuck: True if stuck in small region
+            - region_bounds: (min_x, min_y, max_x, max_y) if stuck
+            - escape_direction: Suggested direction to escape
+            - oscillation_count: How many back-and-forth movements detected
+            - stuck_duration: How many frames at current position
+            - region_size: Total movement range (x_range + y_range)
+        """
+        result = {
+            'is_stuck': False,
+            'region_bounds': None,
+            'escape_direction': None,
+            'oscillation_count': 0,
+            'stuck_duration': 0,
+            'region_size': 0
+        }
+        
+        if not position_history or len(position_history) < min_positions:
+            return result
+        
+        # Use seed primitive if available
+        if hasattr(self, 'primitive_helper') and self.primitive_helper.available:
+            try:
+                primitive_result = self.primitive_helper.detect_stuck_pattern(
+                    position_history=position_history,
+                    threshold=region_size
+                )
+                
+                if primitive_result:
+                    result['is_stuck'] = primitive_result.get('is_stuck', False)
+                    result['region_bounds'] = primitive_result.get('bounding_box')
+                    result['oscillation_count'] = primitive_result.get('oscillation_count', 0)
+                    result['stuck_duration'] = primitive_result.get('stuck_duration', 0)
+                    result['region_size'] = primitive_result.get('region_size', 0)
+                    
+                    # Calculate escape direction if stuck
+                    if result['is_stuck'] and result['region_bounds']:
+                        min_x, min_y, max_x, max_y = result['region_bounds']
+                        center_x = (min_x + max_x) / 2
+                        center_y = (min_y + max_y) / 2
+                        
+                        frame_height = getattr(self, '_current_frame_height', 64)
+                        frame_width = getattr(self, '_current_frame_width', 64)
+                        
+                        # Escape toward unexplored (bias toward center if in corner)
+                        if center_x < frame_width / 3:
+                            result['escape_direction'] = 'right'
+                        elif center_x > frame_width * 2 / 3:
+                            result['escape_direction'] = 'left'
+                        elif center_y < frame_height / 3:
+                            result['escape_direction'] = 'down'
+                        elif center_y > frame_height * 2 / 3:
+                            result['escape_direction'] = 'up'
+                        else:
+                            import random
+                            result['escape_direction'] = random.choice(['up', 'down', 'left', 'right'])
+                        
+                        logger.debug(f"[STUCK-PRIMITIVE] Detected! region_size={result['region_size']}, "
+                                    f"duration={result['stuck_duration']}, oscillations={result['oscillation_count']}, "
+                                    f"escape={result['escape_direction']}")
+                    
+                    return result
+            except Exception as e:
+                logger.debug(f"[STUCK-PRIMITIVE] Fallback to manual: {e}")
+        
+        # Fallback: manual calculation (same as primitive but inline)
+        recent = position_history[-min_positions:]
+        
+        x_coords = [p[0] for p in recent]
+        y_coords = [p[1] for p in recent]
+        min_x, max_x = min(x_coords), max(x_coords)
+        min_y, max_y = min(y_coords), max(y_coords)
+        
+        x_range = max_x - min_x
+        y_range = max_y - min_y
+        total_region_size = x_range + y_range
+        
+        result['region_size'] = total_region_size
+        
+        # Stuck if movement range < threshold
+        if total_region_size < region_size:
+            result['is_stuck'] = True
+            result['region_bounds'] = (min_x, min_y, max_x, max_y)
+            
+            # Count stuck duration and oscillations
+            from collections import Counter
+            pos_counts = Counter(recent)
+            result['oscillation_count'] = sum(1 for c in pos_counts.values() if c > 1)
+            
+            current_pos = recent[-1]
+            result['stuck_duration'] = sum(1 for p in recent if p == current_pos)
+            
+            # Escape direction
+            center_x = (min_x + max_x) / 2
+            center_y = (min_y + max_y) / 2
+            
+            frame_height = getattr(self, '_current_frame_height', 64)
+            frame_width = getattr(self, '_current_frame_width', 64)
+            
+            if center_x < frame_width / 3:
+                result['escape_direction'] = 'right'
+            elif center_x > frame_width * 2 / 3:
+                result['escape_direction'] = 'left'
+            elif center_y < frame_height / 3:
+                result['escape_direction'] = 'down'
+            elif center_y > frame_height * 2 / 3:
+                result['escape_direction'] = 'up'
+            else:
+                import random
+                result['escape_direction'] = random.choice(['up', 'down', 'left', 'right'])
+            
+            logger.debug(f"[REGIONAL-STUCK] Detected! region_size={total_region_size}, "
+                        f"duration={result['stuck_duration']}, escape={result['escape_direction']}")
+        
+        return result
+    
+    def _get_exploration_phase(
+        self,
+        actions_taken: int,
+        game_type: str,
+        level_number: int,
+        coverage_percent: float = 0.0
+    ) -> Dict[str, Any]:
+        """
+        Calculate current exploration phase based on budget progress.
+        
+        DELEGATES TO SEED PRIMITIVE: estimate_exploration_budget (when available)
+        
+        Phases:
+        - DISCOVERY (0-30% budget): 70% exploration weight
+        - OPTIMIZATION (30-70% budget): 30% exploration weight
+        - CRITICAL (70-100% budget): 10% exploration weight
+        
+        Args:
+            actions_taken: Actions used so far this level
+            game_type: Game type for budget lookup
+            level_number: Current level
+            coverage_percent: Map coverage percentage (0-100)
+            
+        Returns:
+            Dict with:
+            - phase: 'discovery' | 'optimization' | 'critical'
+            - explore_weight: 0.0-1.0 (how much to weight exploration)
+            - budget_progress: 0.0-1.0 (how much budget used)
+            - budget_estimate: Estimated total budget
+            - confidence: How confident we are in this estimate
+        """
+        # Get learned budget for this game/level
+        budget_info = self._get_learned_budget(game_type, level_number)
+        
+        # Use average as estimate (can be overridden by observed patterns)
+        budget_estimate = budget_info['avg_actions']
+        confidence = budget_info['confidence']
+        
+        # Handle edge case of zero or very small budget
+        if budget_estimate < 100:
+            budget_estimate = 2000  # Fallback to standard
+            confidence = 0.0
+        
+        actions_remaining = max(0, int(budget_estimate) - actions_taken)
+        
+        # Try to use primitive for phase calculation
+        if hasattr(self, 'primitive_helper') and self.primitive_helper.available:
+            try:
+                primitive_result = self.primitive_helper.estimate_exploration_budget(
+                    actions_remaining=actions_remaining,
+                    actions_max=int(budget_estimate),
+                    coverage_percent=coverage_percent
+                )
+                
+                if primitive_result.get('available'):
+                    # Primitive succeeded - use its results
+                    phase = primitive_result.get('phase', 'optimization')
+                    explore_weight = primitive_result.get('explore_weight', 0.3)
+                    budget_progress = primitive_result.get('progress', 0.5)
+                    
+                    # Reduce exploration weight if confidence is low
+                    if confidence < 0.3:
+                        explore_weight = max(0.15, explore_weight * 0.7)
+                    
+                    return {
+                        'phase': phase,
+                        'explore_weight': explore_weight,
+                        'budget_progress': round(budget_progress, 2),
+                        'budget_estimate': int(budget_estimate),
+                        'confidence': round(confidence, 2),
+                        'budget_info': budget_info,
+                        'primitive_used': True,
+                        'urgency': primitive_result.get('urgency', 'medium')
+                    }
+            except Exception as e:
+                logger.debug(f"[EXPLORE-PHASE] Primitive fallback: {e}")
+        
+        # Fallback: manual calculation
+        budget_progress = min(1.0, actions_taken / budget_estimate)
+        
+        # Determine phase and exploration weight
+        if budget_progress < 0.30:
+            phase = 'discovery'
+            explore_weight = 0.70
+        elif budget_progress < 0.70:
+            phase = 'optimization'
+            explore_weight = 0.30
+        else:
+            phase = 'critical'
+            explore_weight = 0.10
+        
+        # Reduce exploration weight if confidence is low (don't trust budget estimate)
+        if confidence < 0.3:
+            # Low confidence - be more conservative with exploration
+            explore_weight = max(0.15, explore_weight * 0.7)
+        
+        return {
+            'phase': phase,
+            'explore_weight': explore_weight,
+            'budget_progress': round(budget_progress, 2),
+            'budget_estimate': int(budget_estimate),
+            'confidence': round(confidence, 2),
+            'budget_info': budget_info,
+            'primitive_used': False
+        }
+    
+    def _should_force_exploration(
+        self,
+        phase_info: Dict[str, Any],
+        regional_stuck: Dict[str, Any],
+        coverage_percent: float = 0.0
+    ) -> Tuple[bool, str]:
+        """
+        Determine if exploration should override goal-seeking.
+        
+        Three triggers:
+        1. Regional stuck (oscillating in small area)
+        2. Phase-based (discovery phase with low exploration so far)
+        3. Coverage emergency (<40% coverage at >50% budget)
+        
+        Args:
+            phase_info: From _get_exploration_phase()
+            regional_stuck: From _detect_regional_stuck()
+            coverage_percent: Network exploration coverage for this level
+            
+        Returns:
+            Tuple of (should_explore, reason)
+        """
+        # Trigger 1: Regional stuck override (highest priority)
+        if regional_stuck.get('is_stuck'):
+            # Enhanced reason with primitive data
+            stuck_duration = regional_stuck.get('stuck_duration', 0)
+            region_size = regional_stuck.get('region_size', 0)
+            escape = regional_stuck.get('escape_direction', 'unknown')
+            return True, f"REGIONAL_STUCK: {region_size}px region, {stuck_duration} frames, escape {escape}"
+        
+        # Trigger 2: Discovery phase and random check
+        phase = phase_info.get('phase', 'optimization')
+        explore_weight = phase_info.get('explore_weight', 0.3)
+        
+        import random
+        explore_roll = random.random()
+        if explore_roll < explore_weight:
+            return True, f"PHASE_{phase.upper()}: Explore roll {explore_roll:.2f} < weight {explore_weight:.2f}"
+        
+        # Trigger 3: Coverage emergency
+        budget_progress = phase_info.get('budget_progress', 0.0)
+        if budget_progress > 0.5 and coverage_percent < 40.0:
+            return True, f"COVERAGE_EMERGENCY: {coverage_percent:.1f}% coverage at {budget_progress*100:.0f}% budget"
+        
+        return False, "No exploration override"
+    
+    def _get_exploration_action(
+        self,
+        escape_direction: Optional[str],
+        unexplored_regions: List[Dict[str, Any]],
+        current_position: Optional[Tuple[int, int]]
+    ) -> Tuple[str, str]:
+        """
+        Get an exploration action based on available data.
+        
+        Priority:
+        1. Escape direction (if regional stuck)
+        2. Network unexplored regions (if available)
+        3. Random directional action
+        
+        Args:
+            escape_direction: From regional stuck detection ('up', 'down', etc.)
+            unexplored_regions: From network exploration tracker
+            current_position: Current agent position
+            
+        Returns:
+            Tuple of (action, reasoning)
+        """
+        direction_to_action = {
+            'up': 'ACTION1',
+            'down': 'ACTION2',
+            'left': 'ACTION3',
+            'right': 'ACTION4'
+        }
+        
+        # Priority 1: Escape direction from stuck detection
+        if escape_direction and escape_direction in direction_to_action:
+            action = direction_to_action[escape_direction]
+            return action, f"[EXPLORE-ESCAPE] Escaping stuck region via {escape_direction}"
+        
+        # Priority 2: Network unexplored regions
+        if unexplored_regions and current_position:
+            # Find closest unexplored region
+            cx, cy = current_position
+            best_region = None
+            best_dist = float('inf')
+            
+            for region in unexplored_regions[:5]:  # Check top 5
+                rx, ry = region.get('x', 0), region.get('y', 0)
+                # Convert region coords to pixel estimate (assuming 8x8 grid on 64x64 frame)
+                px, py = rx * 8 + 4, ry * 8 + 4
+                dist = abs(px - cx) + abs(py - cy)  # Manhattan distance
+                if dist < best_dist:
+                    best_dist = dist
+                    best_region = (px, py)
+            
+            if best_region:
+                tx, ty = best_region
+                # Determine direction to target
+                if abs(tx - cx) > abs(ty - cy):
+                    direction = 'right' if tx > cx else 'left'
+                else:
+                    direction = 'down' if ty > cy else 'up'
+                
+                action = direction_to_action[direction]
+                return action, f"[EXPLORE-NETWORK] Moving {direction} toward unexplored region"
+        
+        # Priority 3: Random exploration
+        import random
+        direction = random.choice(['up', 'down', 'left', 'right'])
+        action = direction_to_action[direction]
+        return action, f"[EXPLORE-RANDOM] Random exploration: {direction}"
+    
+    # =========================================================================
+    # END OF EXPLORATION PHASE SYSTEM
+    # =========================================================================
 
     # =========================================================================
     # END OF REFACTORED HELPER METHODS
@@ -5675,11 +6514,16 @@ class GameplayEngine:
             network_max_level = self._get_network_max_level(game_id)
             pioneer_at_frontier = agent_mode == 'pioneer' and current_level > max(network_max_level, 0)
             
+            # SKIP SEQUENCE RETRIEVAL: Pure exploration mode (still captures sequences on win)
+            if self.game_config.get('skip_sequence_retrieval', False):
+                logger.info(f"[SKIP-SEQUENCES] Sequence retrieval disabled for {game_id}; pure exploration (capture still enabled)")
+                ranked_sequences = []
+                known_sequence = None
             # OPTIMIZER: Always gets sequence (to try improving it)
             # GENERALIST: Gets sequence (follows it exactly)
             # PIONEER: Gets sequence (uses it to reach frontier, then explores)
             # EXPLOITER: REQUIRES sequence (fails if no sequence found)
-            if learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist', 'pioneer', 'exploiter']:
+            elif learning_mode in ['exploit', 'smart_exploration'] or agent_mode in ['optimizer', 'generalist', 'pioneer', 'exploiter']:
                 if game_id in self._frontier_replay_blocklist:
                     logger.info(f"[FRONTIER-LOCK] Skipping sequence replay/validation for {game_id}; exploration-only for this run")
                     ranked_sequences = []
@@ -9796,6 +10640,95 @@ class GameplayEngine:
         
         # Sanity check incoming frame before any processing to avoid operating on malformed grids
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
+        
+        # ===================================================================
+        # EXPLORATION PHASE SYSTEM: Override goal-seeking when stuck/exploring
+        # ===================================================================
+        # Three-layer control:
+        # 1. Regional stuck detection (highest priority - force escape)
+        # 2. Phase-based exploration budget (discovery/optimization/critical)
+        # 3. Coverage emergency trigger (<40% coverage at >50% budget)
+        #
+        # This prevents the "safe zone trap" where agents oscillate forever
+        # because goal-seeking has infinite priority over exploration.
+        # ===================================================================
+        try:
+            # Get position history for regional stuck detection
+            position_history = getattr(self, '_position_history', [])
+            current_position = getattr(self, '_current_agent_position', None)
+            
+            # Track position history (add current position if different from last)
+            if current_position:
+                if not position_history or position_history[-1] != current_position:
+                    position_history.append(current_position)
+                    # Keep last 30 positions
+                    if len(position_history) > 30:
+                        position_history = position_history[-30:]
+                    self._position_history = position_history
+            
+            # Detect regional stuck
+            regional_stuck = self._detect_regional_stuck(position_history)
+            
+            # Get game context
+            game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+            game_type = game_id[:4] if game_id else 'unknown'
+            loop_state = getattr(self, '_current_loop_state', None)
+            actions_taken = loop_state.action_count if loop_state else 0
+            current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+            
+            # Get network exploration coverage FIRST (needed for phase calculation)
+            coverage_percent = 0.0
+            unexplored_regions = []
+            if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+                try:
+                    exploration_ctx = self.exploration_tracker.get_exploration_context_for_reasoning(
+                        game_type=game_type,
+                        level=current_level,
+                        current_position=current_position,
+                        frame_width=len(game_state.frame[0]) if game_state.frame and game_state.frame[0] else 64,
+                        frame_height=len(game_state.frame) if game_state.frame else 64
+                    )
+                    coverage_percent = exploration_ctx.get('network_exploration', {}).get('coverage_percent', 0.0)
+                    unexplored_regions = exploration_ctx.get('exploration_recommendations', {}).get('unexplored_regions', [])
+                except Exception:
+                    pass
+            
+            # Get exploration phase (now with coverage_percent for primitive)
+            phase_info = self._get_exploration_phase(actions_taken, game_type, current_level, coverage_percent)
+            
+            # Check if exploration should override
+            should_explore, explore_reason = self._should_force_exploration(
+                phase_info=phase_info,
+                regional_stuck=regional_stuck,
+                coverage_percent=coverage_percent
+            )
+            
+            if should_explore:
+                # Get exploration action
+                escape_direction = regional_stuck.get('escape_direction')
+                explore_action, explore_full_reason = self._get_exploration_action(
+                    escape_direction=escape_direction,
+                    unexplored_regions=unexplored_regions,
+                    current_position=current_position
+                )
+                
+                # Log the override
+                logger.info(f"[EXPLORE-PHASE] {phase_info['phase'].upper()} phase, "
+                           f"budget {phase_info['budget_progress']*100:.0f}%, "
+                           f"coverage {coverage_percent:.1f}%, "
+                           f"action: {explore_action} | {explore_reason}")
+                
+                # Clear position history if escaping stuck (to avoid re-triggering)
+                if regional_stuck.get('is_stuck'):
+                    self._position_history = []
+                
+                return explore_action, f"{explore_full_reason} | {explore_reason}"
+            
+            # Store phase info for debugging/logging
+            self._current_exploration_phase = phase_info
+            
+        except Exception as explore_err:
+            logger.debug(f"Exploration phase check failed (non-critical): {explore_err}")
         
         # ===================================================================
         # FIX CON-002: PERSONA ENSEMBLE - GENERATE PROPOSALS EARLY

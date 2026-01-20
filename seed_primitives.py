@@ -98,6 +98,8 @@ class PrimitiveCategory(Enum):
     TEXTURE = "texture"               # Surface patterns, gradients, regularity
     # === SYMBOLIC MECHANICS: UNIVERSAL PUZZLE PRIMITIVES ===
     SYMBOLIC = "symbolic"             # Symbolic state tracking (shape, color, orientation as symbols)
+    # === EXPLORATION STRATEGY PRIMITIVES (from stuck_in_safe_zone_analysis) ===
+    EXPLORATION_STRATEGY = "exploration_strategy"  # Strategic exploration: stuck detection, budget, target selection
     REMOTE_CAUSATION = "remote_causation"  # Action-at-distance effect detection
     UI_DETECTION = "ui_detection"     # HUD parsing, health bars, action limits
 
@@ -1298,6 +1300,73 @@ class SeedPrimitiveRegistry:
             output_type="float",
             unlock_level="late",
             piaget_stage="formal_operational"
+        ))
+        
+        # ==================================================================
+        # EXPLORATION STRATEGY PRIMITIVES - BIRTHRIGHT (Always Available)
+        # ==================================================================
+        # From stuck_in_safe_zone_analysis.md:
+        # Agents get stuck because they have "PERFECT perception but TERRIBLE
+        # executive function." These primitives provide STRATEGIC thinking
+        # above tactical execution. Without them, agents are like chess players
+        # who see checkmate but keep walking into a wall.
+        #
+        # ALL are BIRTHRIGHT - without strategic exploration, agents are useless.
+        # ==================================================================
+        
+        self._register(Primitive(
+            name="detect_stuck_pattern",
+            category=PrimitiveCategory.EXPLORATION_STRATEGY,
+            description="Detect if agent is oscillating in small region. Returns stuck info with region_size, stuck_duration, oscillation_count. BIRTHRIGHT.",
+            func=self._detect_stuck_pattern,
+            input_types=["position_history", "threshold"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="select_unexplored_target",
+            category=PrimitiveCategory.EXPLORATION_STRATEGY,
+            description="Select best unexplored region based on distance, priority, and novelty. Returns target position and reason. BIRTHRIGHT.",
+            func=self._select_unexplored_target,
+            input_types=["agent_position", "unexplored_regions", "visited_history"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="estimate_exploration_budget",
+            category=PrimitiveCategory.EXPLORATION_STRATEGY,
+            description="Calculate explore vs exploit trade-off based on actions used. Returns phase, weights, and urgency. BIRTHRIGHT.",
+            func=self._estimate_exploration_budget,
+            input_types=["actions_remaining", "actions_max", "coverage_percent"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="calculate_reachability",
+            category=PrimitiveCategory.EXPLORATION_STRATEGY,
+            description="Estimate if goal is reachable given known obstacles. Returns reachability info with path_clear status. BIRTHRIGHT.",
+            func=self._calculate_reachability,
+            input_types=["agent_pos", "goal_pos", "known_obstacles", "frame"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
+        ))
+        
+        self._register(Primitive(
+            name="get_strategic_exploration_action",
+            category=PrimitiveCategory.EXPLORATION_STRATEGY,
+            description="Get action that combines stuck detection, phase budget, and unexplored targeting. The 'executive function' primitive. BIRTHRIGHT.",
+            func=self._get_strategic_exploration_action,
+            input_types=["position_history", "unexplored_regions", "actions_used", "actions_max", "coverage_percent", "current_pos", "frame"],
+            output_type="dict",
+            unlock_level="seed",
+            piaget_stage="sensorimotor"
         ))
         
         # ==================================================================
@@ -7732,6 +7801,466 @@ class SeedPrimitiveRegistry:
         return min(1.0, max(0.0, 0.5 + learning_rate))
     
     # ======================================================================
+    # EXPLORATION STRATEGY PRIMITIVE IMPLEMENTATIONS (BIRTHRIGHT)
+    # ======================================================================
+    # From stuck_in_safe_zone_analysis.md:
+    # These primitives provide STRATEGIC thinking above tactical execution.
+    # "Your agent isn't broken - it's TOO FOCUSED. It's like a chess player
+    # who sees checkmate in 3 moves but keeps walking into the wall."
+    # ======================================================================
+    
+    def _detect_stuck_pattern(
+        self,
+        position_history: List[Tuple[int, int]],
+        threshold: int = 5
+    ) -> Dict[str, Any]:
+        """
+        BIRTHRIGHT PRIMITIVE: Detect if agent is oscillating in small region.
+        
+        From analysis: "The agent is like a person who sees a prize through
+        a window, keeps walking into the window, and never looks around for
+        the door."
+        
+        Args:
+            position_history: List of (x, y) positions
+            threshold: Maximum region_size (x_range + y_range) to be "stuck"
+            
+        Returns:
+            {
+                'is_stuck': bool,
+                'region_size': int,  # x_range + y_range of movement
+                'stuck_duration': int,  # frames at current position
+                'oscillation_count': int,  # repeated positions
+                'bounding_box': (min_x, min_y, max_x, max_y)
+            }
+        """
+        result = {
+            'is_stuck': False,
+            'region_size': 0,
+            'stuck_duration': 0,
+            'oscillation_count': 0,
+            'bounding_box': None
+        }
+        
+        if not position_history or len(position_history) < 10:
+            return result
+        
+        last_10 = position_history[-10:]
+        
+        # Calculate bounding box of movement
+        x_coords = [p[0] for p in last_10]
+        y_coords = [p[1] for p in last_10]
+        
+        min_x, max_x = min(x_coords), max(x_coords)
+        min_y, max_y = min(y_coords), max(y_coords)
+        
+        x_range = max_x - min_x
+        y_range = max_y - min_y
+        region_size = x_range + y_range
+        
+        result['region_size'] = region_size
+        result['bounding_box'] = (min_x, min_y, max_x, max_y)
+        
+        # Stuck if movement range < threshold
+        result['is_stuck'] = region_size < threshold
+        
+        # Calculate stuck duration (how long at current position)
+        if last_10:
+            current_pos = last_10[-1]
+            result['stuck_duration'] = sum(1 for p in last_10 if p == current_pos)
+        
+        # Count oscillation (repeated positions indicate back-and-forth)
+        from collections import Counter
+        pos_counts = Counter(last_10)
+        result['oscillation_count'] = sum(1 for c in pos_counts.values() if c > 1)
+        
+        return result
+    
+    def _select_unexplored_target(
+        self,
+        agent_position: Tuple[int, int],
+        unexplored_regions: List[Dict[str, Any]],
+        visited_history: set
+    ) -> Dict[str, Any]:
+        """
+        BIRTHRIGHT PRIMITIVE: Select best unexplored region to visit.
+        
+        From analysis: "The system KNOWS which regions are unexplored,
+        but agent never acts on these recommendations."
+        
+        Args:
+            agent_position: Current (x, y)
+            unexplored_regions: List of {'x': grid_x, 'y': grid_y, 'priority': float}
+            visited_history: Set of visited positions
+            
+        Returns:
+            {
+                'target_position': (x, y) in pixels,
+                'distance': manhattan distance,
+                'priority': combined score,
+                'reason': explanation string
+            }
+        """
+        if not agent_position or not unexplored_regions:
+            return {
+                'target_position': None,
+                'distance': 0,
+                'priority': 0.0,
+                'reason': 'No unexplored regions available'
+            }
+        
+        ax, ay = agent_position
+        scored_regions = []
+        
+        for region in unexplored_regions:
+            rx, ry = region.get('x', 0), region.get('y', 0)
+            
+            # Convert grid coords (8x8) to pixel coords (center of region)
+            target_x = rx * 8 + 4
+            target_y = ry * 8 + 4
+            
+            # Distance score (closer = better, inverse relationship)
+            distance = abs(target_x - ax) + abs(target_y - ay)
+            distance_score = 1.0 / (distance + 1)
+            
+            # Priority score from network data
+            priority_score = region.get('priority', 1.0)
+            
+            # Novelty score (never visited = best)
+            target_pos = (target_x, target_y)
+            never_visited = target_pos not in visited_history
+            novelty_score = 2.0 if never_visited else 0.5
+            
+            total_score = distance_score + priority_score + novelty_score
+            
+            scored_regions.append({
+                'target_position': (target_x, target_y),
+                'distance': distance,
+                'priority': total_score,
+                'grid_coords': (rx, ry),
+                'reason': f'Unexplored region ({rx},{ry}), dist={distance}, novelty={novelty_score}'
+            })
+        
+        if not scored_regions:
+            return {
+                'target_position': None,
+                'distance': 0,
+                'priority': 0.0,
+                'reason': 'No valid targets'
+            }
+        
+        # Return highest scoring region
+        best = max(scored_regions, key=lambda r: r['priority'])
+        return best
+    
+    def _estimate_exploration_budget(
+        self,
+        actions_remaining: int,
+        actions_max: int,
+        coverage_percent: float
+    ) -> Dict[str, Any]:
+        """
+        BIRTHRIGHT PRIMITIVE: Calculate exploration vs exploitation trade-off.
+        
+        From analysis: Three phases:
+        - Discovery (0-30%): explore_weight=0.8, goal_weight=0.2
+        - Optimization (30-70%): balanced, adjusts with coverage
+        - Critical (70-100%): exploit_weight=0.9, all-in on best hypothesis
+        
+        Args:
+            actions_remaining: How many actions left
+            actions_max: Starting action budget
+            coverage_percent: 0-100, what % of map explored
+            
+        Returns:
+            {
+                'explore_weight': float 0-1,
+                'exploit_weight': float 0-1,
+                'phase': 'discovery' | 'optimization' | 'critical',
+                'urgency': 'low' | 'medium' | 'high',
+                'progress': float 0-1 (how far through budget)
+            }
+        """
+        if actions_max <= 0:
+            actions_max = 2000  # Default
+        
+        progress = 1.0 - (actions_remaining / actions_max)
+        
+        # Phase 1: Discovery (first 30%)
+        if progress < 0.3:
+            return {
+                'explore_weight': 0.8,
+                'exploit_weight': 0.2,
+                'phase': 'discovery',
+                'urgency': 'low',
+                'progress': progress
+            }
+        
+        # Phase 2: Optimization (30-70%)
+        elif progress < 0.7:
+            # Reduce exploration as we learn more (high coverage = less explore)
+            coverage_factor = coverage_percent / 100.0 if coverage_percent else 0.0
+            explore = max(0.2, 0.6 - (coverage_factor * 0.4))
+            return {
+                'explore_weight': explore,
+                'exploit_weight': 1.0 - explore,
+                'phase': 'optimization',
+                'urgency': 'medium',
+                'progress': progress
+            }
+        
+        # Phase 3: Critical (last 30%)
+        else:
+            return {
+                'explore_weight': 0.1,
+                'exploit_weight': 0.9,
+                'phase': 'critical',
+                'urgency': 'high',
+                'progress': progress
+            }
+    
+    def _calculate_reachability(
+        self,
+        agent_pos: Tuple[int, int],
+        goal_pos: Tuple[int, int],
+        known_obstacles: set,
+        frame: Optional[List[List[int]]] = None
+    ) -> Dict[str, Any]:
+        """
+        BIRTHRIGHT PRIMITIVE: Estimate if goal is reachable given obstacles.
+        
+        From analysis: "The nearest lock is at (38, 48) - in the red circle!
+        Agent thinks 'Goal is 4 pixels away' and keeps trying to reach it,
+        but can't because there's a wall between."
+        
+        Uses simple raycasting (Bresenham-like) to detect obstacles.
+        
+        Args:
+            agent_pos: Current (x, y)
+            goal_pos: Target (x, y)
+            known_obstacles: Set of (x, y) obstacle positions
+            frame: Optional frame data for additional obstacle detection
+            
+        Returns:
+            {
+                'is_reachable': bool (probably reachable, even with detour),
+                'path_clear': bool (direct path has no obstacles),
+                'obstacle_detected': bool,
+                'obstacles_in_path': int,
+                'estimated_detour': int (extra actions needed)
+            }
+        """
+        result = {
+            'is_reachable': True,
+            'path_clear': True,
+            'obstacle_detected': False,
+            'obstacles_in_path': 0,
+            'estimated_detour': 0
+        }
+        
+        if not agent_pos or not goal_pos:
+            return result
+        
+        ax, ay = agent_pos
+        gx, gy = goal_pos
+        
+        # Bresenham-like line tracing
+        path_cells = []
+        dx = abs(gx - ax)
+        dy = abs(gy - ay)
+        sx = 1 if ax < gx else -1
+        sy = 1 if ay < gy else -1
+        err = dx - dy
+        
+        x, y = ax, ay
+        max_steps = dx + dy + 10  # Safety limit
+        steps = 0
+        
+        while steps < max_steps:
+            path_cells.append((x, y))
+            if x == gx and y == gy:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+            steps += 1
+        
+        # Check for obstacles in path
+        obstacles_in_path = []
+        
+        for cell in path_cells:
+            # Check known obstacles
+            if cell in known_obstacles:
+                obstacles_in_path.append(cell)
+                continue
+            
+            # Check frame for non-background pixels (potential walls)
+            if frame:
+                cx, cy = cell
+                if 0 <= cy < len(frame) and 0 <= cx < len(frame[0]):
+                    pixel = frame[cy][cx]
+                    # Non-zero, non-agent pixel might be obstacle
+                    # This is heuristic - color 0 is usually background
+                    if pixel != 0 and cell != agent_pos:
+                        # Check if it's a different object blocking path
+                        obstacles_in_path.append(cell)
+        
+        if obstacles_in_path:
+            result['path_clear'] = False
+            result['obstacle_detected'] = True
+            result['obstacles_in_path'] = len(obstacles_in_path)
+            # Rough detour estimate: each obstacle adds ~3 extra actions
+            result['estimated_detour'] = len(obstacles_in_path) * 3
+            # Still probably reachable with detour
+            result['is_reachable'] = len(obstacles_in_path) < 10
+        
+        return result
+    
+    def _get_strategic_exploration_action(
+        self,
+        position_history: List[Tuple[int, int]],
+        unexplored_regions: List[Dict[str, Any]],
+        actions_used: int,
+        actions_max: int,
+        coverage_percent: float,
+        current_pos: Tuple[int, int],
+        frame: Optional[List[List[int]]] = None
+    ) -> Dict[str, Any]:
+        """
+        BIRTHRIGHT PRIMITIVE: The "executive function" - strategic exploration.
+        
+        From analysis: "Your agent has excellent tactics but zero strategy."
+        This primitive combines:
+        1. Stuck detection (am I oscillating?)
+        2. Phase budget (should I explore or exploit?)
+        3. Target selection (where should I go?)
+        
+        Returns a strategic action recommendation that can OVERRIDE goal-seeking.
+        
+        Args:
+            position_history: Recent positions
+            unexplored_regions: From network exploration tracker
+            actions_used: Actions taken so far
+            actions_max: Total action budget
+            coverage_percent: Map coverage so far
+            current_pos: Current position
+            frame: Current frame for obstacle detection
+            
+        Returns:
+            {
+                'should_explore': bool,
+                'action': str (ACTION1-4 direction),
+                'reason': str,
+                'stuck_info': dict,
+                'budget_info': dict,
+                'target_info': dict
+            }
+        """
+        result = {
+            'should_explore': False,
+            'action': None,
+            'reason': 'Goal-seeking allowed',
+            'stuck_info': None,
+            'budget_info': None,
+            'target_info': None
+        }
+        
+        # Step 1: Detect stuck pattern
+        stuck_info = self._detect_stuck_pattern(position_history, threshold=5)
+        result['stuck_info'] = stuck_info
+        
+        # Step 2: Get budget phase
+        actions_remaining = max(0, actions_max - actions_used)
+        budget_info = self._estimate_exploration_budget(
+            actions_remaining, actions_max, coverage_percent
+        )
+        result['budget_info'] = budget_info
+        
+        # Step 3: OVERRIDE CONDITIONS
+        
+        # Override 1: Regional stuck (highest priority)
+        if stuck_info['is_stuck'] and stuck_info['stuck_duration'] >= 5:
+            result['should_explore'] = True
+            result['reason'] = f"STUCK: Oscillating in {stuck_info['region_size']}px region for {stuck_info['stuck_duration']} frames"
+            
+            # Get escape direction (toward unexplored)
+            target_info = self._select_unexplored_target(
+                current_pos, unexplored_regions, set(position_history)
+            )
+            result['target_info'] = target_info
+            
+            if target_info['target_position']:
+                tx, ty = target_info['target_position']
+                cx, cy = current_pos or (0, 0)
+                
+                # Choose direction toward target
+                if abs(tx - cx) > abs(ty - cy):
+                    result['action'] = 'ACTION4' if tx > cx else 'ACTION3'
+                else:
+                    result['action'] = 'ACTION2' if ty > cy else 'ACTION1'
+            else:
+                # No target - random escape
+                import random
+                result['action'] = random.choice(['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'])
+            
+            return result
+        
+        # Override 2: Discovery phase forces exploration
+        if budget_info['phase'] == 'discovery':
+            # Roll for exploration (80% chance)
+            import random
+            if random.random() < budget_info['explore_weight']:
+                result['should_explore'] = True
+                result['reason'] = f"DISCOVERY phase: {budget_info['progress']*100:.0f}% budget used, exploring"
+                
+                target_info = self._select_unexplored_target(
+                    current_pos, unexplored_regions, set(position_history) if position_history else set()
+                )
+                result['target_info'] = target_info
+                
+                if target_info['target_position']:
+                    tx, ty = target_info['target_position']
+                    cx, cy = current_pos or (0, 0)
+                    if abs(tx - cx) > abs(ty - cy):
+                        result['action'] = 'ACTION4' if tx > cx else 'ACTION3'
+                    else:
+                        result['action'] = 'ACTION2' if ty > cy else 'ACTION1'
+                else:
+                    result['action'] = 'ACTION4'  # Default: go right
+                
+                return result
+        
+        # Override 3: Coverage emergency (<50% coverage at >50% budget)
+        if budget_info['progress'] > 0.5 and coverage_percent < 50:
+            result['should_explore'] = True
+            result['reason'] = f"COVERAGE EMERGENCY: Only {coverage_percent:.0f}% explored at {budget_info['progress']*100:.0f}% budget"
+            
+            target_info = self._select_unexplored_target(
+                current_pos, unexplored_regions, set(position_history) if position_history else set()
+            )
+            result['target_info'] = target_info
+            
+            if target_info['target_position']:
+                tx, ty = target_info['target_position']
+                cx, cy = current_pos or (0, 0)
+                if abs(tx - cx) > abs(ty - cy):
+                    result['action'] = 'ACTION4' if tx > cx else 'ACTION3'
+                else:
+                    result['action'] = 'ACTION2' if ty > cy else 'ACTION1'
+            else:
+                import random
+                result['action'] = random.choice(['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'])
+            
+            return result
+        
+        # No override - allow goal-seeking
+        return result
+    
+    # ======================================================================
     # NEGATIVE SPACE PRIMITIVE IMPLEMENTATIONS
     # ======================================================================
     
@@ -7739,6 +8268,7 @@ class SeedPrimitiveRegistry:
         self,
         frame: List[List[int]]
     ) -> List[Dict[str, Any]]:
+
         """
         Find empty regions bounded by objects.
         Returns list of enclosed regions with positions.

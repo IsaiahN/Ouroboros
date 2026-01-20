@@ -67,6 +67,8 @@ def main():
                        help='Run replay validation batch using replay_index pointers (no live gameplay)')
     parser.add_argument('--replay-limit', type=int, default=None,
                        help='Limit number of replay validations (most recent first)')
+    parser.add_argument('--no-replay', action='store_true',
+                       help='Skip sequence retrieval/replay but still capture new sequences on win')
     
     args = parser.parse_args()
     
@@ -142,6 +144,8 @@ def main():
     if args.replay_validation:
         limit_text = f"limit {args.replay_limit}" if args.replay_limit else "no limit"
         print(f"  Replay Validation Batch: ENABLED ({limit_text})")
+    if args.no_replay:
+        print(f"  No Replay Mode: ENABLED (pure exploration, capture still enabled)")
     if config.get('ensure_game_type_coverage'):
         print(f"  Game Type Coverage: ENABLED (one game per type guaranteed)")
     print(f"{'='*60}\n")
@@ -165,6 +169,10 @@ def main():
             config['replay_validation_limit'] = args.replay_limit
     else:
         config['replay_validation_batch'] = False
+    
+    # No replay mode (skip sequence retrieval, still capture)
+    if args.no_replay:
+        config['skip_sequence_retrieval'] = True
     
     # Create and run
     runner = AutonomousEvolutionRunner(**config)
