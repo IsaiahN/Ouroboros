@@ -9204,6 +9204,10 @@ class GameplayEngine:
             
             if game_type:
                 try:
+                    # FIX: Pass symbolic_state_tracker for interactable detection
+                    if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+                        self.agent_self_model._symbolic_state_tracker = self.symbolic_state_tracker
+                    
                     network_inv = self.agent_self_model.get_network_object_inventory(game_type, level)
                     
                     # Priority 1: Try known interactable positions (coordinates)
@@ -10681,11 +10685,29 @@ class GameplayEngine:
                             # The action may be blocked - check if it's in allowed_actions
                             allowed = blocking_info.get('allowed_actions', [])
                             
+                            # FIX #3: When symbolic state shows we have keys/locks/tools,
+                            # allow movement actions even if Q-blocked. The agent KNOWS
+                            # what to do (seek tools) - don't force blind exploration.
+                            symbolic_knows_targets = False
+                            if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+                                tracker = self.symbolic_state_tracker
+                                has_keys = bool(tracker.key_objects)
+                                has_tools = bool(tracker.tool_objects)
+                                has_locks = bool(tracker.lock_objects)
+                                if (has_keys or has_locks) and has_tools:
+                                    symbolic_knows_targets = True
+                                    logger.info(
+                                        f"[SYMBOLIC-OVERRIDE] Keys={has_keys}, Locks={has_locks}, Tools={has_tools} "
+                                        f"- allowing movement despite Q-blocking"
+                                    )
+                            
                             # Check if current action is allowed
                             is_allowed = (
                                 action in allowed or 
                                 rung in ('exploration', 'discovery') or
-                                (action in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4') and 'exploration' in allowed)
+                                (action in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4') and 'exploration' in allowed) or
+                                # FIX: Movement actions allowed when symbolic state has targets
+                                (symbolic_knows_targets and action in ('ACTION1', 'ACTION2', 'ACTION3', 'ACTION4'))
                             )
                             
                             if not is_allowed:
@@ -11308,6 +11330,10 @@ class GameplayEngine:
                         
                         if game_type:
                             try:
+                                # FIX: Pass symbolic_state_tracker for interactable detection
+                                if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+                                    self.agent_self_model._symbolic_state_tracker = self.symbolic_state_tracker
+                                
                                 network_inv = self.agent_self_model.get_network_object_inventory(game_type, level)
                                 import re
                                 import random
@@ -16804,6 +16830,11 @@ class GameplayEngine:
             # the current agent now knows about all 5.
             # ===============================================================
             game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            # FIX: Pass symbolic_state_tracker to agent_self_model for interactable detection
+            if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+                self.agent_self_model._symbolic_state_tracker = self.symbolic_state_tracker
+            
             network_inventory = self.agent_self_model.get_network_object_inventory(game_type, level)
             total_unique = 0
             if network_inventory and isinstance(network_inventory, dict):

@@ -305,11 +305,27 @@ class SymbolicStateTracker:
             result['current_shape'] = key_state['shape_signature']
             result['target_shape'] = lock_state['shape_signature']
             
-            # Estimate steps based on shape difference
-            # This is a heuristic - actual steps depend on available tools
-            result['steps_estimate'] = 1 + abs(
-                key_state['cell_count'] - lock_state['cell_count']
-            )
+            # FIX: Estimate steps based on transformations needed, NOT pixel count!
+            # Previous formula gave 1998 steps because abs(key_pixels - lock_pixels) is huge.
+            # In reality, each tool use is ~3-5 actions (navigate + interact).
+            steps_estimate = 0
+            
+            # Shape mismatch: typically 1-3 tool uses needed
+            steps_estimate += 15  # ~3 tool uses at 5 actions each
+            
+            # Color mismatch (if applicable)
+            if key_state.get('color') != lock_state.get('color'):
+                steps_estimate += 10  # ~2 tool uses for color change
+            
+            # Add navigation overhead based on number of tools
+            num_tools = len(getattr(self, 'tool_objects', {}) or {})
+            if num_tools > 0:
+                steps_estimate += num_tools * 8  # Navigation to each tool
+            else:
+                steps_estimate += 20  # Exploration to find tools
+            
+            # Cap at reasonable maximum (most levels solvable in ~60 actions)
+            result['steps_estimate'] = min(steps_estimate, 60)
         
         return result
     
@@ -3070,31 +3086,45 @@ class AgentSelfModel:
                         logger.debug(f"[NETWORK-INVENTORY] Added symbolic interactable: {obj_id}")
             
             # 3c. Also check SymbolicStateTracker if available (in-memory, more current)
-            if hasattr(self, 'symbolic_tracker') and self.symbolic_tracker:
+            # FIX: Check for tracker passed in or attached to self
+            tracker = getattr(self, '_symbolic_state_tracker', None) or getattr(self, 'symbolic_state_tracker', None)
+            if tracker:
                 try:
-                    match_progress = self.symbolic_tracker.get_match_progress()
-                    
+                    # Access tracker's objects directly (more reliable than get_match_progress())
                     # Keys are interactable (need to collect/transform them)
-                    for key_color in match_progress.get('key_colors', []):
-                        obj_id = f"key_color_{key_color}"
-                        if obj_id not in all_objects:
-                            inventory['interactable'].append(obj_id)
-                            all_objects.add(obj_id)
+                    for obj_id, key_state in (tracker.key_objects or {}).items():
+                        key_color = key_state.get('color', 'unknown')
+                        interactable_id = f"key_color_{key_color}"
+                        if interactable_id not in all_objects:
+                            inventory['interactable'].append(interactable_id)
+                            all_objects.add(interactable_id)
+                            logger.debug(f"[NETWORK-INVENTORY] Added key interactable: {interactable_id}")
                     
                     # Locks are interactable (goal to reach with matching key)
-                    for lock_color in match_progress.get('lock_colors', []):
-                        obj_id = f"lock_color_{lock_color}"
-                        if obj_id not in all_objects:
-                            inventory['interactable'].append(obj_id)
-                            all_objects.add(obj_id)
+                    for obj_id, lock_state in (tracker.lock_objects or {}).items():
+                        lock_color = lock_state.get('color', 'unknown')
+                        interactable_id = f"lock_color_{lock_color}"
+                        if interactable_id not in all_objects:
+                            inventory['interactable'].append(interactable_id)
+                            all_objects.add(interactable_id)
+                            logger.debug(f"[NETWORK-INVENTORY] Added lock interactable: {interactable_id}")
                     
                     # Tools are interactable (transform the key)
-                    for tool_info in match_progress.get('tool_info', []):
-                        tool_color = tool_info.get('color') if isinstance(tool_info, dict) else tool_info
-                        obj_id = f"tool_color_{tool_color}"
-                        if obj_id not in all_objects:
-                            inventory['interactable'].append(obj_id)
-                            all_objects.add(obj_id)
+                    for obj_id, tool_state in (tracker.tool_objects or {}).items():
+                        tool_color = tool_state.get('color', 'unknown')
+                        interactable_id = f"tool_color_{tool_color}"
+                        if interactable_id not in all_objects:
+                            inventory['interactable'].append(interactable_id)
+                            all_objects.add(interactable_id)
+                            logger.debug(f"[NETWORK-INVENTORY] Added tool interactable: {interactable_id}")
+                            
+                    if tracker.key_objects or tracker.lock_objects or tracker.tool_objects:
+                        logger.info(
+                            f"[NETWORK-INVENTORY] Symbolic tracker contributed: "
+                            f"keys={len(tracker.key_objects or {})}, "
+                            f"locks={len(tracker.lock_objects or {})}, "
+                            f"tools={len(tracker.tool_objects or {})}"
+                        )
                 except Exception as e:
                     logger.debug(f"[NETWORK-INVENTORY] SymbolicTracker query failed: {e}")
             
