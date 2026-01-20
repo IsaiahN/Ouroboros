@@ -1390,22 +1390,70 @@ class CODSEngine:
             List of newly created ComposedOperators
         """
         if not self._composition_discovery_enabled:
+            logger.info(f"[CODS] Composition discovery DISABLED, skipping (trigger={trigger})")
             return []
         
-        logger.info(f"[CODS] Discovering compositions (trigger={trigger})")
+        logger.info(f"[CODS] === DISCOVERY START === (trigger={trigger})")
         
-        # Mine frequent sequences from execution log
-        patterns = self.execution_miner.mine_sequences(
-            window_size=3,  # Start with 3-primitive sequences
-            min_frequency=5  # Need to see pattern at least 5 times
-        )
+        # Log execution trace size for debugging
+        exec_log_size = len(self.execution_miner.execution_log) if hasattr(self.execution_miner, 'execution_log') else 0
+        logger.info(f"[CODS] Execution log has {exec_log_size} entries")
+        
+        if exec_log_size < 15:
+            logger.info(f"[CODS] Execution log too small ({exec_log_size} < 15), skipping discovery")
+            logger.info(f"[CODS] === DISCOVERY END === (insufficient data)")
+            return []
+        
+        # Mine frequent sequences from execution log with error handling
+        try:
+            patterns = self.execution_miner.mine_sequences(
+                window_size=3,  # Start with 3-primitive sequences
+                min_frequency=5  # Need to see pattern at least 5 times
+            )
+        except Exception as mine_err:
+            logger.error(f"[CODS] MINING CRASHED: {mine_err}")
+            import traceback
+            logger.error(f"[CODS] Traceback: {traceback.format_exc()}")
+            patterns = []
+        
+        # Log mined patterns
+        logger.info(f"[CODS] Mined {len(patterns)} frequency patterns")
+        for i, pat in enumerate(patterns[:3]):
+            logger.info(f"[CODS]   Pattern {i+1}: {pat.get('sequence', [])} (freq={pat.get('count', 0)})")
+        
+        # If no patterns, log why
+        if len(patterns) == 0 and exec_log_size >= 15:
+            logger.info("[CODS] No patterns found. Possible reasons:")
+            logger.info("  - Not enough repeated sequences (need 5+ occurrences)")
+            logger.info("  - Actions too random (no consistency)")
+            # Log primitive frequency for diagnosis
+            try:
+                from collections import Counter
+                prims = [e.get('primitive', 'unknown') for e in self.execution_miner.execution_log[-50:]]
+                prim_counts = Counter(prims)
+                logger.info(f"[CODS] Recent primitive frequencies: {prim_counts.most_common(5)}")
+            except Exception:
+                pass
         
         # Also mine success-correlated patterns (patterns before score increases)
-        success_patterns = self.execution_miner.mine_success_patterns()
+        try:
+            success_patterns = self.execution_miner.mine_success_patterns()
+        except Exception as succ_err:
+            logger.error(f"[CODS] SUCCESS PATTERN MINING CRASHED: {succ_err}")
+            success_patterns = []
+        logger.info(f"[CODS] Mined {len(success_patterns)} success-correlated patterns")
+        for i, pat in enumerate(success_patterns[:3]):
+            logger.info(f"[CODS]   Success pattern {i+1}: {pat.get('sequence', [])} (corr={pat.get('correlation', 0):.2f})")
         
         # Combine and deduplicate
         all_patterns = patterns + success_patterns
         unique_patterns = self._deduplicate_patterns(all_patterns)
+        logger.info(f"[CODS] After dedup: {len(unique_patterns)} unique patterns")
+        
+        if not unique_patterns:
+            logger.info(f"[CODS] No patterns found to compose (need min_frequency=5)")
+            logger.info(f"[CODS] === DISCOVERY END === (no patterns)")
+            return []
         
         # Create compositions for top patterns
         new_compositions: List[ComposedOperator] = []
@@ -1466,7 +1514,10 @@ class CODSEngine:
         
         if new_compositions:
             logger.info(f"[CODS] Created {len(new_compositions)} new compositions from pattern mining")
+        else:
+            logger.info(f"[CODS] No new compositions created (patterns may already exist or primitives unavailable)")
         
+        logger.info(f"[CODS] === DISCOVERY END === (created {len(new_compositions)} compositions)")
         return new_compositions
     
     def _deduplicate_patterns(self, patterns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

@@ -10694,6 +10694,20 @@ class GameplayEngine:
                                 original_action = action
                                 original_reason = reason
                                 
+                                # FIX: Log detailed explanation of WHY each question is blocking
+                                # Console feedback showed "[QUESTIONING] ACTION3 blocked by ['Q9']" 
+                                # but never explained what Q9 means or why it triggered
+                                for q in questions:
+                                    if q.get('blocks_action'):
+                                        q_id = q.get('question', 'unknown')
+                                        q_query = q.get('query', 'no query')
+                                        q_urgency = q.get('urgency', 'normal')
+                                        logger.info(f"[QUESTIONING] {q_id} is BLOCKING: {q_query} (urgency={q_urgency})")
+                                        if q.get('forces_theory_revision'):
+                                            logger.info(f"[QUESTIONING]   -> Forces theory revision before continuing")
+                                        if q.get('allowed_actions'):
+                                            logger.info(f"[QUESTIONING]   -> Allowed actions: {q['allowed_actions']}")
+                                
                                 # Use primitive analysis to pick intelligent exploration action
                                 exploration_action = None
                                 try:
@@ -10993,6 +11007,67 @@ class GameplayEngine:
             except Exception:
                 logger.debug("Persona dialogue emission skipped")
             return action, reason
+        
+        # ===================================================================
+        # FIX: INFINITE LOOP BREAKER - Detect pathological stuck loops
+        # ===================================================================
+        # Problem from console feedback: Agent detects stuck 80+ times but keeps
+        # repeating the same failed actions. Stuck detection fires but no recovery.
+        # Solution: Track consecutive stuck detections and force dramatic action.
+        # ===================================================================
+        if not hasattr(self, '_stuck_detection_history'):
+            self._stuck_detection_history = []
+        
+        # Track stuck status for loop detection
+        current_stuck = getattr(self, '_is_stuck', False)
+        self._stuck_detection_history.append(current_stuck)
+        if len(self._stuck_detection_history) > 30:
+            self._stuck_detection_history = self._stuck_detection_history[-30:]
+        
+        # Count stuck detections in last 20 frames
+        recent_stuck_count = sum(1 for s in self._stuck_detection_history[-20:] if s)
+        
+        # If stuck 15+ times in last 20 frames, we're in an infinite loop
+        if recent_stuck_count >= 15:
+            logger.error(f"[LOOP] INFINITE STUCK LOOP DETECTED! ({recent_stuck_count}/20 frames stuck)")
+            logger.error("[LOOP] Forcing emergency strategy change")
+            
+            # Force exploration mode and clear all pattern state
+            self._force_exploration_mode = True
+            if hasattr(self, '_pattern_action_queue'):
+                self._pattern_action_queue = []
+            if hasattr(self, '_meta_pattern_tracker'):
+                self._meta_pattern_tracker['current_pattern_id'] = None
+            
+            # Clear stuck history to prevent re-triggering immediately
+            self._stuck_detection_history = []
+            
+            # Force symbolic analysis on the current frame
+            if hasattr(self, 'symbolic_tracker') and self.symbolic_tracker and game_state.frame:
+                try:
+                    frame = game_state.frame
+                    if not isinstance(frame, np.ndarray):
+                        frame = np.array(frame)
+                    self.symbolic_tracker.identify_symbolic_objects(frame)
+                    match_state = self.symbolic_tracker.get_match_progress()
+                    logger.info(f"[LOOP-SYMBOLIC] Emergency symbolic analysis: keys={match_state.get('key_count', 0)}, locks={match_state.get('lock_count', 0)}, tools={match_state.get('tool_count', 0)}")
+                except Exception as e:
+                    logger.debug(f"[LOOP-SYMBOLIC] Emergency analysis failed: {e}")
+            
+            # Force random exploration action
+            import random
+            random_action = f"ACTION{random.choice([1, 2, 3, 4])}"
+            return _finalize_ladder_and_return(random_action, "EMERGENCY: Breaking infinite stuck loop with random exploration", 'emergency')
+        
+        # ===================================================================
+        # FIX: FORCE EXPLORATION MODE - When blacklist repeatedly hit
+        # ===================================================================
+        if getattr(self, '_force_exploration_mode', False):
+            self._force_exploration_mode = False  # Reset flag
+            logger.info("[FORCE-EXPLORE] Blacklist forced exploration - trying random action")
+            import random
+            random_action = f"ACTION{random.choice([1, 2, 3, 4])}"
+            return _finalize_ladder_and_return(random_action, "Forced exploration after repeated blacklist hits", 'heuristic')
         
         # ===================================================================
         # FIX #5 (CHECKLIST): STUCK DETECTION -> RECOVERY MODE
@@ -13331,7 +13406,23 @@ class GameplayEngine:
                         # Skip if pattern was already tried and failed ON THIS GAME/LEVEL
                         if pattern_id in level_blacklist:
                             logger.info(f"[META] Skipping blacklisted pattern {pattern_id[:16]} on {blacklist_key}")
+                            
+                            # FIX: Track how many times we've hit blacklisted patterns consecutively
+                            # If we keep detecting blacklisted patterns, we need to try something else
+                            if not hasattr(self, '_blacklist_hit_count'):
+                                self._blacklist_hit_count = 0
+                            self._blacklist_hit_count += 1
+                            
+                            if self._blacklist_hit_count >= 5:
+                                logger.warning(f"[META] Hit blacklist {self._blacklist_hit_count}x in a row - forcing exploration mode")
+                                self._force_exploration_mode = True
+                                self._blacklist_hit_count = 0
+                            
+                            # Don't continue pattern detection - RETURN to try something else
+                            # This prevents infinite re-detection of same blacklisted pattern
                         else:
+                            # Reset blacklist hit counter on successful pattern detection
+                            self._blacklist_hit_count = 0
                             logger.info(f"[META] Meta-learner detected pattern: {pattern_result['pattern_type']}")
                             logger.info(f"   Rule: {pattern_result['rule']['type']}, Confidence: {pattern_result['confidence']:.2f}")
                             
@@ -14608,10 +14699,48 @@ class GameplayEngine:
                                 )
                                 if collision and collision.get('collisions'):
                                     first_hit = collision['collisions'][0]
+                                    target_color = first_hit.get('target_color')
                                     logger.info(
                                         f"[COLLISION] {controlled_color} hit "
-                                        f"{first_hit.get('target_color')}"
+                                        f"{target_color}"
                                     )
+                                    
+                                    # FIX: Actually LEARN from the collision!
+                                    # Console feedback showed collisions detected but no learning.
+                                    # Determine collision effect type based on what happened
+                                    effect_type = 'blocked'  # Default: object was blocked
+                                    if first_hit.get('target_disappeared'):
+                                        effect_type = 'destroy_target'  # Target was destroyed
+                                    elif not first_hit.get('target_still_there'):
+                                        effect_type = 'push_target'  # Target was pushed
+                                    
+                                    # Record this collision event to learn from it
+                                    try:
+                                        agent_id = self.session_manager.current_agent_id if hasattr(self.session_manager, 'current_agent_id') else 'unknown'
+                                        self.agent_self_model.record_collision_event(
+                                            agent_id=agent_id,
+                                            game_id=game_id,
+                                            level=current_level,
+                                            action_number=getattr(self, '_action_counter', 0),
+                                            controlled_color=controlled_color,
+                                            from_pos=from_pos or (0, 0),
+                                            to_pos=to_pos or (0, 0),
+                                            target_color=target_color,
+                                            target_pos=first_hit.get('target_position', (0, 0)),
+                                            collision_type=first_hit.get('collision_type', 'unknown'),
+                                            effect_observed=effect_type,
+                                            grid_changes=None
+                                        )
+                                        logger.info(f"[COLLISION] Learned: color {controlled_color} + color {target_color} = {effect_type}")
+                                        
+                                        # If blocked, mark target as obstacle to avoid in future
+                                        if effect_type == 'blocked':
+                                            if not hasattr(self, '_learned_obstacles'):
+                                                self._learned_obstacles = set()
+                                            self._learned_obstacles.add(target_color)
+                                            logger.info(f"[COLLISION] Marked color {target_color} as obstacle (cannot pass through)")
+                                    except Exception as col_err:
+                                        logger.debug(f"[COLLISION] Failed to record collision event: {col_err}")
                             
                             # ================================================================
                             # SESSION 25: CONTROL TRANSFER DETECTION

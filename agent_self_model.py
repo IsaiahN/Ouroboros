@@ -3050,6 +3050,54 @@ class AgentSelfModel:
                         inventory['interactable'].append(coord_id)
                         all_objects.add(coord_id)
             
+            # 3b. FIX: Also check symbolic_object_roles for keys/locks/tools (these are interactable!)
+            # The console feedback showed 0 interactable because pseudo_button_behavior was empty,
+            # but symbolic objects (keys, locks, tools) ARE interactable and should be included.
+            symbolic_result = self.db.execute_query("""
+                SELECT DISTINCT object_color, role_type, signature
+                FROM symbolic_object_roles
+                WHERE game_type = ? AND level_number = ?
+                AND role_type IN ('key', 'lock', 'tool', 'goal', 'target')
+                AND is_active = 1
+            """, (game_type, level))
+            
+            if symbolic_result:
+                for r in symbolic_result:
+                    obj_id = f"symbolic_{r['role_type']}_color_{r['object_color']}"
+                    if obj_id not in all_objects:
+                        inventory['interactable'].append(obj_id)
+                        all_objects.add(obj_id)
+                        logger.debug(f"[NETWORK-INVENTORY] Added symbolic interactable: {obj_id}")
+            
+            # 3c. Also check SymbolicStateTracker if available (in-memory, more current)
+            if hasattr(self, 'symbolic_tracker') and self.symbolic_tracker:
+                try:
+                    match_progress = self.symbolic_tracker.get_match_progress()
+                    
+                    # Keys are interactable (need to collect/transform them)
+                    for key_color in match_progress.get('key_colors', []):
+                        obj_id = f"key_color_{key_color}"
+                        if obj_id not in all_objects:
+                            inventory['interactable'].append(obj_id)
+                            all_objects.add(obj_id)
+                    
+                    # Locks are interactable (goal to reach with matching key)
+                    for lock_color in match_progress.get('lock_colors', []):
+                        obj_id = f"lock_color_{lock_color}"
+                        if obj_id not in all_objects:
+                            inventory['interactable'].append(obj_id)
+                            all_objects.add(obj_id)
+                    
+                    # Tools are interactable (transform the key)
+                    for tool_info in match_progress.get('tool_info', []):
+                        tool_color = tool_info.get('color') if isinstance(tool_info, dict) else tool_info
+                        obj_id = f"tool_color_{tool_color}"
+                        if obj_id not in all_objects:
+                            inventory['interactable'].append(obj_id)
+                            all_objects.add(obj_id)
+                except Exception as e:
+                    logger.debug(f"[NETWORK-INVENTORY] SymbolicTracker query failed: {e}")
+            
             # 4. Network hypotheses (validated control theories)
             # Note: This table uses control_pattern and action_response_map, not target_objects
             hyp_result = self.db.execute_query("""
