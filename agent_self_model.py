@@ -398,7 +398,11 @@ class SymbolicStateTracker:
                 self.match_history[-1] > self.match_history[-2]
             ),
             'transformations_made': len(self.transformation_log),
-            'transformation_needed': self.get_transformation_needed()
+            'transformation_needed': self.get_transformation_needed(),
+            # LS20 Fix: Return actual counts for reasoning payload
+            'key_count': len(self.key_objects),
+            'lock_count': len(self.lock_objects),
+            'tool_count': len(self.tool_objects)
         }
     
     def reset(self):

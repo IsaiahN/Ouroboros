@@ -63,6 +63,7 @@ from plugin_interfaces import Plugin, PluginManager
 from observability_plugins import default_observability_plugins
 from prestige_engine import PrestigeEngine
 from sensation_engine import SensationEngine, get_sensation_mode
+from network_exploration_tracker import NetworkExplorationTracker
 from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
@@ -1548,6 +1549,7 @@ class GameplayEngine:
         self.event_bus.subscribe(EventType.HOOK_FAILURE_DETECTED, self._on_hook_failure_event)
         self.prestige_engine = PrestigeEngine(self.db)  # Phase 1: Prestige tracking
         self.sensation_engine = SensationEngine(self.db)  # Phase 4.5: Emotional intelligence
+        self.exploration_tracker = NetworkExplorationTracker(self.db)  # Network-level exploration map
         self.budget_allocator = BreakthroughBudgetAllocator(self.db)  # Tier 1: Dynamic budgets
         self.breakthrough_detector = BreakthroughDetector()  # Tier 1: Momentum detection
         self.matching_pipeline = MultiStageMatchingPipeline(self.db)  # Tier 1: Multi-stage matching (+40%)
@@ -3305,13 +3307,27 @@ class GameplayEngine:
             # This enables learning for symbolic transformation puzzles (all games).
             # ================================================================
             try:
+                # FIX: Extract integer color values from controlled object strings
+                # objects_agent_controls contains strings like "toggleable_color_9"
+                # but _analyze_symbolic_mechanics expects List[int]
+                import re
+                controlled_color_ints = []
+                if hasattr(self, 'agent_self_model'):
+                    obj_strs = getattr(self.agent_self_model, 'objects_agent_controls', []) or []
+                    for obj_str in obj_strs:
+                        match = re.search(r'color_(\d+)', str(obj_str))
+                        if match:
+                            color_int = int(match.group(1))
+                            if color_int not in controlled_color_ints:
+                                controlled_color_ints.append(color_int)
+                
                 self._analyze_symbolic_mechanics(
                     frame_before=getattr(self, '_previous_frame', None),
                     frame_after=game_state.frame if game_state else None,
                     action_position=getattr(self, '_last_action_position', None),
                     action_taken=action,
                     overlap_color=getattr(self, '_last_overlap_color', None),
-                    controlled_colors=getattr(self.agent_self_model, 'objects_agent_controls', []) if hasattr(self, 'agent_self_model') else []
+                    controlled_colors=controlled_color_ints
                 )
             except Exception as e:
                 logger.debug(f"Symbolic mechanics analysis failed (non-critical): {e}")
@@ -5299,6 +5315,73 @@ class GameplayEngine:
                 logger.debug(f"CODS context init failed (non-critical): {e}")
         
         # ================================================================
+        # LS20 FIX: INITIAL SYMBOLIC ANALYSIS AT GAME START
+        # ================================================================
+        # Force symbolic object identification on the FIRST frame.
+        # This ensures key_count, lock_count, tool_count are non-zero
+        # BEFORE the first action is selected.
+        # Without this, reasoning payload shows key_count=0, lock_count=0
+        # even though objects exist in the frame.
+        # ================================================================
+        if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker and game_state.frame:
+            try:
+                # Get controlled colors from agent self model if available
+                controlled_colors = []
+                if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                    # FIX: Extract integer color values from controlled object strings
+                    # Objects are stored as strings like "toggleable_color_9", "moveable_color_12"
+                    # We need to parse out the color numbers for symbolic classification
+                    import re
+                    controlled_objs = self.agent_self_model.get_controlled_objects(
+                        agent_id, game_id, level=1  # First level at game start
+                    ) or []
+                    
+                    for obj_str in controlled_objs:
+                        # Extract color number from strings like "toggleable_color_9" or "moveable_color_12"
+                        match = re.search(r'color_(\d+)', str(obj_str))
+                        if match:
+                            color_int = int(match.group(1))
+                            if color_int not in controlled_colors:
+                                controlled_colors.append(color_int)
+                    
+                    # Also check network hypotheses for this game type
+                    if not controlled_colors and game_id:
+                        game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                        try:
+                            net_result = self.db.execute_query("""
+                                SELECT DISTINCT control_pattern FROM network_object_control_hypotheses
+                                WHERE game_type = ? AND is_active = TRUE AND reliability_score >= 0.5
+                                ORDER BY reliability_score DESC LIMIT 5
+                            """, (game_type,))
+                            for row in (net_result or []):
+                                pattern = row.get('control_pattern', '')
+                                match = re.search(r'color_(\d+)', str(pattern))
+                                if match:
+                                    color_int = int(match.group(1))
+                                    if color_int not in controlled_colors:
+                                        controlled_colors.append(color_int)
+                        except Exception:
+                            pass
+                
+                # Perform initial symbolic identification
+                initial_objects = self.symbolic_state_tracker.identify_symbolic_objects(
+                    game_state.frame,
+                    controlled_colors=controlled_colors
+                )
+                
+                key_count = len(initial_objects.get('keys', {}))
+                lock_count = len(initial_objects.get('locks', {}))
+                tool_count = len(initial_objects.get('tools', {}))
+                
+                if key_count > 0 or lock_count > 0 or tool_count > 0:
+                    logger.info(f"[SYMBOLIC] Game start: keys={key_count}, locks={lock_count}, tools={tool_count} (controlled colors: {controlled_colors})")
+                else:
+                    logger.debug(f"[SYMBOLIC] No symbolic objects detected at game start (controlled colors: {controlled_colors})")
+                    
+            except Exception as sym_err:
+                logger.debug(f"Initial symbolic analysis failed (non-critical): {sym_err}")
+        
+        # ================================================================
         # MORTALITY STATE INITIALIZATION (Jan 17 - Five Types of Death)
         # ================================================================
         # Initialize mortality awareness for this agent. This tracks:
@@ -6779,6 +6862,28 @@ class GameplayEngine:
                             # Only cap for pathological cases (shouldn't happen with normal budgets)
                             if len(self._recent_action_traces) > 20000:
                                 self._recent_action_traces = self._recent_action_traces[-20000:]
+                            
+                            # ================================================================
+                            # NETWORK ACTION COVERAGE: Record action usage for collective map
+                            # Future agents can see which actions have been tried on this level
+                            # ================================================================
+                            if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+                                try:
+                                    action_num = int(action.replace('ACTION', '')) if isinstance(action, str) else action
+                                    game_type = game_id[:4] if game_id else ''
+                                    self.exploration_tracker.record_action_use(
+                                        game_type=game_type,
+                                        level=current_level,
+                                        agent_id=self.game_config.get('agent_id', ''),
+                                        action=action_num,
+                                        score_before=previous_score,
+                                        score_after=game_state.score,
+                                        caused_death=(game_state.state == 'GAME_OVER')
+                                    )
+                                    # Store for position tracking
+                                    self._last_score_change = score_change
+                                except Exception:
+                                    pass  # Don't break gameplay for tracking
                             
                             # ================================================================
                             # BIRTHRIGHT PERCEPTION - Runs EVERY action, unconditionally
@@ -11662,6 +11767,27 @@ class GameplayEngine:
                         # Add current position to visited set
                         self._visited_positions[track_key].add((avg_x, avg_y))
                         visited_set = self._visited_positions[track_key]
+                        
+                        # ===============================================================
+                        # NETWORK EXPLORATION: Record visit for collective map
+                        # This saves exploration to the network so future agents know
+                        # what's been explored vs unexplored on this level.
+                        # ===============================================================
+                        if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+                            try:
+                                game_type = current_game_id[:4] if current_game_id else ''
+                                score_changed = getattr(self, '_last_score_change', 0) != 0
+                                self.exploration_tracker.record_position_visit(
+                                    game_type=game_type,
+                                    level=current_level,
+                                    agent_id=self.game_config.get('agent_id', ''),
+                                    x=avg_x, y=avg_y,
+                                    frame_width=frame_width,
+                                    frame_height=frame_height,
+                                    score_changed=score_changed
+                                )
+                            except Exception:
+                                pass  # Don't break gameplay for tracking
                         
                         # Calculate exploration coverage
                         total_cells = (frame_width // 5) * (frame_height // 5) or 1
@@ -16794,11 +16920,15 @@ class GameplayEngine:
 
     def _infer_goals_from_frame(self, frame: Optional[List]) -> List[Dict[str, Any]]:
         """
-        Task 4: Infer goal objects from frame by detecting rare colors.
+        Task 4: Infer goal objects from frame.
         
-        In ARC puzzles, goals are often indicated by rare colors that appear
-        in specific positions. This method detects potential goal objects
-        when the world model doesn't provide explicit goals.
+        LS20 FIX: Now uses symbolic role classification FIRST, then falls back
+        to rare color heuristic only if symbolic analysis doesn't find locks.
+        
+        Priority:
+        1. Symbolic lock objects (from SymbolicStateTracker) - these are the real goals
+        2. CODS classify_symbolic_role primitive - identifies keys/locks/tools
+        3. Rare color heuristic (FALLBACK) - only when symbolic analysis fails
         
         Args:
             frame: Current game frame (2D grid of color values)
@@ -16812,6 +16942,84 @@ class GameplayEngine:
         goals = []
         
         try:
+            # ================================================================
+            # PRIORITY 1: Use SymbolicStateTracker lock objects
+            # These are identified through proper symbolic analysis
+            # ================================================================
+            if hasattr(self, 'symbolic_state_tracker') and self.symbolic_state_tracker:
+                lock_objects = self.symbolic_state_tracker.lock_objects
+                if lock_objects:
+                    for lock_id, lock_state in lock_objects.items():
+                        centroid = lock_state.get('centroid', (0, 0))
+                        goals.append({
+                            'color': lock_state.get('color', 0),
+                            'position': [int(centroid[0]), int(centroid[1])],
+                            'pixel_count': lock_state.get('cell_count', 0),
+                            'frequency': 0.0,  # N/A for symbolic detection
+                            'reason': 'Symbolic lock object (target to match)',
+                            'goal_type': 'lock',
+                            'shape_signature': lock_state.get('shape_signature')
+                        })
+                    
+                    if goals:
+                        logger.debug(f"[GOALS] Found {len(goals)} symbolic lock object(s)")
+                        return goals[:5]
+            
+            # ================================================================
+            # PRIORITY 2: Use CODS classify_symbolic_role primitive
+            # ================================================================
+            if hasattr(self, 'cods_engine') and self.cods_engine:
+                try:
+                    # FIX: Extract integer colors from controlled object strings
+                    # Previously tried to read non-existent _controlled_colors attribute
+                    controlled = []
+                    if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                        import re
+                        agent_id = getattr(self, '_current_agent_id', None)
+                        game_id = getattr(self, '_current_game_id', None)
+                        level = getattr(self, '_current_level', 1)
+                        
+                        if agent_id and game_id:
+                            controlled_objs = self.agent_self_model.get_controlled_objects(
+                                agent_id, game_id, level
+                            ) or []
+                            for obj_str in controlled_objs:
+                                match = re.search(r'color_(\d+)', str(obj_str))
+                                if match:
+                                    color_int = int(match.group(1))
+                                    if color_int not in controlled:
+                                        controlled.append(color_int)
+                    
+                    roles = self.cods_engine.seeds.call(
+                        'classify_symbolic_role',
+                        frame,
+                        controlled_objects=controlled
+                    )
+                    
+                    if roles and roles.get('locks'):
+                        for lock_info in roles['locks']:
+                            bbox = lock_info.get('bbox', [0, 0, 0, 0])
+                            center_x = (bbox[0] + bbox[2]) // 2
+                            center_y = (bbox[1] + bbox[3]) // 2
+                            goals.append({
+                                'color': lock_info.get('color', 0),
+                                'position': [center_x, center_y],
+                                'pixel_count': lock_info.get('cell_count', 0),
+                                'frequency': 0.0,
+                                'reason': 'CODS symbolic role classification (lock)',
+                                'goal_type': 'lock'
+                            })
+                        
+                        if goals:
+                            logger.debug(f"[GOALS] CODS found {len(goals)} lock object(s)")
+                            return goals[:5]
+                except Exception as cods_err:
+                    logger.debug(f"CODS symbolic classification failed: {cods_err}")
+            
+            # ================================================================
+            # PRIORITY 3: FALLBACK - Rare color heuristic
+            # Only use if symbolic analysis didn't find any locks
+            # ================================================================
             frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
             
             if frame_arr.size == 0:
@@ -16840,7 +17048,8 @@ class GameplayEngine:
                             'position': [center_x, center_y],
                             'pixel_count': int(count),
                             'frequency': round(frequency, 4),
-                            'reason': f'Rare color ({frequency:.1%} of frame, {count} pixels)'
+                            'reason': f'Rare color FALLBACK ({frequency:.1%} of frame, {count} pixels)',
+                            'goal_type': 'rare_color'
                         })
             
             # Sort by frequency (rarest first = most likely goal)
@@ -17238,6 +17447,31 @@ class GameplayEngine:
             except Exception as e:
                 logger.debug(f"Completion prediction context failed: {e}")
         
+        # 6. Get NETWORK EXPLORATION MAP: What has the collective network explored?
+        # This enables agents to prioritize unexplored regions and avoid re-treading.
+        if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+            try:
+                game_type = game_id[:4] if game_id else ''
+                agent_pos = getattr(self, '_current_agent_position', None)
+                frame_width = len(frame[0]) if frame and frame[0] else 64
+                frame_height = len(frame) if frame else 64
+                
+                exploration_ctx = self.exploration_tracker.get_exploration_context_for_reasoning(
+                    game_type=game_type,
+                    level=level,
+                    current_position=agent_pos,
+                    frame_width=frame_width,
+                    frame_height=frame_height
+                )
+                
+                if exploration_ctx:
+                    context['network_exploration'] = exploration_ctx.get('network_exploration', {})
+                    context['exploration_recommendations'] = exploration_ctx.get('exploration_recommendations', {})
+                    context['current_region'] = exploration_ctx.get('current_region')
+                    context['suggested_exploration_direction'] = exploration_ctx.get('suggested_direction')
+            except Exception as e:
+                logger.debug(f"Network exploration context failed: {e}")
+        
         return context
 
     # ========================================================================
@@ -17411,18 +17645,21 @@ class GameplayEngine:
                 context['trigger'] = survey.get('trigger', 'unknown')
                 context['game_signature'] = survey.get('game_signature', 'unknown')
                 
-                # Extract detected features
+                # LS20 FIX: Features are nested in survey['features'], not at top level
+                features = survey.get('features', {})
+                
+                # Extract detected features from the correct nested location
                 context['detected_features'] = {
-                    'has_pipes': survey.get('has_pipes', False),
-                    'has_containers': survey.get('has_containers', False),
-                    'has_symmetry': survey.get('has_symmetry', False),
-                    'has_templates': survey.get('has_templates', False),
-                    'has_holes': survey.get('has_holes', False),
-                    'unique_colors': survey.get('unique_colors', 0),
-                    'dominant_color': survey.get('dominant_color'),
-                    'rare_colors': survey.get('rare_colors', [])[:3],  # Limit size
-                    'edge_density': survey.get('edge_density', 0),
-                    'symmetry_axes': survey.get('symmetry_axes', 0)
+                    'has_pipes': features.get('has_pipes', False),
+                    'has_containers': features.get('has_containers', False),
+                    'has_symmetry': features.get('has_symmetry', False),
+                    'has_templates': features.get('has_templates', False),
+                    'has_holes': features.get('has_holes', False),
+                    'unique_colors': features.get('color_count', 0),  # Field is 'color_count' not 'unique_colors'
+                    'dominant_color': features.get('dominant_color'),
+                    'rare_colors': features.get('rare_colors', [])[:3],  # Limit size
+                    'edge_density': features.get('density', 0),  # Field is 'density' not 'edge_density'
+                    'symmetry_axes': features.get('symmetry_axes', 0)
                 }
                 
                 # Strategy hints from survey
