@@ -2605,6 +2605,38 @@ class AutonomousEvolutionRunner:
         except Exception as e:
             print(f"[WARN] Automated assessment failed: {e}")
         
+        # ================================================================
+        # MASTERY SYSTEM: Update mastery scores for all game-levels
+        # ================================================================
+        # Recalculates diversity, ablation, consistency, and efficiency metrics.
+        # This determines whether replay is allowed (gated by tier).
+        # Also applies mastery decay for performance degradation.
+        # ================================================================
+        try:
+            from mastery_system import get_mastery_system
+            mastery_system = get_mastery_system(self.db)
+            
+            if mastery_system:
+                updated = mastery_system.update_all_mastery(self.current_generation)
+                
+                if updated > 0:
+                    # Get tier distribution for reporting
+                    report = mastery_system.get_mastery_report()
+                    tier_dist = report.get('tier_distribution', {})
+                    
+                    # Format distribution string
+                    tier_str = ", ".join(
+                        f"{tier[0].upper()}:{count}" 
+                        for tier, count in sorted(tier_dist.items(), 
+                            key=lambda x: ['master', 'expert', 'practitioner', 'apprentice', 'novice'].index(x[0]) if x[0] in ['master', 'expert', 'practitioner', 'apprentice', 'novice'] else 5)
+                    )
+                    
+                    print(f"[MASTERY] Updated {updated} game-levels: {tier_str}")
+        except ImportError:
+            pass  # Mastery system not available yet
+        except Exception as e:
+            print(f"[WARN] Mastery update failed: {e}")
+        
         # CODS: Check for potential primitive unlocks (post-generation)
         if CODS_AVAILABLE and check_for_potential_unlocks:
             try:

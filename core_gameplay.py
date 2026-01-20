@@ -23875,8 +23875,35 @@ class GameplayEngine:
                 elif len(actions) <= existing_actions - min_action_improvement:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
-                    logger.info(f" Optimized sequence: {existing_actions} → {len(actions)} actions "
-                              f"(efficiency: {existing_efficiency:.4f} → {efficiency:.4f})")
+                    logger.info(f" Optimized sequence: {existing_actions} -> {len(actions)} actions "
+                              f"(efficiency: {existing_efficiency:.4f} -> {efficiency:.4f})")
+                    
+                    # ================================================================
+                    # MASTERY SYSTEM: Record significant improvement (>5%)
+                    # ================================================================
+                    # Track improvements for efficiency score calculation.
+                    # Only improvements >5% count toward mastery.
+                    # ================================================================
+                    try:
+                        from mastery_system import get_mastery_system
+                        mastery_system = get_mastery_system(self.db)
+                        if mastery_system:
+                            generation = self.game_config.get('generation', 0)
+                            mastery_system.record_sequence_improvement(
+                                game_type=game_type_prefix,
+                                level_number=level_number,
+                                previous_sequence_id=existing_seq['sequence_id'],
+                                previous_actions=existing_actions,
+                                new_sequence_id=sequence_id,
+                                new_actions=len(actions),
+                                agent_id=current_agent_id,
+                                generation=generation
+                            )
+                    except ImportError:
+                        pass  # Mastery system not available
+                    except Exception as e:
+                        logger.debug(f"[MASTERY] Could not record improvement: {e}")
+                        
                 elif efficiency > existing_efficiency * min_efficiency_multiplier:
                     should_store = True
                     sequence_id = f"seq_{uuid.uuid4().hex[:16]}"
@@ -23959,6 +23986,22 @@ class GameplayEngine:
                     # CRITICAL: Force immediate commit to ensure sequence is saved
                     self.db.checkpoint_wal()
                     logger.info(f" Sequence {sequence_id} committed to database immediately")
+                    
+                    # ================================================================
+                    # MASTERY SYSTEM: Trigger update on new sequence discovery
+                    # ================================================================
+                    # Event-driven update ensures mastery scores are fresh.
+                    # New sequences contribute to diversity score.
+                    # ================================================================
+                    try:
+                        from mastery_system import get_mastery_system
+                        mastery_system = get_mastery_system(self.db)
+                        if mastery_system:
+                            mastery_system.trigger_update(game_type, level_number, 'sequence_discovered')
+                    except ImportError:
+                        pass  # Mastery system not available
+                    except Exception as e:
+                        logger.debug(f"[MASTERY] Event trigger failed: {e}")
                 
                 # Try to detect and store abstract pattern (only if we have valid sequence_id)
                 if source_mode == 'LIVE':
@@ -24201,6 +24244,8 @@ class GameplayEngine:
         2. UNTESTED sequences with highest score  
         3. Among ties, prefer fewer actions (more efficient)
         
+        MASTERY GATE: Sequences are only returned if mastery tier allows replay.
+        
         Args:
             game_id: Game to check
             limit: Max sequences to return (default 3)
@@ -24213,6 +24258,34 @@ class GameplayEngine:
             
         try:
             game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            # ================================================================
+            # MASTERY GATE CHECK: Only allow replay if mastery tier permits
+            # ================================================================
+            # Cumulative sequences span multiple levels, so we check against Level 1.
+            # If Level 1 mastery doesn't allow replay, block the whole sequence.
+            # This ensures agents must EARN understanding before replaying.
+            # ================================================================
+            try:
+                from mastery_system import get_mastery_system
+                import random as _random
+                mastery_system = get_mastery_system(self.db)
+                
+                if mastery_system:
+                    # Check L1 mastery (cumulative sequences start from L1)
+                    allowed, reason, mastery = mastery_system.should_allow_replay(
+                        game_type, 1  # Level 1 for cumulative sequences
+                    )
+                    
+                    if not allowed:
+                        logger.info(f"[MASTERY-GATE] {game_type} cumulative: {reason}")
+                        return []  # Force exploration - no sequences returned
+                    else:
+                        logger.debug(f"[MASTERY-GATE] {game_type} cumulative: {reason}")
+            except ImportError:
+                pass  # Mastery system not available - continue without gating
+            except Exception as e:
+                logger.debug(f"[MASTERY-GATE] Check failed, allowing sequences: {e}")
             
             sequences = self.db.execute_query("""
                 SELECT ws.*, 
@@ -24365,6 +24438,39 @@ class GameplayEngine:
         try:
             # Extract game type prefix (e.g., 'vc33' from 'vc33-6ae7bf49eea5')
             game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            # ================================================================
+            # MASTERY GATE CHECK: Only allow replay if mastery tier permits
+            # ================================================================
+            # Philosophy: Sequences are a PRIVILEGE, not a default.
+            # Agents must EARN the right to replay by demonstrating understanding.
+            # 
+            # Tier System:
+            # - Novice (0-24): NEVER allow replay (must explore)
+            # - Apprentice (25-49): Study only (essential actions shown)  
+            # - Practitioner (50-74): 70% replay / 30% forced exploration
+            # - Expert (75-94): 90% replay / 10% forced exploration
+            # - Master (95-100): 95% replay / 5% forced exploration
+            # ================================================================
+            try:
+                from mastery_system import get_mastery_system
+                mastery_system = get_mastery_system(self.db)
+                
+                if mastery_system:
+                    current_gen = self.game_config.get('generation', 0)
+                    allowed, reason, mastery = mastery_system.should_allow_replay(
+                        game_type, level_number
+                    )
+                    
+                    if not allowed:
+                        logger.info(f"[MASTERY-GATE] {game_type} L{level_number}: {reason}")
+                        return None  # Force exploration
+                    else:
+                        logger.debug(f"[MASTERY-GATE] {game_type} L{level_number}: {reason}")
+            except ImportError:
+                pass  # Mastery system not available - continue without gating
+            except Exception as e:
+                logger.debug(f"[MASTERY-GATE] Check failed, allowing replay: {e}")
             
             # TASK #4: Exploiter 50/50 Split Logic
             # Check if current agent is an exploiter and their social rule adherence
@@ -24804,6 +24910,103 @@ class GameplayEngine:
                 logger.info(f"[LEARNING-REPLAY] Enabled for L{level_number} sequence {sequence_id[:12]} - "
                            f"exploring with full decision chain logging")
             
+            # ================================================================
+            # STEALTH ABLATION MODE (20% of non-learning replays)
+            # ================================================================
+            # Agent does NOT know this is happening - no logging until AFTER.
+            # Purpose: Test if agent truly understands the sequence or just memorized it.
+            # If agent wins despite skipped actions, they understand the pattern.
+            #
+            # TIERED DIFFICULTY: Skip rate scales with claimed mastery level
+            # - Practitioner: 10-20% actions skipped
+            # - Expert: 20-30% actions skipped  
+            # - Master: 30-50% actions skipped (stress test)
+            #
+            # PROTECTED ACTIONS: Click actions (ACTION6, ACTION7) weighted 0.3x
+            # - Clicks are often more essential than directional moves
+            # ================================================================
+            ablation_test_mode = _random.random() < 0.20 and not learning_replay_mode
+            ablation_skip_indices = set()
+            ablation_skip_rate = 0.0
+            ablation_tier_at_test = 'novice'
+            
+            if ablation_test_mode:
+                try:
+                    from mastery_system import get_mastery_system
+                    mastery_system = get_mastery_system(self.db)
+                    
+                    if mastery_system:
+                        # Get game type for mastery lookup
+                        # NOTE: Use sequence['game_id'] since game_id_for_frontier not yet defined
+                        game_type_for_ablation = ''
+                        if sequence.get('game_id'):
+                            game_type_for_ablation = sequence['game_id'].split('-')[0]
+                        elif self.session_manager and self.session_manager.current_game_id:
+                            game_type_for_ablation = self.session_manager.current_game_id.split('-')[0]
+                        
+                        mastery = mastery_system.get_mastery(
+                            game_type_for_ablation, level_number
+                        )
+                        ablation_tier_at_test = mastery.tier
+                        
+                        # Get tiered skip rate
+                        min_skip, max_skip = mastery_system.get_ablation_skip_rate(mastery.tier)
+                        ablation_skip_rate = _random.uniform(min_skip, max_skip)
+                        
+                        total_actions = len(actions)
+                        num_to_skip = int(total_actions * ablation_skip_rate)
+                        
+                        # Only ablate if we have enough actions and non-trivial skip
+                        if num_to_skip > 0 and total_actions > 5:
+                            # Build weighted skip candidates
+                            # Click actions (6, 7) are weighted 0.3x (less likely to skip)
+                            # Directional actions weighted 1.0x (normal skip probability)
+                            candidates = []
+                            weights = []
+                            for idx in range(2, total_actions - 2):  # Protect first 2 and last 2
+                                action = actions[idx]
+                                candidates.append(idx)
+                                if action in (6, 7):  # Click actions
+                                    weights.append(0.3)  # 70% less likely to skip clicks
+                                else:
+                                    weights.append(1.0)
+                            
+                            if candidates and weights:
+                                # Normalize weights
+                                total_weight = sum(weights)
+                                weights = [w / total_weight for w in weights]
+                                
+                                # Weighted random sample
+                                num_to_skip = min(num_to_skip, len(candidates))
+                                
+                                # Manual weighted sampling (avoid numpy dependency)
+                                selected = []
+                                remaining_candidates = list(zip(candidates, weights))
+                                for _ in range(num_to_skip):
+                                    if not remaining_candidates:
+                                        break
+                                    # Weighted random selection
+                                    total = sum(w for _, w in remaining_candidates)
+                                    if total <= 0:
+                                        break
+                                    r = _random.random() * total
+                                    cumulative = 0
+                                    for i, (cand, w) in enumerate(remaining_candidates):
+                                        cumulative += w
+                                        if r <= cumulative:
+                                            selected.append(cand)
+                                            remaining_candidates.pop(i)
+                                            break
+                                
+                                ablation_skip_indices = set(selected)
+                        
+                        # NO LOGGING HERE - STEALTH MODE
+                        # Logging happens ONLY after replay completes
+                except ImportError:
+                    ablation_test_mode = False  # Mastery system not available
+                except Exception:
+                    ablation_test_mode = False  # Failed to set up ablation
+            
             def compute_frame_hash(frame):
 
                 """Simple frame hash for novelty detection."""
@@ -24977,6 +25180,19 @@ class GameplayEngine:
                                 'actions_replayed': action_count,
                                 'sequence_id': sequence_id
                             }
+                
+                # ================================================================
+                # STEALTH ABLATION: Skip this action silently
+                # ================================================================
+                # Agent does NOT know this is happening.
+                # NO LOGGING - if we skip, we just continue to next action.
+                # Results are recorded ONLY after replay completes.
+                # This tests if agent truly understands the sequence.
+                # ================================================================
+                if ablation_test_mode and idx in ablation_skip_indices:
+                    # Skip this action entirely - agent doesn't know
+                    action_count += 1  # Count as "executed" for action tracking
+                    continue
                 
                 # Check for game/level reset (score dropped unexpectedly)
                 if game_state.score < highest_score_achieved - 0.5:  # 0.5 tolerance for float precision
@@ -26030,6 +26246,60 @@ class GameplayEngine:
                                 
                 except Exception as e:
                     logger.debug(f"Replay learning finalization failed (non-critical): {e}")
+            
+            # ================================================================
+            # STEALTH ABLATION RESULT RECORDING (after replay completes)
+            # ================================================================
+            # NOW we can log and record the ablation test result.
+            # Agent didn't know this was happening - results recorded post-hoc.
+            # This builds the ablation score component of mastery calculation.
+            # ================================================================
+            if ablation_test_mode and ablation_skip_indices:
+                try:
+                    from mastery_system import get_mastery_system
+                    mastery_system = get_mastery_system(self.db)
+                    
+                    if mastery_system:
+                        # Get game type for recording
+                        # Use multiple fallbacks to ensure we have game_type
+                        game_type_for_ablation = ''
+                        try:
+                            if game_id_for_frontier:
+                                game_type_for_ablation = game_id_for_frontier.split('-')[0]
+                        except NameError:
+                            pass  # Variable not defined yet
+                        if not game_type_for_ablation and sequence.get('game_id'):
+                            game_type_for_ablation = sequence['game_id'].split('-')[0]
+                        
+                        # Determine if test passed (agent won despite skipped actions)
+                        ablation_test_passed = replay_success
+                        
+                        # Record the result
+                        agent_id_for_ablation = self.game_config.get('agent_id', 'unknown')
+                        generation = self.game_config.get('generation', 0)
+                        
+                        mastery_system.record_ablation_result(
+                            game_type=game_type_for_ablation,
+                            level_number=level_number,
+                            sequence_id=sequence_id,
+                            skipped_indices=list(ablation_skip_indices),
+                            skip_rate=ablation_skip_rate,
+                            test_passed=ablation_test_passed,
+                            actions_taken=action_count,
+                            final_score=float(game_state.score),
+                            agent_id=agent_id_for_ablation,
+                            generation=generation,
+                            tier_at_test=ablation_tier_at_test
+                        )
+                        
+                        # NOW log the result (post-hoc - agent already finished)
+                        logger.info(f"[ABLATION-RESULT] {'PASSED' if ablation_test_passed else 'FAILED'} - "
+                                   f"tier={ablation_tier_at_test}, skipped {len(ablation_skip_indices)}/{len(actions)} actions "
+                                   f"({ablation_skip_rate:.0%}), final_score={game_state.score}")
+                except ImportError:
+                    pass  # Mastery system not available
+                except Exception as e:
+                    logger.debug(f"[ABLATION] Failed to record result: {e}")
             
             # Log frontier status for debugging
             if reached_frontier:

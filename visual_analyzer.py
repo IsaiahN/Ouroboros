@@ -43,8 +43,8 @@ class VisualAnalyzer:
         self.colors_that_worked: Dict[int, int] = {}  # color -> success_count (persistent learning)
         
         # Adaptive exploration parameters
-        self.exploration_radius = 5  # Start with focused exploration
-        self.min_exploration_radius = 3
+        self.exploration_radius = 8  # Start with broader exploration
+        self.min_exploration_radius = 6  # Was 3 - too restrictive, trapped agents in local regions
         self.max_exploration_radius = 20
         self._expansion_step = 2  # Accelerates: +2, +3, +4, +5... (urgency increases when stuck)
         self.stagnation_threshold = 8  # Actions without improvement to trigger expansion
@@ -58,6 +58,8 @@ class VisualAnalyzer:
         # Full game memory - keep all targets (was 10 goldfish window)
         self.max_target_history = 20000
         self.oscillation_detected = False
+        self.total_actions_this_game = 0  # Track actions for early-game contraction protection
+        self.map_coverage_percent = 0.0  # Estimated map coverage for radius decisions
     
     def set_priority_color(self, color: int, reason: str = "learned from previous success"):
         """Set a priority color to target based on what worked before.
@@ -88,9 +90,77 @@ class VisualAnalyzer:
         logger.info(f"[SUCCESS] Color {color} worked! (count: {self.colors_that_worked[color]})")
     
     def clear_priority_on_new_game(self):
-        """Clear priority when starting a new game (but keep colors_that_worked)."""
+        """Clear priority and reset action counter when starting a new game (but keep colors_that_worked)."""
         self.priority_color = None
         self.priority_color_reason = ""
+        self.total_actions_this_game = 0  # Reset for early-game contraction protection
+        self.map_coverage_percent = 0.0  # Reset coverage estimate
+    
+    def get_effective_radius(self, purpose: str = "deduplication") -> int:
+        """Get radius based on agent mode, game phase, and purpose.
+        
+        Different purposes need different radii:
+        - 'deduplication': Used to filter out nearby duplicate targets (can be smaller)
+        - 'selection': Used to prioritize distant targets (should be larger)
+        - 'generation': Used for target generation (should be largest)
+        
+        Args:
+            purpose: What the radius will be used for
+            
+        Returns:
+            Effective radius for the given purpose
+        """
+        base_radius = self.exploration_radius
+        
+        # PIONEER MODE: Always use expanded radius for maximum exploration
+        if self.current_agent_mode == 'pioneer':
+            if purpose == 'generation':
+                return max(base_radius, 15)  # Very broad target generation
+            elif purpose == 'selection':
+                return max(base_radius, 12)  # Prefer distant targets
+            else:  # deduplication
+                return max(base_radius, 10)  # Minimal deduplication
+        
+        # EARLY GAME (first 50 actions): Force broad exploration
+        if self.total_actions_this_game < 50:
+            if purpose == 'generation':
+                return max(base_radius, 12)
+            elif purpose == 'selection':
+                return max(base_radius, 10)
+            else:  # deduplication
+                return max(base_radius, 8)
+        
+        # LOW COVERAGE: If we haven't explored much, stay broad
+        if self.map_coverage_percent < 30:
+            if purpose == 'generation':
+                return max(base_radius, 10)
+            elif purpose == 'selection':
+                return max(base_radius, 8)
+            else:  # deduplication  
+                return base_radius
+        
+        # OPTIMIZER/GENERALIST with good coverage: Can use tighter radius
+        if self.current_agent_mode in ('optimizer', 'generalist'):
+            # These modes are refining, not exploring - allow contraction
+            return base_radius
+        
+        # DEFAULT: Use base radius
+        return base_radius
+    
+    def update_coverage_estimate(self, clicked_count: int, frame_width: int, frame_height: int):
+        """Update estimated map coverage based on clicked coordinates.
+        
+        Args:
+            clicked_count: Number of unique coordinates clicked
+            frame_width: Frame width in pixels
+            frame_height: Frame height in pixels
+        """
+        total_cells = frame_width * frame_height
+        if total_cells > 0:
+            # Each click "covers" roughly a radius-sized area
+            covered_area = clicked_count * (self.exploration_radius ** 2) * 3.14
+            self.map_coverage_percent = min(100, (covered_area / total_cells) * 100)
+            logger.debug(f"Map coverage estimate: {self.map_coverage_percent:.1f}%")
 
     def update_frame_change_tracking(self, new_frame: List[List[int]], current_score: Optional[float] = None) -> bool:
         """Track whether the frame changed after an action.
@@ -131,6 +201,12 @@ class VisualAnalyzer:
             self.consecutive_no_change_count += 1
             self.actions_since_decline += 1
             logger.debug(f"Frame unchanged ({self.consecutive_no_change_count} consecutive)")
+        
+        # Track total actions for early-game protection
+        self.total_actions_this_game += 1
+        
+        # Track total actions for early-game protection
+        self.total_actions_this_game += 1
         
         # Adapt exploration based on stagnation
         self._adapt_exploration_radius()
@@ -184,16 +260,30 @@ class VisualAnalyzer:
                 self._expansion_step = min(self._expansion_step + 1, 10)
         
         # Contract if improving - also reset expansion step (no longer desperate)
+        # PROTECTIONS against premature contraction:
+        # 1. PIONEER EXEMPTION: Pioneers need maximum exploration freedom
+        # 2. EARLY GAME PROTECTION: First 50 actions need broad discovery
+        # 3. Only contract if actually improving (score increase, not just frame change)
         elif self.actions_since_improvement == 0 and self.exploration_radius > self.min_exploration_radius:
-            old_radius = self.exploration_radius
-            self.exploration_radius = max(
-                self.exploration_radius - 1,
-                self.min_exploration_radius
-            )
-            if old_radius != self.exploration_radius:
-                logger.info(f"Improvement detected - contracting exploration radius: {old_radius} -> {self.exploration_radius}")
-                # Reset expansion urgency since we're making progress
+            if self.current_agent_mode == 'pioneer':
+                # Pioneers don't contract - they need maximum exploration freedom
+                # Just reset the expansion urgency since we're making some progress
                 self._expansion_step = 2
+            elif self.total_actions_this_game < 50:
+                # Early game - don't contract, need broad discovery first
+                # Just reset expansion urgency
+                self._expansion_step = 2
+                logger.debug(f"Early game ({self.total_actions_this_game} actions) - skipping contraction")
+            else:
+                old_radius = self.exploration_radius
+                self.exploration_radius = max(
+                    self.exploration_radius - 1,
+                    self.min_exploration_radius
+                )
+                if old_radius != self.exploration_radius:
+                    logger.info(f"Improvement detected - contracting exploration radius: {old_radius} -> {self.exploration_radius}")
+                    # Reset expansion urgency since we're making progress
+                    self._expansion_step = 2
     
     def mark_coordinate_clicked(self, x: int, y: int, frame_changed: bool = False):
         """Mark a coordinate as already clicked and track failures.
@@ -636,10 +726,13 @@ class VisualAnalyzer:
     def _deduplicate_targets(self, targets: List[Dict[str, Any]],
                             min_distance: Optional[int] = None) -> List[Dict[str, Any]]:
         """Remove duplicate targets that are too close together.
+        
+        Uses get_effective_radius() for mode-specific deduplication that
+        preserves more targets for pioneers and early-game exploration.
 
         Args:
             targets: List of target dictionaries
-            min_distance: Minimum distance between targets (uses exploration_radius if None)
+            min_distance: Minimum distance between targets (uses get_effective_radius if None)
 
         Returns:
             Deduplicated and sorted targets
@@ -647,9 +740,10 @@ class VisualAnalyzer:
         if not targets:
             return []
         
-        # Use adaptive exploration radius for deduplication
+        # Use mode-aware effective radius for deduplication
+        # This is intentionally less aggressive than raw exploration_radius
         if min_distance is None:
-            min_distance = self.exploration_radius
+            min_distance = self.get_effective_radius(purpose='deduplication')
 
         # Sort by priority (highest first)
         sorted_targets = sorted(targets, key=lambda t: t["priority"], reverse=True)
@@ -675,12 +769,16 @@ class VisualAnalyzer:
 
         return unique_targets
 
-    def select_best_target(self, analysis: Dict[str, Any]) -> Optional[Tuple[int, int, str]]:
+    def select_best_target(self, analysis: Dict[str, Any], 
+                           agent_position: Optional[Tuple[int, int]] = None) -> Optional[Tuple[int, int, str]]:
         """Select the best target from analysis, avoiding already-clicked coordinates.
-        Uses adaptive exploration radius to expand/contract search space.
+        
+        Uses mode-specific radius and prioritizes distant targets for exploration.
+        DECOUPLED from deduplication - selection considers exploration needs separately.
 
         Args:
             analysis: Analysis results from analyze_frame
+            agent_position: Current agent position (x, y) for distance calculations
 
         Returns:
             Tuple of (x, y, reason) or None if no targets
@@ -689,6 +787,11 @@ class VisualAnalyzer:
 
         if not targets:
             return None
+        
+        # Update coverage estimate
+        frame_width = analysis.get("width", 64)
+        frame_height = analysis.get("height", 64)
+        self.update_coverage_estimate(len(self.clicked_coordinates), frame_width, frame_height)
 
         # Filter out already-clicked coordinates
         unclicked_targets = [
@@ -703,8 +806,22 @@ class VisualAnalyzer:
                 logger.info(f"Oscillation detected - trying combination point: {combination_target}")
                 return combination_target
         
-        # If we have unclicked targets, prefer those
+        # DECOUPLED TARGET SELECTION: Prioritize based on exploration needs
         if unclicked_targets:
+            selection_radius = self.get_effective_radius(purpose='selection')
+            
+            # For PIONEERS or early game: Prefer DISTANT targets to maximize exploration
+            if self.current_agent_mode == 'pioneer' or self.total_actions_this_game < 50:
+                distant_targets = self._sort_by_exploration_value(
+                    unclicked_targets, agent_position, selection_radius
+                )
+                if distant_targets:
+                    best_target = distant_targets[0]
+                    logger.debug(f"Selected exploration target: ({best_target['x']}, {best_target['y']}) "
+                               f"[mode={self.current_agent_mode}, radius={selection_radius}]")
+                    return (best_target["x"], best_target["y"], best_target["reason"])
+            
+            # For OPTIMIZERS: Prefer high-priority (known good) targets
             best_target = unclicked_targets[0]
             logger.debug(f"Selected unclicked target: ({best_target['x']}, {best_target['y']}) [radius={self.exploration_radius}]")
             return (best_target["x"], best_target["y"], best_target["reason"])
@@ -728,6 +845,67 @@ class VisualAnalyzer:
             return (best_target["x"], best_target["y"], best_target["reason"])
         
         return None
+    
+    def _sort_by_exploration_value(self, targets: List[Dict[str, Any]], 
+                                    agent_position: Optional[Tuple[int, int]],
+                                    selection_radius: int) -> List[Dict[str, Any]]:
+        """Sort targets by exploration value - prioritize distant, unexplored areas.
+        
+        DECOUPLED from deduplication: This method decides which targets are best
+        for exploration, independent of how close targets are to each other.
+        
+        Exploration value considers:
+        1. Distance from agent position (farther = better for exploration)
+        2. Distance from recently clicked areas (farther = less explored)
+        3. Target priority (still matters, but weighted less)
+        
+        Args:
+            targets: List of target dictionaries
+            agent_position: Current agent position (x, y), or None
+            selection_radius: Radius threshold for "distant" classification
+            
+        Returns:
+            Targets sorted by exploration value (best first)
+        """
+        if not targets:
+            return []
+        
+        def exploration_score(target: Dict[str, Any]) -> float:
+            x, y = target["x"], target["y"]
+            base_priority = target.get("priority", 0.5)
+            
+            # Distance from agent (if known)
+            agent_distance_score = 0.0
+            if agent_position:
+                dx = abs(x - agent_position[0])
+                dy = abs(y - agent_position[1])
+                agent_distance = (dx**2 + dy**2) ** 0.5
+                # Normalize: targets beyond selection_radius get bonus
+                if agent_distance > selection_radius:
+                    agent_distance_score = min(1.0, agent_distance / 50.0)  # Cap at 50 pixels
+            
+            # Distance from clicked coordinates (avoid re-exploring same areas)
+            min_click_distance = float('inf')
+            for clicked_x, clicked_y in self.clicked_coordinates:
+                dx = abs(x - clicked_x)
+                dy = abs(y - clicked_y)
+                dist = (dx**2 + dy**2) ** 0.5
+                min_click_distance = min(min_click_distance, dist)
+            
+            # Normalize click distance (farther from clicks = better)
+            if min_click_distance == float('inf'):
+                click_distance_score = 1.0  # No clicks yet, all areas equal
+            else:
+                click_distance_score = min(1.0, min_click_distance / 30.0)
+            
+            # Combined score: prioritize exploration over raw priority
+            # Weights: 40% distance from agent, 40% distance from clicks, 20% priority
+            return (agent_distance_score * 0.4 + 
+                    click_distance_score * 0.4 + 
+                    base_priority * 0.2)
+        
+        # Sort by exploration score (highest first)
+        return sorted(targets, key=exploration_score, reverse=True)
     
     def _find_combination_target(self, targets: List[Dict[str, Any]]) -> Optional[Tuple[int, int, str]]:
         """Find a target between recent clicks to explore combinations.
