@@ -2,8 +2,12 @@
 
 **Architecture**: Database-centric multi-agent evolution with horizontal knowledge transfer
 
+**Foundational Papers & Theories**:
 - Paper: [AGI as Network Intelligence: A Unified Theory](https://medium.com/@IsaiahNwukor/agi-as-network-intelligence-a-unified-theory-056e18c7ede1)
 
+- [MetaLearning Theory](architecture/Concept%20-%20MetaLearning%20System/Abstract%20-%20Unified_Metalearning_System_Theory_Complete.md) - CODS/Oracle, 110 seed primitives, bootstrapping
+- [Consciousness Theory](architecture/Concept%20-%20Agent%20Self%20&%20World%20Model/Abstract%20-%20unified_agent_consciousness_theory.md) - Two Streams, persona submodeling, I-Thread
+- [Network Theory](architecture/Concept%20-%20Network%20Model/Abstract%20-%20unified_network_theory_complete.md) - Database-as-organism, viral exchange, dual-economy
 ---
 
 ## System Architecture
@@ -22,11 +26,9 @@ Three integrated subsystems:
 
 **Key Collaborators & Influences:**
 
-- **Patrick Cox** - Math-based Storytelling for characters
 - **RLVR** - [Reinforcement Learning with Verifiable Rewards](https://arxiv.org/abs/2506.14245)
-  - Xumeng Wen, Zihan Liu, Shun Zheng, Shengyu Ye, Zhirong Wu, Yang Wang, Zhijian Xu, Xiao Liang, Junjie Li, Ziming Miao, Jiang Bian, Mao Yang
-
-We are grateful to all collaborators, acquaintances, friends, family, and connections (past/present/future) who contribute.
+- **Tiny Reasoning Machines** -[Less is More: Recursive Reasoning with Tiny Networks](https://arxiv.org/abs/2510.04871)
+- **Patrick Cox** - Math-based Storytelling for characters
 
 ---
 
@@ -219,7 +221,23 @@ Two independent resource types prevent feedback loops:
 
 Separation prevents high-prestige agents from monopolizing compute, maintaining population diversity.
 
-### 9. Cross-Domain Pattern Detection
+### 9. Mastery System (Earn the Right to Replay)
+
+Agents must **earn** the privilege to replay winning sequences - no free shortcuts:
+
+| Metric | Requirement | Purpose |
+|--------|-------------|---------|
+| **Diverse Wins** | 3+ unique strategies for same level | Proves flexibility, not luck |
+| **Ablation Tolerance** | Win with 20% of sequence removed | Tests understanding vs memorization |
+| **Transfer Learning** | Apply knowledge to level variants | Validates generalization |
+
+**Mastery Tiers**: NOVICE → FAMILIAR → PROFICIENT → EXPERT → MASTER
+
+- Replay privileges unlock at PROFICIENT (tier 3+)
+- Privileges revoked if understanding degrades
+- Sequences always stored but never automatically replayed
+
+### 10. Cross-Domain Pattern Detection
 
 System identifies structurally similar patterns discovered independently across different game types:
 
@@ -227,7 +245,7 @@ System identifies structurally similar patterns discovered independently across 
 - **Resonance scoring**: Higher weight when multiple agent roles converge on same pattern
 - **Complexity reduction**: Validated cross-domain patterns reduce search space for new games
 
-### 10. Game State Modes
+### 11. Game State Modes
 
 | Mode | Trigger | Distribution |
 |------|---------|-------------|
@@ -236,7 +254,7 @@ System identifies structurally similar patterns discovered independently across 
 
 Transition on first full win; Pioneers reassign to remaining unbeaten games.
 
-### 11. System Maintenance
+### 12. System Maintenance
 
 | Component | Behavior |
 |-----------|----------|
@@ -246,7 +264,7 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 | Pycache | Disabled (`PYTHONDONTWRITEBYTECODE=1`) |
 | Shutdown | `Ctrl+C` triggers WAL checkpoint |
 
-### 12. System Health Metrics
+### 13. System Health Metrics
 
 | Metric | Target | Warning | Critical |
 |--------|--------|---------|----------|
@@ -278,6 +296,7 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 | `persona_runtime.py` | Internal persona dialogue and metacognition |
 | `viral_package_engine.py` | Viral knowledge exchange system |
 | `prestige_engine.py` | Social capital and contribution tracking |
+| `mastery_system.py` | Earn-to-replay privileges, mastery tier tracking |
 | `sensation_engine.py` | Emotional gameplay and navigation state |
 | `resonance_detector.py` | Cross-domain pattern resonance |
 
