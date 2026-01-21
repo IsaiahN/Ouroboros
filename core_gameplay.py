@@ -9123,23 +9123,32 @@ class GameplayEngine:
                         continue
                 except Exception as e:
                     error_msg = str(e).lower()
-                    # Check for shutdown-related errors
-                    if ("shutting down" in error_msg or 
-                        "session" in error_msg or 
-                        "client" in error_msg or
-                        "nonetype" in error_msg):
-                        logger.info(" Session/client error detected, ending game gracefully")
+                    # Check for shutdown-related errors ONLY
+                    # BUGFIX: Removed "nonetype" - that was causing premature game termination
+                    # for legitimate bugs. NoneType errors should be logged but not end games.
+                    # Only actual shutdown/session/client errors should terminate.
+                    is_shutdown_error = (
+                        "shutting down" in error_msg or
+                        "client session closed" in error_msg or
+                        "no active session" in error_msg
+                    )
+                    if is_shutdown_error:
+                        logger.info(" Session shutdown detected, ending game gracefully")
                         break
                     # Critical errors that should stop
                     if "authentication" in error_msg or "api_key" in error_msg:
                         logger.error(f"Critical error in action {action_count}: {e}")
                         break
-                    # Log other errors but don't show full traceback during shutdown
-                    logger.error(f"Error in action {action_count}: {e}")
-                    # Emit traceback once to pinpoint the failing comparison
+                    # Log errors but DON'T end game - try to continue (resilience)
+                    # This allows the game to survive transient errors
+                    logger.warning(f"[RECOVERABLE] Error in action {action_count}: {e}")
+                    # Emit traceback once to pinpoint the failing operation
                     if not getattr(self, '_logged_action_error', False):
                         logger.exception("Action loop error traceback (first occurrence)")
                         self._logged_action_error = True
+                    # Increment action count and continue - don't give up
+                    action_count += 1
+                    level_action_count += 1
 
             # Calculate results
             end_time = datetime.now()
