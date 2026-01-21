@@ -259,7 +259,7 @@ Transition on first full win; Pioneers reassign to remaining unbeaten games.
 | Component | Behavior |
 |-----------|----------|
 | Database cleanup | Automatic every 10 generations (`safe_cleanup.py`) |
-| Database Size limit | 10 GB default (configurable in `disk_space_monitor.py:MAX_DB_SIZE_GB`) |
+| Database Size limit | 200 GB default (configurable in `disk_space_monitor.py:MAX_DB_SIZE_GB`) |
 | Logging | SQLite only (no `.log` files) |
 | Pycache | Disabled (`PYTHONDONTWRITEBYTECODE=1`) |
 | Shutdown | `Ctrl+C` triggers WAL checkpoint |

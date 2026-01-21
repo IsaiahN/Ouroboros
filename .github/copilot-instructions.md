@@ -50,7 +50,7 @@ python -c "import sys; print(sys.prefix)"
 - NEVER create `.log` files
 - Use `database_logger.py` with `DatabaseLogHandler`
 - Every operation, decision, result -> database tables
-- **Size Limit**: 10 GB (vacuum requires 2x space)
+- **Size Limit**: 200 GB (vacuum requires 2x space)
 
 ### **RULE 3: No Orphaned Code**
 - Delete/move/integrate ALL old code when refactoring
@@ -752,7 +752,7 @@ Therefore: I AM Object X (or I CONTROL Object X)
 - Prestige outlier > 10x median
 - Agent stuck on "easy" level
 - Zero-score games increasing
-- Database approaching 10 GB
+- Database approaching 200 GB
 
 ---
 
@@ -767,7 +767,7 @@ Therefore: I AM Object X (or I CONTROL Object X)
 - Make code changes without confirming signals
 - Commit to git before real evolution testing
 - Create orphaned/duplicate code
-- Exceed 10 GB database size
+- Exceed 200 GB database size
 - Hard-code game solutions
 
 **ALWAYS**:

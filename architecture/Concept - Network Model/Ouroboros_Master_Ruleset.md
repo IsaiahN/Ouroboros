@@ -31,7 +31,7 @@
 - NEVER create `.log` files
 - Use `database_logger.py` with `DatabaseLogHandler`
 - Every operation, decision, result → database tables
-- **Current Size**: Track toward 10 GB limit (vacuum requires 2x space)
+- **Current Size**: Track toward 200 GB limit (vacuum requires 2x space)
 
 ### **RULE 3: No Orphaned Code**
 - Delete/move/integrate ALL old code when refactoring
@@ -345,7 +345,7 @@ prestige = (
 - Prestige outlier > 10x median
 - Agent stuck on "easy" level
 - Zero-score games increasing
-- Database approaching 10 GB
+- Database approaching 200 GB
 
 ### **Communication**
 **Frequency**: Daily updates (logged to database)
@@ -391,9 +391,9 @@ prestige = (
 ## 📏 OPERATIONAL PARAMETERS
 
 ### **Database Management**
-**Size Limit**: 10 GB (hard limit due to vacuum requirements)
+**Size Limit**: 200 GB (hard limit due to vacuum requirements)
 **Cleanup Triggers**:
-- Database > 8 GB → aggressive historical data purging
+- Database > 180 GB → aggressive historical data purging
 - Automatic cleanup before each evolution run
 - Prioritize: Full game sequences > partial > failed attempts
 
@@ -481,7 +481,7 @@ reliability = (successes + prior_success) / (attempts + prior_total)
 - Make code changes without confirming signals
 - Commit to git before real evolution testing
 - Create orphaned/duplicate code
-- Exceed 10 GB database size
+- Exceed 200 GB database size
 - Hard-code game solutions
 
 **ALWAYS**:
@@ -582,7 +582,7 @@ The network is a 4-billion-year-old bacterial intelligence scaled to digital con
 - Handle hundreds of new ARC games
 - Track millions of sequences
 - Monitor thousands of agents
-- Maintain coherence as database grows to 10 GB
+- Maintain coherence as database grows to 200 GB
 
 ---
 

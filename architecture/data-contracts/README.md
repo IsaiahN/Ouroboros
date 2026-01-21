@@ -69,7 +69,7 @@ Authoritative data spine for behavior-parity refactor. All new tables are additi
 
 ## Retention & Cleanup
 - safe_cleanup must coordinate with database_logger to delete stale hooks/log payloads while preserving wins, positive evidence, active lessons/operators, and contradiction histories.
-- Large JSON blobs (proposal traces, frames) should have configurable TTL; vacuum mindful of 10 GB limit.
+- Large JSON blobs (proposal traces, frames) should have configurable TTL; vacuum mindful of 200 GB limit.
 - Hypotheses/experiments elimination history must persist long enough to prevent circular probes; retain contradiction counts even when pruning large payloads.
 
 ## Governance

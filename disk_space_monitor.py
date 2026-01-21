@@ -14,7 +14,7 @@ class DiskSpaceMonitor:
     
     # Thresholds (in GB)
     MIN_FREE_SPACE_GB = 15.0  # Minimum free space on drive
-    MAX_DB_SIZE_GB = 10.0     # Maximum database size
+    MAX_DB_SIZE_GB = 200.0    # Maximum database size
     CRITICAL_FREE_SPACE_GB = 5.0  # Emergency stop threshold
     
     def __init__(self, db_path: str = 'core_data.db'):
