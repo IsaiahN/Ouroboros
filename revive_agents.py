@@ -23,7 +23,7 @@ import json
 import random
 import uuid
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from database_interface import DatabaseInterface
 import logging
 
@@ -344,6 +344,135 @@ class AgentRevivalSystem:
         
         return revived_ids
 
+    def mass_revive_inactive_agents(
+        self,
+        target_count: int,
+        generation: int,
+        fresh_start: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Mass reactivate inactive agents to reach target population.
+        
+        This is used when population is too low and we want to give old
+        agents a second chance with fresh starts (reset prestige, mastery).
+        
+        Args:
+            target_count: Number of agents to reactivate
+            generation: Current generation number
+            fresh_start: If True, reset prestige and mastery to starter levels
+        
+        Returns:
+            Dict with results: reactivated_count, agent_ids, errors
+        """
+        results = {
+            'reactivated_count': 0,
+            'agent_ids': [],
+            'errors': [],
+            'fresh_start': fresh_start
+        }
+        
+        try:
+            # Get current active count
+            active_result = self.db.execute_query("""
+                SELECT COUNT(*) as active FROM agents WHERE is_active = 1
+            """)
+            current_active = active_result[0]['active'] if active_result else 0
+            
+            # Get inactive agents (prioritize by most recent deactivation, then fitness)
+            # Since we're giving them fresh starts, we don't exclude based on legacy_score
+            # Everyone gets a second chance!
+            inactive_agents = self.db.execute_query("""
+                SELECT agent_id, agent_type, genome, epigenetics, 
+                       discovery_prestige, legacy_score, generation as orig_gen
+                FROM agents 
+                WHERE is_active = 0
+                ORDER BY generation DESC, discovery_prestige DESC
+                LIMIT ?
+            """, (target_count,))
+            
+            if not inactive_agents:
+                results['errors'].append("No inactive agents available for revival")
+                return results
+            
+            print(f"[REVIVAL] Found {len(inactive_agents)} inactive agents eligible for reactivation")
+            print(f"[REVIVAL] Current active: {current_active}, Target to revive: {min(target_count, len(inactive_agents))}")
+            
+            for agent in inactive_agents:
+                if results['reactivated_count'] >= target_count:
+                    break
+                
+                agent_id = agent['agent_id']
+                
+                try:
+                    if fresh_start:
+                        # Reset prestige, mastery, and related fields to starter levels
+                        self.db.execute_query("""
+                            UPDATE agents SET
+                                is_active = 1,
+                                generation = ?,
+                                discovery_prestige = 0.0,
+                                innovation_score = 0.0,
+                                breeding_priority = 1.0,
+                                survival_protection = 0.0,
+                                bonus_game_slots = 0,
+                                action_budget_multiplier = 1.0,
+                                legacy_score = 0.0,
+                                vitality = 1.0,
+                                social_relevance_score = 1.0,
+                                learning_rate_effective = 0.1,
+                                generations_since_contribution = 0,
+                                times_packages_queried_recent = 0,
+                                last_prestige_update_gen = ?,
+                                death_type = NULL,
+                                death_persona = NULL
+                            WHERE agent_id = ?
+                        """, (generation, generation, agent_id))
+                        
+                        # Also clear any per-game mastery records for this agent
+                        # (mastery is game-level, not agent-level, but we can log the revival)
+                        logger.info(f"[REVIVAL] Fresh start for {agent_id[:12]}... (prestige/mastery reset)")
+                    else:
+                        # Simple reactivation without reset
+                        self.db.execute_query("""
+                            UPDATE agents SET
+                                is_active = 1,
+                                generation = ?
+                            WHERE agent_id = ?
+                        """, (generation, agent_id))
+                        logger.info(f"[REVIVAL] Reactivated {agent_id[:12]}... (kept existing stats)")
+                    
+                    # Log the revival
+                    self.db.execute_query("""
+                        INSERT INTO agent_revivals (
+                            original_agent_id, revived_agent_id, revival_trigger,
+                            revival_mode, generation, revival_timestamp
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        agent_id,
+                        agent_id,  # Same ID, just reactivated
+                        'mass_revival_population_boost',
+                        'fresh_start' if fresh_start else 'reactivation',
+                        generation,
+                        datetime.now().isoformat()
+                    ))
+                    
+                    results['agent_ids'].append(agent_id)
+                    results['reactivated_count'] += 1
+                    
+                except Exception as e:
+                    results['errors'].append(f"Failed to reactivate {agent_id}: {e}")
+            
+            print(f"[REVIVAL] Successfully reactivated {results['reactivated_count']} agents")
+            if results['errors']:
+                print(f"[REVIVAL] {len(results['errors'])} errors occurred")
+            
+        except Exception as e:
+            results['errors'].append(f"Mass revival failed: {e}")
+            logger.error(f"Mass revival failed: {e}")
+        
+        return results
+
 
 if __name__ == "__main__":
     import argparse
@@ -352,11 +481,47 @@ if __name__ == "__main__":
     parser.add_argument('--test', action='store_true', help='Run test mode')
     parser.add_argument('--generation', type=int, default=0, help='Current generation')
     parser.add_argument('--max', type=int, default=3, help='Maximum revivals')
+    parser.add_argument('--mass-revive', type=int, metavar='COUNT',
+                       help='Mass reactivate COUNT inactive agents with fresh starts')
+    parser.add_argument('--no-fresh-start', action='store_true',
+                       help='Keep existing prestige/stats when mass reviving (default: reset)')
     args = parser.parse_args()
     
     revival_system = AgentRevivalSystem()
     
-    if args.test:
+    if args.mass_revive:
+        # Mass revival mode
+        print("=" * 70)
+        print(f"MASS AGENT REVIVAL - Reactivating {args.mass_revive} agents")
+        print("=" * 70)
+        
+        # Get current population stats
+        active = revival_system.db.execute_query("SELECT COUNT(*) as c FROM agents WHERE is_active = 1")
+        inactive = revival_system.db.execute_query("SELECT COUNT(*) as c FROM agents WHERE is_active = 0")
+        print(f"\nCurrent state:")
+        print(f"  Active agents: {active[0]['c']}")
+        print(f"  Inactive agents: {inactive[0]['c']}")
+        print(f"  Fresh start (reset prestige/mastery): {not args.no_fresh_start}")
+        
+        # Perform mass revival
+        result = revival_system.mass_revive_inactive_agents(
+            target_count=args.mass_revive,
+            generation=args.generation,
+            fresh_start=not args.no_fresh_start
+        )
+        
+        print(f"\nResults:")
+        print(f"  Reactivated: {result['reactivated_count']} agents")
+        if result['errors']:
+            print(f"  Errors: {len(result['errors'])}")
+            for err in result['errors'][:5]:
+                print(f"    - {err}")
+        
+        # Show new state
+        active_after = revival_system.db.execute_query("SELECT COUNT(*) as c FROM agents WHERE is_active = 1")
+        print(f"\nNew active count: {active_after[0]['c']}")
+        
+    elif args.test:
         print("=" * 70)
         print("AGENT REVIVAL SYSTEM TEST")
         print("=" * 70)

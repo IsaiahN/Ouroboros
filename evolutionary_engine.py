@@ -674,8 +674,9 @@ class EvolutionaryEngine:
         # Use population_size from strategy, or default to reasonable size
         target_population_size = evolution_strategy.get('population_size', 50)
         
-        # NEVER let population exceed 200 agents (safety limit)
-        target_population_size = min(target_population_size, 200)
+        # NEVER let population exceed 500 agents (safety limit)
+        # Increased from 200 to support larger network populations
+        target_population_size = min(target_population_size, 500)
 
         # Combine current population and offspring
         all_candidates = current_population + offspring

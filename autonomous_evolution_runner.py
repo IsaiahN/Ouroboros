@@ -289,16 +289,16 @@ class AutonomousEvolutionRunner:
         Calculate target population using dynamic performance-based formula.
         
         Formula (Option C - Dynamic Performance-Based):
-            Base: 60 agents (minimum for role diversity)
+            Base: 300 agents (minimum for network diversity and parallel exploration)
             Bonus: +5 agents per unbeaten game (to assign pioneers)
-            Max: 150 agents (to keep generation time ~1 hour)
+            Max: 500 agents (upper bound for resource management)
         
         Returns:
-            int: Target population (60 + unbeaten_games * 5, capped at 150)
+            int: Target population (300 + unbeaten_games * 5, capped at 500)
         """
-        BASE_POPULATION = 60  # Minimum for role diversity
+        BASE_POPULATION = 300  # Minimum for network diversity (increased from 60)
         BONUS_PER_UNBEATEN = 5  # Extra agents per unbeaten game
-        MAX_POPULATION = 150  # Cap to keep generation time reasonable
+        MAX_POPULATION = 500  # Upper bound for resource management (increased from 150)
         
         try:
             # Count unbeaten games (games without full game win sequences)
@@ -2574,9 +2574,18 @@ class AutonomousEvolutionRunner:
                 print(f"[WARN] Sequence mining failed: {e}")
         
         # Run evaluation games
-        # ADAPTIVE: Use target population if available, otherwise use configured value
-        adaptive_games = getattr(self, '_current_target_population', self.games_per_generation)
-        print(f"  [ADAPTIVE] Running {adaptive_games} games (target population: {getattr(self, '_current_target_population', 'not set')})")
+        # ADAPTIVE SCALING: games_per_generation = active_agents * 0.25
+        # Rationale: 75 games for 300 agents (25% play rate per generation)
+        # This ensures each agent plays ~once every 4 generations on average
+        active_agent_count = self.db.get_active_agent_count()
+        GAMES_PER_AGENT_RATIO = 0.25  # 25% of agents play each generation
+        MIN_GAMES = 10  # Never go below 10 games
+        MAX_GAMES = 200  # Cap to prevent extremely long generations
+        
+        adaptive_games = int(active_agent_count * GAMES_PER_AGENT_RATIO)
+        adaptive_games = max(MIN_GAMES, min(MAX_GAMES, adaptive_games))
+        
+        print(f"  [ADAPTIVE] Running {adaptive_games} games ({active_agent_count} agents * {GAMES_PER_AGENT_RATIO:.0%} = {int(active_agent_count * GAMES_PER_AGENT_RATIO)}, clamped to [{MIN_GAMES}, {MAX_GAMES}])")
         eval_results = await self.run_evaluation_games(adaptive_games)
         
         # CRITICAL: Force WAL checkpoint after every generation to prevent data loss
