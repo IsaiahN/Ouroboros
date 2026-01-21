@@ -19,7 +19,10 @@ class DiskSpaceMonitor:
     
     def __init__(self, db_path: str = 'core_data.db'):
         self.db_path = db_path
-        self.drive = os.path.splitdrive(os.path.abspath(db_path))[0]
+        # Use the directory containing the db file for disk space checks
+        # This works cross-platform (Unix has no drive letters, Windows does)
+        abs_db_path = os.path.abspath(db_path)
+        self.db_dir = os.path.dirname(abs_db_path) or '.'
         
     def check_disk_space(self) -> Tuple[bool, str, dict]:
         """
@@ -30,8 +33,8 @@ class DiskSpaceMonitor:
         """
         stats = {}
         
-        # Get drive free space
-        drive_stats = shutil.disk_usage(self.drive)
+        # Get drive free space using the db directory (cross-platform)
+        drive_stats = shutil.disk_usage(self.db_dir)
         free_gb = drive_stats.free / (1024**3)
         total_gb = drive_stats.total / (1024**3)
         used_gb = drive_stats.used / (1024**3)

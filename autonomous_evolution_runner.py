@@ -514,10 +514,11 @@ class AutonomousEvolutionRunner:
                 db_path = getattr(self.db, 'db_path', 'core_data.db')
                 if os.path.exists(db_path):
                     db_size = os.path.getsize(db_path)
-                    drive = os.path.splitdrive(os.path.abspath(db_path))[0] or '/'
+                    # Use db directory for disk space check (cross-platform)
+                    db_dir = os.path.dirname(os.path.abspath(db_path)) or '.'
                     try:
                         import shutil
-                        free_space = shutil.disk_usage(drive).free
+                        free_space = shutil.disk_usage(db_dir).free
                         if free_space > db_size * 2:
                             self.db.execute_query("VACUUM")
                             print(f"  [DB] Vacuumed database (had {free_space/(1024**3):.1f}GB free)")
