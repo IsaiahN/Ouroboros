@@ -112,8 +112,8 @@ def main():
     else:
         print(">> STANDARD MODE - Balanced evolution")
         config = {
-            'initial_population_size': 10,
-            'games_per_generation': 10,  # REDUCED: 20 -> 10 for reasonable times
+            'initial_population_size': 300,  # Minimum population (BASE_POPULATION)
+            'games_per_generation': 75,  # ADAPTIVE: 300 * 0.25 = 75 (actual value computed at runtime)
             'evolution_interval_minutes': 60,
             'max_generations': 50
         }
@@ -131,8 +131,8 @@ def main():
     
     print(f"\n{'='*60}")
     print("Configuration:")
-    print(f"  Initial Population: {config['initial_population_size']} agents")
-    print(f"  Games per Generation: {config['games_per_generation']}")
+    print(f"  Initial Population: {config['initial_population_size']} agents (or existing if higher)")
+    print(f"  Games per Generation: ADAPTIVE (agents * 25%, min 10, max 200)")
     print(f"  Evolution Interval: {config['evolution_interval_minutes']} minutes")
     print(f"  Max Generations: {config['max_generations']}")
     if args.diversity:
