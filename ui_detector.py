@@ -415,7 +415,15 @@ class UIDetector:
                 result['max_actions'] = self.max_observed_values.get(
                     region_key, region.max_value
                 )
-                result['is_critical'] = region.current_value <= 2
+                # FIX (Feedback 9): Use percentage-based threshold, not absolute
+                # Critical when < 10% actions remaining (was: <= 2 which is way too late)
+                max_actions = result['max_actions']
+                remaining = region.current_value
+                if max_actions and max_actions > 0 and remaining is not None:
+                    pct_remaining = remaining / max_actions
+                    result['is_critical'] = pct_remaining < 0.10
+                else:
+                    result['is_critical'] = (remaining or 0) <= 2  # Fallback
                 break
         
         return result

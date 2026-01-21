@@ -5638,6 +5638,12 @@ class GameplayEngine:
         Returns:
             Tuple of (should_explore, reason)
         """
+        # Trigger 0: No-change stuck (API returns 304/no change repeatedly)
+        # FIX (Feedback 9): Detect when actions produce no frame change
+        no_change_count = getattr(self, '_no_frame_change_count', 0)
+        if no_change_count >= 8:  # 8+ consecutive no-change actions
+            return True, f"NO_CHANGE_STUCK: {no_change_count} consecutive actions with no frame change"
+        
         # Trigger 1: Regional stuck override (highest priority)
         if regional_stuck.get('is_stuck'):
             # Enhanced reason with primitive data
@@ -5666,12 +5672,14 @@ class GameplayEngine:
         self,
         escape_direction: Optional[str],
         unexplored_regions: List[Dict[str, Any]],
-        current_position: Optional[Tuple[int, int]]
+        current_position: Optional[Tuple[int, int]],
+        current_level: int = 1
     ) -> Tuple[str, str]:
         """
         Get an exploration action based on available data.
         
         Priority:
+        0. Network tracker intelligent suggestion (untried/underexplored)
         1. Escape direction (if regional stuck)
         2. Network unexplored regions (if available)
         3. Random directional action
@@ -5680,6 +5688,7 @@ class GameplayEngine:
             escape_direction: From regional stuck detection ('up', 'down', etc.)
             unexplored_regions: From network exploration tracker
             current_position: Current agent position
+            current_level: Current level number (for exploration tracker)
             
         Returns:
             Tuple of (action, reasoning)
@@ -5690,6 +5699,28 @@ class GameplayEngine:
             'left': 'ACTION3',
             'right': 'ACTION4'
         }
+        
+        # Priority 0: Use network tracker's intelligent suggestion (untried/underexplored actions)
+        # FIX (Feedback 9): Wire up exploration_tracker.get_exploration_priority_action
+        if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+            try:
+                game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                game_type = game_id[:4] if game_id else 'unknown'
+                frame_w = getattr(self, '_current_frame_width', 64)
+                frame_h = getattr(self, '_current_frame_height', 64)
+                
+                suggested = self.exploration_tracker.get_exploration_priority_action(
+                    game_type=game_type,
+                    level=current_level,
+                    current_position=current_position,
+                    frame_width=frame_w,
+                    frame_height=frame_h
+                )
+                if suggested and isinstance(suggested, int) and 1 <= suggested <= 7:
+                    action = f"ACTION{suggested}"
+                    return action, f"[EXPLORE-TRACKER] Using network exploration intelligence: {action}"
+            except Exception as tracker_err:
+                logger.debug(f"[EXPLORE-TRACKER] Suggestion failed: {tracker_err}")
         
         # Priority 1: Escape direction from stuck detection
         if escape_direction and escape_direction in direction_to_action:
@@ -8236,6 +8267,9 @@ class GameplayEngine:
                             # Frame changed = not stuck, reset struggle guard and stuck counter
                             self._reset_struggle_guard_state(level=current_level)
                             consecutive_no_frame_change = 0
+                            # FIX (Feedback 9): Track for obstacle avoidance in _select_action
+                            self._no_frame_change_count = 0
+                            self._last_action_no_change = False
                             
                             # If we were in escape mode and frame changed, escape worked!
                             if in_escape_mode:
@@ -8256,6 +8290,10 @@ class GameplayEngine:
                             # A frame change includes: shape, color, size, positioning changes.
                             # Score increase without frame change does NOT reset stuck counter.
                             consecutive_no_frame_change += 1
+                            # FIX (Feedback 9): Track for obstacle avoidance in _select_action
+                            self._no_frame_change_count = consecutive_no_frame_change
+                            self._last_action_no_change = True
+                            self._last_action_taken = action  # Track which action failed
                             
                             # ================================================================
                             # FIX: EARLY PERSONA SPAWN AT 30 FRAMES (before 200 escape mode)
@@ -10642,6 +10680,32 @@ class GameplayEngine:
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
         
         # ===================================================================
+        # FIX (Feedback 9): OBSTACLE AVOIDANCE - Perpendicular recovery
+        # ===================================================================
+        # If last action caused no frame change, try perpendicular direction
+        # This prevents walking into walls repeatedly
+        # ===================================================================
+        last_action_no_change = getattr(self, '_last_action_no_change', False)
+        last_action = getattr(self, '_last_action_taken', None)
+        
+        if last_action_no_change and last_action and last_action.startswith('ACTION'):
+            perpendicular_map = {
+                'ACTION1': ['ACTION3', 'ACTION4'],  # up failed -> try left/right
+                'ACTION2': ['ACTION3', 'ACTION4'],  # down failed -> try left/right
+                'ACTION3': ['ACTION1', 'ACTION2'],  # left failed -> try up/down
+                'ACTION4': ['ACTION1', 'ACTION2'],  # right failed -> try up/down
+            }
+            if last_action in perpendicular_map:
+                import random
+                recovery_action = random.choice(perpendicular_map[last_action])
+                # Only use obstacle avoidance occasionally to allow retries
+                if random.random() < 0.7:  # 70% chance to try perpendicular
+                    # Clear the flag so we don't keep triggering if perpendicular also fails
+                    self._last_action_no_change = False
+                    logger.debug(f"[OBSTACLE-AVOID] {last_action} caused no change, trying {recovery_action}")
+                    return recovery_action, f"[OBSTACLE-AVOID] {last_action} blocked, trying perpendicular {recovery_action}"
+        
+        # ===================================================================
         # EXPLORATION PHASE SYSTEM: Override goal-seeking when stuck/exploring
         # ===================================================================
         # Three-layer control:
@@ -10709,7 +10773,8 @@ class GameplayEngine:
                 explore_action, explore_full_reason = self._get_exploration_action(
                     escape_direction=escape_direction,
                     unexplored_regions=unexplored_regions,
-                    current_position=current_position
+                    current_position=current_position,
+                    current_level=current_level
                 )
                 
                 # Log the override
@@ -18491,13 +18556,17 @@ class GameplayEngine:
                                     current_controlled_colors.append(int(match.group(1)))
                 
                 # Check if we have new controlled colors that weren't in the tracker
+                # FIX (Feedback 9): Refresh when colors CHANGE, not just when tracker empty
                 tracker_keys = set(self.symbolic_state_tracker.key_objects.keys()) if self.symbolic_state_tracker.key_objects else set()
+                last_controlled = getattr(self, '_last_symbolic_controlled_colors', [])
+                colors_changed = set(current_controlled_colors) != set(last_controlled)
                 needs_refresh = (
                     len(current_controlled_colors) > 0 and
-                    len(self.symbolic_state_tracker.key_objects) == 0
+                    (len(self.symbolic_state_tracker.key_objects) == 0 or colors_changed)
                 )
                 
                 if needs_refresh and frame:
+                    self._last_symbolic_controlled_colors = current_controlled_colors.copy()
                     # Re-identify objects with updated controlled colors
                     frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
                     self.symbolic_state_tracker.identify_symbolic_objects(frame_arr, controlled_colors=current_controlled_colors)

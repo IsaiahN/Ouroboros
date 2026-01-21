@@ -2,6 +2,356 @@
 
 ---
 
+## Session: January 21, 2026 - Feedback 9 Perception-Action Integration Fixes
+
+---
+
+### Approach: Address feedback from ls20 reasoning log analysis showing perception systems work (60% improvement) but decision-making doesn't act on sensor data. Five targeted fixes to bridge the perception-action gap.
+
+**Timestamp**: 3:08:48 PM  
+**Status**: COMPLETE - All 5 fixes implemented and verified
+
+---
+
+### Problem Statement (From Feedback 9)
+
+Analysis of ls20 reasoning logs revealed:
+- **Agent Position**: 99.7% FIXED (was 0%)
+- **Symbolic State**: Only 5.7% populated (NULL 94% of time)
+- **Stuck Rate**: 60% UNCHANGED (285/478 actions returned "304 Not Modified")
+- **Exploration Coverage**: 0% after 478 actions
+- **Resource Awareness**: `actions_critical: false` at 93% budget used
+
+**Root Cause**: Perception systems generate correct data, but decision-making ignores it.
+- Exploration recommendations generated but never acted on
+- Stuck detection works but doesn't trigger recovery
+- Symbolic analysis runs but decision-making ignores results
+
+---
+
+### Solution: 5 Targeted Fixes
+
+#### Fix #1: Symbolic State Refresh Trigger
+**File**: [core_gameplay.py](core_gameplay.py) (~line 18560)  
+**Issue**: Symbolic state only refreshed when tracker empty, not when controlled colors change  
+**Fix**: Track `_last_symbolic_controlled_colors` and refresh on color change
+
+```python
+# BEFORE (broken)
+needs_refresh = (
+    len(current_controlled_colors) > 0 and
+    len(self.symbolic_state_tracker.key_objects) == 0
+)
+
+# AFTER (fixed)
+last_controlled = getattr(self, '_last_symbolic_controlled_colors', [])
+colors_changed = set(current_controlled_colors) != set(last_controlled)
+needs_refresh = (
+    len(current_controlled_colors) > 0 and
+    (len(self.symbolic_state_tracker.key_objects) == 0 or colors_changed)
+)
+if needs_refresh and frame:
+    self._last_symbolic_controlled_colors = current_controlled_colors.copy()
+```
+
+#### Fix #2: No-Change Stuck Detection
+**File**: [core_gameplay.py](core_gameplay.py) (~line 5643)  
+**Issue**: Stuck detection only looked at position, not API response (304 Not Modified)  
+**Fix**: Add trigger for 8+ consecutive no-frame-change actions
+
+```python
+# NEW - Trigger 0 in _should_force_exploration()
+no_change_count = getattr(self, '_no_frame_change_count', 0)
+if no_change_count >= 8:  # 8+ consecutive no-change actions
+    return True, f"NO_CHANGE_STUCK: {no_change_count} consecutive actions with no frame change"
+```
+
+**Tracking** (game loop ~line 8270):
+```python
+if frame_changed:
+    self._no_frame_change_count = 0
+    self._last_action_no_change = False
+else:
+    self._no_frame_change_count = consecutive_no_frame_change
+    self._last_action_no_change = True
+    self._last_action_taken = action
+```
+
+#### Fix #3: Exploration Tracker Integration
+**File**: [core_gameplay.py](core_gameplay.py) (~line 5700)  
+**Issue**: `network_exploration_tracker.get_exploration_priority_action()` existed but was never called  
+**Fix**: Wire up as Priority 0 in `_get_exploration_action()`
+
+```python
+# NEW - Priority 0 uses intelligent exploration suggestion
+if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+    suggested = self.exploration_tracker.get_exploration_priority_action(
+        game_type=game_type,
+        level=current_level,
+        current_position=current_position,
+        frame_width=frame_w,
+        frame_height=frame_h
+    )
+    if suggested and isinstance(suggested, int) and 1 <= suggested <= 7:
+        action = f"ACTION{suggested}"
+        return action, f"[EXPLORE-TRACKER] Using network exploration intelligence: {action}"
+```
+
+Also added `current_level` parameter to function signature and call site.
+
+#### Fix #4: Resource Critical Threshold
+**File**: [ui_detector.py](ui_detector.py) (~line 419)  
+**Issue**: `is_critical` only triggered at `remaining <= 2` (way too late)  
+**Fix**: Use percentage-based threshold (<10% remaining)
+
+```python
+# BEFORE (broken)
+result['is_critical'] = region.current_value <= 2
+
+# AFTER (fixed)
+max_actions = result['max_actions']
+remaining = region.current_value
+if max_actions and max_actions > 0 and remaining is not None:
+    pct_remaining = remaining / max_actions
+    result['is_critical'] = pct_remaining < 0.10  # 10% threshold
+else:
+    result['is_critical'] = (remaining or 0) <= 2  # Fallback
+```
+
+#### Fix #5: Obstacle Avoidance
+**File**: [core_gameplay.py](core_gameplay.py) (~line 10688)  
+**Issue**: No response when action causes no change (walks into walls repeatedly)  
+**Fix**: Try perpendicular direction with 70% probability
+
+```python
+# NEW - in _select_action() after frame sanity check
+if last_action_no_change and last_action and last_action.startswith('ACTION'):
+    perpendicular_map = {
+        'ACTION1': ['ACTION3', 'ACTION4'],  # up failed -> try left/right
+        'ACTION2': ['ACTION3', 'ACTION4'],  # down failed -> try left/right
+        'ACTION3': ['ACTION1', 'ACTION2'],  # left failed -> try up/down
+        'ACTION4': ['ACTION1', 'ACTION2'],  # right failed -> try up/down
+    }
+    if last_action in perpendicular_map:
+        if random.random() < 0.7:  # 70% chance to try perpendicular
+            self._last_action_no_change = False  # Clear flag
+            recovery_action = random.choice(perpendicular_map[last_action])
+            return recovery_action, f"[OBSTACLE-AVOID] {last_action} blocked, trying perpendicular"
+```
+
+---
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `py_compile core_gameplay.py` | PASS |
+| `py_compile ui_detector.py` | PASS |
+| Pylance errors | None |
+| Integration review | All call sites verified |
+
+---
+
+### Expected Outcomes
+
+| Metric | Before | After (Expected) |
+|--------|--------|------------------|
+| Stuck Rate | 60% | ~25% |
+| Symbolic Detection | 6% | ~40% |
+| Exploration Coverage | 0% | ~70% |
+| Resource Critical | Triggers at 2 actions | Triggers at 10% remaining |
+
+---
+
+### Files Modified
+- `core_gameplay.py`: Fixes #1, #2, #3, #5 + tracking variables
+- `ui_detector.py`: Fix #4
+
+---
+
+### Next Steps
+1. Run evolution to validate fixes work in practice
+2. Monitor for stuck rate reduction
+3. Watch for symbolic state population improvement
+4. Verify exploration tracker suggestions being used
+
+---
+
+## Session: January 21, 2026 - Mastery System Deadlock Fix + CODS Integration
+
+---
+
+### Approach: Fix critical deadlock in mastery-gated replay system that caused 98% zero-score games. The mastery gates were too strict - agents couldn't unlock replay because they couldn't build mastery, but they couldn't build mastery without replay. Implemented graduated validation (Option B + C) and CODS evidence integration.
+
+**Timestamp**: 2:40:58 PM  
+**Status**: COMPLETE - Deadlock broken, CODS integration added
+
+---
+
+### Problem Statement
+
+Analysis of 24-hour gameplay revealed catastrophic failure:
+- **98% zero-score rate** (96 zeros out of 98 games)
+- Only 2 positive scores in 24 hours
+- Agents stuck in pure exploration mode
+
+**Root Cause: Mastery System Deadlock (Catch-22)**
+
+| Metric | Current State | Required for Practitioner (50+) |
+|--------|--------------|--------------------------------|
+| Diversity | 0 pts (1 sequence each) | Need 2+ unique sequences for 10 pts |
+| Ablation | 0 pts (0 tests run) | Need ablation tests to pass |
+| Consistency | 20 pts | Working |
+| Efficiency | 0-6 pts | Minor |
+| **TOTAL** | 20-26 pts | Need 50+ to unlock replay |
+
+**The Deadlock**:
+1. Agents stuck at Novice/Apprentice (20-26 pts max)
+2. Novice/Apprentice have **0% replay probability**
+3. Without replay, agents do pure random exploration
+4. Pure exploration rarely finds new unique sequences
+5. Without replay, no ablation tests can run
+6. System stuck in loop of zero-score exploration
+
+---
+
+### Solution: Graduated Validation (Option B + C + CODS)
+
+#### Fix #1: Option B - Apprentice Gets 30% Replay
+**File**: [mastery_system.py](mastery_system.py)
+
+```python
+# BEFORE (deadlocked)
+TIER_CONFIG = {
+    'novice':       {'replay_prob': 0.00},
+    'apprentice':   {'replay_prob': 0.00},  # NO REPLAY
+    'practitioner': {'replay_prob': 0.70},  # threshold: 50
+}
+
+# AFTER (graduated)
+TIER_CONFIG = {
+    'novice':       {'replay_prob': 0.00},
+    'apprentice':   {'replay_prob': 0.30},  # 30% REPLAY - breaks deadlock
+    'practitioner': {'replay_prob': 0.70},  # threshold: 40 (lowered from 50)
+    'expert':       {'replay_prob': 0.90},  # threshold: 65 (lowered from 75)
+    'master':       {'replay_prob': 0.95},  # threshold: 85 (lowered from 95)
+}
+```
+
+#### Fix #2: Option C - Bootstrap Diversity Bonus
+**File**: [mastery_system.py](mastery_system.py)
+
+```python
+# BEFORE: 1 sequence = 0 pts (impossible to escape novice)
+# AFTER: 1 sequence = 10 pts (bootstrap bonus)
+if unique_strategies >= 5:
+    diversity_score = 30.0
+elif unique_strategies >= 3:
+    diversity_score = 20.0
+elif unique_strategies >= 2:
+    diversity_score = 15.0
+elif unique_strategies >= 1:
+    diversity_score = 10.0  # BOOTSTRAP BONUS
+else:
+    diversity_score = 0.0
+```
+
+#### Fix #3: CODS Evidence Integration (New Metric 5)
+**File**: [mastery_system.py](mastery_system.py)
+
+Added new metric that queries CODS tables for reasoning evidence:
+
+```python
+# METRIC 5: CODS EVIDENCE (max 10 points)
+# - Operators that contributed to wins: 3 pts each, max 6
+# - Validated primitive/operator theories: 0.5 pts each, max 4
+
+operator_wins = db.execute_query("""
+    SELECT COUNT(DISTINCT operator_id) as operators_helped
+    FROM operator_test_results
+    WHERE game_id LIKE ? AND level_number = ?
+      AND contributed_to_win = 1 AND success = 1
+""", (f"{game_type}-%", level_number))
+
+primitive_theories = db.execute_query("""
+    SELECT COUNT(*) as validated_theories
+    FROM gametype_primitive_theory
+    WHERE game_type = ? AND success_rate >= 0.6 AND times_used >= 3
+""", (game_type,))
+```
+
+---
+
+### Results After Fix
+
+| Level | Before | After |
+|-------|--------|-------|
+| as66 L1 | novice (20 pts, 0%) | **apprentice (34 pts, 30%)** |
+| as66 L3 | apprentice (26 pts, 0%) | **apprentice (39 pts, 30%)** |
+| ft09 L1 | novice (20 pts, 0%) | **apprentice (34 pts, 30%)** |
+| lp85 L1 | novice (20 pts, 0%) | **apprentice (34 pts, 30%)** |
+| ls20 L1 | novice (20 pts, 0%) | **apprentice (34 pts, 30%)** |
+| sp80 L1 | novice (20 pts, 0%) | **apprentice (34 pts, 30%)** |
+| vc33 L1 | novice (20 pts, 0%) | **apprentice (34 pts, 30%)** |
+| vc33 L2 | novice (20 pts, 0%) | **apprentice (34 pts, 30%)** |
+
+**Score Breakdown**:
+- Diversity: 10 pts (bootstrap bonus)
+- Consistency: 20 pts (cross-agent validation)
+- CODS Evidence: 4 pts (validated theories)
+- **Total: 34 pts -> Apprentice with 30% replay**
+
+---
+
+### Theoretical Integration: CODS + Mastery
+
+**Before**: Two parallel validation systems that didn't communicate
+- Mastery: Validates sequence understanding (per game-level)
+- CODS: Validates pattern/primitive understanding (cross-game)
+
+**After**: CODS feeds evidence to Mastery
+
+```
+CODS should be the "why" validator, Mastery is the "what" validator.
+- Mastery asks: "Did you beat this level multiple ways?"
+- CODS asks: "Did you understand WHY those ways work?"
+```
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| [mastery_system.py](mastery_system.py) | Tier thresholds lowered, apprentice replay 30%, bootstrap diversity, CODS evidence metric |
+| [README.md](README.md) | Added architecture theory links, mastery system section |
+
+---
+
+### Current State
+
+**Deadlock: BROKEN**
+- 9 of 11 levels now at Apprentice with 30% replay
+- System can now bootstrap ablation tests
+- CODS evidence provides additional path to higher scores
+
+**Expected Progression**:
+- Gen 1-10: 30% replay enables ablation tests
+- Gen 10-30: Ablation data accumulates, some levels reach Practitioner (40+)
+- Gen 30-50: Practitioner replay (70%) enables optimization
+- Gen 50+: System progresses meaningfully
+
+---
+
+### Next Steps
+
+1. Run evolution to test graduated validation
+2. Monitor for ablation tests actually running
+3. Watch for levels reaching Practitioner tier
+4. Verify CODS evidence accumulating
+
+---
+
 ## Session: January 19, 2026 - LS20 Reasoning Feedback Fix Implementation
 
 ---

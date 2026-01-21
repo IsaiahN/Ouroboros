@@ -58,11 +58,12 @@ class MasteryStatus:
     ablation_score: float
     consistency_score: float
     efficiency_score: float
-    unique_sequences: int
-    ablation_success_rate: Optional[float]
-    unique_agents: int
-    cross_agent_success_rate: float
-    replay_probability: float
+    cods_evidence_score: float = 0.0  # NEW: CODS-validated reasoning evidence
+    unique_sequences: int = 0
+    ablation_success_rate: Optional[float] = None
+    unique_agents: int = 0
+    cross_agent_success_rate: float = 0.0
+    replay_probability: float = 0.0
     # Internal tracking
     _decay_applied: bool = field(default=False, repr=False)
 
@@ -367,9 +368,52 @@ class MasterySystem:
             efficiency_score = improvement_score + recency_score
         
         # ================================================================
+        # METRIC 5: CODS EVIDENCE (max 10 points) - NEW
+        # ================================================================
+        # Does CODS have evidence of genuine reasoning for this level?
+        # - Operators that contributed to wins
+        # - Primitive/operator theories validated on this game type
+        # This proves agents understood WHY, not just memorized sequences.
+        cods_evidence_score = 0.0
+        try:
+            # Check operator_test_results for operators that contributed to wins
+            operator_wins = self.db.execute_query("""
+                SELECT COUNT(DISTINCT operator_id) as operators_helped
+                FROM operator_test_results
+                WHERE game_id LIKE ? 
+                  AND level_number = ?
+                  AND contributed_to_win = 1
+                  AND success = 1
+            """, (f"{game_type}-%", level_number))
+            
+            if operator_wins and operator_wins[0]['operators_helped']:
+                helpful_operators = operator_wins[0]['operators_helped']
+                # 3 pts per helpful operator, max 6 pts
+                cods_evidence_score += min(helpful_operators * 3.0, 6.0)
+            
+            # Check gametype_primitive_theory for validated primitives/operators
+            primitive_theories = self.db.execute_query("""
+                SELECT COUNT(*) as validated_theories
+                FROM gametype_primitive_theory
+                WHERE game_type = ?
+                  AND success_rate >= 0.6
+                  AND times_used >= 3
+            """, (game_type,))
+            
+            if primitive_theories and primitive_theories[0]['validated_theories']:
+                validated = primitive_theories[0]['validated_theories']
+                # 2 pts per validated theory, max 4 pts
+                cods_evidence_score += min(validated * 0.5, 4.0)
+                
+            logger.debug(f"[MASTERY] CODS evidence for {game_type} L{level_number}: {cods_evidence_score:.1f} pts")
+        except Exception as e:
+            logger.debug(f"[MASTERY] CODS evidence check failed: {e}")
+            # Fail gracefully - don't break mastery calculation
+        
+        # ================================================================
         # AGGREGATE
         # ================================================================
-        total_score = diversity_score + ablation_score + consistency_score + efficiency_score
+        total_score = diversity_score + ablation_score + consistency_score + efficiency_score + cods_evidence_score
         
         # Determine tier
         tier = self._score_to_tier(total_score)
@@ -386,6 +430,7 @@ class MasterySystem:
             ablation_score=ablation_score,
             consistency_score=consistency_score,
             efficiency_score=efficiency_score,
+            cods_evidence_score=cods_evidence_score,  # NEW
             unique_sequences=unique_strategies,
             ablation_success_rate=ablation_success_rate,
             unique_agents=unique_agents,
