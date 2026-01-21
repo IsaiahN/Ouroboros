@@ -144,19 +144,20 @@ class ARCClient:
 
     async def __aenter__(self):
         """Async context manager entry."""
-        # Create timeout with longer durations for long-running games
+        # Create timeout with longer durations for stability
         timeout = aiohttp.ClientTimeout(
             total=None,  # No total timeout
-            connect=30,  # 30 seconds to establish connection
+            connect=60,  # 60 seconds to establish connection (increased from 30)
             sock_read=600  # 10 minutes for reading response (very long games)
         )
-        # Create connector with keep-alive enabled
+        # Create connector with keep-alive enabled and REDUCED concurrency for stability
         connector = aiohttp.TCPConnector(
-            limit=100,
-            limit_per_host=30,
+            limit=20,  # REDUCED from 100 - less concurrent connections
+            limit_per_host=10,  # REDUCED from 30 - less per-host connections
             ttl_dns_cache=300,  # Cache DNS for 5 minutes
             enable_cleanup_closed=True,
-            force_close=False  # Keep connections alive
+            force_close=False,  # Keep connections alive
+            keepalive_timeout=60  # Keep connections alive for 60 seconds
         )
         self.session = aiohttp.ClientSession(
             headers=self.headers,
@@ -234,8 +235,8 @@ class ARCClient:
         if not self.session:
             raise ARCError("Session not initialized. Use async with statement.")
 
-        max_retries = 3
-        retry_delay = 1
+        max_retries = 5  # Increased from 3 for better resilience
+        retry_delay = 2  # Increased from 1 second
 
         logger.debug(f"Making {method} request to {url}")
 
