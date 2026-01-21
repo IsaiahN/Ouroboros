@@ -83,12 +83,16 @@ class MasterySystem:
     """
     
     # Tier thresholds and replay probabilities
+    # DEADLOCK FIX (Jan 21 2026): Original gates were too strict - nothing could pass.
+    # - Apprentice now gets 30% replay to bootstrap ablation tests
+    # - Practitioner threshold lowered to 40 (was 50)
+    # - This breaks the catch-22 where replay required mastery, but mastery required replay
     TIER_CONFIG = {
         'novice':       {'min_score': 0,  'max_score': 24,  'replay_prob': 0.00, 'forced_explore': 1.00},
-        'apprentice':   {'min_score': 25, 'max_score': 49,  'replay_prob': 0.00, 'forced_explore': 1.00},
-        'practitioner': {'min_score': 50, 'max_score': 74,  'replay_prob': 0.70, 'forced_explore': 0.30},
-        'expert':       {'min_score': 75, 'max_score': 94,  'replay_prob': 0.90, 'forced_explore': 0.10},
-        'master':       {'min_score': 95, 'max_score': 100, 'replay_prob': 0.95, 'forced_explore': 0.05},
+        'apprentice':   {'min_score': 25, 'max_score': 39,  'replay_prob': 0.30, 'forced_explore': 0.70},  # FIXED: was 0.00
+        'practitioner': {'min_score': 40, 'max_score': 64,  'replay_prob': 0.70, 'forced_explore': 0.30},  # FIXED: was 50
+        'expert':       {'min_score': 65, 'max_score': 84,  'replay_prob': 0.90, 'forced_explore': 0.10},  # FIXED: was 75
+        'master':       {'min_score': 85, 'max_score': 100, 'replay_prob': 0.95, 'forced_explore': 0.05},  # FIXED: was 95
     }
     
     # Ablation skip rates by tier (min, max)
@@ -262,13 +266,18 @@ class MasterySystem:
         """, (f"{game_type}-%", level_number))
         
         unique_strategies = self._count_unique_sequences(sequences, similarity_threshold=0.8)
-        # 0-1 unique = 0 pts, 2 unique = 10 pts, 3+ unique = 20 pts, 5+ unique = 30 pts
+        # DEADLOCK FIX (Jan 21 2026): Bootstrap diversity bonus
+        # Original: 0-1 unique = 0 pts (impossible to break out of novice)
+        # Fixed: 1 unique = 10 pts (bootstrap), 2 unique = 15 pts, 3+ = 20 pts, 5+ = 30 pts
+        # This lets levels with 1 working sequence reach 30 pts (apprentice w/ replay)
         if unique_strategies >= 5:
             diversity_score = 30.0
         elif unique_strategies >= 3:
             diversity_score = 20.0
         elif unique_strategies >= 2:
-            diversity_score = 10.0
+            diversity_score = 15.0
+        elif unique_strategies >= 1:
+            diversity_score = 10.0  # BOOTSTRAP BONUS: first sequence gets credit
         else:
             diversity_score = 0.0
         
@@ -465,12 +474,15 @@ class MasterySystem:
         return dp[m][n] / max_len if max_len > 0 else 0.0
     
     def _score_to_tier(self, score: float) -> str:
-        """Convert numeric score to tier name."""
-        if score >= 95:
+        """Convert numeric score to tier name.
+        
+        DEADLOCK FIX (Jan 21 2026): Lowered thresholds to match TIER_CONFIG.
+        """
+        if score >= 85:
             return 'master'
-        elif score >= 75:
+        elif score >= 65:
             return 'expert'
-        elif score >= 50:
+        elif score >= 40:
             return 'practitioner'
         elif score >= 25:
             return 'apprentice'
@@ -482,7 +494,8 @@ class MasterySystem:
         Determine if replay should be allowed for this game-level.
         
         Uses probabilistic gating based on mastery tier:
-        - Novice/Apprentice: NEVER allow replay (must explore)
+        - Novice: NEVER allow replay (must explore)
+        - Apprentice: 30% replay (bootstrap ablation tests)
         - Practitioner: 70% replay probability
         - Expert: 90% replay probability
         - Master: 95% replay probability
