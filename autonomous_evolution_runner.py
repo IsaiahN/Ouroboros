@@ -495,20 +495,32 @@ class AutonomousEvolutionRunner:
         Keeps only the last 10,000 most recent log entries.
         """
         try:
+            # First checkpoint WAL to ensure consistent reads (helps with external drives)
+            print("    - Checkpointing WAL...")
+            if hasattr(self.db, 'checkpoint_wal'):
+                self.db.checkpoint_wal()
+            
             # Get current log count
+            print("    - Counting system logs...")
             count_result = self.db.execute_query("SELECT COUNT(*) as count FROM system_logs")
             total_logs = count_result[0]['count'] if count_result else 0
+            print(f"    - Found {total_logs:,} log entries")
             
             if total_logs > 10000:
-                # Delete old logs, keep newest 10,000
-                deleted = self.db.execute_query("""
-                    DELETE FROM system_logs 
-                    WHERE id NOT IN (
-                        SELECT id FROM system_logs 
-                        ORDER BY timestamp DESC 
-                        LIMIT 10000
-                    )
+                # Delete old logs using a more efficient approach
+                # First get the cutoff ID, then delete everything below it
+                print("    - Finding cutoff point...")
+                cutoff_result = self.db.execute_query("""
+                    SELECT id FROM system_logs 
+                    ORDER BY timestamp DESC 
+                    LIMIT 1 OFFSET 9999
                 """)
+                if cutoff_result:
+                    cutoff_id = cutoff_result[0]['id']
+                    print(f"    - Deleting logs older than ID {cutoff_id}...")
+                    self.db.execute_query("""
+                        DELETE FROM system_logs WHERE id < ?
+                    """, (cutoff_id,))
                 
                 # Check disk space before vacuum (requires 2x database size)
                 db_path = getattr(self.db, 'db_path', 'core_data.db')
@@ -529,6 +541,8 @@ class AutonomousEvolutionRunner:
                 
                 logs_removed = total_logs - 10000
                 print(f"  [DB] Cleaned up {logs_removed:,} old log entries (kept 10K most recent)")
+            else:
+                print(f"    - No cleanup needed ({total_logs:,} <= 10,000)")
                 
         except Exception as e:
             print(f"[WARN]  Log cleanup failed (non-critical): {e}")
@@ -2966,11 +2980,13 @@ class AutonomousEvolutionRunner:
         
         # Cleanup old logs on startup to prevent bloat from previous runs
         # Skip in test mode for faster startup
-        if self.skip_cleanup:
-            print("\n[SKIP] Skipping database cleanup (test mode)")
-        else:
-            print("\n[?]  Performing startup database cleanup...")
-            self._cleanup_old_logs()
+        # TEMPORARILY DISABLED - causing issues with external drive
+        # if self.skip_cleanup:
+        #     print("\n[SKIP] Skipping database cleanup (test mode)")
+        # else:
+        #     print("\n[?]  Performing startup database cleanup...")
+        #     self._cleanup_old_logs()
+        print("\n[SKIP] Startup cleanup temporarily disabled")
         
         # Sync schema file with actual database (catches tables created by other modules)
         if SCHEMA_MAINTENANCE_AVAILABLE and SchemaAutoMaintenance:
