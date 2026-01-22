@@ -202,7 +202,6 @@ class AutonomousEvolutionRunner:
         from frustration_detector import FrustrationDetector
         from near_miss_analyzer import NearMissAnalyzer
         from collective_reasoning_engine import CollectiveReasoningEngine
-        from counterfactual_analyzer import CounterfactualAnalyzer
         from oracle_stuck_game_diagnostics import OracleStuckGameDiagnostics
         
         self.subgoal_planner = SubgoalPlanner(self.db)  # Hierarchical planning
@@ -210,9 +209,9 @@ class AutonomousEvolutionRunner:
         self.stuck_game_diagnostics = OracleStuckGameDiagnostics(self.db)  # DIAGNOSTIC ONLY - no interventions
         self.near_miss_analyzer = NearMissAnalyzer(self.db)  # Learn from 15-18/20 scores
         self.collective_reasoner = CollectiveReasoningEngine(self.db)  # Multi-agent collaboration
-        self.counterfactual_analyzer = CounterfactualAnalyzer(self.db)  # "What if?" analysis
+        # counterfactual_analyzer removed - generated dead data (Jan 17, 2026)
         
-        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Diagnostics, Near-Miss Analysis, Collective Reasoning, Counterfactual Analysis)")
+        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Diagnostics, Near-Miss Analysis, Collective Reasoning)")
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -1728,32 +1727,7 @@ class AutonomousEvolutionRunner:
                                     except Exception as e:
                                         print(f"  [WARN] Near-miss analysis failed: {e}")
 
-                                # Counterfactual analysis
-                                if self.counterfactual_analyzer and not result.get('win', False) and final_score < 15:
-                                    try:
-                                        session_id = engine_slot.session_manager.current_session_id or "unknown"
-                                        # Build action_history from engine if available
-                                        action_history = []
-                                        if hasattr(engine_slot, '_action_history') and engine_slot._action_history:
-                                            action_history = list(engine_slot._action_history)
-                                        elif hasattr(engine_slot, '_recent_actions') and engine_slot._recent_actions:
-                                            action_history = [{'action': a, 'index': i} for i, a in enumerate(engine_slot._recent_actions)]
-                                        learning_ids = self.counterfactual_analyzer.analyze_failure(
-                                            agent_id=agent_id,
-                                            game_id=game_id,
-                                            game_type=game_type,
-                                            final_score=final_score,
-                                            action_history=action_history,
-                                            session_id=session_id,
-                                            generation=self.current_generation,
-                                        )
-                                        if learning_ids and hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:
-                                            try:
-                                                engine_slot.cods_engine.process_counterfactual_insights(learning_ids)
-                                            except Exception:
-                                                pass
-                                    except Exception as e:
-                                        print(f"  [WARN] Counterfactual analysis failed: {e}")
+                                # Counterfactual analysis removed - generated dead data (Jan 17, 2026)
 
                                 # CODS outcome logging
                                 if hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:
