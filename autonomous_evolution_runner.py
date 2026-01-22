@@ -294,11 +294,11 @@ class AutonomousEvolutionRunner:
             Max: 500 agents (upper bound for resource management)
         
         Returns:
-            int: Target population (300 + unbeaten_games * 5, capped at 500)
+            int: Target population (80 + unbeaten_games * 5, capped at 200)
         """
-        BASE_POPULATION = 300  # Minimum for network diversity (increased from 60)
+        BASE_POPULATION = 80  # Balanced for ~25 games per generation
         BONUS_PER_UNBEATEN = 5  # Extra agents per unbeaten game
-        MAX_POPULATION = 500  # Upper bound for resource management (increased from 150)
+        MAX_POPULATION = 200  # Upper bound for resource management
         
         try:
             # Count unbeaten games (games without full game win sequences)

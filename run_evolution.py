@@ -112,8 +112,8 @@ def main():
     else:
         print(">> STANDARD MODE - Balanced evolution")
         config = {
-            'initial_population_size': 300,  # Minimum population (BASE_POPULATION)
-            'games_per_generation': 75,  # ADAPTIVE: 300 * 0.25 = 75 (actual value computed at runtime)
+            'initial_population_size': 80,  # Balanced for ~25 games per generation
+            'games_per_generation': 25,  # ADAPTIVE: 80 * 0.31 = 25 (min 25)
             'evolution_interval_minutes': 60,
             'max_generations': 50
         }
