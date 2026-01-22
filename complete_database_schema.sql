@@ -1651,36 +1651,6 @@ CREATE TABLE death_zones (
                     is_active INTEGER DEFAULT 1
                 , last_challenged_at TEXT, challenge_count INTEGER DEFAULT 0, last_validated_at TEXT, generations_since_death INTEGER DEFAULT 0);
 
-CREATE TABLE decision_points (
-                    decision_point_id TEXT PRIMARY KEY,
-                    agent_id TEXT NOT NULL,
-                    game_id TEXT NOT NULL,
-                    
-                    -- Decision context
-                    action_index INTEGER NOT NULL,
-                    score_at_decision REAL NOT NULL,
-                    available_actions TEXT,  -- JSON: actions that were available
-                    action_taken INTEGER NOT NULL,  -- What agent actually did
-                    
-                    -- Why is this a decision point?
-                    importance_score REAL NOT NULL,  -- How critical was this moment?
-                    importance_factors TEXT,  -- JSON: why this matters
-                    
-                    -- Outcomes
-                    immediate_score_change REAL DEFAULT 0.0,
-                    final_game_outcome TEXT NOT NULL,
-                    
-                    -- Alternative analysis
-                    counterfactuals_generated INTEGER DEFAULT 0,
-                    best_alternative_action INTEGER,
-                    best_alternative_predicted_score REAL,
-                    
-                    -- Timestamps
-                    identified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
-                    FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
-                );
-
 CREATE TABLE decision_weaving_reports (
             report_id TEXT PRIMARY KEY,
             agent_id TEXT NOT NULL,
@@ -5208,10 +5178,6 @@ CREATE INDEX idx_dangerous_objects_lookup
 CREATE INDEX idx_death_zones_lookup
                 ON death_zones (game_type, level_number, is_active)
             ;
-
-CREATE INDEX idx_decision_points_agent ON decision_points(agent_id);
-
-CREATE INDEX idx_decision_points_importance ON decision_points(importance_score DESC);
 
 CREATE INDEX idx_episodic_agent_type
                 ON i_thread_episodic_memories(agent_id, episode_type, significance DESC)

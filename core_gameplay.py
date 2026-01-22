@@ -10712,6 +10712,43 @@ class GameplayEngine:
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
         
         # ===================================================================
+        # EXPLORATION TRACKING FIX (2026-01-22)
+        # ===================================================================
+        # Track agent position for network exploration REGARDLESS of control
+        # confidence. Previously, tracking only happened inside the high-confidence
+        # self-model block, so coverage was always 0% if control_confidence < 0.5.
+        # 
+        # This runs early in _select_action to ensure every position is tracked.
+        # ===================================================================
+        try:
+            _exp_agent_pos = getattr(self, '_current_agent_position', None)
+            _exp_loop_state = getattr(self, '_current_loop_state', loop_state)
+            
+            if _exp_agent_pos and game_state.frame:
+                _exp_game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                _exp_game_type = _exp_game_id[:4] if _exp_game_id else 'unknown'
+                _exp_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+                _exp_frame_height = len(game_state.frame)
+                _exp_frame_width = len(game_state.frame[0]) if game_state.frame else 0
+                _exp_x, _exp_y = _exp_agent_pos
+                
+                # Record to network exploration tracker
+                if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+                    _exp_score_changed = getattr(self, '_last_score_change', 0) != 0
+                    self.exploration_tracker.record_position_visit(
+                        game_type=_exp_game_type,
+                        level=_exp_level,
+                        agent_id=self.game_config.get('agent_id', ''),
+                        x=_exp_x, y=_exp_y,
+                        frame_width=_exp_frame_width,
+                        frame_height=_exp_frame_height,
+                        score_changed=_exp_score_changed
+                    )
+                    logger.debug(f"[EXPLORE-TRACK] Position ({_exp_x},{_exp_y}) recorded for {_exp_game_type} L{_exp_level}")
+        except Exception as _exp_err:
+            logger.debug(f"Exploration tracking failed (non-critical): {_exp_err}")
+        
+        # ===================================================================
         # FIX (Feedback 9): OBSTACLE AVOIDANCE - Perpendicular recovery
         # ===================================================================
         # If last action caused no frame change, try perpendicular direction
@@ -14243,6 +14280,91 @@ class GameplayEngine:
                 if transformation_info.get('transformation_needed'):
                     # KEY != LOCK: Need to find and use tools
                     tool_locations = tracker.tool_objects
+                    
+                    # ===================================================================
+                    # TRANSFORMATION TRIGGER (FIX 2026-01-22)
+                    # ===================================================================
+                    # After enough exploration (15+ actions), switch from exploration
+                    # to EXECUTION mode. Instead of just biasing toward tools, FORCE
+                    # a direct action toward the nearest tool to actually attempt win.
+                    # 
+                    # This is THE missing piece: agents detect transformation_needed
+                    # but never commit to executing the transformation sequence.
+                    # ===================================================================
+                    _dm9_loop_state = getattr(self, '_current_loop_state', None)
+                    _dm9_actions_taken = _dm9_loop_state.action_count if _dm9_loop_state else 0
+                    
+                    # Get key count from match progress
+                    _dm9_match_progress = tracker.get_match_progress() if hasattr(tracker, 'get_match_progress') else {}
+                    _dm9_key_count = _dm9_match_progress.get('key_count', 0)
+                    
+                    # TRANSFORMATION TRIGGER CONDITIONS:
+                    # 1. Explored enough (15+ actions to build world model)
+                    # 2. Transformation is needed (key != lock)
+                    # 3. We have key objects to transform
+                    # 4. We know where tools are
+                    # 5. We know agent position
+                    _dm9_should_execute = (
+                        _dm9_actions_taken >= 15 and
+                        _dm9_key_count > 0 and
+                        tool_locations and
+                        agent_pos
+                    )
+                    
+                    if _dm9_should_execute:
+                        # Find the nearest tool to navigate toward
+                        _dm9_nearest_tool = None
+                        _dm9_nearest_dist = float('inf')
+                        _dm9_nearest_centroid = None
+                        
+                        # Prefer tools from CompletionPredictor order if available
+                        if completion_estimate and completion_estimate.get('tool_visit_order'):
+                            _dm9_tool_order = completion_estimate['tool_visit_order']
+                            for tool_id in _dm9_tool_order:
+                                if tool_id in tool_locations and 'centroid' in tool_locations[tool_id]:
+                                    _dm9_nearest_tool = tool_id
+                                    _dm9_nearest_centroid = tool_locations[tool_id]['centroid']
+                                    break
+                        
+                        # Fallback: find nearest tool by distance
+                        if not _dm9_nearest_tool:
+                            for tool_id, tool_state in tool_locations.items():
+                                if 'centroid' in tool_state:
+                                    tx, ty = tool_state['centroid']
+                                    dist = abs(tx - agent_pos[0]) + abs(ty - agent_pos[1])  # Manhattan distance
+                                    if dist < _dm9_nearest_dist:
+                                        _dm9_nearest_dist = dist
+                                        _dm9_nearest_tool = tool_id
+                                        _dm9_nearest_centroid = (tx, ty)
+                        
+                        if _dm9_nearest_centroid:
+                            tool_x, tool_y = _dm9_nearest_centroid
+                            dx = tool_x - agent_pos[0]
+                            dy = tool_y - agent_pos[1]
+                            
+                            # FORCE a direct action (not bias) toward the tool
+                            if abs(dx) > abs(dy):
+                                _dm9_action = 4 if dx > 0 else 3  # right or left
+                            else:
+                                _dm9_action = 2 if dy > 0 else 1  # down or up
+                            
+                            _dm9_reasoning = (
+                                f"[TRANSFORM-TRIGGER] Executing transformation: "
+                                f"ACTION{_dm9_action} toward {_dm9_nearest_tool[:20]} "
+                                f"(actions={_dm9_actions_taken}, keys={_dm9_key_count}, match={match_score:.2f})"
+                            )
+                            logger.info(_dm9_reasoning)
+                            
+                            # Mark that we're in transformation execution mode
+                            self._transformation_execution_active = True
+                            
+                            # RETURN DIRECTLY - don't just bias, COMMIT to the action
+                            return _finalize_ladder_and_return(f"ACTION{_dm9_action}", _dm9_reasoning, 'symbolic')
+                    
+                    # ===================================================================
+                    # END TRANSFORMATION TRIGGER
+                    # ===================================================================
+                    # If trigger conditions not met, fall back to biasing (original behavior)
                     
                     if tool_locations and agent_pos:
                         # Use CompletionPredictor's tool visit order if available
