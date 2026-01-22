@@ -3362,8 +3362,19 @@ class GameplayEngine:
                         # types get suppressed -> never tried -> never succeed -> stay suppressed
                         # Now we just use the context-based expected_outcome directly.
                         
-                        # Current theory from autobiography
+                        # Build a proper theory based on expected outcome, not action rationale
+                        # Theory should be a testable hypothesis about game mechanics
                         theory_source = getattr(self, '_last_action_source', 'intuition')
+                        if expected_outcome == 'object_control':
+                            theory = f"This action controls an object ({theory_source})"
+                        elif expected_outcome == 'avoid_failure':
+                            theory = f"This action avoids danger ({theory_source})"
+                        elif expected_outcome == 'frame_change':
+                            theory = f"This action causes visible change ({theory_source})"
+                        elif expected_outcome == 'score_increase':
+                            theory = f"This action leads to scoring ({theory_source})"
+                        else:
+                            theory = f"This action has an effect ({theory_source})"
                         
                         # Make the prediction
                         safe_agent_id = agent_id or 'unknown'
@@ -3372,7 +3383,7 @@ class GameplayEngine:
                             agent_id=safe_agent_id,
                             game_type=game_type,
                             level_number=loop_state.current_level,
-                            theory=f"Action from {theory_source}: {reasoning[:100]}",
+                            theory=theory,
                             predicted_outcome=expected_outcome,
                             action=safe_action
                         )
@@ -7449,12 +7460,24 @@ class GameplayEngine:
                                     # NOTE: Suppression system removed - it caused death spirals.
                                     # Use context-based expected_outcome directly.
                                     
+                                    # Build a proper theory based on expected outcome, not action rationale
                                     theory_source = getattr(self, '_last_action_source', 'intuition')
+                                    if expected_outcome == 'object_control':
+                                        theory = f"This action controls an object ({theory_source})"
+                                    elif expected_outcome == 'avoid_failure':
+                                        theory = f"This action avoids danger ({theory_source})"
+                                    elif expected_outcome == 'frame_change':
+                                        theory = f"This action causes visible change ({theory_source})"
+                                    elif expected_outcome == 'score_increase':
+                                        theory = f"This action leads to scoring ({theory_source})"
+                                    else:
+                                        theory = f"This action has an effect ({theory_source})"
+                                    
                                     self.metacognitive_engine.make_prediction(
                                         agent_id=agent_id,
                                         game_type=game_type,
                                         level_number=current_level,
-                                        theory=f"Action from {theory_source}: {reasoning[:100]}",
+                                        theory=theory,
                                         predicted_outcome=expected_outcome,
                                         action=action
                                     )
@@ -10697,7 +10720,12 @@ class GameplayEngine:
         last_action_no_change = getattr(self, '_last_action_no_change', False)
         last_action = getattr(self, '_last_action_taken', None)
         
-        if last_action_no_change and last_action and last_action.startswith('ACTION'):
+        # Normalize last_action to string format (could be int or string from escape actions)
+        if last_action is not None and isinstance(last_action, int):
+            last_action = f"ACTION{last_action}"
+        
+        # Only apply obstacle avoidance for directional actions (ACTION1-4)
+        if last_action_no_change and last_action and isinstance(last_action, str):
             perpendicular_map = {
                 'ACTION1': ['ACTION3', 'ACTION4'],  # up failed -> try left/right
                 'ACTION2': ['ACTION3', 'ACTION4'],  # down failed -> try left/right
@@ -13151,6 +13179,9 @@ class GameplayEngine:
                             # =======================================================
                             no_change_count = getattr(self, '_no_frame_change_count', 0)
                             last_action = getattr(self, '_last_action_taken', None)
+                            # Normalize last_action to string (could be int from escape actions)
+                            if last_action is not None and isinstance(last_action, int):
+                                last_action = f"ACTION{last_action}"
                             
                             if no_change_count >= 2 and last_action == action:
                                 # We're blocked! Try perpendicular direction
@@ -19685,6 +19716,9 @@ class GameplayEngine:
         # ===================================================================
         delta_changes = getattr(self, '_last_delta_frame_changes', [])
         last_action = getattr(self, '_last_action_taken', None)
+        # Normalize last_action to string (could be int from escape actions)
+        if last_action is not None and isinstance(last_action, int):
+            last_action = f"ACTION{last_action}"
         
         # If we have delta changes but traces show no movement, incorporate delta
         if not actions_moved and delta_changes and last_action:
