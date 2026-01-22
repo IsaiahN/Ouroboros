@@ -2,6 +2,212 @@
 
 ---
 
+## Session: January 22, 2026 - Map Intelligence System (Collision Understanding)
+
+---
+
+### Approach: Replace blind obstacle avoidance with intelligent map understanding. The previous collision system populated `_learned_obstacles` but NEVER READ it - agents avoided areas by fear, not understanding. New system categorizes terrain (walls/objects/interactables/passable) to enable full map coverage and smarter navigation.
+
+**Timestamp**: 11:49:29 AM  
+**Status**: COMPLETE - Map Intelligence system implemented and verified
+
+---
+
+### Problem Statement
+
+User feedback identified critical issue:
+> "I need the collision system to be able to tell the difference between a wall, an object, etc. I never want it to hinder exploration of the entire map. The goal is to have the network/agent have an understanding of the entire map so it doesn't have to use all its actions for future games exploring."
+
+**Investigation Findings**:
+
+1. **`_learned_obstacles` set was populated but NEVER READ** (critical bug)
+   - Code added obstacles: `self._learned_obstacles.add((current_y, current_x))`
+   - But no code ever queried this set for navigation decisions
+   
+2. **`collision_effects` table had excellent data** (learning was working!)
+   - Example: ls20 L2 had 3,294 blocked observations, 1,462 destroy_target, 862 push_target
+   - But this data was NEVER USED for navigation
+
+3. **Exploration tracking only worked inside high-confidence self-model block**
+   - If `control_confidence < 0.5`, positions weren't tracked
+   - This caused 0% coverage reports despite agents moving
+
+**Root Cause**: The gap between collision LEARNING and collision USAGE was complete - two separate systems that never talked to each other.
+
+---
+
+### Solution: Map Intelligence System
+
+#### Design Principle
+**"UNDERSTANDING over AVOIDANCE"** - Build positive map knowledge, never block exploration.
+- Nothing is ever marked "forbidden"
+- All terrain types return `safe_to_move: True`
+- System provides suggestions, not restrictions
+
+#### New Data Structure
+```python
+_map_intelligence = {
+    'walls': set(),        # Colors that ONLY block (never pushed/destroyed) = permanent boundaries
+    'objects': set(),      # Colors that can be pushed or have complex interactions
+    'interactables': set(), # Colors that get destroyed (collectibles)
+    'passable': set(),     # Colors confirmed passable via successful movement
+    'collision_history': [] # Recent collision events for analysis
+}
+```
+
+#### Key Components Implemented
+
+**1. `_get_map_intelligence()` Method** ([core_gameplay.py](core_gameplay.py#L5575-L5730))
+```python
+def _get_map_intelligence(self, game_state, direction=None, target_position=None) -> Dict:
+    """
+    Returns:
+    - safe_to_move: Always True (suggestions only)
+    - terrain_type: 'wall', 'object', 'interactable', 'passable', 'unknown', 'boundary'
+    - suggestion: 'proceed', 'try_push', 'collect', 'explore_around'
+    - alternative_directions: Better routes if blocked
+    - map_coverage: Stats on what we know
+    """
+```
+
+**2. `_query_collision_effects()` Bridge** ([core_gameplay.py](core_gameplay.py#L5735-L5770))
+```python
+def _query_collision_effects(self, game_type, level, controlled_color=None) -> List[Dict]:
+    """Bridge collision LEARNING to USAGE via agent_self_model.get_collision_effects()"""
+```
+
+**3. Two-Pass Categorization Algorithm** ([core_gameplay.py](core_gameplay.py#L6520-6570))
+```python
+# First pass: collect ALL effect types per target color
+color_effects: Dict[int, Set[str]] = {}
+for effect in collision_effects:
+    color_effects[target_color].add(effect_type)
+
+# Second pass: categorize based on FULL knowledge
+for target_color, effects in color_effects.items():
+    if 'destroy_target' in effects:
+        map_intelligence['interactables'].add(target_color)  # Highest priority
+    elif 'push_target' in effects:
+        map_intelligence['objects'].add(target_color)        # Pushable
+    elif 'blocked' in effects and len(effects) == 1:
+        map_intelligence['walls'].add(target_color)          # ONLY blocked = wall
+    elif 'blocked' in effects:
+        map_intelligence['objects'].add(target_color)        # Mixed = object
+```
+
+**4. Enhanced Obstacle Avoidance** ([core_gameplay.py](core_gameplay.py#L11065-11150))
+```python
+# Use map intelligence for smarter routing
+map_intel = self._get_map_intelligence(game_state, direction=last_action)
+
+if map_intel.get('collision_likely'):
+    terrain = map_intel.get('terrain_type', 'unknown')
+    logger.info(f"[MAP-INTEL] Collision with {terrain}, suggestion: {map_intel.get('suggestion')}")
+
+# Choose recovery based on terrain type
+if alternative_dirs:
+    recovery_action = random.choice([dir_to_action[d] for d in alternative_dirs])
+```
+
+**5. Passable Cell Marking** ([core_gameplay.py](core_gameplay.py#L8590-8610))
+```python
+# When movement succeeds, mark that color as passable
+if new_pos and new_state.frame:
+    passed_color = new_state.frame[ny][nx]
+    if passed_color != 0:
+        self._map_intelligence['passable'].add(passed_color)
+        # Reclassify if previously marked as object
+        if passed_color in self._map_intelligence['objects']:
+            logger.info(f"[MAP-INTEL] Color {passed_color} reclassified: object -> passable")
+```
+
+**6. Real-Time Collision Categorization** ([core_gameplay.py](core_gameplay.py#L16335-16420))
+```python
+# During live gameplay, categorize collisions with boundary awareness
+if effect_type == 'blocked':
+    at_boundary = (target_pos at edge of frame)
+    if at_boundary:
+        map_intelligence['walls'].add(target_color)
+        logger.info(f"[MAP-INTEL] Color {target_color} classified as WALL (boundary)")
+    else:
+        map_intelligence['objects'].add(target_color)
+        logger.info(f"[MAP-INTEL] Color {target_color} classified as OBJECT (movable?)")
+```
+
+---
+
+### Integration Points
+
+| Location | Purpose |
+|----------|---------|
+| Game start (L6508-6580) | Pre-load L1 collision knowledge from database |
+| Level transition (L4255-4320) | Load collision knowledge for new level |
+| `_select_action()` (L11065-11150) | Use map intel for smarter obstacle routing |
+| Game loop (L16335-16420) | Categorize new collisions in real-time |
+| Successful movement (L8590-8610) | Mark colors as passable |
+
+---
+
+### Additional Fixes
+
+**1. Exploration Tracking Fix** ([core_gameplay.py](core_gameplay.py#L11025-11060))
+- Previously: Tracking only happened inside high-confidence self-model block
+- Now: Tracks position REGARDLESS of control confidence
+- Result: Exploration coverage will now be >0%
+
+**2. Transformation Trigger Fix** (from previous session continuation)
+- Fixed symbolic state refresh to trigger on controlled color changes
+
+**3. Pylance Type Error Fix** ([core_gameplay.py](core_gameplay.py#L19145))
+- Fixed type error where numpy array was passed to `identify_symbolic_objects()` expecting `List[List[int]]`
+```python
+frame_list: List[List[int]] = frame if isinstance(frame, list) else (
+    frame.tolist() if hasattr(frame, 'tolist') else list(frame)
+)  # type: ignore[assignment]
+```
+
+---
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `py_compile core_gameplay.py` | PASS |
+| Pylance errors | None |
+| `import core_gameplay` | SUCCESS |
+| Database schema (collision_effects) | Has required columns |
+| Method signatures | All match usage |
+
+---
+
+### Expected Outcomes
+
+| Metric | Before | After (Expected) |
+|--------|--------|------------------|
+| `_learned_obstacles` usage | Written but never read | Replaced with `_map_intelligence` |
+| Collision data usage | Never used | Loaded at game/level start |
+| Terrain categorization | None | walls/objects/interactables/passable |
+| Exploration blocking | Fear-based avoidance | Understanding-based suggestions |
+| Map coverage | 0% (tracking bug) | >50% (tracking fixed) |
+
+---
+
+### Files Modified
+- `core_gameplay.py`: Map Intelligence system, exploration tracking fix, type error fix
+
+---
+
+### Current Status / Next Steps
+1. **COMPLETE**: Map Intelligence system fully implemented
+2. **READY FOR TESTING**: Run evolution to validate:
+   - Watch for `[MAP-INTEL]` log messages showing terrain categorization
+   - Monitor exploration coverage improvement
+   - Verify agents navigate around walls efficiently
+   - Check that agents try pushing "objects" instead of avoiding them
+3. **MONITOR**: No current failure - system ready for live testing
+
+---
+
 ## Session: January 21, 2026 - Feedback 9 Perception-Action Integration Fixes
 
 ---

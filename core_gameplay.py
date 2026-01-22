@@ -4247,6 +4247,73 @@ class GameplayEngine:
                     logger.info(f"[DISCOVERY] Reset discovery state for new level {new_level}")
                 except Exception as e:
                     logger.debug(f"Discovery state reset failed: {e}")
+                
+                # ============================================================
+                # MAP INTELLIGENCE: Load collision effects for new level
+                # ============================================================
+                # Pre-load what we know about this level's terrain so we can
+                # navigate efficiently without re-learning from scratch.
+                # This bridges collision LEARNING to collision USAGE.
+                # ============================================================
+                try:
+                    game_type = game_id.split('-')[0] if '-' in game_id else game_id
+                    collision_effects = self._query_collision_effects(game_type, new_level)
+                    
+                    if collision_effects:
+                        # Initialize map intelligence with prior knowledge
+                        if not hasattr(self, '_map_intelligence'):
+                            self._map_intelligence = {
+                                'walls': set(), 'objects': set(),
+                                'interactables': set(), 'passable': set(),
+                                'collision_history': []
+                            }
+                        else:
+                            # Reset for new level (keep structure, clear content)
+                            self._map_intelligence = {
+                                'walls': set(), 'objects': set(),
+                                'interactables': set(), 'passable': set(),
+                                'collision_history': []
+                            }
+                        
+                        # First pass: collect all effect types per target color
+                        color_effects: Dict[int, Set[str]] = {}
+                        for effect in collision_effects:
+                            target_color = effect.get('target_color')
+                            effect_type = effect.get('effect_type', '')
+                            if target_color is None:
+                                continue
+                            if target_color not in color_effects:
+                                color_effects[target_color] = set()
+                            color_effects[target_color].add(effect_type)
+                        
+                        # Second pass: categorize based on FULL knowledge of each color
+                        for target_color, effects in color_effects.items():
+                            if 'destroy_target' in effects:
+                                self._map_intelligence['interactables'].add(target_color)
+                            elif 'push_target' in effects:
+                                self._map_intelligence['objects'].add(target_color)
+                            elif 'blocked' in effects and len(effects) == 1:
+                                self._map_intelligence['walls'].add(target_color)
+                            elif 'blocked' in effects:
+                                self._map_intelligence['objects'].add(target_color)
+                        
+                        logger.info(f"[MAP-INTEL] Loaded {len(collision_effects)} effects for L{new_level}: "
+                                   f"walls={len(self._map_intelligence['walls'])}, "
+                                   f"objects={len(self._map_intelligence['objects'])}, "
+                                   f"interactables={len(self._map_intelligence['interactables'])}")
+                    else:
+                        # Reset map intelligence for unexplored level
+                        self._map_intelligence = {
+                            'walls': set(), 'objects': set(),
+                            'interactables': set(), 'passable': set(),
+                            'collision_history': []
+                        }
+                        logger.debug(f"[MAP-INTEL] No prior collision knowledge for L{new_level}, starting fresh")
+                    
+                    # Also reset collision position tracking for new level
+                    self._collision_positions = {}
+                except Exception as e:
+                    logger.debug(f"Map intelligence loading failed: {e}")
             except Exception as e:
                 logger.debug(f"CODS level advance failed (non-critical): {e}")
         
@@ -5521,6 +5588,191 @@ class GameplayEngine:
         
         return result
     
+    def _get_map_intelligence(
+        self,
+        game_state: 'GameState',
+        direction: Optional[str] = None,
+        target_position: Optional[Tuple[int, int]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get map intelligence for smarter navigation decisions.
+        
+        PURPOSE: Build UNDERSTANDING of the map, not AVOIDANCE.
+        We want agents to explore the ENTIRE map efficiently, not fear certain areas.
+        
+        Returns categorized knowledge about:
+        - Walls: Permanent boundaries (don't waste actions trying to pass)
+        - Objects: Things that might be pushable or need interaction
+        - Interactables: Collectibles/destroyables
+        - Passable: Confirmed passable regions
+        
+        Args:
+            game_state: Current game state
+            direction: Optional direction we're planning to move
+            target_position: Optional specific position we're checking
+            
+        Returns:
+            Dict with:
+            - safe_to_move: Whether the planned direction is safe
+            - terrain_type: 'empty', 'wall', 'object', 'interactable', 'unknown'
+            - suggestion: What to do ('proceed', 'try_push', 'collect', 'explore_around')
+            - alternative_directions: List of better directions if blocked
+            - map_coverage: Dict of what we know about the map
+        """
+        result = {
+            'safe_to_move': True,
+            'terrain_type': 'unknown',
+            'suggestion': 'proceed',
+            'alternative_directions': [],
+            'map_coverage': {
+                'walls_known': 0,
+                'objects_known': 0,
+                'interactables_known': 0,
+                'passable_known': 0
+            },
+            'at_color': None,
+            'collision_likely': False
+        }
+        
+        map_intel = getattr(self, '_map_intelligence', None)
+        if not map_intel:
+            return result
+        
+        # Report what we know
+        result['map_coverage'] = {
+            'walls_known': len(map_intel.get('walls', set())),
+            'objects_known': len(map_intel.get('objects', set())),
+            'interactables_known': len(map_intel.get('interactables', set())),
+            'passable_known': len(map_intel.get('passable', set()))
+        }
+        
+        # If no frame or direction, just return coverage info
+        if not game_state.frame or not direction:
+            return result
+        
+        # Get current position and planned position
+        current_pos = getattr(self, '_current_agent_position', None)
+        if not current_pos:
+            return result
+        
+        # Direction offsets
+        direction_offset = {
+            'up': (0, -1), 'ACTION1': (0, -1),
+            'down': (0, 1), 'ACTION2': (0, 1),
+            'left': (-1, 0), 'ACTION3': (-1, 0),
+            'right': (1, 0), 'ACTION4': (1, 0),
+        }
+        
+        offset = direction_offset.get(direction, (0, 0))
+        if offset == (0, 0):
+            return result
+        
+        # Calculate target position
+        target_x = current_pos[0] + offset[0]
+        target_y = current_pos[1] + offset[1]
+        
+        # Bounds check
+        frame_height = len(game_state.frame)
+        frame_width = len(game_state.frame[0]) if game_state.frame else 0
+        
+        if target_x < 0 or target_x >= frame_width or target_y < 0 or target_y >= frame_height:
+            result['safe_to_move'] = True  # Let the game handle boundary
+            result['terrain_type'] = 'boundary'
+            result['suggestion'] = 'proceed'  # Don't block - game will handle it
+            return result
+        
+        # Check what's at target position
+        target_color = game_state.frame[target_y][target_x]
+        result['at_color'] = target_color
+        
+        # Background is always passable
+        if target_color == 0:
+            result['terrain_type'] = 'empty'
+            result['suggestion'] = 'proceed'
+            map_intel.setdefault('passable', set()).add(target_color)
+            return result
+        
+        # Check our categorization
+        walls = map_intel.get('walls', set())
+        objects = map_intel.get('objects', set())
+        interactables = map_intel.get('interactables', set())
+        passable = map_intel.get('passable', set())
+        
+        if target_color in walls:
+            result['terrain_type'] = 'wall'
+            result['collision_likely'] = True
+            # IMPORTANT: Don't say "unsafe" - say "try another direction"
+            # We UNDERSTAND this is a wall, so we intelligently route around
+            result['safe_to_move'] = True  # Still safe, just inefficient
+            result['suggestion'] = 'explore_around'
+            
+            # Suggest perpendicular directions
+            if direction in ['up', 'down', 'ACTION1', 'ACTION2']:
+                result['alternative_directions'] = ['left', 'right']
+            else:
+                result['alternative_directions'] = ['up', 'down']
+                
+        elif target_color in objects:
+            result['terrain_type'] = 'object'
+            result['collision_likely'] = True
+            result['safe_to_move'] = True
+            result['suggestion'] = 'try_push'  # Maybe we can push it!
+            
+        elif target_color in interactables:
+            result['terrain_type'] = 'interactable'
+            result['collision_likely'] = False
+            result['safe_to_move'] = True
+            result['suggestion'] = 'collect'  # Go get it!
+            
+        elif target_color in passable:
+            result['terrain_type'] = 'passable'
+            result['collision_likely'] = False
+            result['safe_to_move'] = True
+            result['suggestion'] = 'proceed'
+            
+        else:
+            # Unknown - need to explore to find out!
+            result['terrain_type'] = 'unknown'
+            result['collision_likely'] = False
+            result['safe_to_move'] = True
+            result['suggestion'] = 'proceed'  # Explore to learn!
+        
+        return result
+    
+    def _query_collision_effects(
+        self,
+        game_type: str,
+        level: int,
+        controlled_color: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Query learned collision effects from the database.
+        
+        This bridges the gap between collision LEARNING (which was working)
+        and collision USAGE (which was missing).
+        
+        Args:
+            game_type: Game type to query
+            level: Level number
+            controlled_color: Optional filter by controlled object
+            
+        Returns:
+            List of collision effect patterns
+        """
+        if not hasattr(self, 'agent_self_model') or not self.agent_self_model:
+            return []
+        
+        try:
+            return self.agent_self_model.get_collision_effects(
+                game_type=game_type,
+                level=level,
+                controlled_color=controlled_color,
+                min_confidence=0.4  # Lower threshold for exploration
+            )
+        except Exception as e:
+            logger.debug(f"[MAP-INTEL] Failed to query collision effects: {e}")
+            return []
+    
     def _get_exploration_phase(
         self,
         actions_taken: int,
@@ -6261,6 +6513,69 @@ class GameplayEngine:
                     
             except Exception as sym_err:
                 logger.debug(f"Initial symbolic analysis failed (non-critical): {sym_err}")
+        
+        # ================================================================
+        # MAP INTELLIGENCE: Initialize at game start
+        # ================================================================
+        # Load prior collision knowledge for Level 1 so the agent can
+        # navigate efficiently from the very first action.
+        # This bridges: collision LEARNING -> collision USAGE
+        # ================================================================
+        try:
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+            collision_effects = self._query_collision_effects(game_type, level=1)
+            
+            # Initialize map intelligence structure
+            self._map_intelligence = {
+                'walls': set(),
+                'objects': set(),
+                'interactables': set(),
+                'passable': set(),
+                'collision_history': []
+            }
+            self._collision_positions = {}
+            
+            if collision_effects:
+                # First pass: collect all effect types per target color
+                color_effects: Dict[int, Set[str]] = {}
+                for effect in collision_effects:
+                    target_color = effect.get('target_color')
+                    effect_type = effect.get('effect_type', '')
+                    if target_color is None:
+                        continue
+                    if target_color not in color_effects:
+                        color_effects[target_color] = set()
+                    color_effects[target_color].add(effect_type)
+                
+                # Second pass: categorize based on FULL knowledge of each color
+                for target_color, effects in color_effects.items():
+                    if 'destroy_target' in effects:
+                        # Destroyable = interactable (highest priority)
+                        self._map_intelligence['interactables'].add(target_color)
+                    elif 'push_target' in effects:
+                        # Pushable = object (even if sometimes blocked)
+                        self._map_intelligence['objects'].add(target_color)
+                    elif 'blocked' in effects and len(effects) == 1:
+                        # ONLY blocked (never pushed/destroyed) = wall
+                        self._map_intelligence['walls'].add(target_color)
+                    elif 'blocked' in effects:
+                        # Blocked + something else = object (complex interaction)
+                        self._map_intelligence['objects'].add(target_color)
+                
+                logger.info(f"[MAP-INTEL] Game start: Loaded {len(collision_effects)} effects for {game_type} L1 - "
+                           f"walls={len(self._map_intelligence['walls'])}, "
+                           f"objects={len(self._map_intelligence['objects'])}, "
+                           f"interactables={len(self._map_intelligence['interactables'])}")
+            else:
+                logger.debug(f"[MAP-INTEL] No prior collision knowledge for {game_type} L1, exploring fresh")
+        except Exception as map_err:
+            logger.debug(f"Map intelligence init failed (non-critical): {map_err}")
+            self._map_intelligence = {
+                'walls': set(), 'objects': set(), 
+                'interactables': set(), 'passable': set(),
+                'collision_history': []
+            }
+            self._collision_positions = {}
         
         # ================================================================
         # MORTALITY STATE INITIALIZATION (Jan 17 - Five Types of Death)
@@ -8293,6 +8608,28 @@ class GameplayEngine:
                             # FIX (Feedback 9): Track for obstacle avoidance in _select_action
                             self._no_frame_change_count = 0
                             self._last_action_no_change = False
+                            
+                            # ============================================================
+                            # MAP INTELLIGENCE: Mark territory as PASSABLE
+                            # ============================================================
+                            # If we moved successfully, the path is clear. Record this
+                            # so we know this direction is passable from this position.
+                            # This builds positive map knowledge, not just fear of obstacles.
+                            # ============================================================
+                            try:
+                                new_pos = getattr(self, '_current_agent_position', None)
+                                if new_pos and hasattr(self, '_map_intelligence') and new_state.frame:
+                                    # Get the color at our new position
+                                    ny, nx = new_pos[1], new_pos[0]
+                                    if 0 <= ny < len(new_state.frame) and 0 <= nx < len(new_state.frame[0] if new_state.frame else []):
+                                        passed_color = new_state.frame[ny][nx]
+                                        if passed_color != 0:  # Don't track background
+                                            self._map_intelligence.setdefault('passable', set()).add(passed_color)
+                                            # If we passed through something previously marked as obstacle, update
+                                            if passed_color in self._map_intelligence.get('objects', set()):
+                                                logger.info(f"[MAP-INTEL] Color {passed_color} reclassified: object -> passable")
+                            except Exception:
+                                pass  # Non-critical
                             
                             # If we were in escape mode and frame changed, escape worked!
                             if in_escape_mode:
@@ -10749,10 +11086,15 @@ class GameplayEngine:
             logger.debug(f"Exploration tracking failed (non-critical): {_exp_err}")
         
         # ===================================================================
-        # FIX (Feedback 9): OBSTACLE AVOIDANCE - Perpendicular recovery
+        # FIX (Feedback 9): SMART OBSTACLE AVOIDANCE - Map Intelligence
         # ===================================================================
-        # If last action caused no frame change, try perpendicular direction
-        # This prevents walking into walls repeatedly
+        # If last action caused no frame change, use MAP INTELLIGENCE to decide:
+        # - If we hit a WALL: route around it (perpendicular)
+        # - If we hit an OBJECT: try to push it or explore elsewhere
+        # - If we hit UNKNOWN: learn what it is for future navigation
+        # 
+        # GOAL: Build map understanding, not blind avoidance.
+        # We want full coverage of the map, not fear of certain areas.
         # ===================================================================
         last_action_no_change = getattr(self, '_last_action_no_change', False)
         last_action = getattr(self, '_last_action_taken', None)
@@ -10771,13 +11113,62 @@ class GameplayEngine:
             }
             if last_action in perpendicular_map:
                 import random
-                recovery_action = random.choice(perpendicular_map[last_action])
+                
+                # Use map intelligence to make smarter routing decision
+                map_intel = self._get_map_intelligence(game_state, direction=last_action)
+                
+                # Log what we learned about this collision
+                if map_intel.get('collision_likely'):
+                    terrain = map_intel.get('terrain_type', 'unknown')
+                    at_color = map_intel.get('at_color')
+                    logger.info(f"[MAP-INTEL] Collision with {terrain} (color {at_color}), suggestion: {map_intel.get('suggestion')}")
+                
+                # Choose recovery action based on map intelligence
+                suggestion = map_intel.get('suggestion', 'explore_around')
+                alternative_dirs = map_intel.get('alternative_directions', [])
+                
+                if alternative_dirs:
+                    # Use suggested directions from map intelligence
+                    dir_to_action = {'up': 'ACTION1', 'down': 'ACTION2', 'left': 'ACTION3', 'right': 'ACTION4'}
+                    recovery_candidates = [dir_to_action.get(d) for d in alternative_dirs if d in dir_to_action]
+                    recovery_action = random.choice(recovery_candidates) if recovery_candidates else random.choice(perpendicular_map[last_action])
+                else:
+                    recovery_action = random.choice(perpendicular_map[last_action])
+                
+                # Record that we hit something at this position (for future reference)
+                current_pos = getattr(self, '_current_agent_position', None)
+                if current_pos:
+                    if not hasattr(self, '_collision_positions'):
+                        self._collision_positions = {}
+                    # Store collision info by position and direction
+                    key = (current_pos, last_action)
+                    self._collision_positions[key] = {
+                        'count': self._collision_positions.get(key, {}).get('count', 0) + 1,
+                        'terrain': map_intel.get('terrain_type', 'unknown'),
+                        'at_color': map_intel.get('at_color')
+                    }
+                    
+                    # If we've hit this same spot 3+ times, DEFINITELY go elsewhere
+                    if self._collision_positions[key]['count'] >= 3:
+                        logger.info(f"[MAP-INTEL] Hit {current_pos} + {last_action} {self._collision_positions[key]['count']}x - forcing alternate route")
+                
                 # Only use obstacle avoidance occasionally to allow retries
-                if random.random() < 0.7:  # 70% chance to try perpendicular
+                # BUT: if terrain is WALL and we hit it 2+ times, always reroute
+                collision_count = self._collision_positions.get((current_pos, last_action), {}).get('count', 0) if current_pos else 0
+                terrain_type = map_intel.get('terrain_type', 'unknown')
+                
+                should_reroute = (
+                    random.random() < 0.7 or  # 70% base chance
+                    (terrain_type == 'wall' and collision_count >= 2) or  # Always reroute at walls after 2 hits
+                    collision_count >= 3  # Always reroute after 3 hits anywhere
+                )
+                
+                if should_reroute:
                     # Clear the flag so we don't keep triggering if perpendicular also fails
                     self._last_action_no_change = False
-                    logger.debug(f"[OBSTACLE-AVOID] {last_action} caused no change, trying {recovery_action}")
-                    return recovery_action, f"[OBSTACLE-AVOID] {last_action} blocked, trying perpendicular {recovery_action}"
+                    reason = f"[MAP-INTEL] {last_action} hit {terrain_type}, rerouting via {recovery_action}"
+                    logger.debug(reason)
+                    return recovery_action, reason
         
         # ===================================================================
         # EXPLORATION PHASE SYSTEM: Override goal-seeking when stuck/exploring
@@ -15972,12 +16363,60 @@ class GameplayEngine:
                                         )
                                         logger.info(f"[COLLISION] Learned: color {controlled_color} + color {target_color} = {effect_type}")
                                         
-                                        # If blocked, mark target as obstacle to avoid in future
+                                        # ============================================================
+                                        # MAP INTELLIGENCE: Categorize collision type for understanding
+                                        # ============================================================
+                                        # Instead of blindly marking colors as "obstacles to avoid",
+                                        # we categorize them to BUILD MAP UNDERSTANDING:
+                                        #   - WALL: Permanent boundary (color at edge, never moves)
+                                        #   - OBJECT: Something we collided with but might push/collect
+                                        #   - INTERACTABLE: Something that disappeared (collected?)
+                                        #   - BOUNDARY: Level boundary (implicit walls)
+                                        # 
+                                        # This knowledge helps NAVIGATE, not AVOID. We want full map
+                                        # coverage, not fear of certain colors.
+                                        # ============================================================
+                                        if not hasattr(self, '_map_intelligence'):
+                                            self._map_intelligence = {
+                                                'walls': set(),       # Static boundaries (never move)
+                                                'objects': set(),     # Pushable/movable obstacles
+                                                'interactables': set(),  # Things that can be collected/destroyed
+                                                'passable': set(),    # Confirmed passable (moved through)
+                                                'collision_history': [],  # Recent collision events
+                                            }
+                                        
+                                        # Categorize based on effect:
                                         if effect_type == 'blocked':
-                                            if not hasattr(self, '_learned_obstacles'):
-                                                self._learned_obstacles = set()
-                                            self._learned_obstacles.add(target_color)
-                                            logger.info(f"[COLLISION] Marked color {target_color} as obstacle (cannot pass through)")
+                                            # Could be wall or heavy object - check if it's at boundary
+                                            target_pos = first_hit.get('target_position', (0, 0))
+                                            frame_height = len(new_state.frame) if new_state.frame else 0
+                                            frame_width = len(new_state.frame[0]) if new_state.frame and new_state.frame[0] else 0
+                                            at_boundary = (target_pos[0] <= 0 or target_pos[0] >= frame_width - 1 or
+                                                          target_pos[1] <= 0 or target_pos[1] >= frame_height - 1)
+                                            
+                                            if at_boundary:
+                                                self._map_intelligence['walls'].add(target_color)
+                                                logger.info(f"[MAP-INTEL] Color {target_color} classified as WALL (boundary)")
+                                            else:
+                                                self._map_intelligence['objects'].add(target_color)
+                                                logger.info(f"[MAP-INTEL] Color {target_color} classified as OBJECT (movable?)")
+                                        elif effect_type == 'destroy_target':
+                                            self._map_intelligence['interactables'].add(target_color)
+                                            logger.info(f"[MAP-INTEL] Color {target_color} classified as INTERACTABLE (collectible?)")
+                                        elif effect_type == 'push_target':
+                                            self._map_intelligence['objects'].add(target_color)
+                                            logger.info(f"[MAP-INTEL] Color {target_color} classified as PUSHABLE OBJECT")
+                                        
+                                        # Record collision for analysis (keep last 20)
+                                        self._map_intelligence['collision_history'].append({
+                                            'controlled': controlled_color,
+                                            'target': target_color,
+                                            'effect': effect_type,
+                                            'position': first_hit.get('target_position'),
+                                            'action': action
+                                        })
+                                        if len(self._map_intelligence['collision_history']) > 20:
+                                            self._map_intelligence['collision_history'] = self._map_intelligence['collision_history'][-20:]
                                     except Exception as col_err:
                                         logger.debug(f"[COLLISION] Failed to record collision event: {col_err}")
                             
@@ -18730,8 +19169,8 @@ class GameplayEngine:
                 if needs_refresh and frame:
                     self._last_symbolic_controlled_colors = current_controlled_colors.copy()
                     # Re-identify objects with updated controlled colors
-                    frame_arr = np.array(frame) if not isinstance(frame, np.ndarray) else frame
-                    self.symbolic_state_tracker.identify_symbolic_objects(frame_arr, controlled_colors=current_controlled_colors)
+                    frame_list: List[List[int]] = frame if isinstance(frame, list) else (frame.tolist() if hasattr(frame, 'tolist') else list(frame))  # type: ignore[assignment]
+                    self.symbolic_state_tracker.identify_symbolic_objects(frame_list, controlled_colors=current_controlled_colors)
                     logger.info(f"[SYMBOLIC-REFRESH] Re-identified with controlled_colors={current_controlled_colors}")
                 
                 match_progress = self.symbolic_state_tracker.get_match_progress()
