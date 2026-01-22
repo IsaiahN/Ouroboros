@@ -31,17 +31,21 @@ logger = logging.getLogger(__name__)
 MAX_LESSONS_PER_GAME = 3
 
 # Maximum lessons to retrieve when starting a new game
-MAX_LESSONS_TO_RETRIEVE = 5
+MAX_LESSONS_TO_RETRIEVE = 20
 
 
-class CounterfactualAnalyzer:
+class LessonsLearnedEngine:
     """
-    Simplified "lessons learned" system.
+    Lessons Learned System - Network Knowledge from Game Outcomes.
     
-    Old system: Generated thousands of "what if" scenarios that were never tested.
-    New system: Max 3 actionable lessons per game, retrievable for future games.
+    After each game, generates max 3 actionable lessons.
+    Before each game, retrieves relevant lessons from past games of same type.
+    Lessons gain/lose confidence based on whether they help.
     
-    The name is kept for backward compatibility with imports.
+    Key methods:
+    - record_game_lessons(): Call after game with score data
+    - get_lessons_for_game(): Call before game to get prior knowledge
+    - mark_lesson_helped(): Update confidence when lesson was useful
     """
     
     def __init__(self, db: DatabaseInterface):
@@ -95,6 +99,81 @@ class CounterfactualAnalyzer:
         except Exception as e:
             self.logger.error(f"Failed to initialize lessons schema: {e}")
     
+    def record_game_lessons(
+        self,
+        agent_id: str,
+        game_id: str,
+        game_type: str,
+        final_score: float,
+        actions_taken: int,
+        levels_completed: int = 0,
+        was_win: bool = False,
+        generation: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Record lessons from a completed game using outcome data only.
+        
+        This is the SIMPLE version that works with data we always have.
+        No need for detailed action history with score_before/score_after.
+        
+        Args:
+            agent_id: The agent that played
+            game_id: The specific game instance
+            game_type: Game type for future retrieval
+            final_score: Final score achieved
+            actions_taken: Total actions in the game
+            levels_completed: How many levels were beaten
+            was_win: Whether the game was won
+            generation: Current evolution generation
+            
+        Returns:
+            List of lesson dicts that were stored
+        """
+        lessons = []
+        
+        # Only generate lessons for non-trivial games
+        if actions_taken < 10:
+            return lessons
+        
+        # Lesson based on efficiency (score per action)
+        efficiency = final_score / max(1, actions_taken)
+        
+        if was_win:
+            # Winning lesson - note what worked
+            lesson_text = f"Won with {actions_taken} actions. Efficiency: {efficiency:.2f} score/action."
+            lesson_type = "strategy"
+            lesson = self._store_lesson(
+                agent_id, game_type, game_id, generation,
+                lesson_text, lesson_type,
+                final_score, was_win, actions_taken, None
+            )
+            if lesson:
+                lessons.append(lesson)
+        elif final_score > 0:
+            # Partial success - note progress
+            lesson_text = f"Scored {final_score} but didn't win. Completed {levels_completed} levels."
+            lesson_type = "pattern"
+            lesson = self._store_lesson(
+                agent_id, game_type, game_id, generation,
+                lesson_text, lesson_type,
+                final_score, was_win, actions_taken, None
+            )
+            if lesson:
+                lessons.append(lesson)
+        else:
+            # Zero score - note to try different approach
+            lesson_text = f"Zero score after {actions_taken} actions. Need fundamentally different approach."
+            lesson_type = "avoid"
+            lesson = self._store_lesson(
+                agent_id, game_type, game_id, generation,
+                lesson_text, lesson_type,
+                final_score, was_win, actions_taken, None
+            )
+            if lesson:
+                lessons.append(lesson)
+        
+        return lessons
+
     def analyze_failure(
         self,
         agent_id: str,

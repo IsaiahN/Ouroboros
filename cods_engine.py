@@ -3511,79 +3511,9 @@ class CODSEngine:
         
         return signals
     
-    def process_counterfactual_insights(
-        self,
-        scenario_ids: List[str]
-    ) -> Dict[str, Any]:
-        """
-        Process counterfactual analysis results to inform CODS.
-        
-        Connects the CounterfactualAnalyzer output to primitive gap detection.
-        
-        Args:
-            scenario_ids: IDs from counterfactual_scenarios table
-            
-        Returns:
-            Processing results
-        """
-        results = {
-            'scenarios_processed': 0,
-            'operator_hypotheses': [],
-            'primitive_hints': []
-        }
-        
-        if not scenario_ids:
-            return results
-        
-        try:
-            # Get counterfactual scenarios
-            placeholders = ','.join('?' * len(scenario_ids))
-            scenarios = self.db.execute_query(f"""
-                SELECT scenario_id, game_id, decision_point_index,
-                       divergence_reason, predicted_outcome, learning_value
-                FROM counterfactual_scenarios
-                WHERE scenario_id IN ({placeholders})
-                ORDER BY learning_value DESC
-            """, tuple(scenario_ids))
-            
-            for scenario in scenarios:
-                results['scenarios_processed'] += 1
-                
-                # High-value counterfactuals suggest we need better decision-making
-                if scenario['learning_value'] >= 0.7:
-                    game_type = scenario['game_id'].split('-')[0]
-                    
-                    # Record as a signal that we need better primitives for this game
-                    self.db.execute_query("""
-                        INSERT INTO cods_primitive_hints (
-                            hint_id, game_type, source, hint_type,
-                            confidence, details, recorded_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        str(uuid.uuid4())[:12],
-                        game_type,
-                        'counterfactual',
-                        'decision_point',
-                        scenario['learning_value'],
-                        json.dumps({
-                            'scenario_id': scenario['scenario_id'],
-                            'reason': scenario['divergence_reason']
-                        }),
-                        datetime.now().isoformat()
-                    ))
-                    
-                    results['primitive_hints'].append({
-                        'game_type': game_type,
-                        'hint': scenario['divergence_reason'][:100]
-                    })
-            
-            logger.info(f"[CODS] Processed {results['scenarios_processed']} counterfactual scenarios")
-            
-        except Exception as e:
-            logger.error(f"[CODS] Error processing counterfactuals: {e}")
-            results['error'] = str(e)
-        
-        return results
+    # NOTE: process_counterfactual_insights() removed Jan 22, 2026
+    # Old counterfactual analyzer was replaced with lessons_learned_engine
+    # which uses simpler outcome-based learning instead of "what if" scenarios
     
     def process_near_miss_patterns(
         self,

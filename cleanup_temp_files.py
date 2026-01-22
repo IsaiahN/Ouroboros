@@ -74,7 +74,7 @@ KEEP_FILES = {
     "sequence_abstraction.py",
     "sequence_pruning_system.py",
     "performance_analyzer.py",
-    "counterfactual_analyzer.py",
+    "lessons_learned_engine.py",
     "near_miss_analyzer.py",
     "frustration_detector.py",
     "agent_operating_mode_system.py",

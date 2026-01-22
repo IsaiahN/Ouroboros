@@ -694,26 +694,25 @@ class TheoryAlignmentChecker:
             TheoryRequirement(
                 theory=TheoryLayer.INTEGRATION,
                 requirement_id="INT-003",
-                description="Imagination Budget allocation for counterfactuals",
-                expected_behavior="Imagination budget should be spent on counterfactual rollouts. "
-                                 "budget_spend should be > 0 when exploring alternatives.",
+                description="Lessons Learned system for cross-game knowledge",
+                expected_behavior="Lessons should be recorded after games and retrieved before games. "
+                                 "Confidence should update based on whether lessons helped.",
                 code_locations=[
-                    "imagination_budget.py",
-                    "counterfactual_analyzer.py",
-                    "core_gameplay.py:_run_counterfactual",
+                    "lessons_learned_engine.py",
+                    "autonomous_evolution_runner.py:record_game_lessons",
                 ],
-                database_tables=["action_traces.budget_spend", "action_traces.counterfactual_rollouts_used"],
+                database_tables=["game_lessons_learned"],
                 test_query="""
                     SELECT 
-                        COUNT(*) as total_actions,
-                        SUM(CASE WHEN budget_spend > 0 THEN 1 ELSE 0 END) as budget_spent,
-                        SUM(CASE WHEN counterfactual_rollouts_used > 0 THEN 1 ELSE 0 END) as cf_used,
-                        AVG(COALESCE(budget_spend, 0)) as avg_spend
-                    FROM action_traces
+                        COUNT(*) as total_lessons,
+                        SUM(times_retrieved) as total_retrievals,
+                        SUM(times_helped) as total_helped,
+                        AVG(confidence) as avg_confidence
+                    FROM game_lessons_learned
                     WHERE created_at >= datetime('now', '-6 hours')
                 """,
-                fix_suggestion="Ensure counterfactual_analyzer is being called and its "
-                              "budget consumption is recorded in action_traces."
+                fix_suggestion="Ensure lessons_learned_engine.record_game_lessons() is being called "
+                              "after each game and get_lessons_for_game() before playing."
             ),
         ]
     
@@ -967,19 +966,21 @@ class TheoryAlignmentChecker:
             return AlignmentStatus.PARTIAL, "Check role-bias correlation", \
                    "Roles may be assigned statically, not emergent"
         
-        elif req_id == "INT-003":  # Imagination Budget
-            total = result.get('total_actions', 0) or 0
-            spent = result.get('budget_spent', 0) or 0
-            cf = result.get('cf_used', 0) or 0
+        elif req_id == "INT-003":  # Lessons Learned
+            total = result.get('total_lessons', 0) or 0
+            retrievals = result.get('total_retrievals', 0) or 0
+            helped = result.get('total_helped', 0) or 0
             if total == 0:
-                return AlignmentStatus.MISSING, "No action data", None
-            spend_rate = spent / total
-            cf_rate = cf / total
-            if spend_rate > 0.05 or cf_rate > 0.01:
-                return AlignmentStatus.ALIGNED, f"budget={spend_rate:.0%}, cf={cf_rate:.0%}", None
+                return AlignmentStatus.MISSING, "No lessons recorded", None
+            help_rate = helped / max(1, retrievals)
+            if retrievals > 0 and help_rate > 0.1:
+                return AlignmentStatus.ALIGNED, f"lessons={total}, retrievals={retrievals}, helped={help_rate:.0%}", None
+            elif total > 0:
+                return AlignmentStatus.PARTIAL, f"lessons={total} but retrievals={retrievals}", \
+                       "Lessons being recorded but not retrieved for use"
             else:
-                return AlignmentStatus.MISALIGNED, f"budget={spend_rate:.0%}, cf={cf_rate:.0%} (none)", \
-                       "Counterfactual analyzer not running or not recording budget"
+                return AlignmentStatus.MISALIGNED, f"lessons={total}", \
+                       "Lessons learned system not recording game outcomes"
         
         # Default
         return AlignmentStatus.UNKNOWN, str(result), None

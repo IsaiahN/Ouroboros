@@ -79,7 +79,7 @@ from agent_self_model import (
 )
 from imagination_budget import compute_mental_modeling_budget, ImaginationBudgetManager
 from persona_runtime import PersonaManager
-from counterfactual_analyzer import CounterfactualAnalyzer
+from lessons_learned_engine import LessonsLearnedEngine
 from object_detector import ObjectDetector
 from collections import Counter
 from dataclasses import dataclass, field
@@ -1827,7 +1827,7 @@ class GameplayEngine:
         self._last_ladder_trace: Dict[str, Any] = {}
         self._last_ladder_rung: Optional[str] = None
         self._current_stage: Optional[int] = None
-        self.counterfactual_analyzer = CounterfactualAnalyzer(self.db)
+        self.lessons_engine = LessonsLearnedEngine(self.db)
         self.object_detector = ObjectDetector(db_path)  # Object detection for Stream-aware perception
         
         # FIX: Initialize action traces for Q1-Q5 emergent reasoning
@@ -5144,53 +5144,10 @@ class GameplayEngine:
                 logger.debug(f"Semantic impression formation failed (non-critical): {e}")
 
         # ===================================================================
-        # FIX #13: COUNTERFACTUAL ANALYSIS FOR FAILURES (WITH COGNITIVE GATING)
+        # LESSONS LEARNED: Recorded by autonomous_evolution_runner after game
+        # Old counterfactual analyzer removed - generated dead data (Jan 17, 2026)
+        # New system: Simple outcome-based lessons via LessonsLearnedEngine
         # ===================================================================
-        # Run "what if?" analysis on failed games to learn alternative strategies.
-        # This enables structured learning beyond trial and error.
-        # COGNITIVE MODE GATING: Limit counterfactuals based on agent's cognitive mode
-        # - Surgeon mode: 3 max (focus on execution)
-        # - Learner mode: 10 max (balanced)
-        # - Artist mode: 20 max (heavy exploration)
-        # ===================================================================
-        if mode_for_spine == 'LIVE' and not results['win'] and hasattr(self, 'counterfactual_analyzer') and self.counterfactual_analyzer:
-            try:
-                # Determine cognitive mode for gating
-                game_type = game_id.split('-')[0] if game_id and '-' in game_id else game_id
-                cognitive_mode = self._get_cognitive_mode(
-                    game_state=game_state,
-                    stuck_confidence=0.0,  # Not stuck, just failed
-                    game_type=game_type
-                )
-                cf_limit = self._get_counterfactual_limit(cognitive_mode)
-                
-                # Build action_history from recent actions
-                action_history: List[Dict[str, Any]] = []
-                if hasattr(self, '_action_history') and self._action_history:
-                    action_history = list(self._action_history)
-                elif hasattr(self, '_recent_actions') and self._recent_actions:
-                    # Convert simple action list to dict format
-                    action_history = [{'action': a, 'index': i} for i, a in enumerate(self._recent_actions)]
-                
-                cf_scenarios = self.counterfactual_analyzer.analyze_failure(
-                    agent_id=agent_id or 'unknown',
-                    game_id=game_id,
-                    game_type=game_type,
-                    final_score=float(game_state.score),
-                    action_history=action_history,
-                    session_id=self.session_manager.current_session_id if self.session_manager else 'unknown',
-                    generation=self.game_config.get('generation', 0),
-                    max_counterfactuals=cf_limit
-                )
-                
-                if cf_scenarios:
-                    results['counterfactual_scenarios'] = cf_scenarios
-                    logger.info(
-                        f"[COUNTERFACTUAL] Generated {len(cf_scenarios)} 'what if' scenarios for failed game {game_id[:12]} "
-                        f"(mode: {cognitive_mode}, limit: {cf_limit})"
-                    )
-            except Exception as e:
-                logger.debug(f"Counterfactual analysis failed (non-critical): {e}")
 
         # FIX: Clarify that level_completions is how many levels were BEATEN, not X/total
         levels_info = f"Levels Beaten: {loop_state.level_completions}" if loop_state.level_completions > 0 else "No Levels Beaten"

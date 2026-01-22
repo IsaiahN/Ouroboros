@@ -203,15 +203,16 @@ class AutonomousEvolutionRunner:
         from near_miss_analyzer import NearMissAnalyzer
         from collective_reasoning_engine import CollectiveReasoningEngine
         from oracle_stuck_game_diagnostics import OracleStuckGameDiagnostics
+        from lessons_learned_engine import LessonsLearnedEngine
         
         self.subgoal_planner = SubgoalPlanner(self.db)  # Hierarchical planning
         self.frustration_detector = FrustrationDetector(self.db)  # Frustration tracking
         self.stuck_game_diagnostics = OracleStuckGameDiagnostics(self.db)  # DIAGNOSTIC ONLY - no interventions
         self.near_miss_analyzer = NearMissAnalyzer(self.db)  # Learn from 15-18/20 scores
         self.collective_reasoner = CollectiveReasoningEngine(self.db)  # Multi-agent collaboration
-        # counterfactual_analyzer removed - generated dead data (Jan 17, 2026)
+        self.lessons_engine = LessonsLearnedEngine(self.db)  # Post-game lessons for future games
         
-        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Diagnostics, Near-Miss Analysis, Collective Reasoning)")
+        print("[OK] Breakthrough systems initialized (Subgoal Planning, Stuck Game Diagnostics, Near-Miss Analysis, Collective Reasoning, Lessons Learned)")
         
         # META-LEARNING COMPONENTS (AGI MODE)
         if agi_mode:
@@ -1647,6 +1648,21 @@ class AutonomousEvolutionRunner:
                                     game_type = game_id[:4] if len(game_id) >= 4 else 'unknown'
                                     self.metrics_capture.start_game(game_id, game_type, agent_id)
 
+                                # Retrieve lessons from previous games of same type
+                                game_type = game_id[:4] if len(game_id) >= 4 else 'unknown'
+                                if self.lessons_engine:
+                                    try:
+                                        prior_lessons = self.lessons_engine.get_lessons_for_game(
+                                            agent_id=agent_id,
+                                            game_type=game_type,
+                                            limit=5
+                                        )
+                                        if prior_lessons:
+                                            # Pass lessons to engine for use during gameplay
+                                            engine_slot.prior_lessons = prior_lessons
+                                    except Exception:
+                                        pass  # Non-critical
+
                                 try:
                                     result = await engine_slot.play_single_game(game_id, agent_id=agent_id)
                                 except asyncio.CancelledError:
@@ -1727,7 +1743,21 @@ class AutonomousEvolutionRunner:
                                     except Exception as e:
                                         print(f"  [WARN] Near-miss analysis failed: {e}")
 
-                                # Counterfactual analysis removed - generated dead data (Jan 17, 2026)
+                                # Lessons learned - record outcome for future games of same type
+                                if self.lessons_engine:
+                                    try:
+                                        self.lessons_engine.record_game_lessons(
+                                            agent_id=agent_id,
+                                            game_id=game_id,
+                                            game_type=game_type,
+                                            final_score=final_score,
+                                            actions_taken=result.get('actions_taken', 0),
+                                            levels_completed=result.get('level_completions', 0),
+                                            was_win=result.get('win', False),
+                                            generation=self.current_generation,
+                                        )
+                                    except Exception as e:
+                                        print(f"  [WARN] Lessons recording failed: {e}")
 
                                 # CODS outcome logging
                                 if hasattr(engine_slot, 'cods_engine') and engine_slot.cods_engine:

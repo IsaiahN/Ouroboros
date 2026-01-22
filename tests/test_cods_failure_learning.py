@@ -5,9 +5,11 @@ Unit Tests for CODS Failure-Driven Learning
 Tests the new failure-driven learning components added to CODS:
 - record_level_outcome()
 - record_game_outcome()
-- process_counterfactual_insights()
 - process_near_miss_patterns()
 - get_primitive_gap_summary()
+
+Note: process_counterfactual_insights() removed Jan 22, 2026
+      (replaced by lessons_learned_engine)
 
 Following Rule 1: Disable pycache
 Following Rule 2: All data in database
@@ -55,12 +57,6 @@ class MockDatabase:
             return [
                 {'operator_id': 'op1', 'success': True, 'level_number': 1},
                 {'operator_id': 'op2', 'success': False, 'level_number': 2}
-            ]
-        elif 'counterfactual_scenarios' in query_lower:
-            return [
-                {'scenario_id': 'cf1', 'game_id': 'sp80-test', 'decision_point_index': 5,
-                 'divergence_reason': 'Try ACTION3 at critical point', 
-                 'predicted_outcome': 'likely_improve', 'learning_value': 0.8}
             ]
         elif 'near_miss_games' in query_lower:
             return [
@@ -244,28 +240,6 @@ class TestRecordGameOutcome:
         
         assert 'error' in result
         assert result['error'] == 'no_context'
-
-
-# =============================================================================
-# Tests for process_counterfactual_insights
-# =============================================================================
-
-class TestProcessCounterfactualInsights:
-    """Tests for process_counterfactual_insights method."""
-    
-    def test_process_high_value_counterfactuals(self, mock_cods_engine, mock_db):
-        """Test processing high-value counterfactual scenarios."""
-        result = mock_cods_engine.process_counterfactual_insights(['cf1', 'cf2'])
-        
-        assert result['scenarios_processed'] >= 1
-        # High-value scenarios should create primitive hints
-    
-    def test_empty_scenarios_list(self, mock_cods_engine, mock_db):
-        """Test with empty scenario list."""
-        result = mock_cods_engine.process_counterfactual_insights([])
-        
-        assert result['scenarios_processed'] == 0
-        assert result['primitive_hints'] == []
 
 
 # =============================================================================
