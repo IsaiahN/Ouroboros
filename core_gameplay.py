@@ -3720,9 +3720,11 @@ class GameplayEngine:
                                         all_objects = self.object_detector.detect_objects_in_frame(
                                             frame_data, game_id or 'unknown', current_level, 0
                                         )
+                                        logger.debug(f"[DEATH] Detected {len(all_objects) if all_objects else 0} objects in frame")
                                         if agent_position and all_objects:
-                                            # Find objects within 3 cells of agent
+                                            # Collect ALL objects with distances, then take closest ones
                                             agent_y, agent_x = agent_position
+                                            objects_with_dist = []
                                             for obj in all_objects:
                                                 # Extract properties from nested JSON
                                                 try:
@@ -3732,20 +3734,31 @@ class GameplayEngine:
                                                 center = props.get('center', [0, 0])
                                                 obj_x, obj_y = center[0], center[1]
                                                 dist = abs(obj_y - agent_y) + abs(obj_x - agent_x)
-                                                if dist <= 3:  # Manhattan distance <= 3
-                                                    # Add distance and color to flat object for record_death
-                                                    obj_with_dist = {
-                                                        'color': props.get('color', 0),
-                                                        'center_x': obj_x,
-                                                        'center_y': obj_y,
-                                                        'distance': dist,
-                                                        'area': props.get('area', 1),
-                                                        'position': center
-                                                    }
-                                                    nearby_objects.append(obj_with_dist)
+                                                obj_with_dist = {
+                                                    'color': props.get('color', 0),
+                                                    'center_x': obj_x,
+                                                    'center_y': obj_y,
+                                                    'distance': dist,
+                                                    'area': props.get('area', 1),
+                                                    'position': center
+                                                }
+                                                objects_with_dist.append(obj_with_dist)
+                                            
+                                            # Sort by distance and take closest
+                                            objects_with_dist.sort(key=lambda x: x['distance'])
+                                            # Take all within 15 cells, OR at least top 5 closest
+                                            for obj in objects_with_dist:
+                                                if obj['distance'] <= 15 or len(nearby_objects) < 5:
+                                                    nearby_objects.append(obj)
+                                                if len(nearby_objects) >= 10:
+                                                    break
+                                            
+                                            logger.debug(f"[DEATH] Found {len(nearby_objects)} nearby objects, "
+                                                       f"closest dist={nearby_objects[0]['distance'] if nearby_objects else 'N/A'}")
                                         elif all_objects:
-                                            # No agent position, just use all objects with unknown distance
-                                            for obj in all_objects[:5]:
+                                            # No agent position - record ALL objects as potential threats
+                                            logger.debug(f"[DEATH] No agent_position - recording all {len(all_objects)} objects as potential threats")
+                                            for obj in all_objects[:10]:
                                                 try:
                                                     props = json.loads(obj.get('properties', '{}'))
                                                 except (json.JSONDecodeError, TypeError):
@@ -3760,8 +3773,8 @@ class GameplayEngine:
                                                     'position': center
                                                 }
                                                 nearby_objects.append(obj_with_dist)
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"[DEATH] Object detection failed: {e}")
                                 
                                 # Only record if we have a valid agent position
                                 if agent_position is not None:
@@ -3775,8 +3788,8 @@ class GameplayEngine:
                                         frames_on_level=frames_on_level,
                                         generation=self.game_config.get('generation', 0)
                                     )
-                                    logger.debug(f"[DEATH] Recorded death on {game_type} L{current_level}, "
-                                               f"nearby_objects={len(nearby_objects)}")
+                                    logger.info(f"[DEATH] Recorded death on {game_type} L{current_level}, "
+                                               f"nearby={len(nearby_objects)} objects, pos={agent_position}")
                                 else:
                                     logger.debug(f"[DEATH] Skipped recording - no agent position")
                             except Exception as e:
@@ -7579,14 +7592,23 @@ class GameplayEngine:
                                         # ================================================================
                                         # Generate a theory about the cause of death for future agents
                                         # to learn from and actively test/avoid.
+                                        # FIX: Convert controlled_objects strings to dicts with x/y
+                                        # using _current_agent_position since that's what theory expects
                                         # ================================================================
+                                        theory_controlled_objects = None
+                                        if hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                            pos = self._current_agent_position
+                                            if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                                                # _current_agent_position is (x, y) format
+                                                theory_controlled_objects = [{'x': int(pos[0]), 'y': int(pos[1])}]
+                                        
                                         theory = self.terminal_detector.generate_game_over_theory(
                                             game_id=game_id,
                                             level_number=current_level,
                                             frame_before_death=frame_before,
                                             fatal_action=fatal_action_num,
                                             pre_death_actions=pre_death_actions,
-                                            controlled_objects=controlled_objects
+                                            controlled_objects=theory_controlled_objects
                                         )
                                         if theory:
                                             logger.info(f"[THEORY] Game-over cause: {theory.get('theory', 'Unknown')[:80]}")
@@ -7634,6 +7656,9 @@ class GameplayEngine:
                                                     if isinstance(pos, (tuple, list)) and len(pos) >= 2:
                                                         # _current_agent_position is (x, y), record_death expects (y, x)
                                                         agent_position = (int(pos[1]), int(pos[0]))
+                                                        logger.debug(f"[DEATH-HYPO] Got agent_position from _current_agent_position: {agent_position}")
+                                                else:
+                                                    logger.debug(f"[DEATH-HYPO] _current_agent_position not available")
                                                 
                                                 # FALLBACK: Parse from controlled_objects strings + frame lookup
                                                 if agent_position is None and controlled_objects and frame_before:
@@ -7641,6 +7666,7 @@ class GameplayEngine:
                                                         import re
                                                         frame_arr = np.asarray(frame_before)
                                                         ctrl_str = controlled_objects[0]
+                                                        logger.debug(f"[DEATH-HYPO] Parsing controlled_objects: {ctrl_str[:50]}")
                                                         # Handle "toggleable_color_X" format
                                                         match = re.search(r'color_(\d+)', ctrl_str)
                                                         if match:
@@ -7649,8 +7675,9 @@ class GameplayEngine:
                                                             if len(positions) > 0:
                                                                 center = positions.mean(axis=0).astype(int)
                                                                 agent_position = (int(center[0]), int(center[1]))  # (y, x)
-                                                    except Exception:
-                                                        pass
+                                                                logger.debug(f"[DEATH-HYPO] Parsed agent_position from color {color}: {agent_position}")
+                                                    except Exception as e:
+                                                        logger.debug(f"[DEATH-HYPO] Failed to parse controlled_objects: {e}")
                                                 
                                                 # Detect objects from frame to find nearby threats
                                                 if hasattr(self, 'object_detector') and self.object_detector and frame_before:
@@ -7659,8 +7686,11 @@ class GameplayEngine:
                                                         all_objects = self.object_detector.detect_objects_in_frame(
                                                             frame_data, game_id or 'unknown', current_level, 0
                                                         )
+                                                        logger.debug(f"[DEATH-HYPO] Detected {len(all_objects) if all_objects else 0} objects in frame")
                                                         if agent_position and all_objects:
                                                             agent_y, agent_x = agent_position
+                                                            # Collect ALL objects with distances, then take closest ones
+                                                            objects_with_dist = []
                                                             for obj in all_objects:
                                                                 try:
                                                                     props = json.loads(obj.get('properties', '{}'))
@@ -7669,33 +7699,63 @@ class GameplayEngine:
                                                                 center = props.get('center', [0, 0])
                                                                 obj_x, obj_y = center[0], center[1]
                                                                 dist = abs(obj_y - agent_y) + abs(obj_x - agent_x)
-                                                                if dist <= 5:  # Objects within 5 cells
-                                                                    obj_with_dist = {
-                                                                        'color': props.get('color', 0),
-                                                                        'center_x': obj_x,
-                                                                        'center_y': obj_y,
-                                                                        'distance': dist,
-                                                                        'area': props.get('area', 1),
-                                                                        'position': center
-                                                                    }
-                                                                    nearby_objects.append(obj_with_dist)
-                                                    except Exception:
-                                                        pass
+                                                                obj_with_dist = {
+                                                                    'color': props.get('color', 0),
+                                                                    'center_x': obj_x,
+                                                                    'center_y': obj_y,
+                                                                    'distance': dist,
+                                                                    'area': props.get('area', 1),
+                                                                    'position': center
+                                                                }
+                                                                objects_with_dist.append(obj_with_dist)
+                                                            
+                                                            # Sort by distance and take closest 10
+                                                            objects_with_dist.sort(key=lambda x: x['distance'])
+                                                            # Take all within 15 cells, OR at least top 5 closest
+                                                            for obj in objects_with_dist:
+                                                                if obj['distance'] <= 15 or len(nearby_objects) < 5:
+                                                                    nearby_objects.append(obj)
+                                                                if len(nearby_objects) >= 10:
+                                                                    break
+                                                            
+                                                            logger.debug(f"[DEATH-HYPO] Found {len(nearby_objects)} nearby objects, closest dist={nearby_objects[0]['distance'] if nearby_objects else 'N/A'}")
+                                                        elif not agent_position and all_objects:
+                                                            # FALLBACK: No agent position - record ALL objects as potential threats
+                                                            # This is better than recording nothing
+                                                            logger.debug(f"[DEATH-HYPO] No agent_position - recording all {len(all_objects)} objects as potential threats")
+                                                            for obj in all_objects[:10]:  # Limit to 10
+                                                                try:
+                                                                    props = json.loads(obj.get('properties', '{}'))
+                                                                except (json.JSONDecodeError, TypeError):
+                                                                    props = {}
+                                                                center = props.get('center', [0, 0])
+                                                                obj_with_dist = {
+                                                                    'color': props.get('color', 0),
+                                                                    'center_x': center[0],
+                                                                    'center_y': center[1],
+                                                                    'distance': 999,  # Unknown distance
+                                                                    'area': props.get('area', 1),
+                                                                    'position': center
+                                                                }
+                                                                nearby_objects.append(obj_with_dist)
+                                                    except Exception as e:
+                                                        logger.debug(f"[DEATH-HYPO] Object detection failed: {e}")
                                                 
-                                                # Record death if we have position
-                                                if agent_position is not None:
-                                                    self.death_hypothesis.record_death(
-                                                        game_type=game_type,
-                                                        level_number=current_level,
-                                                        agent_id=agent_id or 'unknown',
-                                                        agent_position=agent_position,
-                                                        nearby_objects=nearby_objects,
-                                                        last_action=f"ACTION{fatal_action_num}" if fatal_action_num else 'unknown',
-                                                        frames_on_level=level_action_count,
-                                                        generation=self.game_config.get('generation', 0)
-                                                    )
-                                                    logger.info(f"[DEATH-HYPO] Recorded death on {game_type} L{current_level}, "
-                                                               f"nearby={len(nearby_objects)} objects")
+                                                # Record death - even without position, record with all detected objects
+                                                # Use (0,0) as fallback position if needed
+                                                record_position = agent_position if agent_position else (0, 0)
+                                                self.death_hypothesis.record_death(
+                                                    game_type=game_type,
+                                                    level_number=current_level,
+                                                    agent_id=agent_id or 'unknown',
+                                                    agent_position=record_position,
+                                                    nearby_objects=nearby_objects,
+                                                    last_action=f"ACTION{fatal_action_num}" if fatal_action_num else 'unknown',
+                                                    frames_on_level=level_action_count,
+                                                    generation=self.game_config.get('generation', 0)
+                                                )
+                                                logger.info(f"[DEATH-HYPO] Recorded death on {game_type} L{current_level}, "
+                                                           f"nearby={len(nearby_objects)} objects, pos={record_position}")
                                             except Exception as e:
                                                 logger.debug(f"Death hypothesis recording failed: {e}")
                                         
@@ -29299,8 +29359,10 @@ class GameplayEngine:
                 # If this object's signature matches a learned death cause,
                 # add to threat_objects regardless of semantic role
                 # ============================================================
-                obj_color = obj.get('color', 0)
-                obj_signature = obj.get('signature', '')
+                # FIX: Use 'color' variable already extracted from props above (line ~29305)
+                # obj.get('color') was wrong - color is inside nested 'properties' JSON
+                obj_color = color  # Use already-parsed color from props
+                obj_signature = props.get('signature', '')
                 is_known_threat = False
                 for threat in known_threats:
                     # Match by pattern/signature (preferred) or color
@@ -29315,8 +29377,7 @@ class GameplayEngine:
                 
                 if is_known_threat and obj not in sensation_context['threat_objects']:
                     sensation_context['threat_objects'].append(obj)
-                    logger.debug(f"[THREAT] Object {obj.get('object_type', 'unknown')} marked as threat "
-                               f"based on death hypothesis (color={obj_color})")
+                    logger.info(f"[THREAT] Object color={obj_color} marked as threat based on death hypothesis")
                 
                 # Accumulate for aggregate scores
                 total_sensation += tetra_sensation['function']['sensation_score']

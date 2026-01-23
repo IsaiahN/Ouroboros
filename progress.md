@@ -2,6 +2,179 @@
 
 ---
 
+## Session: January 23, 2026 - as66 Death Recording & Threat Learning Fix
+
+---
+
+### Approach: Diagnose and fix why agents keep running into enemies (orange objects) in as66 despite having a lessons learned system. Root cause: death recording code was NEVER executing due to (1) being in an unused code path, (2) calling `get_controlled_objects()` without required parameters, and (3) expecting dict return type but getting strings.
+
+**Timestamp**: 1:56:16 PM  
+**Status**: IN PROGRESS - Core fixes implemented, ready for testing
+
+---
+
+### Problem Statement
+
+User reported:
+> "what do you think the problem is now with as66? i still see the agents running into the enemies"
+
+Despite having:
+- `lessons_learned_engine.py` with salience-based retrieval
+- `DeathCauseHypothesis` class for threat learning
+- `death_events` and `death_cause_hypotheses` tables
+
+**Agents were NOT learning to avoid orange enemies.**
+
+---
+
+### Investigation Steps
+
+| Step | What | Finding |
+|------|------|---------|
+| 1 | Checked reasoning logs | `threat_objects: []` was EMPTY in all frames |
+| 2 | Queried `death_events` table | **0 rows** - no deaths ever recorded |
+| 3 | Queried `death_cause_hypotheses` | **0 rows** - no threat patterns learned |
+| 4 | Queried `game_results` | **7,969 games played** - deaths happening but not recorded |
+| 5 | Found `record_death()` location | Only in `_run_single_action()` which is NEVER CALLED |
+| 6 | Found main game loop | GAME_OVER handling at line ~7500 had NO death recording |
+| 7 | Found `get_controlled_objects()` calls | Called with 0 args but requires 3: `(agent_id, game_id, level)` |
+| 8 | Checked return type | Returns `List[str]` like `"toggleable_color_9"`, NOT dicts with x/y |
+
+---
+
+### Root Causes (4 Critical Bugs)
+
+#### Bug 1: Death Recording in Unused Code Path
+**Location**: `_run_single_action()` method  
+**Problem**: This method is NEVER called by the main game loop  
+**Impact**: `death_hypothesis.record_death()` never executed despite 7,969 games
+
+#### Bug 2: Missing Parameters to `get_controlled_objects()`
+**Locations**: Lines 3688, 7518, 15744, 26095 in core_gameplay.py  
+**Problem**: Called as `get_controlled_objects()` but signature requires `(agent_id, game_id, level)`  
+**Impact**: `TypeError` silently caught by try/except, death recording skipped
+
+#### Bug 3: Wrong Return Type Expectation
+**Problem**: Code expected dicts with `'x'` and `'y'` keys:
+```python
+if isinstance(ctrl_obj, dict):
+    agent_position = (ctrl_obj.get('y', 0), ctrl_obj.get('x', 0))
+```
+**Reality**: Method returns strings like `"toggleable_color_9"`  
+**Impact**: `isinstance(ctrl_obj, dict)` always False, `agent_position` stays None
+
+#### Bug 4: Prior Lessons Retrieved But Never Used
+**Location**: `autonomous_evolution_runner.py` line 1655  
+**Problem**: Lessons fetched before gameplay but stored passively, never wired into gameplay context  
+**Impact**: Agents had no access to learned lessons during decision-making
+
+---
+
+### Fixes Applied
+
+#### Fix 1: Added Death Recording to Main Game Loop
+**File**: [core_gameplay.py](core_gameplay.py#L7596-7660)
+
+Added `death_hypothesis.record_death()` call in the GAME_OVER handling block of the main game loop (line ~7590), which is the code path that ACTUALLY EXECUTES.
+
+#### Fix 2: Fixed All `get_controlled_objects()` Calls (4 locations)
+
+**Files Changed**: [core_gameplay.py](core_gameplay.py)
+
+| Line | Before | After |
+|------|--------|-------|
+| 7520-7548 | `get_controlled_objects()` | `get_controlled_objects(agent_id, game_id, current_level)` |
+| 3695-3710 | `get_controlled_objects()` | `get_controlled_objects(agent_id, game_id, current_level)` |
+| 15787-15825 | `get_controlled_objects()` | `get_controlled_objects(agent_id, game_id, current_level_check)` |
+| 26161-26195 | `get_controlled_objects()` | `get_controlled_objects(agent_id, game_id_for_frontier, actual_level)` |
+
+#### Fix 3: Fixed Agent Position Extraction
+
+**Problem**: Code tried to extract x/y from dict, but got strings  
+**Solution**: Use `self._current_agent_position` (set by `_build_self_model_context`) with fallback to parsing strings
+
+```python
+# PRIMARY: Use cached position from self-model context
+if hasattr(self, '_current_agent_position') and self._current_agent_position:
+    pos = self._current_agent_position
+    if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+        agent_position = (int(pos[1]), int(pos[0]))  # Convert (x,y) to (y,x)
+
+# FALLBACK: Parse from controlled_objects strings + frame lookup
+if agent_position is None and controlled_objects and frame_before:
+    import re
+    frame_arr = np.asarray(frame_before)
+    ctrl_str = controlled_objects[0]
+    match = re.search(r'color_(\d+)', ctrl_str)
+    if match:
+        color = int(match.group(1))
+        positions = np.argwhere(frame_arr == color)
+        if len(positions) > 0:
+            center = positions.mean(axis=0).astype(int)
+            agent_position = (int(center[0]), int(center[1]))  # (y, x)
+```
+
+#### Fix 4: Increased Lessons Limit & Wired into Gameplay
+
+**File**: [autonomous_evolution_runner.py](autonomous_evolution_runner.py#L1655-1667)
+- Changed `limit=5` to `limit=15` for more lesson coverage
+- Added `game_config['prior_lessons'] = prior_lessons` to store for gameplay access
+
+**File**: [core_gameplay.py](core_gameplay.py#L29084-29101)
+- Wired `prior_lessons` from `game_config` into `sensation_context`
+- Added `prior_lessons` to tetrahedral_perception structure (line 18440, 18660)
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| [core_gameplay.py](core_gameplay.py) | Death recording in main loop, fixed 4 `get_controlled_objects()` calls, agent position extraction with fallback, prior_lessons in sensation_context and tetra |
+| [autonomous_evolution_runner.py](autonomous_evolution_runner.py) | Increased lessons limit to 15, added game_config storage |
+
+---
+
+### Verification
+
+```powershell
+# Syntax check - all files pass
+python -m py_compile core_gameplay.py agent_self_model.py autonomous_evolution_runner.py lessons_learned_engine.py
+
+# Verified no more zero-argument calls
+grep "get_controlled_objects()" core_gameplay.py  # No matches
+```
+
+---
+
+### Current State
+
+**READY FOR TESTING** - All fixes implemented and syntax verified:
+
+1. ✅ Death recording added to main game loop
+2. ✅ All `get_controlled_objects()` calls fixed with proper parameters
+3. ✅ Agent position extraction uses `_current_agent_position` with string-parsing fallback
+4. ✅ Lessons limit increased to 15
+5. ✅ Prior lessons wired into gameplay context
+
+**Expected Outcome After Testing**:
+- `death_events` table should start populating
+- `death_cause_hypotheses` should accumulate threat patterns
+- `threat_objects` in reasoning logs should show orange enemies
+- Agents should learn to avoid enemies over generations
+
+---
+
+### Next Steps
+
+1. Run evolution with 5-10 games on as66
+2. Query `death_events` table - should have rows now
+3. Query `death_cause_hypotheses` - should show orange color as threat
+4. Check reasoning logs - `threat_objects` should be populated
+5. Observe agent behavior - should start avoiding orange enemies
+
+---
+
 ## Session: January 22, 2026 - Lessons Learned Engine Overhaul (Salience + Dedup + CODS)
 
 ---
