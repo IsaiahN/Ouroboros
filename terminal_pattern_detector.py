@@ -1416,11 +1416,11 @@ class TerminalPatternDetector:
                         action_meaning = {1: 'UP (toward edge)', 2: 'DOWN (toward edge)', 
                                          3: 'RIGHT (toward edge)', 4: 'LEFT (toward edge)',
                                          5: 'WAIT', 6: 'CLICK', 7: 'UNDO'}
-                        theory['theory'] = f"Moved into boundary/wall at ({x},{y}). ACTION{fatal_action} ({action_meaning.get(fatal_action, '?')}) pushed controlled object out of bounds."
+                        theory['theory'] = f"[{game_type.upper()} L{level_number}] Boundary collision at ({x},{y}). ACTION{fatal_action} ({action_meaning.get(fatal_action, '?')}) pushed object out of bounds."
                         theory['hypothesis_type'] = 'boundary_collision'
-                        theory['avoidance_strategy'] = f"When near edge ({x},{y}), avoid ACTION{fatal_action}. Try opposite direction or wait."
+                        theory['avoidance_strategy'] = f"In {game_type} L{level_number}, when near ({x},{y}), avoid ACTION{fatal_action}. Try opposite direction."
                         theory['confidence'] = 0.7
-                        theory['testable_prediction'] = f"Moving ACTION{fatal_action} near coordinates ({x},{y}) should cause game-over. Test by approaching from opposite side."
+                        theory['testable_prediction'] = f"In {game_type} L{level_number}, ACTION{fatal_action} near ({x},{y}) should cause game-over."
                         return theory
             
             # Check for oscillation death (same actions repeated before death)
@@ -1428,11 +1428,18 @@ class TerminalPatternDetector:
                 # Check for A-B-A-B pattern
                 last_four = pre_death_actions[-4:]
                 if len(set(last_four)) == 2 and last_four[0] == last_four[2] and last_four[1] == last_four[3]:
-                    theory['theory'] = f"Died after oscillating between ACTION{last_four[0]} and ACTION{last_four[1]}. Game may punish repeated back-and-forth movement."
+                    # Include position context for oscillation
+                    pos_str = ""
+                    if controlled_objects:
+                        positions = [(obj.get('x', -1), obj.get('y', -1)) for obj in controlled_objects if obj.get('x', -1) >= 0]
+                        if positions:
+                            pos_str = f" at {positions[0]}" if len(positions) == 1 else f" near {positions[:2]}"
+                    
+                    theory['theory'] = f"[{game_type.upper()} L{level_number}] Oscillation death{pos_str}. ACTION{last_four[0]}<->ACTION{last_four[1]} pattern punished."
                     theory['hypothesis_type'] = 'oscillation_trap'
-                    theory['avoidance_strategy'] = f"Break oscillation pattern. After ACTION{last_four[0]}, try a different action instead of ACTION{last_four[1]}."
+                    theory['avoidance_strategy'] = f"In {game_type} L{level_number}{pos_str}, break oscillation. After ACTION{last_four[0]}, try different action."
                     theory['confidence'] = 0.6
-                    theory['testable_prediction'] = "Avoid oscillating between same two actions more than twice in a row."
+                    theory['testable_prediction'] = f"In {game_type} L{level_number}, avoid oscillating ACTION{last_four[0]}<->ACTION{last_four[1]} more than twice."
                     return theory
             
             # Check for similar past patterns
@@ -1447,11 +1454,21 @@ class TerminalPatternDetector:
             if existing_patterns:
                 most_common = existing_patterns[0]
                 if most_common['occurrence_count'] >= 3:
-                    theory['theory'] = f"ACTION{most_common['fatal_action']} has caused game-over {most_common['occurrence_count']} times at level {level_number}. This action may be consistently dangerous here."
+                    # Build position context for actionable theory
+                    position_str = ""
+                    if controlled_objects:
+                        positions = [(obj.get('x', -1), obj.get('y', -1)) for obj in controlled_objects if obj.get('x', -1) >= 0]
+                        if positions:
+                            if len(positions) == 1:
+                                position_str = f" from position ({positions[0][0]},{positions[0][1]})"
+                            else:
+                                position_str = f" with objects at {positions[:3]}"  # Show up to 3 positions
+                    
+                    theory['theory'] = f"[{game_type.upper()}] ACTION{most_common['fatal_action']}{position_str} has caused game-over {most_common['occurrence_count']} times at L{level_number}. This action is dangerous in this region."
                     theory['hypothesis_type'] = 'repeated_failure'
-                    theory['avoidance_strategy'] = f"Strongly avoid ACTION{most_common['fatal_action']} at level {level_number}. Try alternative approaches."
+                    theory['avoidance_strategy'] = f"In {game_type} L{level_number}, avoid ACTION{most_common['fatal_action']}{position_str}. Try alternative actions or approach from different angle."
                     theory['confidence'] = min(0.9, 0.5 + most_common['occurrence_count'] * 0.1)
-                    theory['testable_prediction'] = f"Any agent using ACTION{most_common['fatal_action']} at level {level_number} in similar state should fail."
+                    theory['testable_prediction'] = f"In {game_type} L{level_number}, ACTION{most_common['fatal_action']} from similar position should reproduce failure."
                     return theory
             
             # Check death zones
@@ -1462,11 +1479,11 @@ class TerminalPatternDetector:
                     for zone in zones:
                         if (zone['x_min'] <= x <= zone['x_max'] and 
                             zone['y_min'] <= y <= zone['y_max']):
-                            theory['theory'] = f"Controlled object entered death zone at ({zone['x_min']}-{zone['x_max']}, {zone['y_min']}-{zone['y_max']}). This region has {zone['death_count']} recorded deaths."
+                            theory['theory'] = f"[{game_type.upper()} L{level_number}] Death zone ({zone['x_min']}-{zone['x_max']}, {zone['y_min']}-{zone['y_max']}) at ({x},{y}). {zone['death_count']} recorded deaths here."
                             theory['hypothesis_type'] = 'death_zone'
-                            theory['avoidance_strategy'] = f"Avoid moving controlled objects into region ({zone['x_min']}-{zone['x_max']}, {zone['y_min']}-{zone['y_max']})."
+                            theory['avoidance_strategy'] = f"In {game_type} L{level_number}, avoid region ({zone['x_min']}-{zone['x_max']}, {zone['y_min']}-{zone['y_max']})."
                             theory['confidence'] = zone.get('danger_score', 0.5)
-                            theory['testable_prediction'] = f"Objects entering this zone should trigger game-over. Navigate around the zone instead."
+                            theory['testable_prediction'] = f"In {game_type} L{level_number}, entering zone ({zone['x_min']}-{zone['x_max']}, {zone['y_min']}-{zone['y_max']}) causes game-over."
                             return theory
             
             # Default theory based on fatal action
@@ -1475,11 +1492,22 @@ class TerminalPatternDetector:
                 3: 'right movement', 4: 'left movement',
                 5: 'wait/special', 6: 'click/select', 7: 'undo'
             }
-            theory['theory'] = f"Game-over caused by ACTION{fatal_action} ({action_meanings.get(fatal_action, 'unknown')}). The exact trigger is unclear, but this action in this state leads to failure."
+            
+            # Build position context for actionable theory
+            position_str = ""
+            if controlled_objects:
+                positions = [(obj.get('x', -1), obj.get('y', -1)) for obj in controlled_objects if obj.get('x', -1) >= 0]
+                if positions:
+                    if len(positions) == 1:
+                        position_str = f" at position ({positions[0][0]},{positions[0][1]})"
+                    else:
+                        position_str = f" with objects at {positions[:3]}"
+            
+            theory['theory'] = f"[{game_type.upper()} L{level_number}] Game-over caused by ACTION{fatal_action} ({action_meanings.get(fatal_action, 'unknown')}){position_str}. Exact trigger unclear."
             theory['hypothesis_type'] = 'action_state_mismatch'
-            theory['avoidance_strategy'] = f"In similar game states, avoid ACTION{fatal_action}. Try alternative actions to discover safe paths."
+            theory['avoidance_strategy'] = f"In {game_type} L{level_number}{position_str}, avoid ACTION{fatal_action}. Try alternative actions."
             theory['confidence'] = 0.4
-            theory['testable_prediction'] = f"Repeating ACTION{fatal_action} in similar frame state should reproduce the failure."
+            theory['testable_prediction'] = f"In {game_type} L{level_number}, ACTION{fatal_action} from similar position should reproduce failure."
             
         except Exception as e:
             logger.debug(f"Theory generation failed: {e}")
