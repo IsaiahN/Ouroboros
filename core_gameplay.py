@@ -8388,22 +8388,56 @@ class GameplayEngine:
                                                 }
                                                 expected_direction = action_direction_map.get(action_str, 'unknown')
                                                 
-                                                for obj_id in moving_objects[:3]:
+                                                # Get what WE control (to distinguish from other movers)
+                                                controlled_colors = set()
+                                                try:
+                                                    control_data = self.agent_self_model.get_controlled_objects(
+                                                        agent_id or 'unknown', game_id or 'unknown', current_level
+                                                    )
+                                                    if control_data:
+                                                        import re
+                                                        for ctrl_str in control_data:
+                                                            match = re.search(r'color_(\d+)', str(ctrl_str))
+                                                            if match:
+                                                                controlled_colors.add(int(match.group(1)))
+                                                except Exception:
+                                                    pass
+                                                
+                                                for obj_id in moving_objects[:5]:
                                                     # Extract color number from obj_id (e.g., "obj_12" -> 12)
                                                     try:
                                                         color_num = int(str(obj_id).split('_')[-1])
                                                     except (ValueError, IndexError):
                                                         color_num = 0
                                                     
-                                                    self.agent_self_model.learn_from_movement_correlation(
-                                                        agent_id=agent_id,
-                                                        game_id=game_id,
-                                                        level=current_level,
-                                                        action=action_str,
-                                                        direction=expected_direction,
-                                                        controlled_color=color_num,
-                                                        generation=self.game_config.get('generation', 0)
-                                                    )
+                                                    if color_num in controlled_colors:
+                                                        # This is what we control - learn as controlled
+                                                        self.agent_self_model.learn_from_movement_correlation(
+                                                            agent_id=agent_id,
+                                                            game_id=game_id,
+                                                            level=current_level,
+                                                            action=action_str,
+                                                            direction=expected_direction,
+                                                            controlled_color=color_num,
+                                                            generation=self.game_config.get('generation', 0)
+                                                        )
+                                                    else:
+                                                        # BIRTHRIGHT THREAT DETECTION: 
+                                                        # Something moved that we DON'T control = potential threat!
+                                                        # "When I move, this OTHER thing also moves" = chaser/enemy
+                                                        if hasattr(self, 'death_hypothesis') and self.death_hypothesis:
+                                                            try:
+                                                                # Record as responsive object (potential threat)
+                                                                self.death_hypothesis.record_responsive_object(
+                                                                    game_type=game_type,
+                                                                    level_number=current_level,
+                                                                    object_color=color_num,
+                                                                    trigger_action=action_str,
+                                                                    agent_id=agent_id or 'unknown'
+                                                                )
+                                                                logger.info(f"[BIRTHRIGHT-THREAT] Color {color_num} moved when agent moved - potential threat!")
+                                                            except Exception as threat_err:
+                                                                logger.debug(f"[BIRTHRIGHT] Threat recording failed: {threat_err}")
                                             
                                             # AUTO-SYMMETRY: If similar objects found, queue for testing
                                             # This replaces the coded _trigger_symmetry_experiment

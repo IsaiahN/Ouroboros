@@ -1277,3 +1277,90 @@ class DeathCauseHypothesis:
             }
         except Exception as e:
             return {'error': str(e)}
+    
+    def record_responsive_object(
+        self,
+        game_type: str,
+        level_number: int,
+        object_color: int,
+        trigger_action: str,
+        agent_id: str
+    ) -> None:
+        """
+        Record that an object moved in response to agent movement.
+        
+        BIRTHRIGHT THREAT DETECTION: Objects that move when you move but that
+        you don't control are potential threats (chasers/enemies).
+        
+        This is called from birthright perception when:
+        1. Agent takes a movement action
+        2. An object moves that the agent doesn't control
+        
+        Multiple observations build confidence that this is a chaser/threat.
+        
+        Args:
+            game_type: Game type prefix (e.g., 'as66')
+            level_number: Level where observed
+            object_color: Color of the object that moved
+            trigger_action: Action that triggered the movement (e.g., 'ACTION1')
+            agent_id: Agent that observed this
+        """
+        try:
+            # Check for existing responsive object record
+            existing = self.db.execute_query("""
+                SELECT hypothesis_id, times_observed, confidence
+                FROM death_cause_hypotheses
+                WHERE game_type = ? AND level_number = ? 
+                  AND object_color = ? AND cause_type = 'responsive'
+                LIMIT 1
+            """, (game_type, level_number, object_color))
+            
+            if existing:
+                row = existing[0]
+                new_observed = row['times_observed'] + 1
+                
+                # Confidence increases with repeated observations
+                # Objects that consistently move when you move are likely threats
+                # Formula: confidence = min(0.8, 0.2 + 0.1 * observations)
+                new_confidence = min(0.8, 0.2 + 0.1 * new_observed)
+                
+                self.db.execute_query("""
+                    UPDATE death_cause_hypotheses
+                    SET times_observed = ?,
+                        confidence = ?,
+                        object_pattern = ?,
+                        last_updated_at = CURRENT_TIMESTAMP
+                    WHERE hypothesis_id = ?
+                """, (
+                    new_observed, new_confidence,
+                    f"responsive_to_{trigger_action}",
+                    row['hypothesis_id']
+                ))
+                
+                if new_confidence >= 0.5:
+                    self.logger.info(
+                        f"[RESPONSIVE] Color {object_color} is likely a CHASER on "
+                        f"{game_type} L{level_number} ({new_observed} observations, conf={new_confidence:.2f})"
+                    )
+            else:
+                # Create new responsive object hypothesis
+                hypothesis_id = f"resp_{game_type}_{level_number}_{object_color}_{uuid.uuid4().hex[:6]}"
+                self.db.execute_query("""
+                    INSERT INTO death_cause_hypotheses (
+                        hypothesis_id, game_type, level_number, cause_type,
+                        object_color, object_pattern, times_observed, 
+                        confidence, contributing_agents
+                    ) VALUES (?, ?, ?, 'responsive', ?, ?, 1, 0.3, ?)
+                """, (
+                    hypothesis_id, game_type, level_number,
+                    object_color, f"responsive_to_{trigger_action}",
+                    json.dumps([agent_id])
+                ))
+                
+                self.logger.debug(
+                    f"[RESPONSIVE] First observation: Color {object_color} moved when "
+                    f"agent moved on {game_type} L{level_number}"
+                )
+                
+        except Exception as e:
+            self.logger.debug(f"Failed to record responsive object: {e}")
