@@ -1080,11 +1080,11 @@ class OracleHealthMonitor:
             SELECT 
                 COUNT(*) as games_played,
                 AVG(final_score) as avg_score,
-                AVG(levels_completed) as avg_levels,
+                AVG(level_completions) as avg_levels,
                 AVG(total_actions) as avg_actions,
                 MAX(final_score) as max_score,
-                MAX(levels_completed) as max_levels,
-                SUM(CASE WHEN levels_completed > 0 THEN 1 ELSE 0 END) as level_completions
+                MAX(level_completions) as max_levels,
+                SUM(CASE WHEN level_completions > 0 THEN 1 ELSE 0 END) as games_with_levels
             FROM game_results
             WHERE generation = ?
         """, (generation,))
@@ -1108,7 +1108,7 @@ class OracleHealthMonitor:
             'avg_actions': r['avg_actions'] or 0,
             'max_score': r['max_score'] or 0,
             'max_levels': r['max_levels'] or 0,
-            'level_completions': r['level_completions'] or 0
+            'level_completions': r['games_with_levels'] or 0
         }
     
     def _generate_diagnosis(
@@ -1536,10 +1536,10 @@ class OracleHealthMonitor:
         results = self.db.execute_query("""
             SELECT 
                 AVG(final_score) as avg_score,
-                AVG(levels_completed) as avg_levels,
+                AVG(level_completions) as avg_levels,
                 AVG(total_actions) as avg_actions,
                 COUNT(*) as games_played,
-                SUM(CASE WHEN levels_completed > 0 THEN 1 ELSE 0 END) as level_completions
+                SUM(CASE WHEN level_completions > 0 THEN 1 ELSE 0 END) as games_with_levels
             FROM game_results
             WHERE generation BETWEEN ? AND ?
         """, (start_gen, end_gen))
@@ -1553,7 +1553,7 @@ class OracleHealthMonitor:
             'avg_levels': r['avg_levels'] or 0,
             'avg_actions': r['avg_actions'] or 0,
             'games_played': r['games_played'] or 0,
-            'level_completions': r['level_completions'] or 0
+            'level_completions': r['games_with_levels'] or 0
         }
     
     # =========================================================================
