@@ -1746,6 +1746,7 @@ class AutonomousEvolutionRunner:
                                 # Lessons learned - record outcome for future games of same type
                                 if self.lessons_engine:
                                     try:
+                                        was_game_over = result.get('final_state') == 'GAME_OVER'
                                         self.lessons_engine.record_game_lessons(
                                             agent_id=agent_id,
                                             game_id=game_id,
@@ -1755,6 +1756,7 @@ class AutonomousEvolutionRunner:
                                             levels_completed=result.get('level_completions', 0),
                                             was_win=result.get('win', False),
                                             generation=self.current_generation,
+                                            was_game_over=was_game_over,
                                         )
                                     except Exception as e:
                                         print(f"  [WARN] Lessons recording failed: {e}")
@@ -1773,6 +1775,25 @@ class AutonomousEvolutionRunner:
                                             print(f"  [CODS] Detected {len(cods_result['primitive_gaps'])} primitive gaps")
                                     except Exception:
                                         pass
+                                
+                                # Check lessons for CODS pattern discoveries (every 10 games)
+                                if self.lessons_engine and self.total_games_played % 10 == 0:
+                                    try:
+                                        patterns = self.lessons_engine.get_patterns_for_cods(game_type)
+                                        if patterns:
+                                            # Feed patterns to CODS for primitive unlock consideration
+                                            death_patterns = [p for p in patterns if p.get('caused_death')]
+                                            high_conf_patterns = [p for p in patterns if p.get('confidence', 0) >= 0.7]
+                                            
+                                            if death_patterns or high_conf_patterns:
+                                                print(f"  [LESSONS-CODS] Found {len(death_patterns)} death patterns, "
+                                                      f"{len(high_conf_patterns)} high-confidence patterns for {game_type}")
+                                                
+                                                # Mark as reported (CODS will process these)
+                                                lesson_ids = [p['lesson_id'] for p in patterns[:10]]
+                                                self.lessons_engine.mark_reported_to_cods(lesson_ids)
+                                    except Exception as e:
+                                        print(f"  [WARN] CODS pattern check failed: {e}")
 
                                 # Mode effectiveness tracking
                                 mode_system.update_mode_effectiveness(

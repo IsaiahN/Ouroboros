@@ -79,7 +79,7 @@ from agent_self_model import (
 )
 from imagination_budget import compute_mental_modeling_budget, ImaginationBudgetManager
 from persona_runtime import PersonaManager
-from lessons_learned_engine import LessonsLearnedEngine
+from lessons_learned_engine import LessonsLearnedEngine, DeathCauseHypothesis
 from object_detector import ObjectDetector
 from collections import Counter
 from dataclasses import dataclass, field
@@ -1828,6 +1828,7 @@ class GameplayEngine:
         self._last_ladder_rung: Optional[str] = None
         self._current_stage: Optional[int] = None
         self.lessons_engine = LessonsLearnedEngine(self.db)
+        self.death_hypothesis = DeathCauseHypothesis(self.db)  # Track death causes to learn threat objects
         self.object_detector = ObjectDetector(db_path)  # Object detection for Stream-aware perception
         
         # FIX: Initialize action traces for Q1-Q5 emergent reasoning
@@ -3669,6 +3670,96 @@ class GameplayEngine:
                             'score_delta': score_after - score_before,
                             'frame_changed': frame_changed
                         }
+                        
+                        # ====================================================
+                        # DEATH CAUSE HYPOTHESIS: Record death with nearby objects
+                        # This builds threat hypotheses so agents learn to avoid
+                        # certain objects (enemies) on specific levels
+                        # ====================================================
+                        if game_state.state == 'GAME_OVER' and hasattr(self, 'death_hypothesis') and self.death_hypothesis:
+                            try:
+                                # Get agent's position and nearby objects
+                                agent_position = None
+                                nearby_objects = []
+                                frames_on_level = loop_state.action_count  # Approx frames on this level
+                                
+                                # Try to get controlled object position as agent position
+                                if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                    control_data = self.agent_self_model.get_controlled_objects()
+                                    if control_data and len(control_data) > 0:
+                                        ctrl_obj = control_data[0]
+                                        if isinstance(ctrl_obj, dict):
+                                            agent_position = (ctrl_obj.get('y', 0), ctrl_obj.get('x', 0))
+                                
+                                # Detect objects in frame to find nearby ones
+                                if hasattr(self, 'object_detector') and self.object_detector and game_state.frame:
+                                    try:
+                                        # Use detect_objects_in_frame with required parameters
+                                        frame_data = {'grid': game_state.frame}
+                                        all_objects = self.object_detector.detect_objects_in_frame(
+                                            frame_data, game_id or 'unknown', current_level, 0
+                                        )
+                                        if agent_position and all_objects:
+                                            # Find objects within 3 cells of agent
+                                            agent_y, agent_x = agent_position
+                                            for obj in all_objects:
+                                                # Extract properties from nested JSON
+                                                try:
+                                                    props = json.loads(obj.get('properties', '{}'))
+                                                except (json.JSONDecodeError, TypeError):
+                                                    props = {}
+                                                center = props.get('center', [0, 0])
+                                                obj_x, obj_y = center[0], center[1]
+                                                dist = abs(obj_y - agent_y) + abs(obj_x - agent_x)
+                                                if dist <= 3:  # Manhattan distance <= 3
+                                                    # Add distance and color to flat object for record_death
+                                                    obj_with_dist = {
+                                                        'color': props.get('color', 0),
+                                                        'center_x': obj_x,
+                                                        'center_y': obj_y,
+                                                        'distance': dist,
+                                                        'area': props.get('area', 1),
+                                                        'position': center
+                                                    }
+                                                    nearby_objects.append(obj_with_dist)
+                                        elif all_objects:
+                                            # No agent position, just use all objects with unknown distance
+                                            for obj in all_objects[:5]:
+                                                try:
+                                                    props = json.loads(obj.get('properties', '{}'))
+                                                except (json.JSONDecodeError, TypeError):
+                                                    props = {}
+                                                center = props.get('center', [0, 0])
+                                                obj_with_dist = {
+                                                    'color': props.get('color', 0),
+                                                    'center_x': center[0],
+                                                    'center_y': center[1],
+                                                    'distance': 999,  # Unknown
+                                                    'area': props.get('area', 1),
+                                                    'position': center
+                                                }
+                                                nearby_objects.append(obj_with_dist)
+                                    except Exception:
+                                        pass
+                                
+                                # Only record if we have a valid agent position
+                                if agent_position is not None:
+                                    self.death_hypothesis.record_death(
+                                        game_type=game_type,
+                                        level_number=current_level,
+                                        agent_id=agent_id or 'unknown',
+                                        agent_position=agent_position,
+                                        nearby_objects=nearby_objects,
+                                        last_action=action or 'unknown',
+                                        frames_on_level=frames_on_level,
+                                        generation=self.game_config.get('generation', 0)
+                                    )
+                                    logger.debug(f"[DEATH] Recorded death on {game_type} L{current_level}, "
+                                               f"nearby_objects={len(nearby_objects)}")
+                                else:
+                                    logger.debug(f"[DEATH] Skipped recording - no agent position")
+                            except Exception as e:
+                                logger.debug(f"Death hypothesis recording failed: {e}")
                         
                         safe_action = action or 'noop'
                         self.metacognitive_engine.record_failure(safe_action, context)
@@ -28965,6 +29056,25 @@ class GameplayEngine:
                 0  # frame_index
             )
             
+            # ================================================================
+            # DEATH HYPOTHESIS: Query known threat objects for this level
+            # This uses learned death causes to identify threats BEFORE the
+            # agent touches them, not just from semantic role analysis
+            # ================================================================
+            known_threats = []
+            if hasattr(self, 'death_hypothesis') and self.death_hypothesis:
+                try:
+                    game_type = (game_id[:4] if game_id else 'unknown')
+                    known_threats = self.death_hypothesis.get_threat_objects(
+                        game_type=game_type,
+                        level_number=level,
+                        min_confidence=0.3  # Moderate threshold
+                    )
+                    if known_threats:
+                        logger.debug(f"[THREAT] Loaded {len(known_threats)} known threats for {game_type} L{level}")
+                except Exception as e:
+                    logger.debug(f"Death hypothesis query failed: {e}")
+            
             # BUILD STREAM-AWARE PERCEPTION FOR EACH OBJECT
             total_sensation = 0.0
             total_goal_relevance = 0.0
@@ -29015,6 +29125,30 @@ class GameplayEngine:
                     sensation_context['goal_objects'].append(obj)
                 elif semantic_role == 'obstacle':
                     sensation_context['threat_objects'].append(obj)
+                
+                # ============================================================
+                # DEATH HYPOTHESIS CHECK: Override with known threat patterns
+                # If this object's signature matches a learned death cause,
+                # add to threat_objects regardless of semantic role
+                # ============================================================
+                obj_color = obj.get('color', 0)
+                obj_signature = obj.get('signature', '')
+                is_known_threat = False
+                for threat in known_threats:
+                    # Match by pattern/signature (preferred) or color
+                    threat_pattern = threat.get('pattern', '')
+                    if threat_pattern and threat_pattern != 'unknown' and threat_pattern == obj_signature:
+                        is_known_threat = True
+                        break
+                    # Match by color (get_threat_objects returns 'color' key)
+                    if threat.get('color') == obj_color:
+                        is_known_threat = True
+                        break
+                
+                if is_known_threat and obj not in sensation_context['threat_objects']:
+                    sensation_context['threat_objects'].append(obj)
+                    logger.debug(f"[THREAT] Object {obj.get('object_type', 'unknown')} marked as threat "
+                               f"based on death hypothesis (color={obj_color})")
                 
                 # Accumulate for aggregate scores
                 total_sensation += tetra_sensation['function']['sensation_score']

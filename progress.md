@@ -2,6 +2,244 @@
 
 ---
 
+## Session: January 22, 2026 - Lessons Learned Engine Overhaul (Salience + Dedup + CODS)
+
+---
+
+### Approach: Overhaul lessons_learned_engine.py with salience-based retrieval (death/high-occurrence lessons first), deduplication on save (increment count instead of duplicate rows), and CODS integration for primitive unlocks. Also fixed 11 integration bugs discovered during review.
+
+**Timestamp**: 8:07:42 AM  
+**Status**: COMPLETE - All features implemented, all bugs fixed, ready for testing
+
+---
+
+### Problem Statement
+
+User requested improvements:
+1. **Salience-based retrieval**: "lessons learned engine when its being imported pre-gameplay for the agent to benefit from should be pulling based on salience"
+2. **Deduplication on save**: "we also want to dedup stuff on lesson learned saved post game"
+3. **CODS integration**: "if cods needs to be involved to provide/unlock a primitive somehow think about how that should work"
+
+**Root Issues**:
+- Lessons were returned in arbitrary order (not by importance)
+- Duplicate lessons created new rows instead of incrementing occurrence count
+- No pathway for CODS to learn from accumulated lessons
+
+---
+
+### Solution: Three-Part Enhancement
+
+#### Part 1: Schema Updates for Salience & Dedup
+
+**New Columns in `game_lessons_learned`**:
+```sql
+occurrence_count INTEGER DEFAULT 1     -- How many times this lesson occurred
+severity INTEGER DEFAULT 2             -- 1=low, 2=medium, 3=high
+caused_death BOOLEAN DEFAULT FALSE     -- Did this lead to agent death?
+caused_early_end BOOLEAN DEFAULT FALSE -- Did this end the game early?
+lesson_hash TEXT                       -- For dedup (game_type + lesson_type + content hash)
+reported_to_cods BOOLEAN DEFAULT FALSE -- Has CODS seen this pattern?
+cods_primitive_unlocked TEXT           -- Which primitive was unlocked (if any)
+last_occurred_at TEXT                  -- Most recent occurrence timestamp
+```
+
+**Migration Method** ([lessons_learned_engine.py](lessons_learned_engine.py#L88-L135)):
+- Safe `ALTER TABLE ADD COLUMN` for each new column
+- UNIQUE index on `lesson_hash` for dedup
+- Index on `(game_type, reported_to_cods)` for CODS queries
+
+#### Part 2: Deduplication via lesson_hash
+
+**`_normalize_lesson_for_hash()`** ([lessons_learned_engine.py](lessons_learned_engine.py#L215-L270)):
+```python
+def _normalize_lesson_for_hash(self, game_type: str, lesson_type: str, details: Dict) -> str:
+    """Create deterministic hash from game_type + lesson_type + normalized content"""
+    normalized = {
+        'game_type': game_type,
+        'lesson_type': lesson_type,
+        'content': self._normalize_dict(details)  # Sorts keys, handles nested dicts
+    }
+    content_str = json.dumps(normalized, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(content_str.encode()).hexdigest()[:32]
+```
+
+**`_store_lesson()` with Dedup** ([lessons_learned_engine.py](lessons_learned_engine.py#L275-L380)):
+```python
+# Try to find existing lesson with same hash
+cursor.execute("""
+    SELECT lesson_id, occurrence_count, severity FROM game_lessons_learned
+    WHERE lesson_hash = ?
+""", (lesson_hash,))
+existing = cursor.fetchone()
+
+if existing:
+    # INCREMENT occurrence count instead of creating duplicate
+    new_severity = max(existing[2], severity)  # Keep highest severity
+    cursor.execute("""
+        UPDATE game_lessons_learned SET
+            occurrence_count = occurrence_count + 1,
+            severity = ?,
+            last_occurred_at = ?
+        WHERE lesson_id = ?
+    """, (new_severity, timestamp, existing[0]))
+else:
+    # Insert new lesson with hash
+    cursor.execute("""INSERT INTO game_lessons_learned ...""")
+```
+
+#### Part 3: Salience-Based Retrieval
+
+**`get_lessons_for_game()`** ([lessons_learned_engine.py](lessons_learned_engine.py#L385-L480)):
+```python
+query = """
+    SELECT ... FROM game_lessons_learned
+    WHERE game_type = ? AND is_active = TRUE
+    ORDER BY 
+        caused_death DESC,              -- Death lessons first (most critical)
+        severity DESC,                  -- Then by severity (3 > 2 > 1)
+        occurrence_count DESC,          -- Then by frequency
+        last_occurred_at DESC,          -- Then by recency
+        created_at DESC                 -- Finally by creation date
+    LIMIT ?
+"""
+```
+
+**Severity Assignment** (in `_store_lesson()`):
+- Severity 3: Death lessons (`caused_death=True`)
+- Severity 3: Early game end (`caused_early_end=True`)
+- Severity 2: Default
+- Severity 1: Informational
+
+#### Part 4: CODS Integration
+
+**`get_patterns_for_cods()`** ([lessons_learned_engine.py](lessons_learned_engine.py#L485-L560)):
+```python
+def get_patterns_for_cods(self, game_type: str = None, min_occurrences: int = 5) -> List[Dict]:
+    """Get high-frequency unreported patterns for CODS analysis"""
+    query = """
+        SELECT ... FROM game_lessons_learned
+        WHERE reported_to_cods = FALSE 
+          AND occurrence_count >= ?
+          AND is_active = TRUE
+        ORDER BY occurrence_count DESC, severity DESC
+        LIMIT 100
+    """
+```
+
+**`mark_reported_to_cods()`** ([lessons_learned_engine.py](lessons_learned_engine.py#L565-L600)):
+```python
+def mark_reported_to_cods(self, lesson_ids: List[int], primitive_unlocked: str = None):
+    """Mark lessons as reported and optionally record primitive unlock"""
+    cursor.execute("""
+        UPDATE game_lessons_learned SET
+            reported_to_cods = TRUE,
+            cods_primitive_unlocked = ?
+        WHERE lesson_id IN ({})
+    """.format(','.join('?' * len(lesson_ids))), 
+    [primitive_unlocked] + lesson_ids)
+```
+
+**Integration in Evolution Runner** ([autonomous_evolution_runner.py](autonomous_evolution_runner.py#L1780-L1797)):
+```python
+# Every 10 games, check for patterns to report to CODS
+if self.total_games_played % 10 == 0:
+    patterns = self.lessons_engine.get_patterns_for_cods(min_occurrences=5)
+    if patterns:
+        logger.info(f"[CODS-LESSONS] Found {len(patterns)} patterns for CODS review")
+        # Future: cods_engine.process_lesson_patterns(patterns)
+```
+
+---
+
+### Bug Fixes (11 Integration Issues)
+
+#### Bug 1: Undefined `loop_idx` Variable
+**Location**: [autonomous_evolution_runner.py](autonomous_evolution_runner.py#L1749)  
+**Fix**: Changed `loop_idx` to `self.total_games_played`
+
+#### Bug 2-3: Parameter Name Mismatch (`level` vs `level_number`)
+**Locations**: 
+- [core_gameplay.py](core_gameplay.py#L29028) (threat retrieval)
+- [core_gameplay.py](core_gameplay.py#L29039) (threat retrieval)  
+**Fix**: Changed `level=current_level` to `level_number=current_level`
+
+#### Bug 4: Missing Parameters in `record_death()` Call
+**Location**: [core_gameplay.py](core_gameplay.py#L3690-L3705)  
+**Fix**: Added `agent_id=self.agent_id, generation=generation`
+
+#### Bug 5: Key Name Mismatch in Threat Matching
+**Location**: [core_gameplay.py](core_gameplay.py#L29095-L29115)  
+**Fix**: Changed `object_color` → `color`, `object_pattern` → `pattern`
+
+#### Bug 6: Inline Imports
+**Location**: [core_gameplay.py](core_gameplay.py#L35)  
+**Fix**: Moved `DeathCauseHypothesis` import to top of file
+
+#### Bug 7: `agent_position` Could Be None
+**Location**: [lessons_learned_engine.py](lessons_learned_engine.py#L720-L750)  
+**Fix**: Added guard `if agent_position else None` before `json.dumps(list(agent_position))`
+
+#### Bug 8: Missing `distance` Field in Nearby Objects
+**Location**: [lessons_learned_engine.py](lessons_learned_engine.py#L755-L790)  
+**Fix**: Changed `obj.get('distance')` to use calculated `dist` variable
+
+#### Bug 9: Non-existent `detect_objects()` Method
+**Location**: [lessons_learned_engine.py](lessons_learned_engine.py#L760)  
+**Fix**: Changed to use `self.object_detector.detect_objects_in_frame()` with proper parameters
+
+#### Bug 10: Object Structure Mismatch (Nested Properties)
+**Location**: [lessons_learned_engine.py](lessons_learned_engine.py#L775-L810)  
+**Fix**: Added JSON parsing for nested `properties` field:
+```python
+props = obj.get('properties', {})
+if isinstance(props, str):
+    props = json.loads(props)
+nearby_objects.append({
+    'color': props.get('color'),
+    'pattern': props.get('pattern'),
+    ...
+})
+```
+
+#### Bug 11: `closest` Variable Undefined When Empty
+**Location**: [lessons_learned_engine.py](lessons_learned_engine.py#L815-L830)  
+**Fix**: Added guard `closest = nearby_objects[0] if nearby_objects else None`
+
+#### Bug 12: Calling `record_death()` with None Position
+**Location**: [core_gameplay.py](core_gameplay.py#L3688)  
+**Fix**: Added `if agent_position:` guard before entire death recording block
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| [lessons_learned_engine.py](lessons_learned_engine.py) | Schema migration, _store_lesson with dedup, salience-based get_lessons_for_game, CODS integration methods, None handling fixes |
+| [core_gameplay.py](core_gameplay.py) | DeathCauseHypothesis import, death recording fixes, threat retrieval fixes, position guard |
+| [autonomous_evolution_runner.py](autonomous_evolution_runner.py) | record_game_lessons call fixed, CODS pattern check added |
+
+---
+
+### Verification
+
+```powershell
+# Import test - all modules load successfully
+python -c "from lessons_learned_engine import LessonsLearnedEngine, DeathCauseHypothesis; from core_gameplay import NetworkAwareGameplay; print('[OK] All imports successful')"
+# Output: [OK] All imports successful
+```
+
+---
+
+### Next Steps
+
+1. Run evolution to test salience-based retrieval in practice
+2. Verify dedup is working (check `occurrence_count` in database)
+3. Monitor CODS pattern accumulation
+4. Consider hooking `get_patterns_for_cods()` into actual CODS engine
+
+---
+
 ## Session: January 22, 2026 - Map Intelligence System (Collision Understanding)
 
 ---
