@@ -3683,13 +3683,34 @@ class GameplayEngine:
                                 nearby_objects = []
                                 frames_on_level = loop_state.action_count  # Approx frames on this level
                                 
-                                # Try to get controlled object position as agent position
-                                if hasattr(self, 'agent_self_model') and self.agent_self_model:
-                                    control_data = self.agent_self_model.get_controlled_objects()
-                                    if control_data and len(control_data) > 0:
-                                        ctrl_obj = control_data[0]
-                                        if isinstance(ctrl_obj, dict):
-                                            agent_position = (ctrl_obj.get('y', 0), ctrl_obj.get('x', 0))
+                                # PRIMARY: Use cached position from self-model context
+                                if hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                    pos = self._current_agent_position
+                                    if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                                        # _current_agent_position is (x, y), record_death expects (y, x)
+                                        agent_position = (int(pos[1]), int(pos[0]))
+                                
+                                # FALLBACK: Parse from controlled_objects strings + frame lookup
+                                if agent_position is None and hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                    control_data = self.agent_self_model.get_controlled_objects(
+                                        agent_id or 'unknown',
+                                        game_id or 'unknown', 
+                                        current_level
+                                    )
+                                    if control_data and len(control_data) > 0 and game_state.frame:
+                                        try:
+                                            import re
+                                            frame_arr = np.asarray(game_state.frame)
+                                            ctrl_str = control_data[0]
+                                            match = re.search(r'color_(\d+)', ctrl_str)
+                                            if match:
+                                                color = int(match.group(1))
+                                                positions = np.argwhere(frame_arr == color)
+                                                if len(positions) > 0:
+                                                    center = positions.mean(axis=0).astype(int)
+                                                    agent_position = (int(center[0]), int(center[1]))  # (y, x)
+                                        except Exception:
+                                            pass
                                 
                                 # Detect objects in frame to find nearby ones
                                 if hasattr(self, 'object_detector') and self.object_detector and game_state.frame:
@@ -7513,9 +7534,16 @@ class GameplayEngine:
                                         # ================================================================
                                         # Also record WHERE the death happened (spatial zone)
                                         # Get controlled object positions if available
+                                        # FIX: get_controlled_objects requires (agent_id, game_id, level)
+                                        # and returns strings like "toggleable_color_9", not dicts
+                                        # Use self._current_agent_position instead (set by _build_self_model_context)
                                         controlled_objects = None
                                         if hasattr(self, 'agent_self_model') and self.agent_self_model:
-                                            controlled = self.agent_self_model.get_controlled_objects()
+                                            controlled = self.agent_self_model.get_controlled_objects(
+                                                agent_id or 'unknown',
+                                                game_id or 'unknown',
+                                                current_level
+                                            )
                                             if controlled:
                                                 controlled_objects = controlled
                                         
@@ -7585,6 +7613,91 @@ class GameplayEngine:
                                                 )
                                             except Exception as e:
                                                 logger.debug(f"Network failure broadcast failed: {e}")
+                                        
+                                        # ================================================================
+                                        # DEATH CAUSE HYPOTHESIS - Network-wide threat learning
+                                        # ================================================================
+                                        # Record death with nearby objects so ALL agents learn to
+                                        # identify and avoid threat objects (the orange enemies).
+                                        # This populates death_events and death_cause_hypotheses tables.
+                                        # ================================================================
+                                        if hasattr(self, 'death_hypothesis') and self.death_hypothesis:
+                                            try:
+                                                # Get agent position - prefer _current_agent_position (set by _build_self_model_context)
+                                                # Fall back to parsing controlled_objects strings
+                                                agent_position = None
+                                                nearby_objects = []
+                                                
+                                                # PRIMARY: Use cached position from self-model context
+                                                if hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                                    pos = self._current_agent_position
+                                                    if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                                                        # _current_agent_position is (x, y), record_death expects (y, x)
+                                                        agent_position = (int(pos[1]), int(pos[0]))
+                                                
+                                                # FALLBACK: Parse from controlled_objects strings + frame lookup
+                                                if agent_position is None and controlled_objects and frame_before:
+                                                    try:
+                                                        import re
+                                                        frame_arr = np.asarray(frame_before)
+                                                        ctrl_str = controlled_objects[0]
+                                                        # Handle "toggleable_color_X" format
+                                                        match = re.search(r'color_(\d+)', ctrl_str)
+                                                        if match:
+                                                            color = int(match.group(1))
+                                                            positions = np.argwhere(frame_arr == color)
+                                                            if len(positions) > 0:
+                                                                center = positions.mean(axis=0).astype(int)
+                                                                agent_position = (int(center[0]), int(center[1]))  # (y, x)
+                                                    except Exception:
+                                                        pass
+                                                
+                                                # Detect objects from frame to find nearby threats
+                                                if hasattr(self, 'object_detector') and self.object_detector and frame_before:
+                                                    try:
+                                                        frame_data = {'grid': frame_before}
+                                                        all_objects = self.object_detector.detect_objects_in_frame(
+                                                            frame_data, game_id or 'unknown', current_level, 0
+                                                        )
+                                                        if agent_position and all_objects:
+                                                            agent_y, agent_x = agent_position
+                                                            for obj in all_objects:
+                                                                try:
+                                                                    props = json.loads(obj.get('properties', '{}'))
+                                                                except (json.JSONDecodeError, TypeError):
+                                                                    props = {}
+                                                                center = props.get('center', [0, 0])
+                                                                obj_x, obj_y = center[0], center[1]
+                                                                dist = abs(obj_y - agent_y) + abs(obj_x - agent_x)
+                                                                if dist <= 5:  # Objects within 5 cells
+                                                                    obj_with_dist = {
+                                                                        'color': props.get('color', 0),
+                                                                        'center_x': obj_x,
+                                                                        'center_y': obj_y,
+                                                                        'distance': dist,
+                                                                        'area': props.get('area', 1),
+                                                                        'position': center
+                                                                    }
+                                                                    nearby_objects.append(obj_with_dist)
+                                                    except Exception:
+                                                        pass
+                                                
+                                                # Record death if we have position
+                                                if agent_position is not None:
+                                                    self.death_hypothesis.record_death(
+                                                        game_type=game_type,
+                                                        level_number=current_level,
+                                                        agent_id=agent_id or 'unknown',
+                                                        agent_position=agent_position,
+                                                        nearby_objects=nearby_objects,
+                                                        last_action=f"ACTION{fatal_action_num}" if fatal_action_num else 'unknown',
+                                                        frames_on_level=level_action_count,
+                                                        generation=self.game_config.get('generation', 0)
+                                                    )
+                                                    logger.info(f"[DEATH-HYPO] Recorded death on {game_type} L{current_level}, "
+                                                               f"nearby={len(nearby_objects)} objects")
+                                            except Exception as e:
+                                                logger.debug(f"Death hypothesis recording failed: {e}")
                                         
                                 except Exception as e:
                                     logger.debug(f"Terminal pattern recording failed: {e}")
@@ -15673,14 +15786,37 @@ class GameplayEngine:
                     # This is more robust than frame-hash matching for dynamic games
                     # =====================================================================
                     if action_to_check and action_to_check <= 4:  # Movement actions (UP/DOWN/RIGHT/LEFT)
-                        # Get controlled object positions from agent self-model
+                        # Get controlled object positions
+                        # PRIMARY: Use _current_agent_position (set by _build_self_model_context)
+                        # This is more reliable than parsing get_controlled_objects strings
                         object_positions = []
-                        if hasattr(self, 'agent_self_model') and self.agent_self_model:
-                            controlled = self.agent_self_model.get_controlled_objects()
-                            if controlled:
-                                for obj in controlled:
-                                    if 'x' in obj and 'y' in obj:
-                                        object_positions.append((obj['x'], obj['y']))
+                        
+                        if hasattr(self, '_current_agent_position') and self._current_agent_position:
+                            pos = self._current_agent_position
+                            if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                                # _current_agent_position is (x, y) format
+                                object_positions.append((int(pos[0]), int(pos[1])))
+                        
+                        # FALLBACK: Parse from controlled_objects strings + frame lookup
+                        if not object_positions and hasattr(self, 'agent_self_model') and self.agent_self_model and game_state.frame:
+                            try:
+                                agent_id = self.game_config.get('agent_id', 'unknown')
+                                controlled = self.agent_self_model.get_controlled_objects(
+                                    agent_id, game_id, current_level_check
+                                )
+                                if controlled:
+                                    import re
+                                    frame_arr = np.asarray(game_state.frame)
+                                    for ctrl_str in controlled[:3]:  # Limit to first 3
+                                        match = re.search(r'color_(\d+)', ctrl_str)
+                                        if match:
+                                            color = int(match.group(1))
+                                            positions = np.argwhere(frame_arr == color)
+                                            if len(positions) > 0:
+                                                center = positions.mean(axis=0).astype(int)
+                                                object_positions.append((int(center[1]), int(center[0])))  # (x, y)
+                            except Exception:
+                                pass
                         
                         if object_positions:
                             game_type = game_id.split('-')[0] if '-' in game_id else game_id
@@ -18372,6 +18508,7 @@ class GameplayEngine:
                 'self_objects': [],       # Objects agent controls (from hypothesis)
                 'goal_objects': [],       # Objects identified as goals (from synthesis)
                 'threat_objects': [],     # Objects identified as threats (from synthesis)
+                'prior_lessons': [],      # Network lessons (salience-ranked: deaths first)
                 'mood': {                 # Cognitive state from stream conflict
                     'valence': 0.0,
                     'arousal': 0.0,
@@ -18589,6 +18726,9 @@ class GameplayEngine:
                     self._summarize_object(obj)
                     for obj in sensation_context.get('threat_objects', [])[:5]
                 ]
+                
+                # Prior lessons from network (salience-ranked: deaths first, then severity/frequency)
+                tetra['prior_lessons'] = sensation_context.get('prior_lessons', [])[:10]
                 
                 # Mood vector (emergent from perception balance)
                 tetra['mood'] = sensation_context.get('mood_vector', tetra['mood'])
@@ -26020,13 +26160,35 @@ class GameplayEngine:
                         # This is more intuitive: "being in region X = danger"
                         # ================================================================
                         if action_num <= 4:  # Movement action
-                            # Get controlled object positions from self_model or frame analysis
+                            # Get controlled object positions
+                            # PRIMARY: Use _current_agent_position (set by _build_self_model_context)
                             controlled_positions = []
-                            if hasattr(self, 'agent_self_model') and self.agent_self_model:
-                                controlled = self.agent_self_model.get_controlled_objects()
-                                for obj in controlled:
-                                    if 'x' in obj and 'y' in obj:
-                                        controlled_positions.append((obj['x'], obj['y']))
+                            
+                            if hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                pos = self._current_agent_position
+                                if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                                    controlled_positions.append((int(pos[0]), int(pos[1])))  # (x, y)
+                            
+                            # FALLBACK: Parse from controlled_objects strings + frame lookup
+                            if not controlled_positions and hasattr(self, 'agent_self_model') and self.agent_self_model and game_state.frame:
+                                try:
+                                    agent_id = self.game_config.get('agent_id', 'unknown')
+                                    controlled = self.agent_self_model.get_controlled_objects(
+                                        agent_id, game_id_for_frontier or '', actual_level
+                                    )
+                                    if controlled:
+                                        import re
+                                        frame_arr = np.asarray(game_state.frame)
+                                        for ctrl_str in controlled[:3]:
+                                            match = re.search(r'color_(\d+)', ctrl_str)
+                                            if match:
+                                                color = int(match.group(1))
+                                                positions = np.argwhere(frame_arr == color)
+                                                if len(positions) > 0:
+                                                    center = positions.mean(axis=0).astype(int)
+                                                    controlled_positions.append((int(center[1]), int(center[0])))  # (x, y)
+                                except Exception:
+                                    pass
                             
                             if controlled_positions:
                                 zone_danger = self.terminal_detector.check_death_zones(
@@ -29022,8 +29184,14 @@ class GameplayEngine:
             'cognitive_state': 'automatic',  # automatic/deliberative/vivid/paralyzed
             'self_objects': [],  # Objects agent controls (from hypothesis)
             'goal_objects': [],  # Objects identified as goals (from synthesis)
-            'threat_objects': []  # Objects identified as threats (from synthesis)
+            'threat_objects': [],  # Objects identified as threats (from synthesis)
+            'prior_lessons': []  # Network lessons from previous games (salience-ranked)
         }
+        
+        # Load prior lessons from game_config if available (set by evolution runner)
+        # These are salience-ranked: death-causing lessons first, then by severity/frequency
+        if hasattr(self, 'game_config') and self.game_config.get('prior_lessons'):
+            sensation_context['prior_lessons'] = self.game_config['prior_lessons']
         
         grid = frame_data.get('current_frame', {}).get('grid', [])
         

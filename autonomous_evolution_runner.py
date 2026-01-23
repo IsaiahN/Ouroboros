@@ -1655,11 +1655,13 @@ class AutonomousEvolutionRunner:
                                         prior_lessons = self.lessons_engine.get_lessons_for_game(
                                             agent_id=agent_id,
                                             game_type=game_type,
-                                            limit=5
+                                            limit=15  # Top 15 by salience (death/severity/occurrence)
                                         )
                                         if prior_lessons:
                                             # Pass lessons to engine for use during gameplay
                                             engine_slot.prior_lessons = prior_lessons
+                                            # Store in game_config so core_gameplay can access during action selection
+                                            engine_slot.game_config['prior_lessons'] = prior_lessons
                                     except Exception:
                                         pass  # Non-critical
 
