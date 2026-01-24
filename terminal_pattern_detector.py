@@ -41,6 +41,7 @@ IMPLEMENTATION:
 import json
 import hashlib
 import logging
+import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
 from database_interface import DatabaseInterface
@@ -226,6 +227,60 @@ class TerminalPatternDetector:
                 )
             """)
             
+            # ================================================================
+            # RELATIVE THREAT PATTERNS - Context-dependent action safety
+            # ================================================================
+            # KEY INSIGHT: Deaths should be encoded with RELATIVE spatial context
+            # "ACTION4 killed when threat was at relative position (-1, 0)"
+            # NOT "ACTION4 is always dangerous" (blanket avoidance)
+            # 
+            # This enables agents to learn:
+            # - "Don't move LEFT when enemy is to my left"
+            # - "Moving LEFT is safe when enemy is above me"
+            # ================================================================
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS relative_threat_patterns (
+                    pattern_id TEXT PRIMARY KEY,
+                    game_type TEXT NOT NULL,
+                    level_number INTEGER NOT NULL,
+                    
+                    -- The fatal action
+                    fatal_action INTEGER NOT NULL,
+                    
+                    -- Threat context at time of death (relative to agent)
+                    -- JSON: [{"color": 7, "rel_x": -1, "rel_y": 0, "distance": 1}, ...]
+                    -- rel_x/rel_y: threat position relative to agent (negative = left/up)
+                    threat_relative_positions TEXT NOT NULL,
+                    
+                    -- What color was the threat that likely killed us?
+                    threat_color INTEGER,
+                    
+                    -- Agent's movement direction (1=up, 2=down, 3=right, 4=left)
+                    -- Helps identify "moved toward threat" patterns
+                    movement_direction TEXT,
+                    
+                    -- Pattern reliability
+                    occurrence_count INTEGER DEFAULT 1,
+                    confirmed_lethal INTEGER DEFAULT 1,
+                    
+                    -- Metadata
+                    discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_occurrence TIMESTAMP,
+                    discovered_by_agent TEXT,
+                    
+                    -- Confidence that this relative pattern predicts danger
+                    confidence REAL DEFAULT 0.6,
+                    
+                    is_active INTEGER DEFAULT 1
+                )
+            """)
+            
+            # Index for fast relative threat lookups
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_relative_threat_lookup
+                ON relative_threat_patterns (game_type, level_number, fatal_action, is_active)
+            """)
+            
         except Exception as e:
             logger.debug(f"Terminal patterns table setup: {e}")
     
@@ -343,6 +398,281 @@ class TerminalPatternDetector:
             
         except Exception as e:
             logger.debug(f"Error recording terminal pattern: {e}")
+            return None
+    
+    # ========================================================================
+    # RELATIVE THREAT PATTERN SYSTEM
+    # ========================================================================
+    # Context-dependent action safety: "ACTION4 is dangerous when enemy is to my left"
+    # NOT blanket avoidance: "ACTION4 is always dangerous"
+    # ========================================================================
+    
+    def record_relative_threat_pattern(
+        self,
+        game_id: str,
+        level_number: int,
+        fatal_action: int,
+        agent_position: Tuple[int, int],  # (x, y)
+        frame_before_death: List[List[int]],
+        agent_color: int,
+        agent_id: str
+    ) -> Optional[str]:
+        """
+        Record a death with RELATIVE threat positions.
+        
+        Instead of storing "ACTION4 at frame X killed me", this stores:
+        "ACTION4 when threats were at relative positions [(−1,0), (0,−1)] killed me"
+        
+        This enables context-aware danger checking:
+        - "Enemy to my left" + "I pressed LEFT" = danger
+        - "Enemy above me" + "I pressed LEFT" = safe
+        
+        Args:
+            game_id: Game where death occurred
+            level_number: Level where death occurred  
+            fatal_action: The action that caused game_over (1-7)
+            agent_position: Agent's (x, y) position at time of death
+            frame_before_death: Grid state before fatal action
+            agent_color: Color of agent's controlled object
+            agent_id: ID of agent who died
+            
+        Returns:
+            pattern_id if recorded, None on failure
+        """
+        try:
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
+            if not frame_before_death or not agent_position:
+                return None
+            
+            agent_x, agent_y = agent_position
+            frame_arr = np.asarray(frame_before_death) if frame_before_death else None
+            
+            if frame_arr is None or frame_arr.size == 0:
+                return None
+            
+            # Find all non-background, non-agent objects and compute relative positions
+            threat_relatives = []
+            height, width = frame_arr.shape
+            
+            for y in range(height):
+                for x in range(width):
+                    color = int(frame_arr[y, x])
+                    # Skip background (0) and agent's own color
+                    if color == 0 or color == agent_color:
+                        continue
+                    
+                    # Compute relative position to agent
+                    rel_x = x - agent_x  # Positive = right of agent
+                    rel_y = y - agent_y  # Positive = below agent
+                    distance = abs(rel_x) + abs(rel_y)  # Manhattan distance
+                    
+                    # Only track nearby threats (within 5 cells)
+                    if distance <= 5:
+                        threat_relatives.append({
+                            'color': color,
+                            'rel_x': rel_x,
+                            'rel_y': rel_y,
+                            'distance': distance
+                        })
+            
+            # Sort by distance (closest threats first)
+            threat_relatives.sort(key=lambda t: t['distance'])
+            
+            # Take the 3 closest threats
+            closest_threats = threat_relatives[:3]
+            
+            if not closest_threats:
+                # No threats nearby - this death wasn't threat-related
+                return None
+            
+            # Determine likely killer (closest threat)
+            threat_color = closest_threats[0]['color'] if closest_threats else None
+            
+            # Determine movement direction from action
+            direction_map = {1: 'up', 2: 'down', 3: 'right', 4: 'left', 5: 'wait', 6: 'click', 7: 'undo'}
+            movement_direction = direction_map.get(fatal_action, 'unknown')
+            
+            # Create pattern signature for deduplication
+            # Group similar relative positions together
+            threat_sig = json.dumps(sorted([
+                (t['rel_x'], t['rel_y'], t['color']) 
+                for t in closest_threats
+            ]))
+            pattern_hash = hashlib.md5(
+                f"{game_type}_{level_number}_{fatal_action}_{threat_sig}".encode()
+            ).hexdigest()[:12]
+            
+            pattern_id = f"relthreat_{game_type}_{level_number}_{pattern_hash}"
+            
+            # Check for existing similar pattern
+            existing = self.db.execute_query("""
+                SELECT pattern_id, occurrence_count
+                FROM relative_threat_patterns
+                WHERE pattern_id = ? AND is_active = 1
+            """, (pattern_id,))
+            
+            if existing:
+                # Update existing pattern
+                self.db.execute_query("""
+                    UPDATE relative_threat_patterns
+                    SET occurrence_count = occurrence_count + 1,
+                        confirmed_lethal = confirmed_lethal + 1,
+                        confidence = MIN(0.95, confidence + 0.05),
+                        last_occurrence = CURRENT_TIMESTAMP
+                    WHERE pattern_id = ?
+                """, (pattern_id,))
+                
+                new_count = existing[0]['occurrence_count'] + 1
+                logger.info(f"[REL-THREAT] Updated pattern: ACTION{fatal_action} + {movement_direction} "
+                           f"with threat at rel({closest_threats[0]['rel_x']},{closest_threats[0]['rel_y']}) "
+                           f"(now {new_count}x)")
+                return pattern_id
+            
+            # Create new pattern
+            self.db.execute_query("""
+                INSERT INTO relative_threat_patterns (
+                    pattern_id, game_type, level_number, fatal_action,
+                    threat_relative_positions, threat_color, movement_direction,
+                    occurrence_count, confirmed_lethal, discovered_by_agent, confidence, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 0.6, 1)
+            """, (
+                pattern_id, game_type, level_number, fatal_action,
+                json.dumps(closest_threats), threat_color, movement_direction,
+                agent_id
+            ))
+            
+            logger.info(f"[REL-THREAT] NEW: ACTION{fatal_action} ({movement_direction}) killed when "
+                       f"color {threat_color} was at rel({closest_threats[0]['rel_x']},{closest_threats[0]['rel_y']})")
+            
+            return pattern_id
+            
+        except Exception as e:
+            logger.debug(f"Error recording relative threat pattern: {e}")
+            return None
+    
+    def check_relative_threat_danger(
+        self,
+        game_type: str,
+        level_number: int,
+        planned_action: int,
+        agent_position: Tuple[int, int],  # (x, y)
+        current_frame: List[List[int]],
+        agent_color: int,
+        min_confidence: float = 0.5
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check if planned action is dangerous given CURRENT relative threat positions.
+        
+        This is the key insight: don't avoid ACTION4 everywhere, avoid it
+        only when there's a threat in the direction you'd be moving.
+        
+        Args:
+            game_type: Current game type
+            level_number: Current level
+            planned_action: Action about to be taken (1-7)
+            agent_position: Agent's current (x, y) position
+            current_frame: Current grid state
+            agent_color: Agent's controlled object color
+            min_confidence: Minimum confidence to trigger warning
+            
+        Returns:
+            None if safe, or Dict with danger info and suggested alternatives
+        """
+        try:
+            if not current_frame or not agent_position:
+                return None
+            
+            agent_x, agent_y = agent_position
+            frame_arr = np.asarray(current_frame)
+            
+            if frame_arr.size == 0:
+                return None
+            
+            # Compute current relative threat positions
+            current_threats = []
+            height, width = frame_arr.shape
+            
+            for y in range(height):
+                for x in range(width):
+                    color = int(frame_arr[y, x])
+                    if color == 0 or color == agent_color:
+                        continue
+                    
+                    rel_x = x - agent_x
+                    rel_y = y - agent_y
+                    distance = abs(rel_x) + abs(rel_y)
+                    
+                    if distance <= 5:
+                        current_threats.append({
+                            'color': color,
+                            'rel_x': rel_x,
+                            'rel_y': rel_y,
+                            'distance': distance
+                        })
+            
+            if not current_threats:
+                return None  # No nearby threats, action is safe
+            
+            # Query for matching relative threat patterns
+            patterns = self.db.execute_query("""
+                SELECT pattern_id, fatal_action, threat_relative_positions, 
+                       threat_color, movement_direction, occurrence_count, confidence
+                FROM relative_threat_patterns
+                WHERE game_type = ? AND level_number = ? 
+                  AND fatal_action = ?
+                  AND confidence >= ?
+                  AND is_active = 1
+                ORDER BY confidence DESC, occurrence_count DESC
+                LIMIT 10
+            """, (game_type, level_number, planned_action, min_confidence))
+            
+            if not patterns:
+                return None  # No patterns for this action
+            
+            # Check if current threat configuration matches any known deadly pattern
+            for pattern in patterns:
+                try:
+                    recorded_threats = json.loads(pattern['threat_relative_positions'])
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                
+                # Check if any recorded threat position matches current situation
+                for rec_threat in recorded_threats:
+                    rec_rel_x = rec_threat.get('rel_x', 999)
+                    rec_rel_y = rec_threat.get('rel_y', 999)
+                    rec_color = rec_threat.get('color')
+                    
+                    # Look for matching current threat
+                    for cur_threat in current_threats:
+                        # Match if same relative position (±1 tolerance) and same color
+                        if (abs(cur_threat['rel_x'] - rec_rel_x) <= 1 and
+                            abs(cur_threat['rel_y'] - rec_rel_y) <= 1 and
+                            (rec_color is None or cur_threat['color'] == rec_color)):
+                            
+                            # DANGER: Current situation matches a known deadly pattern!
+                            direction_map = {1: 'up', 2: 'down', 3: 'right', 4: 'left'}
+                            movement = direction_map.get(planned_action, 'move')
+                            
+                            # Suggest alternative: opposite direction or wait
+                            opposite = {1: 2, 2: 1, 3: 4, 4: 3, 5: 5, 6: 5, 7: 5}
+                            suggested_alternative = opposite.get(planned_action, 5)
+                            
+                            return {
+                                'danger': True,
+                                'pattern_id': pattern['pattern_id'],
+                                'reason': f"Moving {movement} with color {cur_threat['color']} at relative ({cur_threat['rel_x']},{cur_threat['rel_y']}) has killed {pattern['occurrence_count']}x",
+                                'confidence': pattern['confidence'],
+                                'threat_color': cur_threat['color'],
+                                'threat_relative_pos': (cur_threat['rel_x'], cur_threat['rel_y']),
+                                'suggested_alternative': suggested_alternative,
+                                'suggestion': f"Try ACTION{suggested_alternative} instead (move away or wait)"
+                            }
+            
+            return None  # No matching dangerous patterns
+            
+        except Exception as e:
+            logger.debug(f"Error checking relative threat danger: {e}")
             return None
     
     def check_for_terminal_danger(self,
