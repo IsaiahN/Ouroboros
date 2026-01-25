@@ -690,3 +690,67 @@ class NetworkExplorationTracker:
             logger.info(f"[EXPLORATION] Cleared exploration data for {game_type} L{level}")
         except Exception as e:
             logger.debug(f"[EXPLORATION] Clear failed: {e}")
+
+    def save_session_exploration(
+        self,
+        game_type: str,
+        level: int,
+        agent_id: Optional[str] = None
+    ) -> int:
+        """
+        Flush current session's exploration to the network database.
+        
+        Called before proactive reset to ensure all learned exploration
+        data is persisted before the reset occurs.
+        
+        Args:
+            game_type: Game type
+            level: Level number
+            agent_id: Agent saving the exploration
+            
+        Returns:
+            Number of regions saved/updated
+        """
+        if not self._session_visited:
+            return 0
+        
+        saved = 0
+        try:
+            for region in self._session_visited:
+                rx, ry = region
+                
+                # Update or insert the region (simplified - just mark as visited)
+                existing = self.db.execute_query("""
+                    SELECT exploration_id, times_visited
+                    FROM network_exploration_map
+                    WHERE game_type = ? AND level_number = ?
+                      AND region_x = ? AND region_y = ?
+                """, (game_type, level, rx, ry))
+                
+                if existing:
+                    # Already exists - increment visit count
+                    self.db.execute_query("""
+                        UPDATE network_exploration_map
+                        SET times_visited = times_visited + 1,
+                            last_visitor_id = ?,
+                            last_explored_at = CURRENT_TIMESTAMP
+                        WHERE exploration_id = ?
+                    """, (agent_id, existing[0]['exploration_id']))
+                else:
+                    # New region - insert
+                    self.db.execute_query("""
+                        INSERT INTO network_exploration_map
+                        (exploration_id, game_type, level_number, region_x, region_y,
+                         times_visited, unique_agents, last_visitor_id,
+                         novelty_score, productivity_score, danger_score)
+                        VALUES (?, ?, ?, ?, ?, 1, 1, ?, 0.95, 0.0, 0.0)
+                    """, (str(uuid.uuid4()), game_type, level, rx, ry, agent_id))
+                    
+                saved += 1
+            
+            logger.info(f"[EXPLORATION] Saved {saved} explored regions for {game_type} L{level}")
+            
+        except Exception as e:
+            logger.debug(f"[EXPLORATION] Session save failed: {e}")
+        
+        return saved

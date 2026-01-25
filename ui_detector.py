@@ -422,8 +422,13 @@ class UIDetector:
                 if max_actions and max_actions > 0 and remaining is not None:
                     pct_remaining = remaining / max_actions
                     result['is_critical'] = pct_remaining < 0.10
+                    # NEW: Add specific thresholds for proactive reset
+                    result['should_proactive_reset'] = remaining <= 2  # 1-2 actions left
+                    result['actions_until_empty'] = remaining
                 else:
                     result['is_critical'] = (remaining or 0) <= 2  # Fallback
+                    result['should_proactive_reset'] = (remaining or 0) <= 2
+                    result['actions_until_empty'] = remaining
                 break
         
         return result
@@ -451,6 +456,153 @@ class UIDetector:
                 )
                 result['is_critical'] = region.current_value <= 1
                 break
+        
+        return result
+    
+    def should_proactive_reset(
+        self, 
+        frame: List[List[int]],
+        exploration_coverage: Optional[float] = None,
+        has_made_progress: bool = False,
+        # NEW: For games without visible HUD
+        current_action_count: Optional[int] = None,
+        learned_budget: Optional[Dict[str, Any]] = None,
+        consecutive_no_change: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Determine if a proactive level reset should be triggered.
+        
+        PROACTIVE RESET: Reset BEFORE the game ends to preserve all learned knowledge
+        and continue playing with a fresh action budget.
+        
+        Works for TWO types of games:
+        1. Games WITH visible HUD (like LS20's purple bar) - uses UI detection
+        2. Games WITHOUT visible HUD - uses learned_budget + action_count
+        
+        The key insight is: if we're near the learned end-of-game threshold,
+        it's better to reset NOW (keeping all memory/exploration state) than to:
+        1. Use the last action randomly and die
+        2. Lose the game and start fresh
+        
+        Args:
+            frame: Current game frame
+            exploration_coverage: % of map explored (0-100), from NetworkExplorationTracker
+            has_made_progress: Whether score increased since last reset
+            current_action_count: How many actions taken this attempt (for no-HUD games)
+            learned_budget: Dict from _get_learned_budget() with min/max/avg actions
+            consecutive_no_change: How many actions with no frame change (stuck detection)
+            
+        Returns:
+            Dict with:
+            - should_reset: bool - whether to reset now
+            - reason: str - why reset is recommended
+            - urgency: str - 'immediate', 'soon', 'not_needed'
+            - source: str - 'hud', 'learned_budget', 'stuck_detection'
+            - knowledge_to_preserve: dict - summary of what we've learned
+        """
+        result = {
+            'should_reset': False,
+            'reason': 'No reset needed',
+            'urgency': 'not_needed',
+            'source': 'none',
+            'knowledge_to_preserve': {
+                'ui_meanings_learned': len(self.learned_meanings),
+                'exploration_coverage': exploration_coverage,
+                'has_progress': has_made_progress
+            }
+        }
+        
+        # ===================================================================
+        # METHOD 1: HUD-BASED DETECTION (games with visible action counter)
+        # ===================================================================
+        action_status = self.get_action_limit_status(frame)
+        health_status = self.get_health_status(frame)
+        
+        remaining_actions = action_status.get('actions_until_empty')
+        remaining_health = health_status.get('current_health')
+        
+        # If we have HUD data, use it (most reliable)
+        if remaining_actions is not None:
+            # CASE 1: Very low actions (1-2 left) - IMMEDIATE reset
+            if remaining_actions <= 2:
+                if has_made_progress:
+                    result['should_reset'] = remaining_actions <= 1
+                    result['urgency'] = 'immediate' if remaining_actions <= 1 else 'soon'
+                    result['reason'] = f"HUD shows {remaining_actions} actions left, made progress - reset to preserve knowledge"
+                else:
+                    result['should_reset'] = True
+                    result['urgency'] = 'immediate'
+                    result['reason'] = f"HUD shows only {remaining_actions} actions left with no progress - reset now"
+                result['source'] = 'hud'
+                return result
+            
+            # CASE 2: Low health AND low actions
+            if remaining_health is not None and remaining_health <= 1 and remaining_actions <= 5:
+                result['should_reset'] = True
+                result['urgency'] = 'soon'
+                result['reason'] = f"Low health ({remaining_health}) + low actions ({remaining_actions}) - reset before double failure"
+                result['source'] = 'hud'
+                return result
+        
+        # ===================================================================
+        # METHOD 2: LEARNED BUDGET DETECTION (games without visible HUD)
+        # ===================================================================
+        # Use historical data about when games typically end
+        if learned_budget and current_action_count is not None:
+            confidence = learned_budget.get('confidence', 0)
+            avg_actions = learned_budget.get('avg_actions', 2000)
+            max_actions = learned_budget.get('max_actions', 2000)
+            
+            # Only use learned budget if we have enough confidence
+            if confidence >= 0.3 and learned_budget.get('observations', 0) >= 3:
+                # Calculate how close we are to the learned limit
+                # Use avg_actions as the typical game end point
+                actions_until_typical_end = avg_actions - current_action_count
+                
+                # CASE 3: Approaching learned game end (within 5% or 10 actions)
+                threshold = max(10, avg_actions * 0.05)  # 5% of typical game or 10 actions
+                
+                if actions_until_typical_end <= threshold and actions_until_typical_end > 0:
+                    if has_made_progress:
+                        result['should_reset'] = actions_until_typical_end <= 3
+                        result['urgency'] = 'soon' if actions_until_typical_end > 3 else 'immediate'
+                    else:
+                        result['should_reset'] = True
+                        result['urgency'] = 'immediate' if actions_until_typical_end <= 5 else 'soon'
+                    
+                    result['reason'] = (f"Learned budget: games typically end around {avg_actions:.0f} actions, "
+                                       f"currently at {current_action_count} ({actions_until_typical_end:.0f} remaining)")
+                    result['source'] = 'learned_budget'
+                    result['knowledge_to_preserve']['learned_budget_confidence'] = confidence
+                    return result
+        
+        # ===================================================================
+        # METHOD 3: STUCK DETECTION (fallback for completely unknown games)
+        # ===================================================================
+        # If no HUD and no learned budget, use stuck detection as proxy
+        # Many games end when you're stuck in a loop
+        
+        STUCK_THRESHOLD_FOR_RESET = 50  # 50 consecutive no-change actions = likely stuck
+        
+        if consecutive_no_change >= STUCK_THRESHOLD_FOR_RESET:
+            # Been stuck for a while - might be approaching game end
+            result['should_reset'] = True
+            result['urgency'] = 'soon'
+            result['reason'] = f"Stuck for {consecutive_no_change} actions - likely near game end, reset to try different approach"
+            result['source'] = 'stuck_detection'
+            return result
+        
+        # ===================================================================
+        # METHOD 4: EXPLORATION-BASED (high coverage but no progress)
+        # ===================================================================
+        if (exploration_coverage is not None and exploration_coverage > 80 and
+            not has_made_progress and current_action_count and current_action_count > 100):
+            # Explored most of map but stuck - reset might help
+            result['should_reset'] = True
+            result['urgency'] = 'soon'
+            result['reason'] = f"Explored {exploration_coverage:.0f}% of map but no progress after {current_action_count} actions"
+            result['source'] = 'exploration_coverage'
+            return result
         
         return result
     

@@ -8026,6 +8026,10 @@ class GameplayEngine:
             MAX_API_RESETS_PER_LEVEL = 2  # Max 2 API resets per level
             API_RESET_THRESHOLD = 1000  # API reset after 1000 no-progress actions (OPTIMIZER only, increased for more exploration)
             
+            # PROACTIVE RESET tracking (knowledge-preserving resets before game ends)
+            self._proactive_resets_this_level = 0  # Track proactive resets per level
+            self._last_reset_score = 0  # Score at last reset for progress detection
+            
             # STUCK STATE DETECTION (for games like ls20 that finish but don't report it)
             consecutive_no_frame_change = 0  # Track actions with no frame change
             STUCK_STATE_THRESHOLD = 200  # Default for non-frontier levels
@@ -8496,6 +8500,97 @@ class GameplayEngine:
                         logger.info(f"[TIME] API error backoff: waiting {api_error_backoff}s before next action")
                         await asyncio.sleep(api_error_backoff)
                         api_error_backoff = 0  # Reset after waiting
+                    
+                    # ================================================================
+                    # PROACTIVE LEVEL RESET: Reset BEFORE game ends to preserve knowledge
+                    # ================================================================
+                    # Works for TWO types of games:
+                    # 1. Games WITH visible HUD (like LS20's purple bar) - uses UI detection
+                    # 2. Games WITHOUT visible HUD - uses learned_budget + action_count
+                    #
+                    # The key insight: If we're near the end (however detected), it's
+                    # better to reset NOW (keeping all learned knowledge) than to:
+                    # 1. Use the last action randomly and die
+                    # 2. Lose all session knowledge when game ends
+                    #
+                    # This extends effective gameplay from ~100 actions to thousands
+                    # by allowing the agent to accumulate knowledge across resets.
+                    # ================================================================
+                    if hasattr(self, 'ui_detector') and self.ui_detector and game_state.frame:
+                        try:
+                            # Get exploration coverage from network tracker
+                            exploration_coverage = None
+                            game_type = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                            if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+                                exp_map = self.exploration_tracker.get_network_exploration_map(game_type, current_level)
+                                exploration_coverage = exp_map.get('coverage_percent', 0)
+                            
+                            # Check if we made progress since last reset
+                            has_made_progress = game_state.score > getattr(self, '_last_reset_score', 0)
+                            
+                            # Get learned budget for games WITHOUT visible HUD
+                            learned_budget = self._get_learned_budget(game_type, current_level)
+                            
+                            # Get proactive reset recommendation (handles both HUD and no-HUD games)
+                            reset_decision = self.ui_detector.should_proactive_reset(
+                                frame=game_state.frame,
+                                exploration_coverage=exploration_coverage,
+                                has_made_progress=has_made_progress,
+                                # NEW: For games without visible HUD
+                                current_action_count=level_action_count,
+                                learned_budget=learned_budget,
+                                consecutive_no_change=consecutive_no_frame_change
+                            )
+                            
+                            if reset_decision.get('should_reset') and reset_decision.get('urgency') == 'immediate':
+                                # Check reset budget (max 5 proactive resets per level)
+                                proactive_resets = getattr(self, '_proactive_resets_this_level', 0)
+                                MAX_PROACTIVE_RESETS = 5
+                                
+                                if proactive_resets < MAX_PROACTIVE_RESETS:
+                                    reset_source = reset_decision.get('source', 'unknown')
+                                    logger.info(f"[PROACTIVE-RESET] ({reset_source}) {reset_decision.get('reason')}")
+                                    logger.info(f"[PROACTIVE-RESET] Knowledge preserved: {reset_decision.get('knowledge_to_preserve')}")
+                                    
+                                    # Save exploration state to network BEFORE reset
+                                    if hasattr(self, 'exploration_tracker') and self.exploration_tracker:
+                                        try:
+                                            self.exploration_tracker.save_session_exploration(
+                                                game_type=game_type,
+                                                level=current_level,
+                                                agent_id=agent_id
+                                            )
+                                        except Exception as exp_save_err:
+                                            logger.debug(f"Exploration save before reset failed: {exp_save_err}")
+                                    
+                                    # Execute the level reset
+                                    try:
+                                        reset_data = await self.session_manager.reset_level()
+                                        game_state = GameState.from_dict(reset_data)
+                                        
+                                        # Track reset metrics
+                                        self._proactive_resets_this_level = proactive_resets + 1
+                                        self._last_reset_score = game_state.score
+                                        level_action_count = 0  # Reset level action counter
+                                        consecutive_no_frame_change = 0  # Reset stuck counter
+                                        
+                                        # CRITICAL: Agent's main action_count continues (budget extension)
+                                        # The in-game action bar refills, but we track total attempts
+                                        
+                                        exp_str = f", exploration: {exploration_coverage:.1f}%" if exploration_coverage else ""
+                                        logger.info(f"[PROACTIVE-RESET] Level reset #{proactive_resets + 1}/{MAX_PROACTIVE_RESETS} complete. "
+                                                   f"Total actions: {action_count}{exp_str}")
+                                        
+                                        # Continue to next iteration with fresh game state
+                                        continue
+                                        
+                                    except Exception as reset_err:
+                                        logger.warning(f"[PROACTIVE-RESET] Reset failed: {reset_err}")
+                                else:
+                                    logger.debug(f"[PROACTIVE-RESET] Max resets ({MAX_PROACTIVE_RESETS}) reached, continuing normally")
+                                    
+                        except Exception as proactive_err:
+                            logger.debug(f"[PROACTIVE-RESET] Check failed: {proactive_err}")
                     
                     # Select action
                     action_succeeded = False
@@ -10267,6 +10362,10 @@ class GameplayEngine:
                         level_action_count = 0  # Reset level action counter
                         level_start_action = action_count  # Mark where this level starts
                         consecutive_no_frame_change = 0  # CRITICAL FIX: Reset stuck state counter on level completion
+                        
+                        # Reset proactive reset counter for new level
+                        self._proactive_resets_this_level = 0
+                        self._last_reset_score = game_state.score
                         
                         # WORLD MODEL: Reinitialize for new level (2025-12-26)
                         # New levels may have different obstacles/goals - refresh world model
