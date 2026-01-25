@@ -8541,6 +8541,17 @@ class GameplayEngine:
                                 learned_budget=learned_budget,
                                 consecutive_no_change=consecutive_no_frame_change
                             )
+                            # DEBUG: Output action bar and reset logic
+                            logger.info(f"[RESET-DEBUG] remaining_actions={reset_decision.get('actions_until_empty')}, should_reset={reset_decision.get('should_reset')}, reset_decision={reset_decision}")
+                                                        # Also append to reasoning logs if available
+                                                        if hasattr(self, 'reasoning_log') and self.reasoning_log is not None:
+                                                            self.reasoning_log.append({
+                                                                'event': 'reset_debug',
+                                                                'remaining_actions': reset_decision.get('actions_until_empty'),
+                                                                'should_reset': reset_decision.get('should_reset'),
+                                                                'reset_decision': dict(reset_decision),
+                                                                'step': action_count if 'action_count' in locals() else None
+                                                            })
                             
                             if reset_decision.get('should_reset') and reset_decision.get('urgency') == 'immediate':
                                 # Check reset budget (max 5 proactive resets per level)
@@ -16009,9 +16020,9 @@ class GameplayEngine:
         # Uses UIDetector to track action limits and health.
         # ===================================================================
         try:
-            if hasattr(self, 'ui_detector') and self.ui_detector:
-                action_status = self.ui_detector.get_action_limit_status()
-                health_status = self.ui_detector.get_health_status()
+            if hasattr(self, 'ui_detector') and self.ui_detector and game_state.frame:
+                action_status = self.ui_detector.get_action_limit_status(game_state.frame)
+                health_status = self.ui_detector.get_health_status(game_state.frame)
                 
                 is_action_critical = action_status.get('is_critical', False) if action_status else False
                 is_health_critical = health_status.get('is_critical', False) if health_status else False
@@ -24569,13 +24580,20 @@ class GameplayEngine:
                             elif region_meaning == 'health':
                                 logger.debug(f"[SYMBOLIC] Health decreased: {change.old_value} -> {change.new_value}")
                 
-                # Periodically learn meanings from patterns
+                # Learn meanings from patterns QUICKLY - needed for proactive reset
+                # Learn every 5 actions (was 20) to catch action_limit patterns faster
+                # LS20 example: Purple bar only has 22 pixels, need to learn before it depletes
                 if hasattr(self, '_symbolic_ui_analysis_count'):
                     self._symbolic_ui_analysis_count += 1
                 else:
                     self._symbolic_ui_analysis_count = 1
                 
-                if self._symbolic_ui_analysis_count % 20 == 0:
+                # FAST learning: every 5 actions or if we detected a decrease
+                should_learn = (self._symbolic_ui_analysis_count % 5 == 0)
+                if ui_changes and any(c.change_type == 'decrease' for c in ui_changes):
+                    should_learn = True  # Immediate learning on decrease events
+                
+                if should_learn:
                     self.ui_detector.learn_meaning_from_changes()
                 
                 # Periodically save UI layouts to network (LS20 Gap Fix)

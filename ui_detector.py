@@ -100,20 +100,25 @@ class UIDetector:
         height = len(frame)
         width = len(frame[0])
         
-        # Check top edge (first 2 rows)
-        top_regions = self._scan_edge_region(frame, 'top', 0, 2, 0, width)
+        # EXPANDED EDGE DETECTION: Scan MORE rows/columns to catch HUD elements
+        # LS20 example: Purple action bar is at row 2-3, lives at row 1-2 cols 52-63
+        # Many games place HUD elements in first 4-5 rows/columns of edges
+        
+        # Check top edge (first 4 rows - expanded from 2)
+        # This catches action bars that may be 1-3 rows from top
+        top_regions = self._scan_edge_region(frame, 'top', 0, 4, 0, width)
         regions.extend(top_regions)
         
-        # Check bottom edge (last 2 rows)
-        bottom_regions = self._scan_edge_region(frame, 'bottom', height - 2, height, 0, width)
+        # Check bottom edge (last 4 rows - expanded from 2)  
+        bottom_regions = self._scan_edge_region(frame, 'bottom', height - 4, height, 0, width)
         regions.extend(bottom_regions)
         
-        # Check left edge (first 2 columns)
-        left_regions = self._scan_edge_region(frame, 'left', 0, height, 0, 2)
+        # Check left edge (first 4 columns - expanded from 2)
+        left_regions = self._scan_edge_region(frame, 'left', 0, height, 0, 4)
         regions.extend(left_regions)
         
-        # Check right edge (last 2 columns)
-        right_regions = self._scan_edge_region(frame, 'right', 0, height, width - 2, width)
+        # Check right edge (last 4 columns - expanded from 2)
+        right_regions = self._scan_edge_region(frame, 'right', 0, height, width - 4, width)
         regions.extend(right_regions)
         
         # Check corners for special indicators
@@ -393,6 +398,10 @@ class UIDetector:
         """
         Get status of action limit indicators if detected.
         
+        When multiple 'actions' regions are found, prefer:
+        1. Regions that have been LEARNED as action_limit from change patterns
+        2. The LARGEST counter (action bars typically have more pixels than lives)
+        
         Returns:
             Dict with remaining_actions, max_actions, is_critical
         """
@@ -405,31 +414,54 @@ class UIDetector:
         
         regions = self.detect_ui_regions(frame)
         
+        # Find all candidates and rank them
+        action_candidates = []
+        
         for region in regions:
             region_key = f"{region.position}_{region.color}"
-            meaning = self.learned_meanings.get(region_key, region.meaning)
+            learned_meaning = self.learned_meanings.get(region_key)
+            initial_meaning = region.meaning
             
-            if meaning in ['action_limit', 'actions']:
-                result['has_action_limit'] = True
-                result['remaining_actions'] = region.current_value
-                result['max_actions'] = self.max_observed_values.get(
-                    region_key, region.max_value
-                )
-                # FIX (Feedback 9): Use percentage-based threshold, not absolute
-                # Critical when < 10% actions remaining (was: <= 2 which is way too late)
-                max_actions = result['max_actions']
-                remaining = region.current_value
-                if max_actions and max_actions > 0 and remaining is not None:
-                    pct_remaining = remaining / max_actions
-                    result['is_critical'] = pct_remaining < 0.10
-                    # NEW: Add specific thresholds for proactive reset
-                    result['should_proactive_reset'] = remaining <= 2  # 1-2 actions left
-                    result['actions_until_empty'] = remaining
-                else:
-                    result['is_critical'] = (remaining or 0) <= 2  # Fallback
-                    result['should_proactive_reset'] = (remaining or 0) <= 2
-                    result['actions_until_empty'] = remaining
-                break
+            if learned_meaning == 'action_limit' or initial_meaning in ['action_limit', 'actions']:
+                # Score candidates - learned meanings get priority, then size
+                priority = 0
+                if learned_meaning == 'action_limit':
+                    priority = 1000  # Learned from actual behavior = highest priority
+                priority += region.current_value  # Larger counters = more likely to be action bar
+                
+                action_candidates.append({
+                    'region': region,
+                    'region_key': region_key,
+                    'priority': priority,
+                    'learned': learned_meaning == 'action_limit'
+                })
+        
+        # Select the best candidate
+        if action_candidates:
+            action_candidates.sort(key=lambda x: x['priority'], reverse=True)
+            best = action_candidates[0]
+            region = best['region']
+            region_key = best['region_key']
+            
+            result['has_action_limit'] = True
+            result['remaining_actions'] = region.current_value
+            result['max_actions'] = self.max_observed_values.get(
+                region_key, region.max_value
+            )
+            # FIX (Feedback 9): Use percentage-based threshold, not absolute
+            # Critical when < 10% actions remaining (was: <= 2 which is way too late)
+            max_actions = result['max_actions']
+            remaining = region.current_value
+            if max_actions and max_actions > 0 and remaining is not None:
+                pct_remaining = remaining / max_actions
+                result['is_critical'] = pct_remaining < 0.10
+                # NEW: Add specific thresholds for proactive reset
+                result['should_proactive_reset'] = remaining <= 2  # 1-2 actions left
+                result['actions_until_empty'] = remaining
+            else:
+                result['is_critical'] = (remaining or 0) <= 2  # Fallback
+                result['should_proactive_reset'] = (remaining or 0) <= 2
+                result['actions_until_empty'] = remaining
         
         return result
     
@@ -523,26 +555,13 @@ class UIDetector:
         
         # If we have HUD data, use it (most reliable)
         if remaining_actions is not None:
-            # CASE 1: Very low actions (1-2 left) - IMMEDIATE reset
-            if remaining_actions <= 2:
-                if has_made_progress:
-                    result['should_reset'] = remaining_actions <= 1
-                    result['urgency'] = 'immediate' if remaining_actions <= 1 else 'soon'
-                    result['reason'] = f"HUD shows {remaining_actions} actions left, made progress - reset to preserve knowledge"
-                else:
+                # CASE 1: Low actions (≤4 left) - IMMEDIATE reset (regardless of lives)
+                if remaining_actions is not None and remaining_actions <= 4:
                     result['should_reset'] = True
                     result['urgency'] = 'immediate'
-                    result['reason'] = f"HUD shows only {remaining_actions} actions left with no progress - reset now"
-                result['source'] = 'hud'
-                return result
-            
-            # CASE 2: Low health AND low actions
-            if remaining_health is not None and remaining_health <= 1 and remaining_actions <= 5:
-                result['should_reset'] = True
-                result['urgency'] = 'soon'
-                result['reason'] = f"Low health ({remaining_health}) + low actions ({remaining_actions}) - reset before double failure"
-                result['source'] = 'hud'
-                return result
+                    result['reason'] = f"HUD shows only {remaining_actions} actions left - reset early to maximize exploration and preserve lives"
+                    result['source'] = 'hud'
+                    return result
         
         # ===================================================================
         # METHOD 2: LEARNED BUDGET DETECTION (games without visible HUD)
