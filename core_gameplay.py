@@ -8543,15 +8543,15 @@ class GameplayEngine:
                             )
                             # DEBUG: Output action bar and reset logic
                             logger.info(f"[RESET-DEBUG] remaining_actions={reset_decision.get('actions_until_empty')}, should_reset={reset_decision.get('should_reset')}, reset_decision={reset_decision}")
-                                                        # Also append to reasoning logs if available
-                                                        if hasattr(self, 'reasoning_log') and self.reasoning_log is not None:
-                                                            self.reasoning_log.append({
-                                                                'event': 'reset_debug',
-                                                                'remaining_actions': reset_decision.get('actions_until_empty'),
-                                                                'should_reset': reset_decision.get('should_reset'),
-                                                                'reset_decision': dict(reset_decision),
-                                                                'step': action_count if 'action_count' in locals() else None
-                                                            })
+                            # Also append to reasoning logs if available
+                            if hasattr(self, 'reasoning_log') and self.reasoning_log is not None:
+                                self.reasoning_log.append({
+                                    'event': 'reset_debug',
+                                    'remaining_actions': reset_decision.get('actions_until_empty'),
+                                    'should_reset': reset_decision.get('should_reset'),
+                                    'reset_decision': dict(reset_decision),
+                                    'step': action_count if 'action_count' in locals() else None
+                                })
                             
                             if reset_decision.get('should_reset') and reset_decision.get('urgency') == 'immediate':
                                 # Check reset budget (max 5 proactive resets per level)
