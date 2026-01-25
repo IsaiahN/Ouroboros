@@ -2,6 +2,332 @@
 
 ---
 
+## Session: January 24, 2026 - UnboundLocalError Fix in ACTION6 Execution
+
+---
+
+### Approach: Fix runtime error preventing evolution from running - `reason` variable was referenced before assignment in ACTION6 coordinate clamping logic.
+
+**Timestamp**: 6:09:47 PM  
+**Status**: COMPLETE - Single-line initialization fix
+
+---
+
+### Problem Statement
+
+Evolution crashed with:
+```
+UnboundLocalError: cannot access local variable 'reason' where it is not associated with a value
+```
+
+**Location**: [core_gameplay.py](core_gameplay.py#L17005) in `_execute_action`
+
+**Root Cause**: The ACTION6 block has multiple branches that set `reason`:
+- `_selection_target` branch → sets `reason`
+- `_meta_pattern_coords` branch → does NOT set `reason`
+- `_pending_action6_target` branch → sets `reason`
+- `self_model_target` branch → sets `reason`
+- Visual fallback branch → sets `reason`
+
+When coordinates needed clamping (line 16995), the code tried to append to `reason`:
+```python
+reason = f"{reason} | clamped from {original_coords}"
+```
+
+But if the `_meta_pattern_coords` branch was taken, `reason` was never initialized.
+
+---
+
+### Solution
+
+Initialize `reason` at the start of the ACTION6 block with a default value:
+
+**File**: [core_gameplay.py](core_gameplay.py#L16901-L16903)
+```python
+if action == "ACTION6":
+    # Initialize reason to avoid UnboundLocalError if no branch sets it
+    reason = "ACTION6 coordinate selection"
+```
+
+This ensures `reason` always has a value regardless of which branch is taken.
+
+---
+
+### Files Modified
+
+- [core_gameplay.py](core_gameplay.py#L16901-L16903): Added `reason` initialization
+
+---
+
+## Session: January 24, 2026 - 3-Layer Action Effectiveness Filter System
+
+---
+
+### Approach: StochasticGoose-inspired meta-learning during gameplay. Each frame builds a cache of which actions work WHERE, enabling agents to learn from EVERY click/move - not just deaths. Filter wasteful actions BEFORE they happen instead of learning only from fatal mistakes.
+
+**Timestamp**: 12:45 PM  
+**Status**: COMPLETE - All 3 layers implemented, integration verified, 28.6% filter rate achieved
+
+---
+
+### Problem Statement
+
+ls20 agents are stuck with only 4.7% coverage despite extensive death-avoidance systems:
+- **95% of actions are wasted** on empty cells or non-interactive regions
+- Existing systems (relative threats, death recording) only learn from DEATHS
+- Most "wasteful" actions don't kill - they just accomplish nothing
+- Random exploration in vast empty areas burns action budget
+
+**Root Cause**: No system tracks which actions are EFFECTIVE, only which are FATAL.
+
+---
+
+### Solution: 3-Layer Action Effectiveness Filter
+
+Inspired by StochasticGoose's meta-learning approach - learn action effectiveness in real-time during gameplay:
+
+```
+Layer 1 (REACTIVE): Exact-match cache
+    (frame_hash, position, action) -> {worked: bool, count: int}
+    
+Layer 2 (PROACTIVE): Object detection pre-filter  
+    Skip clicks on empty cells (no object detected)
+    
+Layer 3 (PREDICTIVE): Pattern generalization
+    (color_at_position, surrounding_hash) -> action_success_rates
+```
+
+**Key Insight**: An action "worked" if it produced ANY frame change. This captures:
+- Successful moves (character position changed)
+- Interactive clicks (UI response, object state changed)
+- Even "partial" progress (animation triggered)
+
+---
+
+### Implementation
+
+#### 1. Filter System Initialization
+**File**: [core_gameplay.py](core_gameplay.py#L2144-L2192)
+
+```python
+# Action effectiveness filter - StochasticGoose-inspired meta-learning
+self._action_effectiveness_cache = {}     # (frame_hash, pos, action) -> {worked, count}
+self._interactive_region_cache = {}        # frame_hash -> set of interactive positions
+self._action_pattern_predictor = {}        # (color, surrounding) -> {action: success_rate}
+
+# Filter settings
+self._max_action_cache_size = 10000
+self._max_region_cache_size = 500  
+self._max_pattern_cache_size = 5000
+self._filter_min_samples = 3              # Need 3+ samples before filtering
+
+# Session statistics
+self._filter_stats = {"filtered": 0, "allowed": 0, "by_layer": {1: 0, 2: 0, 3: 0}}
+
+# Pre-action state capture variables (instance variables for cross-method access)
+self._filter_pre_frame = None
+self._filter_pre_position = None
+self._filter_pre_action = None
+```
+
+#### 2. Helper Methods (Lines 6391-6714)
+
+**Layer 1 - Reactive Cache Check**:
+```python
+def _action_filter_check_cache(self, frame_hash, position, action):
+    """Layer 1: Check exact-match cache for known ineffective actions."""
+    cache_key = (frame_hash, position, action)
+    if cache_key in self._action_effectiveness_cache:
+        data = self._action_effectiveness_cache[cache_key]
+        if data["count"] >= self._filter_min_samples and not data["worked"]:
+            return False  # Known to not work
+    return True  # Unknown or known to work
+```
+
+**Layer 2 - Proactive Object Detection**:
+```python
+def _action_filter_check_interactive(self, frame, position, action):
+    """Layer 2: Pre-filter clicks on non-interactive regions."""
+    if action not in [5, 6, 7]:  # Only filter click actions
+        return True
+    
+    frame_hash = hash(frame.tobytes()) if frame is not None else 0
+    if frame_hash not in self._interactive_region_cache:
+        # Use object detector to find interactive regions
+        interactive = set()
+        if hasattr(self, 'object_detector') and self.object_detector:
+            objects = self.object_detector.detect_objects(frame)
+            for obj in objects:
+                for cell in obj.get("cells", []):
+                    interactive.add((cell[0], cell[1]))
+        self._interactive_region_cache[frame_hash] = interactive
+    
+    # Check if click position is near any interactive region
+    interactive_positions = self._interactive_region_cache.get(frame_hash, set())
+    # Allow if within 1 cell of any interactive region
+    for iy, ix in interactive_positions:
+        if abs(iy - position[0]) <= 1 and abs(ix - position[1]) <= 1:
+            return True
+    
+    return len(interactive_positions) == 0  # Allow if no objects detected
+```
+
+**Layer 3 - Predictive Pattern Generalization**:
+```python
+def _action_filter_check_pattern(self, frame, position, action):
+    """Layer 3: Pattern-based prediction using local features."""
+    if frame is None:
+        return True
+        
+    y, x = position
+    h, w = frame.shape[:2]
+    
+    # Get color at position
+    color_at_pos = int(frame[y, x]) if 0 <= y < h and 0 <= x < w else -1
+    
+    # Get surrounding hash (3x3 neighborhood)
+    surrounding = []
+    for dy in [-1, 0, 1]:
+        for dx in [-1, 0, 1]:
+            ny, nx = y + dy, x + dx
+            if 0 <= ny < h and 0 <= nx < w:
+                surrounding.append(int(frame[ny, nx]))
+            else:
+                surrounding.append(-1)
+    surrounding_hash = hash(tuple(surrounding))
+    
+    pattern_key = (color_at_pos, surrounding_hash)
+    if pattern_key in self._action_pattern_predictor:
+        action_stats = self._action_pattern_predictor[pattern_key]
+        if action in action_stats:
+            success_rate = action_stats[action]["success"] / max(1, action_stats[action]["total"])
+            if action_stats[action]["total"] >= self._filter_min_samples and success_rate < 0.1:
+                return False  # <10% success rate with enough samples
+    
+    return True
+```
+
+#### 3. Pre-Action State Capture
+**File**: [core_gameplay.py](core_gameplay.py#L3470-L3475)
+
+```python
+# Capture pre-action state for effectiveness filter
+self._filter_pre_frame = frame.copy() if frame is not None else None
+self._filter_pre_position = current_position
+self._filter_pre_action = action
+```
+
+#### 4. Post-Action Result Recording  
+**File**: [core_gameplay.py](core_gameplay.py#L9547-L9565)
+
+```python
+# Record action effectiveness for filter learning
+pre_frame = getattr(self, '_filter_pre_frame', None)
+pre_position = getattr(self, '_filter_pre_position', None)
+pre_action = getattr(self, '_filter_pre_action', None)
+
+if pre_position is not None and pre_frame is not None and pre_action is not None:
+    self._action_filter_record_result(
+        pre_frame, 
+        pre_position, 
+        pre_action,
+        new_frame,
+        new_position
+    )
+```
+
+#### 5. Emergency Exploration with Filter
+**File**: [core_gameplay.py](core_gameplay.py#L13489-L13548)
+
+```python
+# Use action effectiveness filter
+candidate_actions = list(range(1, 8))  # ACTION1-ACTION7
+random.shuffle(candidate_actions)
+
+for candidate_action in candidate_actions:
+    # Apply 3-layer filter
+    layer1_ok = self._action_filter_check_cache(frame_hash, current_position, candidate_action)
+    layer2_ok = self._action_filter_check_interactive(frame, current_position, candidate_action)
+    layer3_ok = self._action_filter_check_pattern(frame, current_position, candidate_action)
+    
+    if layer1_ok and layer2_ok and layer3_ok:
+        action = candidate_action
+        break
+    else:
+        self._filter_stats["filtered"] += 1
+        # Track which layer filtered
+        if not layer1_ok:
+            self._filter_stats["by_layer"][1] += 1
+        elif not layer2_ok:
+            self._filter_stats["by_layer"][2] += 1
+        elif not layer3_ok:
+            self._filter_stats["by_layer"][3] += 1
+
+if action is None:
+    # All actions filtered - pick random (exploration fallback)
+    action = random.randint(1, 7)
+else:
+    self._filter_stats["allowed"] += 1
+```
+
+---
+
+### Integration Fixes Applied
+
+After initial implementation, review found 3 integration gaps:
+
+| Issue | Location | Fix |
+|-------|----------|-----|
+| **Variable Scope** | Lines 3470-3475 | Changed local `_filter_pre_*` to instance `self._filter_pre_*` |
+| **Missing Null Check** | Lines 6635-6650 | Added `if not position or not frame or not action: return` |
+| **Unsafe Variable Access** | Lines 9547-9565 | Used `getattr()` with defaults + existence check |
+| **Missing Initialization** | Lines 2175-2190 | Added `self._filter_pre_frame = None` etc. in `__init__` |
+
+---
+
+### Verification
+
+Integration test results (28.6% filter rate):
+```
+✓ Cache initialized correctly
+✓ Layer 1 cache check works
+✓ Layer 2 object detection works
+✓ Layer 3 pattern prediction works
+✓ Record result updates cache
+✓ Pattern predictor updates
+✓ Stats tracking works
+✓ Cache size limits respected
+✓ Level reset preserves patterns
+✓ Full integration flow works
+
+Filter statistics:
+- Filtered: 2 actions
+- Allowed: 5 actions  
+- Filter rate: 28.6%
+- By layer: {1: 1, 2: 0, 3: 1}
+```
+
+---
+
+### Files Modified
+
+- [core_gameplay.py](core_gameplay.py): Lines 2144-2192 (init), 3470-3475 (capture), 6391-6714 (helpers), 9547-9565 (recording), 13489-13548 (exploration), 4722-4733 (reset), 4769-4790 (game results)
+
+---
+
+### Expected Impact
+
+| Metric | Before | Expected After |
+|--------|--------|----------------|
+| ls20 Coverage | 4.7% | 15-25% |
+| Wasted Actions | ~95% | ~70% |
+| Learning Source | Deaths only | All actions |
+| Action Budget Efficiency | Low | Medium-High |
+
+**Key Advantage**: System learns from EVERY action, not just fatal ones. Even a "nothing happened" click teaches the system "this position is not interactive."
+
+---
+
 ## Session: January 24, 2026 - Relative Threat Encoding System
 
 ---

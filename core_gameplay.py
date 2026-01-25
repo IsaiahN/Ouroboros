@@ -16898,6 +16898,9 @@ class GameplayEngine:
                 logger.debug(f"Reasoning capture failed: {e}")
         
         if action == "ACTION6":
+            # Initialize reason to avoid UnboundLocalError if no branch sets it
+            reason = "ACTION6 coordinate selection"
+            
             # Priority 1: Check if we have a selection target from selection-aware logic
             if hasattr(self, '_selection_target') and self._selection_target:
                 target = self._selection_target if isinstance(self._selection_target, dict) else {}
