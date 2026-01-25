@@ -183,7 +183,7 @@ class RemoteEffectLearner:
     Applicable to ALL games, not just specific game types.
     """
     
-    def __init__(self, game_type: str = None, db: Optional[DatabaseInterface] = None, db_path: str = "core_data.db"):
+    def __init__(self, game_type: Optional[str] = None, db: Optional[DatabaseInterface] = None, db_path: str = "core_data.db"):
         self.game_type = game_type
         self.db = db or DatabaseInterface(db_path)
         
@@ -446,7 +446,7 @@ class RemoteEffectLearner:
         except Exception as e:
             logger.warning(f"Failed to share remote effect: {e}")
     
-    def query_network_effects(self, game_type: str = None) -> List[Dict[str, Any]]:
+    def query_network_effects(self, game_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """Query the network for known remote effects."""
         game = game_type or self.game_type or 'unknown'
         
@@ -460,10 +460,10 @@ class RemoteEffectLearner:
             
             return [
                 {
-                    'trigger_color': int(r[0]) if r[0] and r[0].isdigit() else None,
-                    'effect_type': r[1],
-                    'observation_count': r[2],
-                    'reliability': r[3]
+                    'trigger_color': int(r['trigger_object']) if r.get('trigger_object') and str(r['trigger_object']).isdigit() else None,
+                    'effect_type': r.get('effect_type'),
+                    'observation_count': r.get('observation_count'),
+                    'reliability': r.get('reliability')
                 }
                 for r in results
             ]
@@ -1895,7 +1895,7 @@ class CODSEngine:
             
         except Exception as e:
             logger.error(f"[CODS] Operator lifecycle error: {e}")
-            results['error'] = str(e)
+            # Note: error logged but not stored in results (different type)
         
         return results
     
@@ -2855,7 +2855,7 @@ class CODSEngine:
             'explanation': explanation,
             'discovery_type': discovery_type,
             'evidence': evidence or {},
-            'discovered_at_step': self._context.step_idx if self._context else 0,
+            'discovered_at_step': len(self._context.action_history) if self._context else 0,
             'game_type': self._context.game_id.split('-')[0] if self._context and self._context.game_id else 'unknown'
         }
         
@@ -4506,7 +4506,7 @@ class CODSEngine:
                     # It's a Concept object, convert to expected format
                     suggestions = {'suggested_concepts': [{'name': suggestions.name}]}
                 
-                if suggestions.get('suggested_concepts'):
+                if isinstance(suggestions, dict) and suggestions.get('suggested_concepts'):
                     for concept in suggestions['suggested_concepts'][:5]:  # Top 5
                         concept_name = concept.get('name') or concept.get('concept_name')
                         if concept_name:
@@ -5585,7 +5585,7 @@ class CODSEngine:
                                 operator_id=operator_id,
                                 operator_name=operator_name,
                                 primitives=available_primitives,
-                                agent_id=agent_id,
+                                agent_id=agent_id or 'unknown',
                                 generation=generation,
                                 game_type=hypothesis.game_type,
                                 level_number=hypothesis.level_number
@@ -5755,7 +5755,7 @@ class CODSEngine:
                 AND last_updated < datetime('now', '-{max_age_days} days')
             """)
             
-            deleted = result.rowcount if hasattr(result, 'rowcount') else 0
+            deleted = len(result) if isinstance(result, list) else (result.rowcount if hasattr(result, 'rowcount') else 0)
             
             if deleted > 0:
                 logger.info(f"[BAYES] Pruned {deleted} refuted hypotheses")

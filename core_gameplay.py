@@ -3475,8 +3475,11 @@ class GameplayEngine:
                 # ================================================================
                 # ACTION FILTER: Capture pre-action state for learning
                 # ================================================================
-                self._filter_pre_frame = self._previous_frame
-                self._filter_pre_position = self._last_action_position
+                # BUG FIX: Must capture CURRENT frame/position, not previous!
+                # _previous_frame is from 2 actions ago, causing cache key mismatch.
+                # ================================================================
+                self._filter_pre_frame = game_state.frame  # Current frame BEFORE action
+                self._filter_pre_position = getattr(self, '_current_agent_position', None)  # Current position
                 self._filter_pre_action = action
                 
                 game_state = await self._execute_action(action, game_state, reasoning, loop_state.current_level)
@@ -12704,6 +12707,50 @@ class GameplayEngine:
                     reason = theory_gated_reason
             except Exception as tg_err:
                 logger.debug(f"Theory-gated scoring failed: {tg_err}")
+            
+            # ===============================================================
+            # ACTION EFFECTIVENESS FILTER - StochasticGoose-inspired
+            # ===============================================================
+            # Check if the proposed action should be filtered based on:
+            # 1. Layer 1: Exact-match cache (this action failed here before)
+            # 2. Layer 2: Object detection (no interactive object at position)  
+            # 3. Layer 3: Pattern prediction (low success rate for this context)
+            #
+            # If filtered, try alternative actions in order of predicted success.
+            # This prevents wasting actions on known-ineffective moves.
+            # ===============================================================
+            try:
+                _filter_frame = getattr(game_state, 'frame', None)
+                _filter_pos = getattr(self, '_current_agent_position', None)
+                
+                if _filter_frame is not None and _filter_pos is not None and action.startswith('ACTION'):
+                    should_skip, skip_reason = self._action_filter_should_skip(
+                        _filter_frame, _filter_pos, action
+                    )
+                    
+                    if should_skip:
+                        # Try to find an alternative action
+                        _filter_candidates = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION6', 'ACTION7']
+                        _filter_candidates.remove(action) if action in _filter_candidates else None
+                        
+                        alternative_found = False
+                        for alt_action in _filter_candidates:
+                            alt_skip, _ = self._action_filter_should_skip(
+                                _filter_frame, _filter_pos, alt_action
+                            )
+                            if not alt_skip:
+                                original_action = action
+                                action = alt_action
+                                reason = f"{skip_reason} -> {alt_action} | {reason[:60]}"
+                                alternative_found = True
+                                logger.info(f"[ACTION-FILTER] Blocked {original_action}, using {alt_action}")
+                                break
+                        
+                        if not alternative_found:
+                            # All actions filtered - proceed with original but log warning
+                            logger.warning(f"[ACTION-FILTER] All actions filtered at {_filter_pos}, proceeding with {action}")
+            except Exception as filter_err:
+                logger.debug(f"Action filter check failed: {filter_err}")
             
             # ===============================================================
             # FIX #5: TRUE DELIBERATION - SYSTEM 2 REASONING

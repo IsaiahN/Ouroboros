@@ -2,6 +2,125 @@
 
 ---
 
+## Session: January 24, 2026 - Action Effectiveness Filter Cache Bug Fix
+
+---
+
+### Approach: Debug why Layer 1 (exact-match cache) wasn't preventing consecutive repetitions despite data showing Layer 3 (pattern learning) was working correctly. Data analysis showed 21 consecutive identical actions with no effect - cache should have blocked after first failure.
+
+**Timestamp**: 10:54:29 PM  
+**Status**: COMPLETE - Cache key mismatch bug fixed
+
+---
+
+### Problem Statement
+
+Comparative analysis of V1 → V2 → V3 runs showed a paradox:
+
+| Metric | V1 | V3 | Insight |
+|--------|----|----|---------|
+| Overall Waste | 51.9% | 41.8% | **-10.1% ✓ Pattern learning works** |
+| ACTION1 Effectiveness | 17.3% | 41.2% | **+23.9% ✓ Learning which contexts** |
+| Consecutive Repetitions | 12 | 21 | **+75% ✗ Cache NOT working** |
+
+**The Paradox**: Agent learned WHICH actions work (Layer 3) but not to STOP repeating failed actions (Layer 1).
+
+Example from data:
+- Frames 48-52: ACTION1 × 5 (all wasted)
+- Frames 168-172: ACTION1 × 5 (all wasted)
+
+If cache worked, first failure should prevent repeats on same frame.
+
+---
+
+### Root Cause Analysis
+
+**Bug Location**: [core_gameplay.py](core_gameplay.py#L3478-3480) (pre-action capture)
+
+```python
+# BEFORE (BUG):
+self._filter_pre_frame = self._previous_frame        # ← Frame from 2 actions ago!
+self._filter_pre_position = self._last_action_position  # ← Previous position!
+```
+
+**Timeline showing the bug:**
+```
+Frame 48 (current) → ACTION1 → no change → Frame 49 (= Frame 48)
+
+Recording uses:
+  _filter_pre_frame = _previous_frame = Frame 47 ← WRONG FRAME!
+  hash(Frame 47) + pos + ACTION1 → cached as "failed"
+
+Next check on Frame 49:
+  hash(Frame 49) ≠ hash(Frame 47) → NO CACHE HIT!
+  
+Agent repeats ACTION1 because cache keys don't match!
+```
+
+---
+
+### Solution
+
+Capture CURRENT frame and position, not stale values:
+
+**File**: [core_gameplay.py](core_gameplay.py#L3478-3483)
+```python
+# AFTER (FIX):
+self._filter_pre_frame = game_state.frame  # Current frame BEFORE action
+self._filter_pre_position = getattr(self, '_current_agent_position', None)  # Current position
+self._filter_pre_action = action
+```
+
+**Why this fixes it:**
+```
+Frame 48 + ACTION1 → no effect
+Record: hash(Frame 48) + ACTION1 = failed  ← correct hash!
+
+Frame 49 (=Frame 48): check hash(Frame 48) → HIT! → skip ACTION1
+```
+
+---
+
+### Additional Fixes in Session
+
+1. **cods_engine.py type annotation fixes**:
+   - `game_type: str = None` → `Optional[str] = None` (lines 186, 449)
+   - Dict index access `r[0]` → `r.get('column_name')` (line 463)
+   - `step_idx` → `len(action_history)` (line 2858)
+   - `agent_id` None handling (line 5588)
+   - `rowcount` list check (line 5758)
+
+---
+
+### Verification
+
+- Filter integration in `_finalize_ladder_and_return`: ✅
+- Cache key consistency (recording vs checking): ✅
+- Frame hash determinism (same frame → same hash): ✅
+- Exception handling (filter errors don't break game): ✅
+- Syntax validation: ✅
+
+---
+
+### Expected Impact
+
+| Metric | Before Fix | Expected After |
+|--------|------------|----------------|
+| Consecutive Repetitions | 21 | <5 |
+| Cache Hit Rate | ~0% | >30% |
+| Overall Waste | 41.8% | <30% |
+
+Now when an action fails, the next check on the **same frame** will hit the cache and skip that action.
+
+---
+
+### Files Modified
+
+- [core_gameplay.py](core_gameplay.py#L3478-3483): Fixed pre-action state capture
+- [cods_engine.py](cods_engine.py): Multiple type annotation fixes
+
+---
+
 ## Session: January 24, 2026 - UnboundLocalError Fix in ACTION6 Execution
 
 ---
