@@ -8531,6 +8531,15 @@ class GameplayEngine:
                             # Get learned budget for games WITHOUT visible HUD
                             learned_budget = self._get_learned_budget(game_type, current_level)
                             
+                            # FIX: Calculate effective stuck count using BOTH tracking methods
+                            # Method 1: consecutive_no_frame_change (resets on any frame change)
+                            # Method 2: _stuck_detection_history (tracks stuck status over sliding window)
+                            effective_stuck_count = consecutive_no_frame_change
+                            if hasattr(self, '_stuck_detection_history') and self._stuck_detection_history:
+                                recent_stuck = sum(1 for s in self._stuck_detection_history[-20:] if s)
+                                # Use the higher of the two to catch loop situations
+                                effective_stuck_count = max(effective_stuck_count, recent_stuck)
+                            
                             # Get proactive reset recommendation (handles both HUD and no-HUD games)
                             reset_decision = self.ui_detector.should_proactive_reset(
                                 frame=game_state.frame,
@@ -8539,7 +8548,7 @@ class GameplayEngine:
                                 # NEW: For games without visible HUD
                                 current_action_count=level_action_count,
                                 learned_budget=learned_budget,
-                                consecutive_no_change=consecutive_no_frame_change
+                                consecutive_no_change=effective_stuck_count  # Use effective count
                             )
                             # DEBUG: Output action bar and reset logic
                             logger.info(f"[RESET-DEBUG] remaining_actions={reset_decision.get('actions_until_empty')}, should_reset={reset_decision.get('should_reset')}, reset_decision={reset_decision}")

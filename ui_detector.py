@@ -600,8 +600,10 @@ class UIDetector:
         # ===================================================================
         # If no HUD and no learned budget, use stuck detection as proxy
         # Many games end when you're stuck in a loop
+        # NOTE: Loop detector in core_gameplay triggers at 15/20 stuck frames,
+        # so this threshold should be lower to catch stuck states earlier
         
-        STUCK_THRESHOLD_FOR_RESET = 50  # 50 consecutive no-change actions = likely stuck
+        STUCK_THRESHOLD_FOR_RESET = 15  # 15 consecutive/recent no-change = likely stuck
         
         if consecutive_no_change >= STUCK_THRESHOLD_FOR_RESET:
             # Been stuck for a while - might be approaching game end
