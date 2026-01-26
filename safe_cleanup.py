@@ -421,6 +421,21 @@ class SafeDatabaseCleaner:
         # do NOT have is_active columns - they're structural data that doesn't become stale.
         # They remain as permanent reference data for the game/level.
         
+        # =====================================================================
+        # FRAME EMBEDDINGS CLEANUP (Self-Supervised Dynamics)
+        # =====================================================================
+        # Frame embeddings are used for similarity search during action selection.
+        # Keep embeddings from recent traces only - older ones are less relevant
+        # and the model can recompute them if needed.
+        # 
+        # Retention: Keep embeddings linked to the 100,000 most recent action_traces
+        # =====================================================================
+        if verbose:
+            print('\n25. Old frame embeddings')
+        results['tables_cleaned']['frame_embeddings'] = self._clean_frame_embeddings(
+            c, conn, dry_run, verbose
+        )
+        
         # Calculate total
         results['total_deleted'] = sum(r.get('deleted', 0) for r in results['tables_cleaned'].values())
         
@@ -1101,6 +1116,107 @@ class SafeDatabaseCleaner:
             'backfilled': backfilled_total,
             'deleted': 0,
         }
+    
+    def _clean_frame_embeddings(self, c, conn, dry_run, verbose):
+        """
+        Clean old frame embeddings that are no longer needed.
+        
+        Strategy: Keep embeddings that correspond to the most recent action_traces.
+        Embeddings without corresponding traces are orphaned and can be deleted.
+        Also cap total embeddings to prevent unbounded growth.
+        
+        Retention: 100,000 embeddings (based on trace_id linking)
+        """
+        embedding_retention = 100000  # Keep embeddings for 100K most recent traces
+        
+        # Check if table exists
+        try:
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='frame_embeddings'")
+            if not c.fetchone():
+                if verbose:
+                    print('   Table frame_embeddings does not exist (skipped)')
+                return {'found': 0, 'deleted': 0}
+        except Exception:
+            return {'found': 0, 'deleted': 0}
+        
+        # Count current embeddings
+        try:
+            c.execute('SELECT COUNT(*) FROM frame_embeddings')
+            total = c.fetchone()[0]
+        except Exception:
+            return {'found': 0, 'deleted': 0}
+        
+        if total == 0:
+            if verbose:
+                print('   No frame embeddings to clean')
+            return {'found': 0, 'deleted': 0}
+        
+        if verbose:
+            print(f'   Total embeddings: {total:,}')
+        
+        # Strategy: Delete embeddings whose trace_id is not in recent action_traces
+        # This ensures we keep embeddings for traces that still exist
+        deleted = 0
+        
+        # First, delete orphaned embeddings (trace_id no longer exists in action_traces)
+        try:
+            c.execute('''
+                SELECT COUNT(*) FROM frame_embeddings fe
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM action_traces at 
+                    WHERE at.id = fe.trace_id
+                )
+            ''')
+            orphaned = c.fetchone()[0]
+            
+            if verbose:
+                print(f'   Orphaned embeddings (trace deleted): {orphaned:,}')
+            
+            if not dry_run and orphaned > 0:
+                c.execute('''
+                    DELETE FROM frame_embeddings 
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM action_traces at 
+                        WHERE at.id = frame_embeddings.trace_id
+                    )
+                ''')
+                conn.commit()
+                deleted += orphaned
+        except Exception as e:
+            if verbose:
+                print(f'   Could not clean orphaned embeddings: {e}')
+        
+        # Second, if still over retention limit, delete oldest by id
+        try:
+            c.execute('SELECT COUNT(*) FROM frame_embeddings')
+            remaining = c.fetchone()[0]
+            excess = max(0, remaining - embedding_retention)
+            
+            if verbose:
+                print(f'   Remaining: {remaining:,}, Excess: {excess:,}')
+            
+            if not dry_run and excess > 0:
+                c.execute(f'''
+                    DELETE FROM frame_embeddings 
+                    WHERE id IN (
+                        SELECT id FROM frame_embeddings 
+                        ORDER BY id ASC 
+                        LIMIT {excess}
+                    )
+                ''')
+                conn.commit()
+                deleted += excess
+        except Exception as e:
+            if verbose:
+                print(f'   Could not clean excess embeddings: {e}')
+        
+        if verbose:
+            if dry_run and (deleted > 0 or orphaned > 0):
+                print(f'   Would delete: {orphaned + excess:,} embeddings')
+            elif deleted > 0:
+                print(f'   Deleted: {deleted:,} embeddings')
+        
+        return {'found': orphaned + excess if 'orphaned' in dir() and 'excess' in dir() else 0, 'deleted': deleted}
     
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""

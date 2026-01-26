@@ -5109,6 +5109,46 @@ CREATE TABLE world_model_states (
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+-- ============================================================================
+-- LEARNED REPRESENTATIONS (Implicit Generalization)
+-- ============================================================================
+-- Stores frame embeddings from dynamics model for similarity search.
+-- Enables finding "similar situations" across games without explicit rules.
+-- See architecture/Self_Supervised_Dynamics_Implementation.md
+
+CREATE TABLE IF NOT EXISTS frame_embeddings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trace_id INTEGER NOT NULL,                -- FK to action_traces.id
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    
+    -- The learned representation (128 floats = 512 bytes)
+    embedding BLOB NOT NULL,
+    
+    -- Context for weighted similarity
+    action_taken INTEGER,
+    score_delta REAL DEFAULT 0.0,
+    frame_changed BOOLEAN DEFAULT FALSE,
+    
+    -- Metadata
+    model_version TEXT DEFAULT 'v1',          -- Track model versions
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (trace_id) REFERENCES action_traces(id),
+    UNIQUE(trace_id)
+);
+
+-- Track model training history
+CREATE TABLE IF NOT EXISTS representation_model_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_version TEXT NOT NULL,
+    training_samples INTEGER NOT NULL,
+    final_loss REAL,
+    training_duration_seconds REAL,
+    trained_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT
+);
+
 -- Indexes
 CREATE INDEX idx_ablation_lookup 
             ON ablation_test_results(game_type, level_number)
@@ -5677,3 +5717,10 @@ CREATE INDEX idx_winning_sequences_game_level_active ON winning_sequences(game_i
 CREATE INDEX idx_working_theories_agent_game ON working_theories(agent_id, game_type, level_number);
 
 CREATE INDEX idx_working_theories_stage ON working_theories(stage);
+
+-- Frame embeddings indexes (Self-Supervised Dynamics)
+CREATE INDEX IF NOT EXISTS idx_frame_embeddings_game_level 
+    ON frame_embeddings(game_type, level_number);
+
+CREATE INDEX IF NOT EXISTS idx_frame_embeddings_trace
+    ON frame_embeddings(trace_id);

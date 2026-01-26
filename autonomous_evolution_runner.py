@@ -2522,6 +2522,44 @@ class AutonomousEvolutionRunner:
             except Exception as e:
                 print(f"  [WARN] Safe cleanup failed: {e}")
             
+            # ===============================================================
+            # REPRESENTATION LEARNER TRAINING (Every generation)
+            # ===============================================================
+            # Train the Self-Supervised Dynamics model on recent action traces.
+            # This creates learned representations that enable implicit 
+            # generalization across games - finding structurally similar
+            # situations even when pixel patterns differ.
+            # ===============================================================
+            try:
+                from representation_learner import RepresentationLearner
+                
+                rep_learner = RepresentationLearner()
+                
+                # Train on recent games (last 10000 traces)
+                metrics = rep_learner.train_on_recent_games(
+                    max_traces=10000,
+                    epochs=3,
+                    batch_size=64
+                )
+                
+                if metrics and metrics.get('final_loss'):
+                    print(f"  [REP] Dynamics model trained: loss={metrics['final_loss']:.4f}, "
+                          f"traces={metrics.get('traces_used', 0):,}")
+                    
+                    # Compute embeddings for recent traces (for similarity search)
+                    embeddings_created = rep_learner.compute_embeddings_for_recent_traces(
+                        max_traces=5000
+                    )
+                    print(f"  [REP] Created {embeddings_created:,} frame embeddings")
+                else:
+                    print(f"  [REP] Training skipped (insufficient data)")
+                    
+            except ImportError:
+                # torch not installed - skip silently
+                pass
+            except Exception as e:
+                print(f"  [WARN] Representation learning failed: {e}")
+            
             return True
             
         except Exception as e:

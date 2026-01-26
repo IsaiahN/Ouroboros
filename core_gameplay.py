@@ -12137,6 +12137,44 @@ class GameplayEngine:
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
         
         # ===================================================================
+        # EMBEDDING-BASED ACTION SUGGESTION (Self-Supervised Dynamics)
+        # ===================================================================
+        # Query learned frame representations to find similar past situations.
+        # This provides IMPLICIT GENERALIZATION - the neural network learns
+        # representations that capture structural similarity, enabling transfer
+        # of knowledge across games without explicit rule encoding.
+        #
+        # Only use as a TIE-BREAKER or when no other strategy has high confidence.
+        # Embedding similarity is a SOFT signal, not a hard rule.
+        # ===================================================================
+        embedding_suggestion = None
+        try:
+            if hasattr(self, 'self_model') and self.self_model:
+                game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+                game_type = game_id[:4] if game_id else 'unknown'
+                current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+                
+                embedding_suggestion = self.self_model.get_embedding_suggested_action(
+                    game_type=game_type,
+                    level=current_level,
+                    current_frame=game_state.frame,
+                    top_k=5
+                )
+                
+                if embedding_suggestion and embedding_suggestion.get('confidence', 0) >= 0.7:
+                    # High confidence embedding match - use it!
+                    suggested_action = f"ACTION{embedding_suggestion['suggested_action']}"
+                    reason = (
+                        f"[EMBEDDING-MATCH] Similar situation found ({embedding_suggestion['similar_count']} matches), "
+                        f"confidence {embedding_suggestion['confidence']:.2f}, "
+                        f"avg_outcome {embedding_suggestion.get('avg_outcome', 0):.2f}"
+                    )
+                    logger.info(f"[EMBEDDING] Using learned suggestion: {suggested_action} (conf={embedding_suggestion['confidence']:.2f})")
+                    return suggested_action, reason
+        except Exception as embed_err:
+            logger.debug(f"Embedding suggestion failed (non-critical): {embed_err}")
+        
+        # ===================================================================
         # EXPLORATION TRACKING FIX (2026-01-22)
         # ===================================================================
         # Track agent position for network exploration REGARDLESS of control

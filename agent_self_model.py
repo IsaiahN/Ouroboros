@@ -1005,6 +1005,8 @@ class AgentSelfModel:
         self.db_path = db_path
         self._abstraction_engine = None
         self._abstraction_unavailable = False
+        self._rep_learner = None
+        self._rep_learner_unavailable = False
         self._ensure_tables()
     
     def _ensure_tables(self):
@@ -2207,6 +2209,119 @@ class AgentSelfModel:
             ON game_pattern_links(pattern_id)
         """)
     
+    @property
+    def rep_learner(self):
+        """
+        Lazy-load RepresentationLearner for embedding-based action suggestions.
+        
+        This provides implicit generalization through learned representations:
+        - Encodes frames into 128-dim embeddings
+        - Finds similar past situations by embedding similarity
+        - Suggests actions based on what worked in similar states
+        """
+        if self._rep_learner is None and not self._rep_learner_unavailable:
+            try:
+                from representation_learner import RepresentationLearner
+                self._rep_learner = RepresentationLearner(self.db_path)
+            except ImportError:
+                logger.warning("[REP_LEARNER] RepresentationLearner unavailable - torch not installed")
+                self._rep_learner_unavailable = True
+            except Exception as e:
+                logger.warning(f"[REP_LEARNER] Failed to initialize: {e}")
+                self._rep_learner_unavailable = True
+        return self._rep_learner
+    
+    def get_embedding_suggested_action(
+        self,
+        game_type: str,
+        level: int,
+        current_frame: List[List[int]],
+        action_scores: Optional[Dict[int, float]] = None,
+        top_k: int = 5
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get action suggestion based on learned frame embeddings.
+        
+        Finds similar past situations and returns what action worked best.
+        This enables implicit generalization - the neural network learns
+        representations that capture structural similarity, not just pixel matching.
+        
+        Args:
+            game_type: Current game type
+            level: Current level number
+            current_frame: 64x64 grid
+            action_scores: Optional dict of action_idx -> current score estimate
+            top_k: Number of similar situations to consider
+            
+        Returns:
+            Dict with 'suggested_action', 'confidence', 'similar_situations' if found,
+            None if no suggestion available
+        """
+        if self.rep_learner is None:
+            return None
+            
+        try:
+            # Find similar past situations
+            similar = self.rep_learner.find_similar_situations(
+                current_frame,
+                game_type=game_type,
+                level=level,
+                top_k=top_k
+            )
+            
+            if not similar:
+                return None
+            
+            # Aggregate action suggestions from similar situations
+            action_votes = {}
+            action_outcomes = {}
+            
+            for situation in similar:
+                # Note: find_similar_situations returns 'action_taken' and 'score_delta'
+                action_idx = situation.get('action_taken')
+                score_change = situation.get('score_delta', 0)
+                similarity = situation.get('similarity', 0.5)
+                
+                if action_idx is None:
+                    continue
+                
+                # Weight by similarity and outcome
+                weight = similarity * (1 + score_change * 0.5)  # Boost positive outcomes
+                
+                if action_idx not in action_votes:
+                    action_votes[action_idx] = 0.0
+                    action_outcomes[action_idx] = []
+                
+                action_votes[action_idx] += weight
+                action_outcomes[action_idx].append(score_change)
+            
+            if not action_votes:
+                return None
+            
+            # Find best action
+            best_action = max(action_votes, key=action_votes.get)
+            total_votes = sum(action_votes.values())
+            confidence = action_votes[best_action] / total_votes if total_votes > 0 else 0.0
+            
+            # Average outcome for the suggested action
+            avg_outcome = (
+                sum(action_outcomes[best_action]) / len(action_outcomes[best_action])
+                if action_outcomes[best_action] else 0.0
+            )
+            
+            return {
+                'suggested_action': best_action,
+                'confidence': confidence,
+                'avg_outcome': avg_outcome,
+                'similar_count': len(similar),
+                'action_votes': action_votes,
+                'similar_situations': similar[:3]  # Return top 3 for debugging
+            }
+            
+        except Exception as e:
+            logger.debug(f"[REP_LEARNER] Error getting suggestion: {e}")
+            return None
+
     def _get_current_generation(self) -> int:
         """Get current generation from evolutionary_state for deprecation tracking."""
         try:
