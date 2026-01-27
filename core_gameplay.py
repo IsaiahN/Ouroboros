@@ -12150,15 +12150,17 @@ class GameplayEngine:
         embedding_suggestion = None
         try:
             if hasattr(self, 'self_model') and self.self_model:
-                game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
-                game_type = game_id[:4] if game_id else 'unknown'
-                current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+                # CROSS-GAME TRANSFER: Search ALL games and levels for similar situations
+                # This enables implicit generalization - the dynamics model learns
+                # structural similarity across games, so patterns from SP80 can help FT09
+                # and vice versa. The embedding space clusters similar puzzles regardless
+                # of game_type, color palette, or position.
                 
                 embedding_suggestion = self.self_model.get_embedding_suggested_action(
-                    game_type=game_type,
-                    level=current_level,
+                    game_type=None,   # Search across ALL games
+                    level=None,       # Search across ALL levels
                     current_frame=game_state.frame,
-                    top_k=5
+                    top_k=10          # More candidates for cross-game voting
                 )
                 
                 if embedding_suggestion and embedding_suggestion.get('confidence', 0) >= 0.7:

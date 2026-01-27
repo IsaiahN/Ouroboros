@@ -47,6 +47,10 @@ coverage.xml
 .pytest_cache/
 cover/
 
+#jupyter Notebook
+*.ipynb
+*.pt
+
 # Database files
 *.db
 *.sqlite
