@@ -2,6 +2,133 @@
 
 ---
 
+## Session: January 27, 2026 - Position-Specific Death Avoidance for Level 5
+
+---
+
+### Approach: Fix instant death on level 5 by implementing frame-hash-based death avoidance using the existing `terminal_patterns` table. Instead of blocking actions level-wide, only block actions in the EXACT frame situation where deaths have occurred.
+
+**Timestamp**: 4:39:24 PM  
+**Status**: COMPLETE - Implementation verified, ready for testing
+
+---
+
+### Problem Statement
+
+**Observed Failure**: Agents consistently die on level 5 of as66 within 1-2 actions. Looking at the game screenshot, the agent spawns directly next to an orange-bordered enemy and immediately walks into it.
+
+**Evidence from Scorecard Data**:
+- Games completing 0 wins despite reaching level 4 repeatedly
+- Only 20-78 actions per game (should be ~2000)
+- Level 4 reached often, but level 5 = instant death
+
+**Root Cause**: The existing death avoidance system was:
+1. **Too blunt**: Blocked actions level-wide ("don't press ACTION4 on level 5")
+2. **Too limited**: Only applied to first 5 actions of level entry
+3. **Wrong data source**: Used `action_traces` table instead of `terminal_patterns`
+
+---
+
+### Investigation Steps
+
+| Step | Action | Finding |
+|------|--------|---------|
+| 1 | Checked action_traces for L5 deaths | ACTION4: 59 deaths, ACTION6: 32 deaths, ACTION3: 31 deaths |
+| 2 | Checked frame_hash in action_traces | ALL NULL - frame_hash not being recorded |
+| 3 | Checked terminal_patterns table | HAS DATA: frame_hash `8045c651605a8b64` has 92 combined deaths |
+| 4 | Verified hash algorithm | Detector uses `''.join(flat).encode()` + hexdigest[:16] |
+
+**Key Discovery**: The `terminal_patterns` table already has position-specific death data:
+- Frame `8045c651605a8b64` (deadly spawn position) → ACTION2 killed 42 times, ACTION1 killed 37 times, ACTION6 killed 13 times
+- This IS the exact spawn position causing instant deaths
+
+---
+
+### Implementation Changes
+
+| File | Change | Lines |
+|------|--------|-------|
+| `core_gameplay.py` | Replaced level-wide death avoidance with frame-hash-specific lookup | ~12155-12220 |
+| `core_gameplay.py` | Updated filter to use position-specific blocking (removed "first 5 actions" limit) | ~12991-13020 |
+| `core_gameplay.py` | Fixed `_current_frame_hash` initialization to None | ~12168 |
+| `core_gameplay.py` | Fixed null-safety for frame_hash_str in filter | ~13015 |
+| `core_gameplay.py` | Removed inline `import hashlib` (already at module level) | ~12180 |
+| `core_gameplay.py` | Removed broken `object_detector.detect()` call (method doesn't exist) | ~6546-6570 |
+
+---
+
+### How Position-Specific Death Avoidance Works
+
+**Before (broken)**:
+```
+Level 5 starts → Check action_traces → "ACTION4 has 46% death rate on L5" → Block ACTION4 everywhere
+```
+
+**After (fixed)**:
+```
+Frame arrives → Compute frame_hash → Query terminal_patterns for THIS EXACT hash → 
+"Frame 8045c651 has ACTION1,2,6 as deadly" → Block only those actions in THIS position
+```
+
+**Code Flow**:
+1. Early in `_select_action()`: Compute frame hash, query `terminal_patterns` for matching deaths
+2. Store deadly actions in `self._deadly_first_actions` (set of action numbers)
+3. Late in `_finalize_ladder_and_return()`: If chosen action is in deadly set, pick alternative
+4. Alternative is randomly chosen from safe actions (not in deadly set)
+
+---
+
+### Verification
+
+```
+$ python manual_tools/test_frame_hash_match.py
+Detector hash: f4bfc776de224731
+Gameplay hash: f4bfc776de224731
+Match: True
+
+=== Checking if L5 frame hashes in DB would be matched ===
+  Would avoid ACTION2 when frame_hash=8045c651605a8b64 (42 deaths)
+  Would avoid ACTION1 when frame_hash=8045c651605a8b64 (37 deaths)
+  Would avoid ACTION6 when frame_hash=8045c651605a8b64 (13 deaths)
+```
+
+**Syntax check**: `python -m py_compile core_gameplay.py` - PASSED
+
+---
+
+### Expected Behavior After Fix
+
+When agent enters level 5 with the deadly spawn position:
+1. Frame hash `8045c651605a8b64` computed
+2. Query finds ACTION1, ACTION2, ACTION6 are deadly (92 combined deaths)
+3. `_deadly_first_actions = {1, 2, 6}`
+4. If agent would choose ACTION1/2/6, filter blocks it
+5. Alternative action (3, 4, 5, or 7) randomly chosen
+6. Agent survives first move, can now explore level 5
+
+---
+
+### Files Modified
+- [core_gameplay.py](core_gameplay.py#L12155-L12220): Position-specific death avoidance query
+- [core_gameplay.py](core_gameplay.py#L12991-L13020): Updated action filter
+- [core_gameplay.py](core_gameplay.py#L6546): Removed broken object_detector call
+
+### Files Created (for debugging)
+- `manual_tools/check_death_data.py`: Query death statistics
+- `manual_tools/check_terminal_patterns.py`: Query terminal_patterns table
+- `manual_tools/check_frame_hash.py`: Check frame_hash population
+- `manual_tools/test_frame_hash_match.py`: Verify hash algorithm matches
+
+---
+
+### Next Steps
+1. Run evolution and observe level 5 behavior
+2. Verify `[TERMINAL-AVOID]` logs appear when blocking deadly actions
+3. Check if agents survive past first action on level 5
+4. Monitor if agents eventually learn to beat level 5
+
+---
+
 ## Session: January 26, 2026 - Self-Supervised Dynamics Implementation
 
 ---

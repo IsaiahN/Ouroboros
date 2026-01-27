@@ -6543,31 +6543,10 @@ class GameplayEngine:
                 return False
             
             # No cache - use object detector if available
-            if hasattr(self, 'object_detector') and self.object_detector:
-                try:
-                    detected = self.object_detector.detect(frame)
-                    if detected and isinstance(detected, list):
-                        interactive_set = set()
-                        for obj in detected:
-                            if isinstance(obj, dict):
-                                ox = obj.get('x', obj.get('center_x', 0))
-                                oy = obj.get('y', obj.get('center_y', 0))
-                                interactive_set.add((ox, oy))
-                        
-                        # Cache for this frame
-                        if len(self._interactive_regions_cache) < self._interactive_cache_max_size:
-                            self._interactive_regions_cache[frame_hash] = interactive_set
-                        
-                        # Check if position is near any detected object
-                        for ix, iy in interactive_set:
-                            if abs(x - ix) <= 5 and abs(y - iy) <= 5:
-                                return True
-                        
-                        # No interactive objects near click position
-                        self._action_filter_stats['object_filter_skips'] += 1
-                        return False
-                except Exception:
-                    pass
+            # NOTE: detect_objects_in_frame requires game_id, level, frame_index
+            # which we don't have in this filter context. Skip this optimization
+            # when the cache doesn't have the data.
+            # The cache will be populated by other code paths that have full context.
             
             # Can't determine - allow action
             return True
@@ -12153,55 +12132,66 @@ class GameplayEngine:
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
         
         # ===================================================================
-        # INSTANT DEATH AVOIDANCE (Lessons Learned from Action Traces)
+        # POSITION-SPECIFIC DEATH AVOIDANCE (Using terminal_patterns table)
         # ===================================================================
-        # Query action_traces for actions that historically cause instant death
-        # on the FIRST FEW ACTIONS of this specific level. This prevents the
-        # agent from repeatedly dying the same way on level entry.
+        # Query terminal_patterns for actions that cause death in THIS EXACT
+        # frame situation (identified by frame_hash). This is position-specific:
+        # - "Don't press ACTION4 when in THIS spawn position next to enemy"
+        # - NOT "Don't press ACTION4 anywhere on level 5"
         #
-        # This is NOT about "don't touch the orange enemy" (object-based).
-        # This is about "don't press LEFT on frame 0 of level 5" (action-based).
+        # The terminal_patterns table stores (frame_hash, fatal_action, level)
+        # combinations that have repeatedly caused game-over.
         # ===================================================================
-        deadly_first_actions: Set[int] = set()
+        deadly_actions_for_frame: Set[int] = set()
         current_action_count = loop_state.action_count if loop_state else 0
-        self._deadly_first_actions = deadly_first_actions  # Store as instance var for _finalize_ladder_and_return
-        self._deadly_check_action_count = current_action_count  # Track when we computed this
+        self._deadly_first_actions = deadly_actions_for_frame  # Store for filter stage
+        self._deadly_check_action_count = current_action_count
+        self._current_frame_hash = None  # Initialize to None, set if we compute hash
         try:
             game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
-            if game_id and loop_state and current_action_count < 5:
+            frame = getattr(game_state, 'frame', None)
+            
+            if game_id and frame is not None:
                 game_type = game_id[:4] if len(game_id) >= 4 else game_id
                 current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
                 
-                # Find actions that frequently cause score drops on this level
-                # Only check if we're in the first 5 actions (level entry)
-                deadly_actions = self.db.execute_query("""
-                    SELECT 
-                        action_number,
-                        COUNT(*) as total_uses,
-                        SUM(CASE WHEN score_change < 0 THEN 1 ELSE 0 END) as score_drops
-                    FROM action_traces
-                    WHERE game_id LIKE ? || '-%'
-                      AND level_number = ?
-                      AND action_number BETWEEN 1 AND 7
-                    GROUP BY action_number
-                    HAVING score_drops >= 3 AND (score_drops * 1.0 / total_uses) >= 0.5
-                """, (game_type, current_level))
+                # Compute frame hash for current situation
+                # MUST match format used by terminal_pattern_detector.compute_frame_hash()
+                # NOTE: hashlib is imported at top of file
+                if hasattr(frame, 'tolist'):
+                    frame_list = frame.tolist()
+                else:
+                    frame_list = frame
+                flat = [str(cell) for row in frame_list for cell in row]
+                current_frame_hash = hashlib.md5(''.join(flat).encode()).hexdigest()[:16]
+                self._current_frame_hash = current_frame_hash  # Store for recording if death occurs
                 
-                if deadly_actions:
-                    for row in deadly_actions:
-                        action_num = row['action_number']
-                        drops = row['score_drops']
-                        total = row['total_uses']
-                        death_rate = drops / total if total > 0 else 0
-                        deadly_first_actions.add(action_num)
-                        logger.debug(f"[DEATH-AVOID] {game_type}-L{current_level}: ACTION{action_num} "
-                                   f"has {death_rate:.0%} death rate ({drops}/{total})")
+                # Query terminal_patterns for THIS EXACT FRAME situation
+                # Only avoid actions that have killed agents 3+ times in THIS position
+                terminal_dangers = self.db.execute_query("""
+                    SELECT fatal_action, occurrence_count, confidence
+                    FROM terminal_patterns
+                    WHERE game_type = ?
+                      AND level_number = ?
+                      AND frame_hash = ?
+                      AND is_active = 1
+                      AND occurrence_count >= 3
+                    ORDER BY occurrence_count DESC
+                """, (game_type, current_level, current_frame_hash))
+                
+                if terminal_dangers:
+                    for danger in terminal_dangers:
+                        fatal_action = danger['fatal_action']
+                        count = danger['occurrence_count']
+                        conf = danger.get('confidence', 0.5)
+                        deadly_actions_for_frame.add(fatal_action)
+                        logger.info(f"[TERMINAL-PATTERN] L{current_level} frame {current_frame_hash[:8]}...: "
+                                   f"ACTION{fatal_action} killed {count} times (conf={conf:.2f})")
                     
-                    if deadly_first_actions:
-                        self._deadly_first_actions = deadly_first_actions  # Update instance var
-                        logger.info(f"[DEATH-AVOID] Level {current_level} entry: avoiding actions {deadly_first_actions}")
+                    self._deadly_first_actions = deadly_actions_for_frame
+                    logger.info(f"[DEATH-AVOID] Position-specific: avoiding {deadly_actions_for_frame} in current frame")
         except Exception as e:
-            logger.debug(f"Instant death check failed: {e}")
+            logger.debug(f"Position-specific death check failed: {e}")
         
         # ===================================================================
         # EMBEDDING-BASED ACTION SUGGESTION (Self-Supervised Dynamics)
@@ -12979,34 +12969,36 @@ class GameplayEngine:
                 logger.debug(f"Action filter check failed: {filter_err}")
             
             # ===============================================================
-            # INSTANT DEATH AVOIDANCE FILTER (Lessons Learned)
+            # POSITION-SPECIFIC DEATH AVOIDANCE FILTER
             # ===============================================================
-            # Check if the proposed action is in the deadly_first_actions set.
-            # These are actions that historically cause instant death on level entry.
-            # If so, try to find an alternative action that isn't deadly.
-            # IMPORTANT: Only applies during first 5 actions of level entry!
+            # Check if the proposed action is deadly for THIS EXACT FRAME.
+            # Unlike level-wide avoidance, this is position-specific:
+            # - "Don't press LEFT when spawn position has enemy to left"
+            # - NOT "Don't press LEFT anywhere on level 5"
+            # The deadly actions set was computed by matching current frame_hash
+            # against terminal_patterns table.
             # ===============================================================
             try:
                 _deadly_actions = getattr(self, '_deadly_first_actions', set())
-                _deadly_check_count = getattr(self, '_deadly_check_action_count', 999)
-                # Only avoid deadly actions during first 5 actions of the level
-                if _deadly_actions and _deadly_check_count < 5 and action.startswith('ACTION'):
+                # Position-specific: applies to any frame that matches a known death pattern
+                if _deadly_actions and action.startswith('ACTION'):
                     # Extract action number
                     action_num = int(action.replace('ACTION', ''))
                     if action_num in _deadly_actions:
-                        # Find an alternative action that isn't deadly
+                        # Find an alternative action that isn't deadly in THIS position
                         all_actions = [1, 2, 3, 4, 5, 6, 7]
                         safe_actions = [a for a in all_actions if a not in _deadly_actions]
                         
                         if safe_actions:
-                            import random
                             alt_action_num = random.choice(safe_actions)
                             original_action = action
                             action = f"ACTION{alt_action_num}"
-                            reason = f"[DEATH-AVOID] Blocked deadly {original_action} -> {action} | {reason[:50]}"
-                            logger.info(f"[DEATH-AVOID] Blocked {original_action} (deadly on level entry), using {action}")
+                            frame_hash = getattr(self, '_current_frame_hash', None)
+                            frame_hash_str = frame_hash[:8] if frame_hash else 'unknown'
+                            reason = f"[TERMINAL-AVOID] {original_action} deadly at frame {frame_hash_str} -> {action} | {reason[:40]}"
+                            logger.info(f"[TERMINAL-AVOID] Blocked {original_action} (frame {frame_hash_str}), using {action}")
                         else:
-                            logger.warning(f"[DEATH-AVOID] All actions deadly on level entry! Proceeding with {action}")
+                            logger.warning(f"[TERMINAL-AVOID] All actions deadly at this position! Proceeding with {action}")
             except Exception as death_avoid_err:
                 logger.debug(f"Instant death avoidance failed: {death_avoid_err}")
             
