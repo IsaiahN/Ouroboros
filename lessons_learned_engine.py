@@ -103,20 +103,21 @@ class LessonsLearnedEngine:
                 )
             """)
             
+            # IMPORTANT: Run migration BEFORE creating indexes that depend on new columns
+            # This ensures lesson_hash column exists before idx_lessons_hash is created
+            self._migrate_schema()
+            
             # Index for fast retrieval by game_type with salience ranking
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_lessons_game_type 
                 ON game_lessons_learned(game_type, severity DESC, occurrence_count DESC)
             """)
             
-            # Index for dedup lookup
+            # Index for dedup lookup (requires lesson_hash column from migration)
             self.db.execute_query("""
                 CREATE INDEX IF NOT EXISTS idx_lessons_hash
                 ON game_lessons_learned(game_type, lesson_hash)
             """)
-            
-            # Add new columns to existing table if needed (migration)
-            self._migrate_schema()
             
             self.logger.info("Lessons learned schema initialized")
             

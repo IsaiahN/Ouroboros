@@ -3929,7 +3929,7 @@ class AgentSelfModel:
         
         # Check if experiments exist but weren't returned
         pending_count = self.db.execute_query(
-            "SELECT COUNT(*) as cnt FROM pending_symmetry_experiments WHERE game_type = ? AND level_number = ?",
+            "SELECT COUNT(*) as cnt FROM pending_symmetry_experiments WHERE game_type = ? AND level_number = ? AND completed = FALSE",
             (game_type, level)
         )
         if pending_count and pending_count[0].get('cnt', 0) > 0:
