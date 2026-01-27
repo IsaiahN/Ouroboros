@@ -3834,22 +3834,34 @@ class GameplayEngine:
                                     except Exception as e:
                                         logger.debug(f"[DEATH] Object detection failed: {e}")
                                 
-                                # Only record if we have a valid agent position
-                                if agent_position is not None:
+                                # Record death even without exact agent position
+                                # If position unknown, use frame center as fallback
+                                # This ensures we still learn about threats from game overs
+                                if agent_position is None and nearby_objects:
+                                    # Use frame center as fallback position
+                                    if game_state.frame:
+                                        frame_h = len(game_state.frame)
+                                        frame_w = len(game_state.frame[0]) if game_state.frame else 0
+                                        agent_position = (frame_h // 2, frame_w // 2)
+                                        logger.debug(f"[DEATH] Using frame center as fallback position: {agent_position}")
+                                
+                                if agent_position is not None or nearby_objects:
+                                    # Use (0,0) as last resort if we have objects but no position
+                                    final_position = agent_position if agent_position else (0, 0)
                                     self.death_hypothesis.record_death(
                                         game_type=game_type,
                                         level_number=current_level,
                                         agent_id=agent_id or 'unknown',
-                                        agent_position=agent_position,
+                                        agent_position=final_position,
                                         nearby_objects=nearby_objects,
                                         last_action=action or 'unknown',
                                         frames_on_level=frames_on_level,
                                         generation=self.game_config.get('generation', 0)
                                     )
                                     logger.info(f"[DEATH] Recorded death on {game_type} L{current_level}, "
-                                               f"nearby={len(nearby_objects)} objects, pos={agent_position}")
+                                               f"nearby={len(nearby_objects)} objects, pos={final_position}")
                                 else:
-                                    logger.debug(f"[DEATH] Skipped recording - no agent position")
+                                    logger.debug(f"[DEATH] Skipped recording - no position and no objects detected")
                             except Exception as e:
                                 logger.debug(f"Death hypothesis recording failed: {e}")
                         
@@ -4339,6 +4351,10 @@ class GameplayEngine:
                     is_frontier=is_new_level_frontier,
                 )
                 logger.debug(f"[CODS] Advanced to level {new_level} (frontier={is_new_level_frontier})")
+                
+                # Clear deadly first actions - new level needs fresh analysis
+                self._deadly_first_actions = set()
+                self._deadly_check_action_count = 0  # Reset so next _select_action will re-query
                 
                 # Reload pseudo-buttons for the new level
                 try:
@@ -12137,6 +12153,57 @@ class GameplayEngine:
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
         
         # ===================================================================
+        # INSTANT DEATH AVOIDANCE (Lessons Learned from Action Traces)
+        # ===================================================================
+        # Query action_traces for actions that historically cause instant death
+        # on the FIRST FEW ACTIONS of this specific level. This prevents the
+        # agent from repeatedly dying the same way on level entry.
+        #
+        # This is NOT about "don't touch the orange enemy" (object-based).
+        # This is about "don't press LEFT on frame 0 of level 5" (action-based).
+        # ===================================================================
+        deadly_first_actions: Set[int] = set()
+        current_action_count = loop_state.action_count if loop_state else 0
+        self._deadly_first_actions = deadly_first_actions  # Store as instance var for _finalize_ladder_and_return
+        self._deadly_check_action_count = current_action_count  # Track when we computed this
+        try:
+            game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+            if game_id and loop_state and current_action_count < 5:
+                game_type = game_id[:4] if len(game_id) >= 4 else game_id
+                current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+                
+                # Find actions that frequently cause score drops on this level
+                # Only check if we're in the first 5 actions (level entry)
+                deadly_actions = self.db.execute_query("""
+                    SELECT 
+                        action_number,
+                        COUNT(*) as total_uses,
+                        SUM(CASE WHEN score_change < 0 THEN 1 ELSE 0 END) as score_drops
+                    FROM action_traces
+                    WHERE game_id LIKE ? || '-%'
+                      AND level_number = ?
+                      AND action_number BETWEEN 1 AND 7
+                    GROUP BY action_number
+                    HAVING score_drops >= 3 AND (score_drops * 1.0 / total_uses) >= 0.5
+                """, (game_type, current_level))
+                
+                if deadly_actions:
+                    for row in deadly_actions:
+                        action_num = row['action_number']
+                        drops = row['score_drops']
+                        total = row['total_uses']
+                        death_rate = drops / total if total > 0 else 0
+                        deadly_first_actions.add(action_num)
+                        logger.debug(f"[DEATH-AVOID] {game_type}-L{current_level}: ACTION{action_num} "
+                                   f"has {death_rate:.0%} death rate ({drops}/{total})")
+                    
+                    if deadly_first_actions:
+                        self._deadly_first_actions = deadly_first_actions  # Update instance var
+                        logger.info(f"[DEATH-AVOID] Level {current_level} entry: avoiding actions {deadly_first_actions}")
+        except Exception as e:
+            logger.debug(f"Instant death check failed: {e}")
+        
+        # ===================================================================
         # EMBEDDING-BASED ACTION SUGGESTION (Self-Supervised Dynamics)
         # ===================================================================
         # Query learned frame representations to find similar past situations.
@@ -12910,6 +12977,38 @@ class GameplayEngine:
                             logger.warning(f"[ACTION-FILTER] All actions filtered at {_filter_pos}, proceeding with {action}")
             except Exception as filter_err:
                 logger.debug(f"Action filter check failed: {filter_err}")
+            
+            # ===============================================================
+            # INSTANT DEATH AVOIDANCE FILTER (Lessons Learned)
+            # ===============================================================
+            # Check if the proposed action is in the deadly_first_actions set.
+            # These are actions that historically cause instant death on level entry.
+            # If so, try to find an alternative action that isn't deadly.
+            # IMPORTANT: Only applies during first 5 actions of level entry!
+            # ===============================================================
+            try:
+                _deadly_actions = getattr(self, '_deadly_first_actions', set())
+                _deadly_check_count = getattr(self, '_deadly_check_action_count', 999)
+                # Only avoid deadly actions during first 5 actions of the level
+                if _deadly_actions and _deadly_check_count < 5 and action.startswith('ACTION'):
+                    # Extract action number
+                    action_num = int(action.replace('ACTION', ''))
+                    if action_num in _deadly_actions:
+                        # Find an alternative action that isn't deadly
+                        all_actions = [1, 2, 3, 4, 5, 6, 7]
+                        safe_actions = [a for a in all_actions if a not in _deadly_actions]
+                        
+                        if safe_actions:
+                            import random
+                            alt_action_num = random.choice(safe_actions)
+                            original_action = action
+                            action = f"ACTION{alt_action_num}"
+                            reason = f"[DEATH-AVOID] Blocked deadly {original_action} -> {action} | {reason[:50]}"
+                            logger.info(f"[DEATH-AVOID] Blocked {original_action} (deadly on level entry), using {action}")
+                        else:
+                            logger.warning(f"[DEATH-AVOID] All actions deadly on level entry! Proceeding with {action}")
+            except Exception as death_avoid_err:
+                logger.debug(f"Instant death avoidance failed: {death_avoid_err}")
             
             # ===============================================================
             # FIX #5: TRUE DELIBERATION - SYSTEM 2 REASONING
