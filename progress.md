@@ -2,6 +2,118 @@
 
 ---
 
+## Session: January 27, 2026 - Single Ground Truth Table Consolidation
+
+---
+
+### Approach: Consolidate death tracking to ONE table: `position_death_patterns`
+
+**Timestamp**: 10:16:30 PM  
+**Status**: COMPLETE - Single source of truth for death tracking
+
+---
+
+### The Problem: Two Tables, Inconsistent Queries
+
+**Before**: Two separate death tracking systems:
+1. `terminal_patterns` - frame_hash based (required EXACT pixel match - rarely triggered)
+2. `position_death_patterns` - bucket-based fuzzy matching (8x8 pixel regions)
+
+Data was being WRITTEN to both tables, but READ inconsistently. Different code paths queried different tables.
+
+### The Fix: Single Ground Truth
+
+**Chose `position_death_patterns`** because:
+- Fuzzy position matching (works even when frame pixels differ slightly)
+- Has `survival_count` for danger_score decay
+- Position-bucket semantics are more intuitive ("near spawn point")
+
+**Changes Made**:
+1. **Line 12256**: REMOVED the old terminal_patterns frame_hash query entirely
+   - Old code required EXACT frame match (almost never triggered)
+   - Now all death avoidance flows through position_death_patterns
+2. **Line 12456 (MAP-INTEL)**: Changed from terminal_patterns to position_death_patterns
+   - Queries `SUM(death_count)` instead of `SUM(occurrence_count)`
+
+**Recording**: Deaths still recorded via `record_position_death()` at line 8469
+
+**Single Flow Now**:
+```
+Death Occurs → record_position_death() → position_death_patterns table
+                                                    ↓
+             ← check_position_danger() ← position_death_patterns table
+                                                    ↓
+             ← MAP-INTEL aggregation ← position_death_patterns table
+```
+
+---
+
+## Session: January 27, 2026 - Consolidated Death Avoidance (Follow-up Fix)
+
+---
+
+### Approach: Fix MAP-INTEL to query terminal_patterns table directly for level-wide death stats, consolidating death avoidance into one effective system.
+
+**Timestamp**: 10:04:04 PM  
+**Status**: SUPERSEDED - Consolidated to position_death_patterns only
+
+---
+
+### Problem Statement
+
+**Observed Failure**: New trace `as66-821a4dcad9c2.431697f0-d36c-444e-ad28-39f0adf8367a.jsonl` shows:
+- Previous position-bucket parameter fixes were applied
+- `failure_insights` shows: "ACTION1 caused 56 deaths" and "ACTION2 caused 52 deaths" at level 5
+- MAP-INTEL rerouted from ACTION3 (hit wall) to **ACTION2** (also deadly!)
+- Agent died immediately
+
+**Root Cause**: Two separate death tracking systems weren't being combined:
+1. **terminal_patterns table** - frame-hash based, stores level-wide aggregated stats
+2. **position_death_patterns table** - position-bucket based, fuzzy position matching
+
+MAP-INTEL was only checking `_deadly_first_actions` (set by position-bucket), but the terminal_patterns data (56 deaths from ACTION1) wasn't being queried!
+
+---
+
+### Fix Applied
+
+**File**: [core_gameplay.py](core_gameplay.py#L12428-L12475)
+
+Added consolidated death avoidance query to MAP-INTEL section:
+```python
+# Query terminal_patterns - aggregated death stats by action per level
+terminal_deaths = self.db.execute_query("""
+    SELECT fatal_action, SUM(occurrence_count) as total_deaths
+    FROM terminal_patterns
+    WHERE game_type = ? AND level_number = ? AND is_active = 1
+    GROUP BY fatal_action
+    HAVING total_deaths >= 10
+    ORDER BY total_deaths DESC
+""", (game_type, current_level))
+
+if terminal_deaths:
+    for td in terminal_deaths:
+        deadly_action_nums.add(td['fatal_action'])
+        logger.info(f"[MAP-INTEL-DEATH] L{current_level}: ACTION{fatal_action} killed {death_count} agents - blocking")
+```
+
+**What This Does**:
+1. Gets position-bucket deaths from `_deadly_first_actions` (fuzzy position matching)
+2. Queries `terminal_patterns` table for level-wide aggregated death stats
+3. Combines both into `deadly_action_nums` set
+4. Filters recovery actions to avoid ALL known deadly actions
+
+**Expected Behavior**: When MAP-INTEL tries to reroute from ACTION3 (hit wall), it will now see that both ACTION1 (56 deaths) and ACTION2 (52 deaths) are deadly and refuse to reroute into either - will log "All recovery options are deadly" and skip rerouting.
+
+---
+
+### Verification
+
+- Syntax check passed: `python -m py_compile core_gameplay.py`
+- Ready for live testing
+
+---
+
 ## Session: January 27, 2026 - Position-Bucket Death Avoidance Fix (Critical Bug Fix)
 
 ---

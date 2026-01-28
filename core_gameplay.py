@@ -8172,27 +8172,39 @@ class GameplayEngine:
                                     fatal_action_num = None
                                 
                                 if frame_before and fatal_action_num:
-                                    # Get recent action sequence
-                                    pre_death_actions = [
-                                        int(str(t.get('action_type', '')).upper().replace('ACTION', ''))
-                                        for t in self._recent_action_traces[-5:]
-                                        if str(t.get('action_type', '')).upper().startswith('ACTION')
-                                    ]
-                                    
                                     agent_id = self.game_config.get('agent_id', 'unknown')
                                     generation = self.game_config.get('generation', 0)
                                     
-                                    pattern_id = self.terminal_detector.record_terminal_pattern(
-                                        game_id=game_id,
-                                        level_number=current_level,
-                                        frame_before_death=frame_before,
-                                        pre_death_actions=pre_death_actions,
-                                        fatal_action=fatal_action_num,
-                                        agent_id=agent_id,
-                                        generation=generation
-                                    )
-                                    if pattern_id:
-                                        logger.info(f"[FORESIGHT] Recorded terminal pattern: {pattern_id[:20]}")
+                                    # ================================================================
+                                    # POSITION-BUCKET DEATH RECORDING (Primary - Single Source of Truth)
+                                    # ================================================================
+                                    # Record deaths by position BUCKET for fuzzy matching.
+                                    # Uses position_death_patterns table - the ONLY table we read from.
+                                    # Generalizes: "deaths around x=8-15, y=0-7 on level 5"
+                                    # ================================================================
+                                    if hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                        try:
+                                            agent_pos = self._current_agent_position
+                                            agent_x, agent_y = agent_pos
+                                            game_type = game_id.split('-')[0] if game_id else 'unknown'
+                                            
+                                            bucket_pattern_id = self.terminal_detector.record_position_death(
+                                                game_type=game_type,
+                                                level_number=current_level,
+                                                position=(agent_x, agent_y),
+                                                fatal_action=fatal_action_num,
+                                                agent_id=agent_id,
+                                                bucket_size=8  # 8x8 pixel regions for fuzzy matching
+                                            )
+                                            if bucket_pattern_id:
+                                                bucket_x = agent_x // 8
+                                                bucket_y = agent_y // 8
+                                                logger.info(
+                                                    f"[POS-BUCKET] Recorded death at bucket ({bucket_x},{bucket_y}) "
+                                                    f"for ACTION{fatal_action_num} on L{current_level}"
+                                                )
+                                        except Exception as e:
+                                            logger.debug(f"Position-bucket death recording failed: {e}")
                                     
                                     # ================================================================
                                     # DEATH ZONE RECORDING - Spatial danger tracking
@@ -8451,38 +8463,6 @@ class GameplayEngine:
                                                        f"nearby={len(nearby_objects)} objects, pos={record_position}")
                                         except Exception as e:
                                             logger.debug(f"Death hypothesis recording failed: {e}")
-                                    
-                                    # ================================================================
-                                    # POSITION-BUCKET DEATH RECORDING - Simple fuzzy death tracking
-                                    # ================================================================
-                                    # Record deaths by position BUCKET for fuzzy matching.
-                                    # Unlike frame_hash (changes every pixel), position buckets
-                                    # generalize: "deaths around x=8-15, y=0-7 on level 5"
-                                    # This strengthens danger_score each time, weakens on survival.
-                                    # ================================================================
-                                    if hasattr(self, '_current_agent_position') and self._current_agent_position:
-                                        try:
-                                            agent_pos_bucket = self._current_agent_position
-                                            agent_x_bucket, agent_y_bucket = agent_pos_bucket
-                                            agent_id_bucket = self.game_config.get('agent_id', 'unknown')
-                                            
-                                            bucket_pattern_id = self.terminal_detector.record_position_death(
-                                                game_type=game_type,
-                                                level_number=current_level,
-                                                position=(agent_x_bucket, agent_y_bucket),  # FIX: Tuple
-                                                fatal_action=fatal_action_num,
-                                                agent_id=agent_id_bucket,
-                                                bucket_size=8  # 8x8 pixel regions
-                                            )
-                                            if bucket_pattern_id:
-                                                bucket_x = agent_x_bucket // 8
-                                                bucket_y = agent_y_bucket // 8
-                                                logger.info(
-                                                    f"[POS-BUCKET] Recorded death at bucket ({bucket_x},{bucket_y}) "
-                                                    f"for ACTION{fatal_action_num} on L{current_level}"
-                                                )
-                                        except Exception as e:
-                                            logger.debug(f"Position-bucket death recording failed: {e}")
                                     
                             except Exception as e:
                                 logger.debug(f"Terminal pattern recording failed: {e}")
@@ -12217,21 +12197,22 @@ class GameplayEngine:
         self._assert_frame_sanity(getattr(game_state, 'frame', None))
         
         # ===================================================================
-        # POSITION-SPECIFIC DEATH AVOIDANCE (Using terminal_patterns table)
         # ===================================================================
-        # Query terminal_patterns for actions that cause death in THIS EXACT
-        # frame situation (identified by frame_hash). This is position-specific:
-        # - "Don't press ACTION4 when in THIS spawn position next to enemy"
-        # - NOT "Don't press ACTION4 anywhere on level 5"
+        # POSITION-BUCKET DEATH AVOIDANCE (Single Source of Truth)
+        # ===================================================================
+        # Uses position_death_patterns table for ALL death avoidance:
+        # 1. Position-specific: Deaths at agent's current position bucket
+        # 2. Level-wide: Aggregated deaths across all positions (in MAP-INTEL)
         #
-        # The terminal_patterns table stores (frame_hash, fatal_action, level)
-        # combinations that have repeatedly caused game-over.
+        # This replaces the old frame_hash based system which was too specific
+        # (required pixel-perfect frame match) and rarely triggered.
+        # Position buckets provide fuzzy matching: 8x8 pixel regions.
         # ===================================================================
         deadly_actions_for_frame: Set[int] = set()
         current_action_count = loop_state.action_count if loop_state else 0
         self._deadly_first_actions = deadly_actions_for_frame  # Store for filter stage
         self._deadly_check_action_count = current_action_count
-        self._current_frame_hash = None  # Initialize to None, set if we compute hash
+        self._current_frame_hash = None  # Keep for recording purposes
         try:
             game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
             frame = getattr(game_state, 'frame', None)
@@ -12240,48 +12221,20 @@ class GameplayEngine:
                 game_type = game_id[:4] if len(game_id) >= 4 else game_id
                 current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
                 
-                # Compute frame hash for current situation
-                # MUST match format used by terminal_pattern_detector.compute_frame_hash()
-                # NOTE: hashlib is imported at top of file
+                # Compute frame hash for recording purposes (if death occurs)
                 if hasattr(frame, 'tolist'):
                     frame_list = frame.tolist()
                 else:
                     frame_list = frame
                 flat = [str(cell) for row in frame_list for cell in row]
                 current_frame_hash = hashlib.md5(''.join(flat).encode()).hexdigest()[:16]
-                self._current_frame_hash = current_frame_hash  # Store for recording if death occurs
-                
-                # Query terminal_patterns for THIS EXACT FRAME situation
-                # Only avoid actions that have killed agents 3+ times in THIS position
-                terminal_dangers = self.db.execute_query("""
-                    SELECT fatal_action, occurrence_count, confidence
-                    FROM terminal_patterns
-                    WHERE game_type = ?
-                      AND level_number = ?
-                      AND frame_hash = ?
-                      AND is_active = 1
-                      AND occurrence_count >= 3
-                    ORDER BY occurrence_count DESC
-                """, (game_type, current_level, current_frame_hash))
-                
-                if terminal_dangers:
-                    for danger in terminal_dangers:
-                        fatal_action = danger['fatal_action']
-                        count = danger['occurrence_count']
-                        conf = danger.get('confidence', 0.5)
-                        deadly_actions_for_frame.add(fatal_action)
-                        logger.info(f"[TERMINAL-PATTERN] L{current_level} frame {current_frame_hash[:8]}...: "
-                                   f"ACTION{fatal_action} killed {count} times (conf={conf:.2f})")
-                    
-                    self._deadly_first_actions = deadly_actions_for_frame
-                    logger.info(f"[DEATH-AVOID] Position-specific: avoiding {deadly_actions_for_frame} in current frame")
+                self._current_frame_hash = current_frame_hash
                 
                 # ===================================================================
-                # POSITION-BUCKET DEATH AVOIDANCE (Fuzzy Position Matching)
+                # POSITION-BUCKET DEATH CHECK (Fuzzy Position Matching)
                 # ===================================================================
-                # Unlike frame_hash (changes every pixel), position buckets provide
-                # fuzzy matching: "deaths at positions 8-15 on level 5 with ACTION4"
-                # This generalizes better across similar-but-not-identical frames.
+                # Single source of truth: position_death_patterns table
+                # Provides fuzzy matching: "deaths at positions 8-15 on level 5"
                 # ===================================================================
                 agent_pos = getattr(self, '_current_agent_position', None)
                 if agent_pos and hasattr(self, 'terminal_detector') and self.terminal_detector:
@@ -12433,9 +12386,43 @@ class GameplayEngine:
                 suggestion = map_intel.get('suggestion', 'explore_around')
                 alternative_dirs = map_intel.get('alternative_directions', [])
                 
-                # Get deadly actions from earlier position-bucket analysis
-                # These are already integers (e.g., {1, 2, 3})
-                deadly_action_nums = getattr(self, '_deadly_first_actions', set())
+                # ===============================================================
+                # CONSOLIDATED DEATH AVOIDANCE FOR MAP-INTEL
+                # ===============================================================
+                # Single source of truth: position_death_patterns table
+                # This table has fuzzy position matching AND level-wide aggregation
+                # Query for level-wide death stats (sum across all positions)
+                # ===============================================================
+                deadly_action_nums = set(getattr(self, '_deadly_first_actions', set()))
+                
+                # Query position_death_patterns for level-wide deadly actions
+                # Aggregates death_count across ALL positions on this level
+                try:
+                    game_id = getattr(game_state, 'game_id', None) or getattr(self, '_current_game_id', '')
+                    game_type = game_id[:4] if game_id and len(game_id) >= 4 else ''
+                    current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+                    
+                    if game_type and hasattr(self, 'db') and self.db:
+                        # Single source of truth: position_death_patterns
+                        # Aggregates deaths across all position buckets for this level
+                        level_deaths = self.db.execute_query("""
+                            SELECT fatal_action, SUM(death_count) as total_deaths
+                            FROM position_death_patterns
+                            WHERE game_type = ? AND level_number = ? AND is_active = 1
+                            GROUP BY fatal_action
+                            HAVING total_deaths >= 10
+                            ORDER BY total_deaths DESC
+                        """, (game_type, current_level))
+                        
+                        if level_deaths:
+                            for ld in level_deaths:
+                                fatal_action = ld['fatal_action']
+                                death_count = ld['total_deaths']
+                                if fatal_action not in deadly_action_nums:
+                                    deadly_action_nums.add(fatal_action)
+                                    logger.info(f"[MAP-INTEL-DEATH] L{current_level}: ACTION{fatal_action} killed {death_count} agents - blocking")
+                except Exception as e:
+                    logger.debug(f"[MAP-INTEL] Death pattern query failed: {e}")
                 
                 if alternative_dirs:
                     # Use suggested directions from map intelligence
