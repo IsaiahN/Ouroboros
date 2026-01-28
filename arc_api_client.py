@@ -203,7 +203,20 @@ class ARCClient:
         try:
             if getattr(self, 'session', None) and not self.session.closed:
                 try:
-                    self.session.close()
+                    # For aiohttp 3.x, we need to handle async close properly
+                    # Try to get the running event loop and schedule the close
+                    import asyncio
+                    try:
+                        loop = asyncio.get_running_loop()
+                        if loop.is_running():
+                            # Schedule close as a task if loop is running
+                            loop.create_task(self.session.close())
+                        else:
+                            loop.run_until_complete(self.session.close())
+                    except RuntimeError:
+                        # No running loop - use connector close which is sync-safe
+                        if self.session.connector:
+                            self.session.connector.close()
                 except Exception:
                     pass
         except Exception:

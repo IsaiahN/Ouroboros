@@ -3734,7 +3734,15 @@ class GameplayEngine:
                         # This builds threat hypotheses so agents learn to avoid
                         # certain objects (enemies) on specific levels
                         # ====================================================
-                        if game_state.state == 'GAME_OVER' and hasattr(self, 'death_hypothesis') and self.death_hypothesis:
+                        # FIX (2026-01-28): Also record deaths on SCORE DROPS!
+                        # Some games (like as66 L5) don't return GAME_OVER on death -
+                        # they just drop the score (4->0). We must treat significant
+                        # score drops as deaths for proper death avoidance learning.
+                        # ====================================================
+                        is_death_by_score_drop = (score_after < score_before and (score_before - score_after) >= 1.0)
+                        is_death = (game_state.state == 'GAME_OVER' or is_death_by_score_drop)
+                        
+                        if is_death and hasattr(self, 'death_hypothesis') and self.death_hypothesis:
                             try:
                                 # Get agent's position and nearby objects
                                 agent_position = None
@@ -3864,6 +3872,42 @@ class GameplayEngine:
                                     logger.debug(f"[DEATH] Skipped recording - no position and no objects detected")
                             except Exception as e:
                                 logger.debug(f"Death hypothesis recording failed: {e}")
+                        
+                        # ====================================================
+                        # POSITION-BUCKET DEATH RECORDING for score-drop deaths
+                        # FIX (2026-01-28): Record to position_death_patterns on ANY death
+                        # including score drops, not just GAME_OVER events.
+                        # ====================================================
+                        if is_death and hasattr(self, 'terminal_detector') and self.terminal_detector:
+                            try:
+                                # Get action number
+                                fatal_action_num = None
+                                if isinstance(action, str) and action.upper().startswith('ACTION'):
+                                    fatal_action_num = int(action.upper().replace('ACTION', ''))
+                                elif isinstance(action, int):
+                                    fatal_action_num = action
+                                
+                                if fatal_action_num and hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                    agent_pos = self._current_agent_position
+                                    agent_x, agent_y = agent_pos
+                                    bucket_pattern_id = self.terminal_detector.record_position_death(
+                                        game_type=game_type,
+                                        level_number=current_level,
+                                        position=(agent_x, agent_y),
+                                        fatal_action=fatal_action_num,
+                                        agent_id=agent_id or 'unknown',
+                                        bucket_size=8
+                                    )
+                                    if bucket_pattern_id:
+                                        bucket_x = agent_x // 8
+                                        bucket_y = agent_y // 8
+                                        death_type = "GAME_OVER" if game_state.state == 'GAME_OVER' else "SCORE_DROP"
+                                        logger.info(
+                                            f"[POS-BUCKET] {death_type}: ACTION{fatal_action_num} at bucket ({bucket_x},{bucket_y}) "
+                                            f"on L{current_level} (score {score_before:.0f}->{score_after:.0f})"
+                                        )
+                            except Exception as e:
+                                logger.debug(f"Position-bucket death recording failed: {e}")
                         
                         safe_action = action or 'noop'
                         self.metacognitive_engine.record_failure(safe_action, context)
@@ -9244,6 +9288,42 @@ class GameplayEngine:
                                     self._level_action_sequence.append(action_num_for_checkpoint)
                             
                             # ================================================================
+                            # FRONTIER LEVEL TOPOLOGY: Build navigation map from frame transitions
+                            # Based on bat navigation research: bats "stitch" partial views into
+                            # a coherent global map. We record transitions between frames to learn
+                            # the level topology - where actions lead and which paths are safe.
+                            # ================================================================
+                            if game_state.frame and hasattr(self, '_previous_frame') and self._previous_frame:
+                                try:
+                                    action_num_topo = int(action.replace('ACTION', '')) if isinstance(action, str) else action
+                                    game_type_topo = game_id[:4] if game_id else ''
+                                    
+                                    # Detect death by score drop (same as death_hypothesis logic)
+                                    death_by_score_drop = (game_state.score < previous_score and 
+                                                          (previous_score - game_state.score) >= 1.0)
+                                    is_death_topo = (game_state.state == 'GAME_OVER' or death_by_score_drop)
+                                    
+                                    self._record_frame_transition(
+                                        game_type=game_type_topo,
+                                        level_number=current_level,
+                                        from_frame=self._previous_frame,
+                                        action_taken=action_num_topo,
+                                        to_frame=game_state.frame,
+                                        resulted_in_death=is_death_topo,
+                                        score_delta=score_change
+                                    )
+                                    
+                                    # Also extract landmarks from new frames (every 10 actions to reduce DB load)
+                                    if loop_state.action_count % 10 == 0:
+                                        self._extract_and_record_landmarks(
+                                            game_type=game_type_topo,
+                                            level_number=current_level,
+                                            frame=game_state.frame
+                                        )
+                                except Exception:
+                                    pass  # Don't break gameplay for topology tracking
+                            
+                            # ================================================================
                             # NETWORK ACTION COVERAGE: Record action usage for collective map
                             # Future agents can see which actions have been tried on this level
                             # ================================================================
@@ -12409,6 +12489,79 @@ class GameplayEngine:
                     return suggested_action, reason
         except Exception as embed_err:
             logger.debug(f"Embedding suggestion failed (non-critical): {embed_err}")
+        
+        # ===================================================================
+        # FRONTIER TOPOLOGY-BASED ACTION SUGGESTION (Bat Navigation Research)
+        # ===================================================================
+        # For frontier levels, use learned topology to suggest safe actions.
+        # This is based on bat navigation research: bats "stitch" partial views
+        # into a coherent global map. We use recorded frame transitions to
+        # recommend actions that:
+        # 1. Have been observed before (not random)
+        # 2. Have low death rates
+        # 3. Have led to score increases
+        #
+        # Only applies to FRONTIER LEVELS where we're building the map.
+        # ===================================================================
+        try:
+            game_id = self.session_manager.current_game_id if hasattr(self, 'session_manager') else None
+            if game_id and game_state.frame:
+                game_type = game_id[:4] if len(game_id) >= 4 else game_id
+                current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+                
+                # Only use topology for frontier levels
+                if self._is_frontier_level(game_id, current_level):
+                    # Get exploration confidence for this level
+                    confidence_data = self._get_exploration_confidence(game_type, current_level)
+                    exploration_mode = confidence_data.get('mode', 'random')
+                    map_confidence = confidence_data.get('confidence', 0.0)
+                    
+                    # In 'exploit' mode (confidence > 0.5), prefer known-safe actions
+                    if exploration_mode == 'exploit' and map_confidence >= 0.5:
+                        topo_suggestion = self._suggest_safe_action_from_topology(
+                            game_type=game_type,
+                            level_number=current_level,
+                            frame=game_state.frame,
+                            exclude_actions=deadly_actions_for_frame  # Exclude already-blocked actions
+                        )
+                        
+                        if topo_suggestion:
+                            action_num, reason = topo_suggestion
+                            action_str = f"ACTION{action_num}"
+                            logger.info(f"[FRONTIER-TOPO] L{current_level} exploit mode (conf={map_confidence:.2f}): {reason}")
+                            return action_str, reason
+                    
+                    elif exploration_mode == 'systematic':
+                        # In systematic mode, prefer actions we haven't tried from this frame
+                        known_transitions = self._get_known_transitions_from_frame(
+                            game_type=game_type,
+                            level_number=current_level,
+                            frame=game_state.frame
+                        )
+                        
+                        # Find untried actions (excluding deadly ones)
+                        tried_actions = set(known_transitions.keys())
+                        untried_actions = set(range(1, 8)) - tried_actions - deadly_actions_for_frame
+                        
+                        if untried_actions:
+                            # Prioritize untried directional actions (1-4) over special actions (5-7)
+                            untried_dirs = untried_actions & {1, 2, 3, 4}
+                            if untried_dirs:
+                                action_num = random.choice(list(untried_dirs))
+                            else:
+                                action_num = random.choice(list(untried_actions))
+                            
+                            action_str = f"ACTION{action_num}"
+                            reason = f"[FRONTIER-TOPO] L{current_level} systematic: trying unexplored ACTION{action_num} (map coverage building)"
+                            logger.info(reason)
+                            return action_str, reason
+                    
+                    # In 'random' mode or if no suggestion, continue with normal selection
+                    # but log our confidence for debugging
+                    if map_confidence < 0.2:
+                        logger.debug(f"[FRONTIER-TOPO] L{current_level} random mode - map unknown (conf={map_confidence:.2f})")
+        except Exception as topo_err:
+            logger.debug(f"Topology suggestion failed (non-critical): {topo_err}")
         
         # ===================================================================
         # EXPLORATION TRACKING FIX (2026-01-22)
@@ -25940,7 +26093,30 @@ class GameplayEngine:
                             """, (game_type, level_number, terminal_hash))
                         except Exception:
                             pass
+                        
+                        # ================================================================
+                        # TOPOLOGY-BASED RECOVERY: Learn from failure and record bad transition
+                        # ================================================================
+                        # Record this death in the topology so future checkpoints can avoid it
+                        try:
+                            if hasattr(self, '_previous_replay_frame') and self._previous_replay_frame:
+                                self._record_frame_transition(
+                                    game_type=game_type,
+                                    level_number=level_number,
+                                    from_frame=self._previous_replay_frame,
+                                    action_taken=action_num,
+                                    to_frame=current_state.frame if current_state.frame else [],
+                                    resulted_in_death=True,
+                                    score_delta=-1.0  # Mark as death
+                                )
+                                logger.debug(f"[TOPOLOGY] Recorded checkpoint death: action {action_num} from frame causes GAME_OVER")
+                        except Exception:
+                            pass
                     return current_state, replayed
+                
+                # Track frame for topology recovery learning
+                if current_state.frame:
+                    self._previous_replay_frame = [row[:] for row in current_state.frame]
                 
             except Exception as e:
                 logger.warning(f"[CHECKPOINT-REPLAY] Action {replayed+1} failed: {e}")
@@ -25948,6 +26124,518 @@ class GameplayEngine:
         
         logger.info(f"[CHECKPOINT-REPLAY] Completed: {replayed}/{len(actions)} actions replayed")
         return current_state, replayed
+
+    # =========================================================================
+    # FRONTIER LEVEL TOPOLOGY SYSTEM
+    # Based on bat navigation research: "stitching" partial views into global map
+    # See: DOCS/direction and mapping.md
+    # =========================================================================
+
+    def _record_frame_transition(
+        self,
+        game_type: str,
+        level_number: int,
+        from_frame: List[List[int]],
+        action_taken: int,
+        to_frame: List[List[int]],
+        resulted_in_death: bool = False,
+        score_delta: float = 0.0
+    ) -> bool:
+        """
+        Record a frame-to-frame transition in the level topology graph.
+        
+        This builds the "stitching" map - how frames connect to each other.
+        Like bats learning island landmarks, we learn how the level is laid out.
+        
+        Args:
+            game_type: Game type (e.g., 'as66')
+            level_number: Current level
+            from_frame: Frame before action
+            action_taken: Action number (1-7)
+            to_frame: Frame after action
+            resulted_in_death: Whether this action caused death
+            score_delta: Score change from this action
+            
+        Returns:
+            True if recorded successfully
+        """
+        # Only track for frontier levels
+        if not self._is_frontier_level(f"{game_type}-check", level_number):
+            return False
+        
+        try:
+            from_hash = str(self._compute_frame_hash(from_frame))
+            to_hash = str(self._compute_frame_hash(to_frame))
+            
+            # UPSERT: Update statistics if transition already known
+            self.db.execute_query("""
+                INSERT INTO frontier_level_topology (
+                    game_type, level_number, from_frame_hash, action_taken,
+                    to_frame_hash, times_observed, times_resulted_in_death,
+                    times_resulted_in_score, avg_score_delta
+                ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT (game_type, level_number, from_frame_hash, action_taken) DO UPDATE SET
+                    to_frame_hash = excluded.to_frame_hash,
+                    times_observed = frontier_level_topology.times_observed + 1,
+                    times_resulted_in_death = frontier_level_topology.times_resulted_in_death + excluded.times_resulted_in_death,
+                    times_resulted_in_score = frontier_level_topology.times_resulted_in_score + excluded.times_resulted_in_score,
+                    avg_score_delta = (
+                        frontier_level_topology.avg_score_delta * frontier_level_topology.times_observed + excluded.avg_score_delta
+                    ) / (frontier_level_topology.times_observed + 1),
+                    last_observed_at = CURRENT_TIMESTAMP
+            """, (
+                game_type, level_number, from_hash, action_taken,
+                to_hash,
+                1 if resulted_in_death else 0,
+                1 if score_delta > 0 else 0,
+                score_delta
+            ))
+            
+            # Also update exploration confidence
+            self._update_exploration_confidence(game_type, level_number, 
+                                                new_transition=True, 
+                                                is_death=resulted_in_death,
+                                                is_score=(score_delta > 0))
+            
+            return True
+            
+        except Exception as e:
+            logger.debug(f"[TOPOLOGY] Failed to record transition: {e}")
+            return False
+
+    def _get_known_transitions_from_frame(
+        self,
+        game_type: str,
+        level_number: int,
+        frame: List[List[int]]
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Get all known transitions from a given frame.
+        
+        Like the bat's internal compass, this tells us "from here, I know
+        action X leads to frame Y (safe), action Z leads to death".
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            frame: Current frame
+            
+        Returns:
+            Dict mapping action_number to transition info:
+            {
+                1: {'to_hash': 'abc123', 'times_observed': 5, 'death_rate': 0.0, 'score_rate': 0.2},
+                3: {'to_hash': 'def456', 'times_observed': 3, 'death_rate': 1.0, 'score_rate': 0.0},
+                ...
+            }
+        """
+        try:
+            frame_hash = str(self._compute_frame_hash(frame))
+            
+            result = self.db.execute_query("""
+                SELECT action_taken, to_frame_hash, times_observed,
+                       times_resulted_in_death, times_resulted_in_score, avg_score_delta
+                FROM frontier_level_topology
+                WHERE game_type = ? AND level_number = ? AND from_frame_hash = ?
+            """, (game_type, level_number, frame_hash))
+            
+            transitions = {}
+            if result:
+                for row in result:
+                    action = row['action_taken']
+                    obs = row['times_observed'] or 1
+                    transitions[action] = {
+                        'to_hash': row['to_frame_hash'],
+                        'times_observed': obs,
+                        'death_rate': (row['times_resulted_in_death'] or 0) / obs,
+                        'score_rate': (row['times_resulted_in_score'] or 0) / obs,
+                        'avg_score_delta': row['avg_score_delta'] or 0.0
+                    }
+            
+            return transitions
+            
+        except Exception as e:
+            logger.debug(f"[TOPOLOGY] Failed to get transitions: {e}")
+            return {}
+
+    def _get_alternative_paths_to_frame(
+        self,
+        game_type: str,
+        level_number: int,
+        target_frame_hash: str,
+        exclude_from_hash: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Find alternative ways to reach a target frame.
+        
+        When a checkpoint fails at action N, we can look at frame N-1
+        and find OTHER actions that might work better.
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            target_frame_hash: The frame we want to reach
+            exclude_from_hash: Exclude paths from this frame (the one that failed)
+            
+        Returns:
+            List of alternative paths, sorted by safety (low death rate first)
+        """
+        try:
+            query = """
+                SELECT from_frame_hash, action_taken, times_observed,
+                       times_resulted_in_death, times_resulted_in_score
+                FROM frontier_level_topology
+                WHERE game_type = ? AND level_number = ? AND to_frame_hash = ?
+            """
+            params = [game_type, level_number, target_frame_hash]
+            
+            if exclude_from_hash:
+                query += " AND from_frame_hash != ?"
+                params.append(exclude_from_hash)
+            
+            query += " ORDER BY times_resulted_in_death ASC, times_observed DESC"
+            
+            result = self.db.execute_query(query, tuple(params))
+            
+            alternatives = []
+            if result:
+                for row in result:
+                    obs = row['times_observed'] or 1
+                    alternatives.append({
+                        'from_hash': row['from_frame_hash'],
+                        'action': row['action_taken'],
+                        'times_observed': obs,
+                        'death_rate': (row['times_resulted_in_death'] or 0) / obs,
+                        'score_rate': (row['times_resulted_in_score'] or 0) / obs
+                    })
+            
+            return alternatives
+            
+        except Exception as e:
+            logger.debug(f"[TOPOLOGY] Failed to get alternative paths: {e}")
+            return []
+
+    def _suggest_safe_action_from_topology(
+        self,
+        game_type: str,
+        level_number: int,
+        frame: List[List[int]],
+        exclude_actions: Optional[Set[int]] = None
+    ) -> Optional[Tuple[int, str]]:
+        """
+        Suggest a safe action based on known topology.
+        
+        Uses the level map to recommend actions that:
+        1. Have been observed before (not random)
+        2. Have low death rates
+        3. Have led to score increases
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            frame: Current frame
+            exclude_actions: Actions to exclude (e.g., already tried)
+            
+        Returns:
+            Tuple of (action_number, reason) or None if no suggestion
+        """
+        exclude_actions = exclude_actions or set()
+        
+        transitions = self._get_known_transitions_from_frame(game_type, level_number, frame)
+        
+        if not transitions:
+            return None  # No topology data for this frame
+        
+        # Filter out excluded and deadly actions
+        safe_actions = []
+        for action, info in transitions.items():
+            if action in exclude_actions:
+                continue
+            if info['death_rate'] >= 0.5:  # > 50% death rate = too risky
+                continue
+            safe_actions.append((action, info))
+        
+        if not safe_actions:
+            return None
+        
+        # Sort by: score_rate DESC, death_rate ASC, times_observed DESC
+        safe_actions.sort(key=lambda x: (-x[1]['score_rate'], x[1]['death_rate'], -x[1]['times_observed']))
+        
+        best_action, best_info = safe_actions[0]
+        reason = (f"[TOPOLOGY] ACTION{best_action}: "
+                  f"{best_info['times_observed']}x observed, "
+                  f"{best_info['death_rate']:.0%} death, "
+                  f"{best_info['score_rate']:.0%} scored")
+        
+        return best_action, reason
+
+    def _update_exploration_confidence(
+        self,
+        game_type: str,
+        level_number: int,
+        new_frame: bool = False,
+        new_transition: bool = False,
+        is_death: bool = False,
+        is_score: bool = False
+    ) -> None:
+        """
+        Update the exploration confidence for a frontier level.
+        
+        Like the bats whose compass stabilized over 5-6 nights, our confidence
+        builds as we learn more about the level topology.
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            new_frame: Whether a new frame was discovered
+            new_transition: Whether a new transition was learned
+            is_death: Whether this was a death (dead end found)
+            is_score: Whether this led to score (safe path found)
+        """
+        try:
+            # Get current stats
+            result = self.db.execute_query("""
+                SELECT unique_frames_visited, transitions_learned, 
+                       dead_ends_found, safe_paths_found, total_attempts
+                FROM frontier_exploration_confidence
+                WHERE game_type = ? AND level_number = ?
+            """, (game_type, level_number))
+            
+            if result and result[0]:
+                row = result[0]
+                frames = row['unique_frames_visited'] or 0
+                transitions = row['transitions_learned'] or 0
+                dead_ends = row['dead_ends_found'] or 0
+                safe_paths = row['safe_paths_found'] or 0
+                attempts = row['total_attempts'] or 0
+            else:
+                frames = transitions = dead_ends = safe_paths = attempts = 0
+            
+            # Update counts
+            if new_frame:
+                frames += 1
+            if new_transition:
+                transitions += 1
+            if is_death:
+                dead_ends += 1
+            if is_score:
+                safe_paths += 1
+            attempts += 1
+            
+            # Calculate confidence
+            # Coverage: what fraction of possible transitions do we know?
+            # Each frame has 7 possible actions
+            max_transitions = max(frames * 7, 1)
+            coverage = min(transitions / max_transitions, 1.0)
+            
+            # Confidence: combines coverage with success/failure ratio
+            # Higher safe_paths relative to dead_ends = higher confidence
+            if dead_ends + safe_paths > 0:
+                success_ratio = safe_paths / (dead_ends + safe_paths)
+            else:
+                success_ratio = 0.5  # Unknown
+            
+            confidence = coverage * 0.6 + success_ratio * 0.4
+            
+            # Determine exploration mode
+            if confidence < 0.2:
+                mode = 'random'  # Know almost nothing, explore randomly
+            elif confidence < 0.5:
+                mode = 'systematic'  # Know something, explore systematically
+            else:
+                mode = 'exploit'  # Know a lot, exploit known paths
+            
+            # UPSERT
+            self.db.execute_query("""
+                INSERT INTO frontier_exploration_confidence (
+                    game_type, level_number, unique_frames_visited, transitions_learned,
+                    dead_ends_found, safe_paths_found, coverage_estimate, confidence_score,
+                    exploration_mode, total_attempts
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (game_type, level_number) DO UPDATE SET
+                    unique_frames_visited = excluded.unique_frames_visited,
+                    transitions_learned = excluded.transitions_learned,
+                    dead_ends_found = excluded.dead_ends_found,
+                    safe_paths_found = excluded.safe_paths_found,
+                    coverage_estimate = excluded.coverage_estimate,
+                    confidence_score = excluded.confidence_score,
+                    exploration_mode = excluded.exploration_mode,
+                    total_attempts = excluded.total_attempts,
+                    last_updated_at = CURRENT_TIMESTAMP
+            """, (
+                game_type, level_number, frames, transitions,
+                dead_ends, safe_paths, coverage, confidence, mode, attempts
+            ))
+            
+        except Exception as e:
+            logger.debug(f"[TOPOLOGY] Failed to update confidence: {e}")
+
+    def _get_exploration_confidence(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> Dict[str, Any]:
+        """
+        Get the current exploration confidence for a frontier level.
+        
+        Returns:
+            Dict with confidence metrics and recommended exploration mode
+        """
+        try:
+            result = self.db.execute_query("""
+                SELECT * FROM frontier_exploration_confidence
+                WHERE game_type = ? AND level_number = ?
+            """, (game_type, level_number))
+            
+            if result and result[0]:
+                row = result[0]
+                return {
+                    'unique_frames': row['unique_frames_visited'] or 0,
+                    'transitions_learned': row['transitions_learned'] or 0,
+                    'dead_ends': row['dead_ends_found'] or 0,
+                    'safe_paths': row['safe_paths_found'] or 0,
+                    'coverage': row['coverage_estimate'] or 0.0,
+                    'confidence': row['confidence_score'] or 0.0,
+                    'mode': row['exploration_mode'] or 'random',
+                    'attempts': row['total_attempts'] or 0
+                }
+            
+            return {
+                'unique_frames': 0, 'transitions_learned': 0,
+                'dead_ends': 0, 'safe_paths': 0,
+                'coverage': 0.0, 'confidence': 0.0,
+                'mode': 'random', 'attempts': 0
+            }
+            
+        except Exception as e:
+            logger.debug(f"[TOPOLOGY] Failed to get confidence: {e}")
+            return {'confidence': 0.0, 'mode': 'random'}
+
+    def _record_landmark(
+        self,
+        game_type: str,
+        level_number: int,
+        frame: List[List[int]],
+        landmark_type: str,
+        position: Tuple[int, int],
+        color_signature: Optional[List[int]] = None
+    ) -> bool:
+        """
+        Record a stable landmark for position anchoring.
+        
+        Like bats anchoring to coastlines and tents, we anchor to
+        stable features like walls, goals, and boundaries.
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            frame: Current frame
+            landmark_type: Type of landmark ('wall', 'goal', 'boundary', 'pattern')
+            position: (x, y) position of landmark
+            color_signature: Dominant colors at/near this landmark
+            
+        Returns:
+            True if recorded successfully
+        """
+        try:
+            # Create landmark hash from position + type
+            landmark_hash = f"{landmark_type}_{position[0]}_{position[1]}"
+            
+            color_json = json.dumps(color_signature) if color_signature else None
+            
+            self.db.execute_query("""
+                INSERT INTO frontier_landmarks (
+                    game_type, level_number, landmark_hash, landmark_type,
+                    position_x, position_y, color_signature
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (game_type, level_number, landmark_hash) DO UPDATE SET
+                    times_observed = frontier_landmarks.times_observed + 1,
+                    frames_present_in = frontier_landmarks.frames_present_in + 1,
+                    stability_score = CAST(frontier_landmarks.frames_present_in + 1 AS REAL) / 
+                                     CAST(frontier_landmarks.times_observed + 1 AS REAL),
+                    last_observed_at = CURRENT_TIMESTAMP
+            """, (
+                game_type, level_number, landmark_hash, landmark_type,
+                position[0], position[1], color_json
+            ))
+            
+            return True
+            
+        except Exception as e:
+            logger.debug(f"[LANDMARK] Failed to record: {e}")
+            return False
+
+    def _extract_and_record_landmarks(
+        self,
+        game_type: str,
+        level_number: int,
+        frame: List[List[int]]
+    ) -> int:
+        """
+        Extract and record landmarks from a frame.
+        
+        Identifies stable reference points:
+        - Boundary/wall colors (usually dominant background)
+        - Goal indicators (unique colors, often at edges)
+        - Consistent patterns
+        
+        Args:
+            game_type: Game type
+            level_number: Level number
+            frame: Current frame
+            
+        Returns:
+            Number of landmarks recorded
+        """
+        if not frame or len(frame) < 2:
+            return 0
+        
+        landmarks_recorded = 0
+        
+        try:
+            frame_arr = np.array(frame)
+            height, width = frame_arr.shape[:2]
+            
+            # 1. Find boundary colors (edges of frame)
+            top_edge = frame_arr[0, :]
+            bottom_edge = frame_arr[-1, :]
+            left_edge = frame_arr[:, 0]
+            right_edge = frame_arr[:, -1]
+            
+            # Most common edge color is likely the boundary/wall
+            all_edges = np.concatenate([top_edge, bottom_edge, left_edge, right_edge])
+            unique, counts = np.unique(all_edges, return_counts=True)
+            if len(unique) > 0:
+                boundary_color = unique[np.argmax(counts)]
+                
+                # Record boundary landmarks at corners
+                corners = [(0, 0), (width-1, 0), (0, height-1), (width-1, height-1)]
+                for x, y in corners:
+                    if frame_arr[y, x] == boundary_color:
+                        self._record_landmark(game_type, level_number, frame, 
+                                            'boundary', (x, y), [int(boundary_color)])
+                        landmarks_recorded += 1
+            
+            # 2. Find unique/rare colors that might be goals
+            unique_colors, color_counts = np.unique(frame_arr, return_counts=True)
+            total_pixels = height * width
+            
+            for color, count in zip(unique_colors, color_counts):
+                # Rare colors (< 5% of frame) might be important objects
+                if count / total_pixels < 0.05 and count > 2:
+                    # Find center of this color region
+                    positions = np.argwhere(frame_arr == color)
+                    if len(positions) > 0:
+                        center_y, center_x = positions.mean(axis=0).astype(int)
+                        landmark_type = 'goal' if count / total_pixels < 0.01 else 'pattern'
+                        self._record_landmark(game_type, level_number, frame,
+                                            landmark_type, (int(center_x), int(center_y)), [int(color)])
+                        landmarks_recorded += 1
+            
+            return landmarks_recorded
+            
+        except Exception as e:
+            logger.debug(f"[LANDMARK] Extraction failed: {e}")
+            return 0
 
     def _perform_level_survey(
         self,

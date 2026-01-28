@@ -2,6 +2,554 @@
 
 ---
 
+## Session: January 28, 2026 - Frontier Level Topology System (Bat Navigation Research)
+
+---
+
+### Approach: Implement frontier level topology mapping inspired by bat navigation research
+
+**Timestamp**: 1:22:58 PM (final review complete)  
+**Status**: COMPLETE - All components implemented and verified
+
+---
+
+### Problem Being Addressed
+
+Agents struggle on frontier levels (like as66 L5) because they lack a "mental map" of the level. They repeatedly:
+1. Die at the same spots without learning
+2. Take random actions instead of leveraging prior knowledge
+3. Don't build up understanding of level topology over time
+
+### Research Basis
+
+From "How do bats determine direction and navigation" research article:
+- Bats use "stitching" - combining partial spatial views into a coherent global map
+- They anchor to stable landmarks (coastlines, tents) for position calibration  
+- Compass confidence builds over time (5-6 nights for Egyptian fruit bats)
+
+**Applied to Ouroboros**:
+- **Level Topology**: Frame-to-frame transition graph (like bat flight paths)
+- **Landmarks**: Stable reference points (walls, goals, boundaries)
+- **Exploration Confidence**: Map confidence scoring that guides mode selection
+
+---
+
+### Implementation Steps Completed
+
+#### Step 1: Database Migration (12:52 PM)
+**File**: [migrations/add_frontier_topology.py](migrations/add_frontier_topology.py) (NEW)
+
+Created 3 new tables for frontier topology:
+
+1. **`frontier_level_topology`** - Frame transition graph
+   - Records from_frame → action → to_frame transitions
+   - Tracks death rates, score rates, observation counts
+   - Enables "from here, ACTION X leads to Y (safe)" queries
+
+2. **`frontier_landmarks`** - Stable reference points
+   - Wall corners, goals, unique color regions
+   - Stability score based on persistence across frames
+
+3. **`frontier_exploration_confidence`** - Map confidence metrics
+   - Coverage estimate, confidence score
+   - Exploration mode: random → systematic → exploit
+
+**Migration Run**: SUCCESS ✅
+
+#### Step 2: Core Topology Methods (1:02 PM)
+**File**: [core_gameplay.py](core_gameplay.py)
+
+Added 8 new methods after `_replay_frontier_checkpoint()`:
+
+| Method | Purpose |
+|--------|---------|
+| `_record_frame_transition()` | Records frame→action→frame transitions |
+| `_get_known_transitions_from_frame()` | Query known outcomes from a frame |
+| `_get_alternative_paths_to_frame()` | Find alternative routes to a target frame |
+| `_suggest_safe_action_from_topology()` | Recommend safe actions based on history |
+| `_update_exploration_confidence()` | Update map confidence metrics |
+| `_get_exploration_confidence()` | Query current confidence/mode |
+| `_record_landmark()` | Record stable landmarks |
+| `_extract_and_record_landmarks()` | Extract landmarks from frames |
+
+#### Step 3: Action Execution Integration (1:02 PM)
+**Location**: [core_gameplay.py#L9297](core_gameplay.py#L9297)
+
+Added topology recording during action execution:
+- Records every frame transition for frontier levels
+- Detects deaths by score drop (not just GAME_OVER)
+- Extracts landmarks every 10 actions
+
+#### Step 4: Action Selection Integration (1:02 PM)
+**Location**: [core_gameplay.py#L12508](core_gameplay.py#L12508)
+
+Added topology-based action suggestion:
+- In **exploit mode** (confidence > 0.5): Prefer known-safe actions
+- In **systematic mode**: Try unexplored actions from current frame
+- In **random mode**: Log confidence for debugging, continue normal selection
+
+#### Step 5: Checkpoint Replay Integration (1:02 PM)
+**Location**: [core_gameplay.py#L26102](core_gameplay.py#L26102)
+
+Enhanced checkpoint replay to learn from failures:
+- Records death transitions when checkpoint fails
+- Future checkpoints learn to avoid dangerous paths
+
+#### Step 6: Bug Fix - Missing Parameter (1:19 PM)
+Fixed missing `is_score` parameter in `_record_frame_transition()`:
+```python
+# Before (bug)
+self._update_exploration_confidence(game_type, level_number, 
+                                    new_transition=True, 
+                                    is_death=resulted_in_death)
+
+# After (fixed)
+self._update_exploration_confidence(game_type, level_number, 
+                                    new_transition=True, 
+                                    is_death=resulted_in_death,
+                                    is_score=(score_delta > 0))
+```
+
+---
+
+### Verification (1:22 PM)
+
+| Check | Result |
+|-------|--------|
+| Python syntax (`py_compile`) | ✅ PASSED |
+| Migration syntax | ✅ PASSED |
+| Database tables exist | ✅ All 3 tables created |
+| SQL UPSERT queries | ✅ All 3 tested and working |
+| Imports available | ✅ numpy, json, random, hashlib |
+| Method dependencies | ✅ `_is_frontier_level()`, `_compute_frame_hash()` exist |
+| Variable scope | ✅ `deadly_actions_for_frame` in scope |
+
+---
+
+### How It Works (Summary)
+
+```
+Agent plays frontier level
+         |
+Every action:
+  - Record frame transition to topology graph
+  - Update exploration confidence
+  - Extract landmarks (every 10 actions)
+         |
+Next action selection:
+  - Query exploration confidence for this level
+  - If exploit mode (conf > 0.5): Use known-safe actions
+  - If systematic mode: Try unexplored actions
+  - If random mode: Normal selection (still learning)
+         |
+Over time:
+  - confidence_score increases as map fills in
+  - Agents shift from random → systematic → exploit
+  - Deaths teach which transitions to avoid
+```
+
+---
+
+### Current Status
+
+**NO CURRENT FAILURES** - Implementation complete and verified.
+
+Next steps:
+1. Run evolution to collect topology data
+2. Monitor `frontier_exploration_confidence` table for confidence growth
+3. Watch for `[FRONTIER-TOPO]` log messages indicating topology-guided actions
+
+---
+
+### Files Modified
+
+- `migrations/add_frontier_topology.py` - NEW: Migration script
+- `core_gameplay.py` - Added topology methods and integration points
+
+---
+
+## Session: January 28, 2026 - Aiohttp Session Close Warning Fix
+
+---
+
+### Approach: Fix RuntimeWarning about coroutine never awaited when closing aiohttp ClientSession
+
+**Timestamp**: 12:46:51 PM  
+**Status**: COMPLETE - Fix implemented, syntax verified
+
+---
+
+### Problem Statement
+
+Runtime warning during evolution shutdown:
+```
+arc_api_client.py:206: RuntimeWarning: coroutine 'ClientSession.close' was never awaited
+  self.session.close()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+asyncio - ERROR - Unclosed client session
+```
+
+---
+
+### Root Cause
+
+The `__del__` method in `ArcApiClient` was calling `self.session.close()` synchronously, but in aiohttp 3.x, `session.close()` is a coroutine that must be awaited. The `__del__` method is synchronous and cannot use `await`.
+
+---
+
+### Fix Applied
+
+**File**: [arc_api_client.py#L201-222](arc_api_client.py#L201-222)
+
+Updated `__del__` to properly handle async session close:
+
+```python
+def __del__(self):
+    """Best-effort cleanup to avoid unclosed session warnings at process exit."""
+    try:
+        if getattr(self, 'session', None) and not self.session.closed:
+            try:
+                # For aiohttp 3.x, we need to handle async close properly
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        # Schedule close as a task if loop is running
+                        loop.create_task(self.session.close())
+                    else:
+                        loop.run_until_complete(self.session.close())
+                except RuntimeError:
+                    # No running loop - use connector close which is sync-safe
+                    if self.session.connector:
+                        self.session.connector.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
+```
+
+**Fix Strategy**:
+1. Check for a running event loop
+2. If loop is running → schedule close as a task
+3. If loop exists but not running → use `run_until_complete()`
+4. Fallback: close the connector directly (synchronous-safe)
+
+---
+
+### Verification
+
+- **Syntax check**: `python -m py_compile arc_api_client.py` ✅ PASSED
+
+---
+
+### Files Modified
+
+---
+
+### Core Methods Added
+
+**File**: [core_gameplay.py](core_gameplay.py)
+
+Added after `_replay_frontier_checkpoint()`:
+
+1. **`_record_frame_transition()`** - Records frame-to-frame transitions
+   - Called during action execution for frontier levels
+   - Tracks death rates, score changes, observation counts
+
+2. **`_get_known_transitions_from_frame()`** - Query known transitions
+   - Returns all known outcomes from a given frame
+   - Like bat's internal compass: "from here, I know action X leads to Y"
+
+3. **`_get_alternative_paths_to_frame()`** - Find alternative routes
+   - When checkpoint fails, find other ways to reach a target frame
+
+4. **`_suggest_safe_action_from_topology()`** - Topology-based action suggestion
+   - Recommends actions based on observed safety
+   - Prioritizes: low death rate, high score rate, high observation count
+
+5. **`_update_exploration_confidence()`** - Update map confidence
+   - Tracks unique frames, transitions, dead ends, safe paths
+   - Calculates coverage and confidence scores
+   - Determines exploration mode: random/systematic/exploit
+
+6. **`_get_exploration_confidence()`** - Query current confidence
+
+7. **`_record_landmark()`** - Record stable landmarks
+
+8. **`_extract_and_record_landmarks()`** - Extract landmarks from frames
+   - Identifies boundary colors, corners, rare colors (potential goals)
+
+---
+
+### Integration Points
+
+1. **Action Execution** (line ~9290):
+   - Records frame transitions after each action
+   - Extracts landmarks every 10 actions
+
+2. **Action Selection** (line ~12493):
+   - Queries topology for frontier levels
+   - In 'exploit' mode: suggests known-safe actions
+   - In 'systematic' mode: prioritizes unexplored actions
+
+3. **Checkpoint Replay** (line ~26010):
+   - Records deaths to topology when checkpoint fails
+   - Future checkpoints learn to avoid dangerous transitions
+
+---
+
+### Verification
+
+- **Syntax check**: `python -m py_compile core_gameplay.py` ✅ PASSED
+- **Migration run**: ✅ 3 tables created with indices
+
+---
+
+### Files Modified
+
+- `migrations/add_frontier_topology.py` - NEW: Migration script
+- `core_gameplay.py` - Added topology methods and integration
+
+---
+
+## Session: January 28, 2026 - Aiohttp Session Close Warning Fix
+
+---
+
+### Approach: Fix RuntimeWarning about coroutine never awaited when closing aiohttp ClientSession
+
+**Timestamp**: 12:46:51 PM  
+**Status**: COMPLETE - Fix implemented, syntax verified
+
+---
+
+### Problem Statement
+
+Runtime warning during evolution shutdown:
+```
+arc_api_client.py:206: RuntimeWarning: coroutine 'ClientSession.close' was never awaited
+  self.session.close()
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+asyncio - ERROR - Unclosed client session
+```
+
+---
+
+### Root Cause
+
+The `__del__` method in `ArcApiClient` was calling `self.session.close()` synchronously, but in aiohttp 3.x, `session.close()` is a coroutine that must be awaited. The `__del__` method is synchronous and cannot use `await`.
+
+---
+
+### Fix Applied
+
+**File**: [arc_api_client.py#L201-222](arc_api_client.py#L201-222)
+
+Updated `__del__` to properly handle async session close:
+
+```python
+def __del__(self):
+    """Best-effort cleanup to avoid unclosed session warnings at process exit."""
+    try:
+        if getattr(self, 'session', None) and not self.session.closed:
+            try:
+                # For aiohttp 3.x, we need to handle async close properly
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        # Schedule close as a task if loop is running
+                        loop.create_task(self.session.close())
+                    else:
+                        loop.run_until_complete(self.session.close())
+                except RuntimeError:
+                    # No running loop - use connector close which is sync-safe
+                    if self.session.connector:
+                        self.session.connector.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
+```
+
+**Fix Strategy**:
+1. Check for a running event loop
+2. If loop is running → schedule close as a task
+3. If loop exists but not running → use `run_until_complete()`
+4. Fallback: close the connector directly (synchronous-safe)
+
+---
+
+### Verification
+
+- **Syntax check**: `python -m py_compile arc_api_client.py` ✅ PASSED
+
+---
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `arc_api_client.py` | Updated `__del__` method to handle async session close properly (lines 201-222) |
+
+---
+
+## Session: January 28, 2026 - Score-Drop Death Recording Fix (Critical L5 Bug)
+
+---
+
+### Approach: Investigate why agents are struggling on as66 Level 5 by reviewing last 10 git commits and analyzing database patterns to find root cause of death avoidance failures
+
+**Timestamp**: 10:38:28 AM  
+**Status**: COMPLETE - Fix implemented, syntax verified, awaiting live testing
+
+---
+
+### Investigation Steps
+
+| Step | Command/Action | Finding |
+|------|----------------|---------|
+| 1 | `git log --oneline -10` | Reviewed last 10 commits - all focused on death avoidance infrastructure |
+| 2 | `git log --stat -10` | Detailed file changes - Position-Specific Death Avoidance, Frontier Checkpoints, etc. |
+| 3 | Query `position_death_patterns` for L5 | ACTION1: 79 deaths, ACTION2: 79 deaths at bucket (0,0) |
+| 4 | Query `frontier_checkpoints` for L5 | 5 checkpoints exist, max 18 actions, max 15 unique frames |
+| 5 | Query `action_traces` for L5 deaths | **0 deaths** with `resulted_in_game_over=1` |
+| 6 | Query `action_traces` for L5 score drops | **252 actions** with `score_change=-4.0` |
+| 7 | Compare action_traces vs position_death_patterns | **MAJOR DISCREPANCY** found |
+
+---
+
+### Problem Statement
+
+**Agents stuck on as66 Level 5** despite 1496 total L5 actions recorded. Investigation via git log review revealed a critical gap in death recording.
+
+**Evidence from database:**
+
+| Metric | Value |
+|--------|-------|
+| L5 actions with `score_change=-4.0` | 252 |
+| L5 actions with `resulted_in_game_over=1` | 0 |
+| ACTION4 deaths (actual) in action_traces | 94 |
+| ACTION4 entries in position_death_patterns | **0** |
+
+**Critical Discrepancy - Actual Deaths vs Recorded:**
+
+| Action | position_death_patterns | action_traces (actual deaths via score drop) |
+|--------|------------------------|----------------------------------------------|
+| ACTION1 | 79 | 18 |
+| ACTION2 | 92 | 7 |
+| ACTION3 | 0 | 62 |
+| ACTION4 | **0** | **94** (most deadly!) |
+| ACTION6 | 45 | 67 |
+
+**The API doesn't return GAME_OVER** on L5 death - it just drops the score from 4 to 0!
+
+---
+
+### Root Cause
+
+**Death recording only triggered on `game_state.state == 'GAME_OVER'`:**
+
+```python
+# BEFORE (BUG at line 3738):
+if game_state.state == 'GAME_OVER' and hasattr(self, 'death_hypothesis'):
+```
+
+Score drops were detected as failures:
+```python
+is_real_failure = (
+    game_state.state == 'GAME_OVER' or  # ← FALSE for L5 deaths
+    score_after < score_before  # ← TRUE for L5 deaths
+)
+```
+
+But death recording (death_hypothesis + position_death_patterns) was inside the GAME_OVER-only branch!
+
+---
+
+### Fix Applied
+
+**1. Changed death detection condition** ([core_gameplay.py#L3738-3745](core_gameplay.py#L3738-3745)):
+```python
+# AFTER: Also detect deaths via score drops
+is_death_by_score_drop = (score_after < score_before and (score_before - score_after) >= 1.0)
+is_death = (game_state.state == 'GAME_OVER' or is_death_by_score_drop)
+
+if is_death and hasattr(self, 'death_hypothesis') and self.death_hypothesis:
+```
+
+**2. Added position_death_patterns recording for score-drop deaths** ([core_gameplay.py#L3876-3920](core_gameplay.py#L3876-3920)):
+```python
+# Record to position_death_patterns on ANY death (GAME_OVER or score drop)
+if is_death and hasattr(self, 'terminal_detector') and self.terminal_detector:
+    bucket_pattern_id = self.terminal_detector.record_position_death(...)
+    death_type = "GAME_OVER" if game_state.state == 'GAME_OVER' else "SCORE_DROP"
+    logger.info(f"[POS-BUCKET] {death_type}: ACTION{fatal_action_num} at bucket...")
+```
+
+---
+
+### Expected Impact
+
+| Before Fix | After Fix |
+|-----------|-----------|
+| Only GAME_OVER deaths recorded | All deaths recorded (GAME_OVER + score drops) |
+| ACTION4 (94 deaths) NOT tracked | ACTION4 deaths will be recorded |
+| Death avoidance ineffective for L5 | Death avoidance learns from ALL deaths |
+| Agents die 252 times without learning | Agents build death patterns and avoid |
+
+**Log signature to verify fix working:**
+```
+[POS-BUCKET] SCORE_DROP: ACTION4 at bucket (3,2) on L5 (score 4->0)
+```
+
+---
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `core_gameplay.py` | Added `is_death_by_score_drop` detection at line 3742 |
+| `core_gameplay.py` | Changed death_hypothesis recording condition at line 3745 |
+| `core_gameplay.py` | Added position_death_patterns recording for score-drop deaths (lines 3876-3920) |
+
+---
+
+### Git History Context (Last 10 Commits Reviewed)
+
+| Commit | Summary |
+|--------|---------|
+| 8f5d33c | Winning Sequences Unique Index Bug Fix |
+| 2866521 | Update schema |
+| 626b4a0 | terminal_danger integration update |
+| 54a215d | Frontier Checkpoint System |
+| 60d52e7 | Consolidate death patterns tables |
+| 2e82366 | Position-Bucket Death Avoidance Fix |
+| 3ad4398 | Position-Specific Death Avoidance |
+| bf9d5af | Fix lessons learned issue |
+| 5c881cd | Fast Gameover Avoidance & Lessons Learned Integration |
+| 3fbf53d | Fix Cross Game Transfer in model |
+
+All these commits built up death avoidance infrastructure, but none caught the GAME_OVER vs score-drop discrepancy.
+
+---
+
+### Verification
+
+- **Syntax check**: `python -m py_compile core_gameplay.py` ✅ PASSED
+- **Live testing**: Pending - run evolution and look for `[POS-BUCKET] SCORE_DROP:` logs
+
+---
+
+### Next Steps
+
+1. Run evolution: `python run_evolution.py --max-generations 3`
+2. Verify new log messages appear: `[POS-BUCKET] SCORE_DROP: ACTION4 at bucket...`
+3. Check position_death_patterns table populates with ACTION3/ACTION4 deaths
+4. Monitor if L5 survival improves
+
+---
+
 ## Session: January 28, 2026 - Winning Sequences Unique Index Bug Fix
 
 ---
