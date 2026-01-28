@@ -281,6 +281,57 @@ class TerminalPatternDetector:
                 ON relative_threat_patterns (game_type, level_number, fatal_action, is_active)
             """)
             
+            # ================================================================
+            # POSITION-BUCKET DEATH PATTERNS - Simple fuzzy position tracking
+            # ================================================================
+            # The simplest and most robust approach:
+            # Divide grid into buckets (e.g., 8x8 regions)
+            # Track: At bucket (X,Y) on level L, action A killed N times
+            # This generalizes across similar positions without exact matching
+            # 
+            # Key: bucket_size determines granularity (8 = 64x64 becomes 8x8)
+            # ================================================================
+            self.db.execute_query("""
+                CREATE TABLE IF NOT EXISTS position_death_patterns (
+                    pattern_id TEXT PRIMARY KEY,
+                    game_type TEXT NOT NULL,
+                    level_number INTEGER NOT NULL,
+                    
+                    -- Position bucket (grid divided by bucket_size)
+                    bucket_x INTEGER NOT NULL,
+                    bucket_y INTEGER NOT NULL,
+                    bucket_size INTEGER DEFAULT 8,
+                    
+                    -- The fatal action at this position
+                    fatal_action INTEGER NOT NULL,
+                    
+                    -- Death/survival tracking
+                    death_count INTEGER DEFAULT 1,
+                    survival_count INTEGER DEFAULT 0,
+                    
+                    -- Calculated danger: death_count / (death_count + survival_count)
+                    danger_score REAL DEFAULT 0.8,
+                    
+                    -- Decay support: If proven wrong, weaken over time
+                    last_death_at TEXT,
+                    last_survival_at TEXT,
+                    generations_since_update INTEGER DEFAULT 0,
+                    
+                    -- Metadata
+                    discovered_at TEXT,
+                    discovered_by_agent TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    
+                    UNIQUE(game_type, level_number, bucket_x, bucket_y, fatal_action)
+                )
+            """)
+            
+            # Index for fast position-based lookups
+            self.db.execute_query("""
+                CREATE INDEX IF NOT EXISTS idx_position_death_lookup
+                ON position_death_patterns (game_type, level_number, bucket_x, bucket_y, is_active)
+            """)
+            
         except Exception as e:
             logger.debug(f"Terminal patterns table setup: {e}")
     
@@ -1884,4 +1935,258 @@ class TerminalPatternDetector:
             
         except Exception as e:
             logger.debug(f"Failed to get game-over theories: {e}")
+            return []
+
+    # ========================================================================
+    # POSITION-BUCKET DEATH PATTERNS - Simple fuzzy position-based avoidance
+    # ========================================================================
+    # This is the simplest, most robust approach to position-based death tracking:
+    # - Divide grid into buckets (default: 8 pixel buckets)
+    # - Track deaths per (game_type, level, bucket, action)
+    # - Strengthen on death, weaken on survival
+    # ========================================================================
+    
+    def record_position_death(
+        self,
+        game_type: str,
+        level_number: int,
+        position: Tuple[int, int],
+        fatal_action: int,
+        agent_id: str = 'unknown',
+        bucket_size: int = 8
+    ) -> Optional[str]:
+        """
+        Record a death at a specific position bucket.
+        
+        This is the simplest form of position-based learning:
+        - Bucket the position (e.g., (23, 15) with bucket_size=8 -> (2, 1))
+        - Record that ACTION at this bucket on this level caused death
+        - Future agents can check before taking same action
+        
+        Args:
+            game_type: Game type (e.g., 'as66')
+            level_number: Level where death occurred
+            position: (x, y) position of agent at death
+            fatal_action: Action that caused death (1-7)
+            agent_id: Agent that discovered this
+            bucket_size: Bucket granularity (8 = divide position by 8)
+            
+        Returns:
+            Pattern ID if recorded
+        """
+        try:
+            if not position or len(position) < 2:
+                return None
+            
+            x, y = position
+            bucket_x = x // bucket_size
+            bucket_y = y // bucket_size
+            
+            # Unique pattern ID
+            pattern_id = f"posdeath_{game_type}_{level_number}_{bucket_x}_{bucket_y}_{fatal_action}"
+            now = datetime.now().isoformat()
+            
+            # Try to update existing pattern
+            existing = self.db.execute_query("""
+                SELECT pattern_id, death_count, survival_count
+                FROM position_death_patterns
+                WHERE game_type = ? AND level_number = ? 
+                  AND bucket_x = ? AND bucket_y = ? AND fatal_action = ?
+            """, (game_type, level_number, bucket_x, bucket_y, fatal_action))
+            
+            if existing:
+                # Update existing pattern
+                new_death_count = existing[0]['death_count'] + 1
+                new_survival_count = existing[0]['survival_count']
+                new_danger_score = new_death_count / (new_death_count + new_survival_count + 0.1)
+                
+                self.db.execute_query("""
+                    UPDATE position_death_patterns
+                    SET death_count = ?,
+                        danger_score = ?,
+                        last_death_at = ?,
+                        generations_since_update = 0
+                    WHERE pattern_id = ?
+                """, (new_death_count, new_danger_score, now, existing[0]['pattern_id']))
+                
+                logger.info(f"[POS-DEATH] Updated: ({bucket_x*bucket_size},{bucket_y*bucket_size}) L{level_number} "
+                           f"ACTION{fatal_action} deaths={new_death_count} danger={new_danger_score:.2f}")
+                return existing[0]['pattern_id']
+            
+            # Create new pattern
+            self.db.execute_query("""
+                INSERT OR REPLACE INTO position_death_patterns (
+                    pattern_id, game_type, level_number,
+                    bucket_x, bucket_y, bucket_size, fatal_action,
+                    death_count, survival_count, danger_score,
+                    last_death_at, discovered_at, discovered_by_agent, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0.8, ?, ?, ?, 1)
+            """, (pattern_id, game_type, level_number, bucket_x, bucket_y, bucket_size,
+                  fatal_action, now, now, agent_id))
+            
+            logger.info(f"[POS-DEATH] NEW: ({bucket_x*bucket_size},{bucket_y*bucket_size}) L{level_number} "
+                       f"ACTION{fatal_action} - first recorded death in this position bucket")
+            return pattern_id
+            
+        except Exception as e:
+            logger.debug(f"Error recording position death: {e}")
+            return None
+    
+    def record_position_survival(
+        self,
+        game_type: str,
+        level_number: int,
+        position: Tuple[int, int],
+        action_taken: int,
+        bucket_size: int = 8
+    ):
+        """
+        Record that an action was taken at a position and the agent SURVIVED.
+        
+        This weakens the danger signal - if agents survive taking ACTION at POSITION,
+        maybe it's not as deadly as we thought.
+        
+        Args:
+            game_type: Game type
+            level_number: Current level
+            position: (x, y) agent position
+            action_taken: Action that was taken (and survived)
+            bucket_size: Bucket granularity (must match recording)
+        """
+        try:
+            if not position or len(position) < 2:
+                return
+            
+            x, y = position
+            bucket_x = x // bucket_size
+            bucket_y = y // bucket_size
+            
+            now = datetime.now().isoformat()
+            
+            # Update survival count for this position+action
+            result = self.db.execute_query("""
+                UPDATE position_death_patterns
+                SET survival_count = survival_count + 1,
+                    danger_score = CAST(death_count AS REAL) / 
+                                   CAST(death_count + survival_count + 1 + 0.1 AS REAL),
+                    last_survival_at = ?
+                WHERE game_type = ? AND level_number = ?
+                  AND bucket_x = ? AND bucket_y = ? AND fatal_action = ?
+                  AND is_active = 1
+            """, (now, game_type, level_number, bucket_x, bucket_y, action_taken))
+            
+            # Log significant updates (when danger score drops below threshold)
+            if result:
+                updated = self.db.execute_query("""
+                    SELECT danger_score, death_count, survival_count
+                    FROM position_death_patterns
+                    WHERE game_type = ? AND level_number = ?
+                      AND bucket_x = ? AND bucket_y = ? AND fatal_action = ?
+                """, (game_type, level_number, bucket_x, bucket_y, action_taken))
+                
+                if updated and updated[0]['danger_score'] < 0.5:
+                    logger.info(f"[POS-SURVIVAL] Weakening: ({bucket_x*bucket_size},{bucket_y*bucket_size}) L{level_number} "
+                               f"ACTION{action_taken} danger={updated[0]['danger_score']:.2f} "
+                               f"(deaths={updated[0]['death_count']}, survives={updated[0]['survival_count']})")
+                    
+        except Exception as e:
+            logger.debug(f"Error recording position survival: {e}")
+    
+    def check_position_danger(
+        self,
+        game_type: str,
+        level_number: int,
+        position: Tuple[int, int],
+        planned_action: int,
+        min_danger: float = 0.6,
+        bucket_size: int = 8
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check if planned action is dangerous at this position bucket.
+        
+        This is the FORESIGHT mechanism for position-based avoidance.
+        
+        Args:
+            game_type: Current game type
+            level_number: Current level  
+            position: (x, y) agent position
+            planned_action: Action agent wants to take
+            min_danger: Minimum danger_score to trigger warning (default 0.6)
+            bucket_size: Bucket granularity
+            
+        Returns:
+            None if safe, or Dict with danger info and alternative suggestion
+        """
+        try:
+            if not position or len(position) < 2:
+                return None
+            
+            x, y = position
+            bucket_x = x // bucket_size
+            bucket_y = y // bucket_size
+            
+            # Check for deadly pattern at this position
+            pattern = self.db.execute_query("""
+                SELECT pattern_id, death_count, survival_count, danger_score, last_death_at
+                FROM position_death_patterns
+                WHERE game_type = ? AND level_number = ?
+                  AND bucket_x = ? AND bucket_y = ? AND fatal_action = ?
+                  AND danger_score >= ?
+                  AND is_active = 1
+                ORDER BY danger_score DESC
+                LIMIT 1
+            """, (game_type, level_number, bucket_x, bucket_y, planned_action, min_danger))
+            
+            if not pattern:
+                return None  # No danger at this position for this action
+            
+            p = pattern[0]
+            
+            # Suggest alternative action (opposite direction or wait)
+            opposite = {1: 2, 2: 1, 3: 4, 4: 3, 5: 5, 6: 5, 7: 5}
+            suggested_alternative = opposite.get(planned_action, 5)  # Default to wait
+            
+            action_names = {1: 'UP', 2: 'DOWN', 3: 'RIGHT', 4: 'LEFT', 5: 'WAIT', 6: 'CLICK', 7: 'NOOP'}
+            
+            return {
+                'danger': True,
+                'pattern_id': p['pattern_id'],
+                'position_bucket': (bucket_x * bucket_size, bucket_y * bucket_size),
+                'death_count': p['death_count'],
+                'survival_count': p['survival_count'],
+                'danger_score': p['danger_score'],
+                'reason': f"ACTION{planned_action} ({action_names.get(planned_action, '?')}) killed {p['death_count']}x "
+                         f"at position bucket ({bucket_x*bucket_size},{bucket_y*bucket_size}) on level {level_number}",
+                'suggested_alternative': suggested_alternative,
+                'suggestion': f"Try ACTION{suggested_alternative} ({action_names.get(suggested_alternative, '?')}) instead"
+            }
+            
+        except Exception as e:
+            logger.debug(f"Error checking position danger: {e}")
+            return None
+    
+    def get_position_death_summary(
+        self,
+        game_type: str,
+        level_number: int,
+        min_deaths: int = 3
+    ) -> List[Dict[str, Any]]:
+        """
+        Get summary of position-based death patterns for a level.
+        Useful for debugging and understanding where deaths cluster.
+        """
+        try:
+            patterns = self.db.execute_query("""
+                SELECT bucket_x, bucket_y, bucket_size, fatal_action,
+                       death_count, survival_count, danger_score
+                FROM position_death_patterns
+                WHERE game_type = ? AND level_number = ?
+                  AND death_count >= ?
+                  AND is_active = 1
+                ORDER BY death_count DESC, danger_score DESC
+            """, (game_type, level_number, min_deaths))
+            
+            return [dict(p) for p in (patterns or [])]
+            
+        except Exception:
             return []

@@ -2,6 +2,147 @@
 
 ---
 
+## Session: January 27, 2026 - Position-Bucket Death Avoidance Fix (Critical Bug Fix)
+
+---
+
+### Approach: Fix the position-bucket death avoidance system that was completely non-functional due to incorrect parameter names in all API calls. The MAP-INTEL rerouting was also bypassing death avoidance entirely.
+
+**Timestamp**: 9:42:40 PM  
+**Status**: COMPLETE - All parameter mismatches fixed, ready for testing
+
+---
+
+### Problem Statement
+
+**Observed Failure**: Agent trace `as66-821a4dcad9c2.071398f0-28fa-4518-ba5a-c5fb5a9fe67e.jsonl` shows:
+- Agent at level 5, score=4/9
+- `failure_insights` clearly states: "ACTION1 caused 54 deaths at level 5" and "ACTION2 caused 52 deaths"
+- ACTION3 (left) hit a wall
+- MAP-INTEL rerouting chose ACTION1 as recovery action
+- **Agent died immediately** - the exact death we were trying to prevent!
+
+**Fatal Trace Entry**:
+```json
+"7_action": {
+  "action_code": "ACTION1",
+  "reasoning": "[MAP-INTEL] ACTION3 hit wall, rerouting via ACTION1"
+}
+"state": "GAME_OVER"
+```
+
+---
+
+### Root Cause Analysis
+
+**TWO SEPARATE BUGS DISCOVERED:**
+
+#### Bug 1: Position-Bucket API Calls Had Wrong Parameter Names
+
+The `terminal_pattern_detector.py` methods expected specific parameter names, but `core_gameplay.py` was calling them with WRONG names:
+
+| Method | Expected Parameters | Actual Call (BROKEN) |
+|--------|---------------------|---------------------|
+| `check_position_danger()` | `position=(x,y)`, `planned_action`, `min_danger` | `x=`, `y=`, `proposed_action=`, `min_deaths=` |
+| `record_position_death()` | `position=(x,y)`, `fatal_action` | `x=`, `y=`, `fatal_action=`, `generation=` |
+| `record_position_survival()` | `position=(x,y)`, `action_taken` | `x=`, `y=`, `action=` |
+
+**Result**: All position-bucket calls were silently failing (caught by exception handlers), so:
+- Deaths were NOT being recorded to position_death_patterns table
+- Survivals were NOT being recorded
+- Danger checks were NOT finding any data (wrong params = no matches)
+
+#### Bug 2: MAP-INTEL Rerouting Bypassed Death Avoidance
+
+The MAP-INTEL obstacle avoidance code was choosing recovery actions WITHOUT checking if they were deadly:
+```python
+# BEFORE (broken):
+recovery_action = random.choice(perpendicular_map[last_action])  # Could pick ACTION1!
+return recovery_action, reason  # Returned BEFORE death avoidance could filter it
+```
+
+---
+
+### Implementation Fixes
+
+| File | Line | Fix |
+|------|------|-----|
+| `core_gameplay.py` | ~12291-12301 | `check_position_danger()` - Fixed to use `position=(x,y)`, `planned_action`, `min_danger` |
+| `core_gameplay.py` | ~12435-12475 | MAP-INTEL now filters deadly actions from `_deadly_first_actions` before choosing recovery |
+| `core_gameplay.py` | ~12441 | Removed broken `.replace('ACTION','')` on integers |
+| `core_gameplay.py` | ~8471-8481 | `record_position_death()` - Fixed to use `position=(x,y)`, removed `generation` param |
+| `core_gameplay.py` | ~8977-8986 | `record_position_survival()` - Fixed to use `position=(x,y)`, `action_taken` |
+
+---
+
+### MAP-INTEL Death Avoidance Integration
+
+**Before (broken)**:
+```python
+recovery_action = random.choice(perpendicular_map[last_action])
+if should_reroute:
+    return recovery_action, reason  # Could return deadly action!
+```
+
+**After (fixed)**:
+```python
+# Get deadly actions from earlier position-bucket analysis
+deadly_action_nums = getattr(self, '_deadly_first_actions', set())
+
+# Filter out deadly actions!
+safe_perp = [a for a in perp_actions if int(a.replace('ACTION', '')) not in deadly_action_nums]
+if safe_perp:
+    recovery_action = random.choice(safe_perp)
+else:
+    # ALL perpendicular options are deadly - don't reroute
+    logger.warning(f"[MAP-INTEL] All perpendicular options are deadly - not rerouting!")
+    recovery_action = None
+
+# Only reroute if we have a SAFE recovery action
+if should_reroute and recovery_action:
+    return recovery_action, reason
+elif should_reroute and not recovery_action:
+    logger.info(f"[MAP-INTEL] Skipping reroute - all options deadly")
+    # Fall through to later death-avoidance logic
+```
+
+---
+
+### Verification
+
+```powershell
+python -m py_compile core_gameplay.py terminal_pattern_detector.py
+# Both files compile successfully
+```
+
+---
+
+### Expected Behavior After Fix
+
+1. **Death Recording Works**: When agent dies, `record_position_death()` stores to `position_death_patterns` table
+2. **Survival Recording Works**: When agent survives risky action, weakens danger score
+3. **Danger Check Works**: `check_position_danger()` finds deadly actions for current position bucket
+4. **MAP-INTEL Respects Deaths**: When rerouting around obstacles, won't choose known-deadly actions
+5. **Graceful Fallback**: If ALL recovery options are deadly, skips rerouting to let main death-avoidance handle it
+
+---
+
+### Files Modified
+- [core_gameplay.py](core_gameplay.py#L12291-L12301): Fixed `check_position_danger()` call parameters
+- [core_gameplay.py](core_gameplay.py#L12435-L12475): Added deadly action filtering to MAP-INTEL
+- [core_gameplay.py](core_gameplay.py#L8471-L8481): Fixed `record_position_death()` call parameters
+- [core_gameplay.py](core_gameplay.py#L8977-L8986): Fixed `record_position_survival()` call parameters
+
+---
+
+### Next Steps
+1. Run evolution and verify position-bucket deaths are being recorded
+2. Check for `[POSITION-BUCKET]` logs showing danger detection
+3. Verify `[MAP-INTEL] Skipping reroute` appears when all options deadly
+4. Monitor if agents survive level 5 longer now
+
+---
+
 ## Session: January 27, 2026 - Position-Specific Death Avoidance for Level 5
 
 ---

@@ -8198,19 +8198,24 @@ class GameplayEngine:
                                     # DEATH ZONE RECORDING - Spatial danger tracking
                                     # ================================================================
                                     # Also record WHERE the death happened (spatial zone)
-                                    # Get controlled object positions if available
-                                    # FIX: get_controlled_objects requires (agent_id, game_id, level)
-                                    # and returns strings like "toggleable_color_9", not dicts
-                                    # Use self._current_agent_position instead (set by _build_self_model_context)
+                                    # Use _current_agent_position for death zone recording
+                                    # (get_controlled_objects returns strings, not position dicts)
                                     controlled_objects = None
-                                    if hasattr(self, 'agent_self_model') and self.agent_self_model:
-                                        controlled = self.agent_self_model.get_controlled_objects(
-                                            agent_id or 'unknown',
-                                            game_id or 'unknown',
-                                            current_level
-                                        )
-                                        if controlled:
-                                            controlled_objects = controlled
+                                    if hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                        pos = self._current_agent_position
+                                        # _current_agent_position is (x, y) format
+                                        controlled_objects = [{'x': pos[0], 'y': pos[1]}]
+                                        # Try to also add color info
+                                        if hasattr(self, 'agent_self_model') and self.agent_self_model:
+                                            ctrl = self.agent_self_model.get_controlled_objects(
+                                                agent_id or 'unknown', game_id or 'unknown', current_level
+                                            )
+                                            if ctrl and len(ctrl) > 0:
+                                                # Extract color from "toggleable_color_9" or "color_5"
+                                                import re
+                                                match = re.search(r'color_(\d+)', str(ctrl[0]))
+                                                if match:
+                                                    controlled_objects[0]['color'] = int(match.group(1))
                                     
                                     game_type = game_id.split('-')[0] if game_id else 'unknown'
                                     zone_id = self.terminal_detector.record_death_zone(
@@ -8220,7 +8225,7 @@ class GameplayEngine:
                                         controlled_objects=controlled_objects
                                     )
                                     if zone_id:
-                                        logger.info(f"[FORESIGHT] Recorded death zone: {zone_id[:20]}")
+                                        logger.info(f"[DEATH-ZONE] Recorded spatial death zone: {zone_id[:20]} at pos {self._current_agent_position if hasattr(self, '_current_agent_position') else 'unknown'}")
                                     
                                     # ================================================================
                                     # DANGEROUS OBJECT DETECTION - Color/pattern-based danger
@@ -8446,6 +8451,38 @@ class GameplayEngine:
                                                        f"nearby={len(nearby_objects)} objects, pos={record_position}")
                                         except Exception as e:
                                             logger.debug(f"Death hypothesis recording failed: {e}")
+                                    
+                                    # ================================================================
+                                    # POSITION-BUCKET DEATH RECORDING - Simple fuzzy death tracking
+                                    # ================================================================
+                                    # Record deaths by position BUCKET for fuzzy matching.
+                                    # Unlike frame_hash (changes every pixel), position buckets
+                                    # generalize: "deaths around x=8-15, y=0-7 on level 5"
+                                    # This strengthens danger_score each time, weakens on survival.
+                                    # ================================================================
+                                    if hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                        try:
+                                            agent_pos_bucket = self._current_agent_position
+                                            agent_x_bucket, agent_y_bucket = agent_pos_bucket
+                                            agent_id_bucket = self.game_config.get('agent_id', 'unknown')
+                                            
+                                            bucket_pattern_id = self.terminal_detector.record_position_death(
+                                                game_type=game_type,
+                                                level_number=current_level,
+                                                position=(agent_x_bucket, agent_y_bucket),  # FIX: Tuple
+                                                fatal_action=fatal_action_num,
+                                                agent_id=agent_id_bucket,
+                                                bucket_size=8  # 8x8 pixel regions
+                                            )
+                                            if bucket_pattern_id:
+                                                bucket_x = agent_x_bucket // 8
+                                                bucket_y = agent_y_bucket // 8
+                                                logger.info(
+                                                    f"[POS-BUCKET] Recorded death at bucket ({bucket_x},{bucket_y}) "
+                                                    f"for ACTION{fatal_action_num} on L{current_level}"
+                                                )
+                                        except Exception as e:
+                                            logger.debug(f"Position-bucket death recording failed: {e}")
                                     
                             except Exception as e:
                                 logger.debug(f"Terminal pattern recording failed: {e}")
@@ -8906,6 +8943,54 @@ class GameplayEngine:
                         consecutive_api_errors = 0
                         self._consecutive_attr_errors = 0  # Reset attribute error counter too
                         action_succeeded = True
+                        
+                        # ================================================================
+                        # POSITION-BUCKET SURVIVAL RECORDING - Weaken danger on success
+                        # ================================================================
+                        # When we SURVIVE an action at a position that was marked dangerous,
+                        # weaken the danger_score. This provides adaptive feedback:
+                        # - Strengthens on death (in game_over handler above)
+                        # - Weakens on survival (here)
+                        # Only record every 20 actions to avoid database thrashing.
+                        # ================================================================
+                        try:
+                            _survival_action_count = action_count if action_count else 0
+                            # Record survival every 20 actions OR if this was a "risky" action
+                            # that the position-bucket system would have warned about
+                            _was_risky_action = False
+                            _deadly_actions = getattr(self, '_deadly_first_actions', set())
+                            if action and action.startswith('ACTION'):
+                                _action_num = int(action.replace('ACTION', ''))
+                                _was_risky_action = _action_num in _deadly_actions
+                            
+                            should_record_survival = (
+                                _survival_action_count % 20 == 0 or  # Every 20 actions
+                                _was_risky_action  # OR we survived something risky
+                            )
+                            
+                            if should_record_survival and hasattr(self, '_current_agent_position') and self._current_agent_position:
+                                _surv_pos = self._current_agent_position
+                                _surv_x, _surv_y = _surv_pos
+                                _surv_game_type = game_id[:4] if game_id else 'unknown'
+                                _surv_level = current_level
+                                _surv_action_num = int(action.replace('ACTION', '')) if action and action.startswith('ACTION') else 0
+                                
+                                if hasattr(self, 'terminal_detector') and self.terminal_detector and _surv_action_num > 0:
+                                    self.terminal_detector.record_position_survival(
+                                        game_type=_surv_game_type,
+                                        level_number=_surv_level,
+                                        position=(_surv_x, _surv_y),  # FIX: Tuple
+                                        action_taken=_surv_action_num,  # FIX: Correct param name
+                                        bucket_size=8
+                                    )
+                                    if _was_risky_action:
+                                        _bucket_x = _surv_x // 8
+                                        _bucket_y = _surv_y // 8
+                                        logger.debug(
+                                            f"[POS-BUCKET] Survived risky ACTION{_surv_action_num} at bucket ({_bucket_x},{_bucket_y})"
+                                        )
+                        except Exception as _surv_err:
+                            logger.debug(f"Position-bucket survival recording failed (non-critical): {_surv_err}")
 
                         # Lesson stub: record score deltas as teacher signals
                         try:
@@ -12190,6 +12275,40 @@ class GameplayEngine:
                     
                     self._deadly_first_actions = deadly_actions_for_frame
                     logger.info(f"[DEATH-AVOID] Position-specific: avoiding {deadly_actions_for_frame} in current frame")
+                
+                # ===================================================================
+                # POSITION-BUCKET DEATH AVOIDANCE (Fuzzy Position Matching)
+                # ===================================================================
+                # Unlike frame_hash (changes every pixel), position buckets provide
+                # fuzzy matching: "deaths at positions 8-15 on level 5 with ACTION4"
+                # This generalizes better across similar-but-not-identical frames.
+                # ===================================================================
+                agent_pos = getattr(self, '_current_agent_position', None)
+                if agent_pos and hasattr(self, 'terminal_detector') and self.terminal_detector:
+                    agent_x, agent_y = agent_pos
+                    # Check ALL 7 actions for position-bucket danger
+                    for check_action in range(1, 8):
+                        danger_info = self.terminal_detector.check_position_danger(
+                            game_type=game_type,
+                            level_number=current_level,
+                            position=(agent_x, agent_y),  # FIX: Tuple, not separate x/y
+                            planned_action=check_action,  # FIX: Correct param name
+                            min_danger=0.6,  # FIX: Float (danger score threshold)
+                            bucket_size=8  # Fuzzy matching in 8x8 regions
+                        )
+                        if danger_info and danger_info.get('danger'):
+                            deadly_actions_for_frame.add(check_action)
+                            death_count = danger_info.get('death_count', 0)
+                            danger_score = danger_info.get('danger_score', 0)
+                            bucket = danger_info.get('position_bucket', (0, 0))
+                            logger.info(
+                                f"[POSITION-BUCKET] L{current_level} bucket {bucket}: "
+                                f"ACTION{check_action} killed {death_count}x (danger={danger_score:.2f})"
+                            )
+                    
+                    if deadly_actions_for_frame:
+                        self._deadly_first_actions = deadly_actions_for_frame
+                        logger.info(f"[DEATH-AVOID] Position-bucket: blocking {deadly_actions_for_frame} at ({agent_x},{agent_y})")
         except Exception as e:
             logger.debug(f"Position-specific death check failed: {e}")
         
@@ -12309,16 +12428,45 @@ class GameplayEngine:
                     logger.info(f"[MAP-INTEL] Collision with {terrain} (color {at_color}), suggestion: {map_intel.get('suggestion')}")
                 
                 # Choose recovery action based on map intelligence
+                # CRITICAL FIX: Filter out deadly actions BEFORE choosing recovery!
+                # The MAP-INTEL was choosing ACTION1 when it was known to cause deaths.
                 suggestion = map_intel.get('suggestion', 'explore_around')
                 alternative_dirs = map_intel.get('alternative_directions', [])
+                
+                # Get deadly actions from earlier position-bucket analysis
+                # These are already integers (e.g., {1, 2, 3})
+                deadly_action_nums = getattr(self, '_deadly_first_actions', set())
                 
                 if alternative_dirs:
                     # Use suggested directions from map intelligence
                     dir_to_action = {'up': 'ACTION1', 'down': 'ACTION2', 'left': 'ACTION3', 'right': 'ACTION4'}
                     recovery_candidates = [dir_to_action.get(d) for d in alternative_dirs if d in dir_to_action]
-                    recovery_action = random.choice(recovery_candidates) if recovery_candidates else random.choice(perpendicular_map[last_action])
+                    # Filter out deadly actions!
+                    safe_candidates = [c for c in recovery_candidates if int(c.replace('ACTION', '')) not in deadly_action_nums]
+                    if safe_candidates:
+                        recovery_action = random.choice(safe_candidates)
+                    elif recovery_candidates:
+                        # All suggested alternatives are deadly - try perpendicular instead
+                        perp_actions = perpendicular_map[last_action]
+                        safe_perp = [a for a in perp_actions if int(a.replace('ACTION', '')) not in deadly_action_nums]
+                        if safe_perp:
+                            recovery_action = random.choice(safe_perp)
+                        else:
+                            # ALL recovery options are deadly - don't reroute, let death avoidance handle it
+                            logger.warning(f"[MAP-INTEL] All recovery options are deadly - not rerouting!")
+                            recovery_action = None
+                    else:
+                        recovery_action = random.choice(perpendicular_map[last_action])
                 else:
-                    recovery_action = random.choice(perpendicular_map[last_action])
+                    perp_actions = perpendicular_map[last_action]
+                    # Filter out deadly actions!
+                    safe_perp = [a for a in perp_actions if int(a.replace('ACTION', '')) not in deadly_action_nums]
+                    if safe_perp:
+                        recovery_action = random.choice(safe_perp)
+                    else:
+                        # ALL perpendicular options are deadly - don't reroute
+                        logger.warning(f"[MAP-INTEL] All perpendicular options {perp_actions} are deadly {deadly_action_nums} - not rerouting!")
+                        recovery_action = None
                 
                 # Record that we hit something at this position (for future reference)
                 current_pos = getattr(self, '_current_agent_position', None)
@@ -12348,12 +12496,16 @@ class GameplayEngine:
                     collision_count >= 3  # Always reroute after 3 hits anywhere
                 )
                 
-                if should_reroute:
+                # Only reroute if we have a SAFE recovery action (not deadly)
+                if should_reroute and recovery_action:
                     # Clear the flag so we don't keep triggering if perpendicular also fails
                     self._last_action_no_change = False
                     reason = f"[MAP-INTEL] {last_action} hit {terrain_type}, rerouting via {recovery_action}"
                     logger.debug(reason)
                     return recovery_action, reason
+                elif should_reroute and not recovery_action:
+                    # All recovery options are deadly - skip rerouting, let later logic handle
+                    logger.info(f"[MAP-INTEL] Skipping reroute - all options deadly")
         
         # ===================================================================
         # EXPLORATION PHASE SYSTEM: Override goal-seeking when stuck/exploring
