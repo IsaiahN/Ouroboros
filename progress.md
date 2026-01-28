@@ -2,6 +2,129 @@
 
 ---
 
+## Session: January 27, 2026 - Frontier Checkpoint System Implementation
+
+---
+
+### Approach: Constructive pathfinding for hard frontier levels through incremental progress tracking
+
+**Timestamp**: 11:20:22 PM  
+**Status**: COMPLETE - Implementation verified, integration gaps fixed
+
+---
+
+### Problem Statement
+
+**Current approach (elimination-based)**:
+- Death avoidance system catalogs 100 ways to die
+- Agent must randomly discover the 1 way to win
+- No memory of GOOD moves, only BAD moves
+- Each agent starts from scratch on frontier levels
+
+**The waste**:
+- Agent A survives 12 actions, dies on action 13
+- Agent B starts from action 1 again, not action 12
+- Progress is lost, exploration restarts
+
+---
+
+### Solution: Frontier Checkpoint System
+
+Build winning sequences incrementally by:
+1. Tracking the BEST partial progress on each frontier level
+2. Replaying known-good prefixes to skip explored territory
+3. Exploring ONLY from the frontier of knowledge
+4. Extending checkpoints when new progress is made
+
+**Architecture document**: [architecture/frontier_checkpoint_system.md](architecture/frontier_checkpoint_system.md)
+
+---
+
+### Implementation Steps Completed
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 1 | Created `frontier_checkpoints` table in schema and DB | ✅ |
+| 2 | Added `_compute_survival_score()` helper method | ✅ |
+| 3 | Added `_save_frontier_checkpoint()` with UPSERT logic | ✅ |
+| 4 | Added `_get_best_frontier_checkpoint()` query method | ✅ |
+| 5 | Added `_replay_frontier_checkpoint()` replay method | ✅ |
+| 6 | Added tracking vars (`_level_unique_frame_hashes`, `_level_action_sequence`) | ✅ |
+| 7 | Integrated checkpoint save after death detection (line 8508) | ✅ |
+| 8 | Integrated checkpoint replay at L1 game start (line 7175) | ✅ |
+| 9 | Integrated checkpoint replay at L2+ level transitions (line 10517) | ✅ |
+| 10 | Added tracking reset at 3 level transition points | ✅ |
+| 11 | Added cleanup to `safe_cleanup.py` (keeps top 20 per level) | ✅ |
+| 12 | Syntax verified with py_compile | ✅ |
+| 13 | Integration tests passed | ✅ |
+
+---
+
+### Integration Gaps Fixed During Review
+
+**Gap 1: Action sequence not seeded after replay**
+- **Problem**: After replaying checkpoint, `_level_action_sequence` was empty. If agent died, new checkpoint only had NEW actions, losing the checkpoint prefix.
+- **Fix**: After replay, seed `_level_action_sequence = list(checkpoint.get('actions', []))`
+- **Files**: [core_gameplay.py#L7189](core_gameplay.py#L7189), [core_gameplay.py#L10527](core_gameplay.py#L10527)
+
+**Gap 2: Checkpoint invalidation used wrong level number**
+- **Problem**: When checkpoint replay failed (GAME_OVER), invalidation derived level from score instead of using checkpoint's stored level.
+- **Fix**: Added `game_type` and `level_number` to checkpoint dict returned by `_get_best_frontier_checkpoint()`
+- **Files**: [core_gameplay.py#L25867](core_gameplay.py#L25867) (dict), [core_gameplay.py#L25921](core_gameplay.py#L25921) (invalidation)
+
+---
+
+### Database Schema
+
+```sql
+CREATE TABLE frontier_checkpoints (
+    game_type TEXT NOT NULL,
+    level_number INTEGER NOT NULL,
+    terminal_frame_hash TEXT NOT NULL,
+    action_sequence TEXT NOT NULL,      -- JSON array: [1,4,3,2,6,...]
+    actions_count INTEGER NOT NULL,
+    unique_frames_seen INTEGER DEFAULT 0,
+    survival_score REAL DEFAULT 0,
+    terminal_reason TEXT,
+    times_used INTEGER DEFAULT 0,
+    times_extended INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP,
+    PRIMARY KEY (game_type, level_number, terminal_frame_hash)
+);
+```
+
+---
+
+### Key Design Decisions
+
+1. **Terminal frame hash as dedup key**: Multiple paths can reach same state - keep only best
+2. **Survival score formula**: `(unique_frames * 10) + actions - (oscillation * 5)`
+3. **Guards**: Min 3 actions, oscillation < 50%, frontier check before save
+4. **Checkpoint replay is "free"**: Doesn't count toward level_action_count budget
+5. **Checkpoints are network knowledge**: Any agent benefits from any checkpoint
+
+---
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `complete_database_schema.sql` | Added frontier_checkpoints table + indices |
+| `core_gameplay.py` | Added 4 methods, tracking vars, 5 integration points |
+| `safe_cleanup.py` | Added `_clean_frontier_checkpoints()` (keeps top 20 per level) |
+| `architecture/frontier_checkpoint_system.md` | Updated status to IMPLEMENTED |
+
+---
+
+### Next Steps (Optional)
+
+- [ ] Run live evolution test to verify checkpoints are saved/replayed in production
+- [ ] Add checkpoint metrics to `gameplay_analyzer.py`
+- [ ] Monitor `times_extended` to verify checkpoints are being built upon
+
+---
+
 ## Session: January 27, 2026 - Single Ground Truth Table Consolidation
 
 ---

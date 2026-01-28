@@ -436,6 +436,19 @@ class SafeDatabaseCleaner:
             c, conn, dry_run, verbose
         )
         
+        # =====================================================================
+        # FRONTIER CHECKPOINT CLEANUP (Constructive Pathfinding)
+        # =====================================================================
+        # Keep only top 20 checkpoints per (game_type, level_number).
+        # Prioritize by survival_score DESC, times_extended DESC.
+        # See: architecture/frontier_checkpoint_system.md
+        # =====================================================================
+        if verbose:
+            print('\n26. Excess frontier checkpoints')
+        results['tables_cleaned']['frontier_checkpoints'] = self._clean_frontier_checkpoints(
+            c, conn, dry_run, verbose
+        )
+        
         # Calculate total
         results['total_deleted'] = sum(r.get('deleted', 0) for r in results['tables_cleaned'].values())
         
@@ -1218,6 +1231,97 @@ class SafeDatabaseCleaner:
         
         return {'found': orphaned + excess if 'orphaned' in dir() and 'excess' in dir() else 0, 'deleted': deleted}
     
+    def _clean_frontier_checkpoints(self, c, conn, dry_run, verbose):
+        """
+        Keep only top 20 checkpoints per (game_type, level_number).
+        
+        Prioritize by survival_score DESC, times_extended DESC.
+        This prevents checkpoint bloat while preserving the best paths.
+        """
+        deleted = 0
+        excess = 0
+        keep_per_level = 20
+        
+        try:
+            # Check if table exists
+            c.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='frontier_checkpoints'
+            """)
+            if not c.fetchone():
+                if verbose:
+                    print('   Table does not exist yet (first run)')
+                return {'found': 0, 'deleted': 0}
+            
+            # Count total checkpoints
+            c.execute('SELECT COUNT(*) FROM frontier_checkpoints')
+            total = c.fetchone()[0]
+            
+            if verbose:
+                print(f'   Total checkpoints: {total:,}')
+            
+            # Get count of distinct (game_type, level_number) pairs
+            c.execute('''
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT game_type, level_number FROM frontier_checkpoints
+                )
+            ''')
+            distinct_levels = c.fetchone()[0]
+            
+            if verbose:
+                print(f'   Distinct game/level pairs: {distinct_levels}')
+            
+            # Compute excess using ROW_NUMBER
+            # Keep top 20 per (game_type, level_number) sorted by survival_score DESC
+            c.execute(f'''
+                SELECT COUNT(*) FROM (
+                    SELECT 
+                        game_type, level_number, terminal_frame_hash,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY game_type, level_number 
+                            ORDER BY survival_score DESC, times_extended DESC
+                        ) as rn
+                    FROM frontier_checkpoints
+                ) ranked
+                WHERE rn > {keep_per_level}
+            ''')
+            excess = c.fetchone()[0]
+            
+            if verbose:
+                print(f'   Excess (beyond top {keep_per_level} per level): {excess:,}')
+            
+            if not dry_run and excess > 0:
+                # Delete rows that rank beyond top 20 for their game/level
+                c.execute(f'''
+                    DELETE FROM frontier_checkpoints 
+                    WHERE (game_type, level_number, terminal_frame_hash) IN (
+                        SELECT game_type, level_number, terminal_frame_hash FROM (
+                            SELECT 
+                                game_type, level_number, terminal_frame_hash,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY game_type, level_number 
+                                    ORDER BY survival_score DESC, times_extended DESC
+                                ) as rn
+                            FROM frontier_checkpoints
+                        ) ranked
+                        WHERE rn > {keep_per_level}
+                    )
+                ''')
+                deleted = c.rowcount
+                conn.commit()
+                
+        except Exception as e:
+            if verbose:
+                print(f'   Could not clean frontier checkpoints: {e}')
+        
+        if verbose:
+            if dry_run and excess > 0:
+                print(f'   Would delete: {excess:,} excess checkpoints')
+            elif deleted > 0:
+                print(f'   Deleted: {deleted:,} excess checkpoints')
+        
+        return {'found': excess, 'deleted': deleted}
+
     def verify_critical_data(self, verbose=True):
         """Verify that critical data is preserved."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)

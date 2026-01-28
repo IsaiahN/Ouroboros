@@ -7164,6 +7164,36 @@ class GameplayEngine:
                     game_id=game_id,
                     trigger='game_start'
                 )
+                
+                # ================================================================
+                # FRONTIER CHECKPOINT: Replay best checkpoint if frontier level
+                # ================================================================
+                # If level 1 is frontier and we have a checkpoint, replay it to
+                # fast-forward to the frontier of knowledge. This enables
+                # constructive pathfinding - building on what worked before.
+                # ================================================================
+                if is_level_1_frontier:
+                    game_type_for_checkpoint = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                    checkpoint = self._get_best_frontier_checkpoint(game_type_for_checkpoint, 1)
+                    if checkpoint:
+                        logger.info(f"[CHECKPOINT] Replaying frontier checkpoint for {game_type_for_checkpoint} L1")
+                        new_state, actions_replayed = self._replay_frontier_checkpoint(
+                            game_state, checkpoint, game_id
+                        )
+                        if new_state and actions_replayed > 0:
+                            game_state = new_state
+                            # Update tracking - we're past the checkpoint now
+                            logger.info(f"[CHECKPOINT] Fast-forwarded {actions_replayed} actions, now exploring from frontier")
+                            # CRITICAL: Seed _level_action_sequence with replayed actions
+                            # This ensures subsequent checkpoints EXTEND this one, not start fresh
+                            self._level_action_sequence = list(checkpoint.get('actions', []))
+                            # Record checkpoint frame hash as seen
+                            if game_state.frame:
+                                frame_hash = self._compute_frame_hash(game_state.frame)
+                                self._level_unique_frame_hashes.add(frame_hash)
+                        elif actions_replayed == 0:
+                            logger.info(f"[CHECKPOINT] No checkpoint available for {game_type_for_checkpoint} L1, exploring fresh")
+                
             except Exception as e:
                 logger.debug(f"CODS context init failed (non-critical): {e}")
         
@@ -7989,6 +8019,10 @@ class GameplayEngine:
             self._frame_count = 0  # Track frame count for reasoning payload (Fix #4)
             start_time = datetime.now()
             
+            # FRONTIER CHECKPOINT SYSTEM: Track unique frames for survival scoring
+            self._level_unique_frame_hashes = set()  # Unique frames seen this level
+            self._level_action_sequence = []  # Actions taken this level (for checkpoint)
+            
             # CRITICAL FIX (2025-12-07): Initialize level tracking from current game state
             # After sequence replay, game_state.score reflects levels completed
             # If we reset to 0, we lose track of progress from replay
@@ -8467,6 +8501,29 @@ class GameplayEngine:
                             except Exception as e:
                                 logger.debug(f"Terminal pattern recording failed: {e}")
                     
+                    # ================================================================
+                    # FRONTIER CHECKPOINT: Save partial progress before death ends game
+                    # ================================================================
+                    # This enables constructive pathfinding - future agents can replay
+                    # the known-good prefix and explore only from the frontier.
+                    # ================================================================
+                    if hasattr(self, '_level_action_sequence') and self._level_action_sequence:
+                        try:
+                            game_type_for_checkpoint = game_id.split('-')[0] if game_id else 'unknown'
+                            unique_frames = len(getattr(self, '_level_unique_frame_hashes', set()))
+                            
+                            # Save checkpoint (method handles frontier guard and validation)
+                            self._save_frontier_checkpoint(
+                                game_type=game_type_for_checkpoint,
+                                level_number=current_level,
+                                terminal_frame=game_state.frame if game_state else [],
+                                action_sequence=list(self._level_action_sequence),
+                                unique_frames_seen=unique_frames,
+                                terminal_reason='death'
+                            )
+                        except Exception as e:
+                            logger.debug(f"Frontier checkpoint save failed: {e}")
+                    
                     # Decide whether to break or continue based on score
                     if is_zero_score:
                         # Definite failure - break the game loop
@@ -8499,6 +8556,10 @@ class GameplayEngine:
                         level_action_count = 0  # Reset level counter
                         level_start_action = action_count
                         consecutive_no_frame_change = 0
+                        
+                        # FRONTIER CHECKPOINT: Reset tracking for new level
+                        self._level_unique_frame_hashes = set()
+                        self._level_action_sequence = []
                         
                         # Reinitialize consciousness state for new level
                         self.game_config['theory_validation_state'] = 'UNTESTED'
@@ -8605,6 +8666,10 @@ class GameplayEngine:
                                         self._last_reset_score = game_state.score
                                         level_action_count = 0  # Reset level action counter
                                         consecutive_no_frame_change = 0  # Reset stuck counter
+                                        
+                                        # FRONTIER CHECKPOINT: Reset tracking after level reset
+                                        self._level_unique_frame_hashes = set()
+                                        self._level_action_sequence = []
                                         
                                         # CRITICAL: Agent's main action_count continues (budget extension)
                                         # The in-game action bar refills, but we track total attempts
@@ -9165,6 +9230,18 @@ class GameplayEngine:
                             # Only cap for pathological cases (shouldn't happen with normal budgets)
                             if len(self._recent_action_traces) > 20000:
                                 self._recent_action_traces = self._recent_action_traces[-20000:]
+                            
+                            # ================================================================
+                            # FRONTIER CHECKPOINT: Track unique frames and actions for this level
+                            # ================================================================
+                            if game_state.frame:
+                                frame_hash = self._compute_frame_hash(game_state.frame)
+                                if hasattr(self, '_level_unique_frame_hashes'):
+                                    self._level_unique_frame_hashes.add(frame_hash)
+                                # Track action number for checkpoint sequence
+                                if hasattr(self, '_level_action_sequence'):
+                                    action_num_for_checkpoint = int(action.replace('ACTION', '')) if isinstance(action, str) else action
+                                    self._level_action_sequence.append(action_num_for_checkpoint)
                             
                             # ================================================================
                             # NETWORK ACTION COVERAGE: Record action usage for collective map
@@ -10433,6 +10510,30 @@ class GameplayEngine:
                                         self._original_self_bias = original
                                     except Exception as e:
                                         logger.debug(f"Failed to boost frontier exploration: {e}")
+                                
+                                # ================================================================
+                                # FRONTIER CHECKPOINT: Replay checkpoint if available
+                                # ================================================================
+                                # Level is frontier - check for checkpoint to fast-forward
+                                # ================================================================
+                                game_type_for_checkpoint = game_id.split('-')[0] if '-' in game_id else game_id[:4]
+                                checkpoint = self._get_best_frontier_checkpoint(game_type_for_checkpoint, next_level_number)
+                                if checkpoint:
+                                    logger.info(f"[CHECKPOINT] Replaying frontier checkpoint for {game_type_for_checkpoint} L{next_level_number}")
+                                    new_state, actions_replayed = self._replay_frontier_checkpoint(
+                                        game_state, checkpoint, game_id
+                                    )
+                                    if new_state and actions_replayed > 0:
+                                        game_state = new_state
+                                        logger.info(f"[CHECKPOINT] Fast-forwarded {actions_replayed} actions, now exploring from frontier")
+                                        # CRITICAL: Seed _level_action_sequence with replayed actions
+                                        # This ensures subsequent checkpoints EXTEND this one, not start fresh
+                                        self._level_action_sequence = list(checkpoint.get('actions', []))
+                                        # Record checkpoint frame hash as seen
+                                        if game_state.frame:
+                                            frame_hash = self._compute_frame_hash(game_state.frame)
+                                            self._level_unique_frame_hashes.add(frame_hash)
+                                
                             else:
                                 logger.debug(f"[FRONTIER] Level {next_level_number}: Found {seq_count} existing sequences")
                         
@@ -10442,6 +10543,10 @@ class GameplayEngine:
                         level_action_count = 0  # Reset level action counter
                         level_start_action = action_count  # Mark where this level starts
                         consecutive_no_frame_change = 0  # CRITICAL FIX: Reset stuck state counter on level completion
+                        
+                        # FRONTIER CHECKPOINT: Reset tracking for new level
+                        self._level_unique_frame_hashes = set()
+                        self._level_action_sequence = []
                         
                         # Reset proactive reset counter for new level
                         self._proactive_resets_this_level = 0
@@ -25607,6 +25712,236 @@ class GameplayEngine:
         except Exception as e:
             logger.debug(f"Error checking frontier status: {e}")
             return True  # Assume frontier on error
+
+    # =========================================================================
+    # FRONTIER CHECKPOINT SYSTEM (Constructive Pathfinding)
+    # =========================================================================
+    # Builds winning sequences incrementally by tracking partial progress.
+    # Instead of cataloging deaths (elimination), we build on what works.
+    # See: architecture/frontier_checkpoint_system.md
+    # =========================================================================
+
+    def _compute_survival_score(self, unique_frames: int, action_count: int, 
+                                oscillation_count: int = 0) -> float:
+        """
+        Game-agnostic progress metric - higher = better.
+        
+        Formula: (unique_frames * 10) + action_count - (oscillation_count * 5)
+        
+        Why this works without game knowledge:
+        - More unique frames = exploring new territory (good)
+        - More actions = survived longer (good)
+        - Oscillation = stuck in loop (bad)
+        """
+        return float(unique_frames * 10) + float(action_count) - float(oscillation_count * 5)
+
+    def _save_frontier_checkpoint(
+        self,
+        game_type: str,
+        level_number: int,
+        terminal_frame: List[List[int]],
+        action_sequence: List[int],
+        unique_frames_seen: int,
+        terminal_reason: str = 'death'
+    ) -> Optional[str]:
+        """
+        Save a checkpoint of partial progress on a frontier level.
+        
+        Uses UPSERT: if same terminal state reached before, keep the better path.
+        
+        Args:
+            game_type: Game type (e.g., 'as66', 'ft09')
+            level_number: Current level
+            terminal_frame: Frame at death/stuck state
+            action_sequence: List of action numbers that got us here
+            unique_frames_seen: Number of unique frames seen (exploration diversity)
+            terminal_reason: Why we stopped ('death', 'stuck', 'timeout')
+            
+        Returns:
+            terminal_frame_hash if saved, None if skipped (level beaten or invalid)
+        """
+        # Guard: Only save if level is STILL frontier
+        if not self._is_frontier_level(f"{game_type}-check", level_number):
+            logger.debug(f"[CHECKPOINT] Skipping save - {game_type} L{level_number} is no longer frontier")
+            return None
+        
+        # Minimum action threshold - fewer than 3 actions = instant death, no value
+        if len(action_sequence) < 3:
+            logger.debug(f"[CHECKPOINT] Skipping save - only {len(action_sequence)} actions (min: 3)")
+            return None
+        
+        # Oscillation filter - if > 50% oscillation, not valuable progress
+        oscillation_count = len(action_sequence) - unique_frames_seen
+        if oscillation_count > len(action_sequence) / 2:
+            logger.debug(f"[CHECKPOINT] Skipping save - too much oscillation ({oscillation_count}/{len(action_sequence)} actions)")
+            return None
+        
+        # Compute terminal frame hash
+        terminal_frame_hash = str(self._compute_frame_hash(terminal_frame))
+        
+        # Compute survival score
+        survival_score = self._compute_survival_score(
+            unique_frames=unique_frames_seen,
+            action_count=len(action_sequence),
+            oscillation_count=oscillation_count
+        )
+        
+        try:
+            # UPSERT: Insert or update if better path to same state
+            self.db.execute_query("""
+                INSERT INTO frontier_checkpoints (
+                    game_type, level_number, terminal_frame_hash,
+                    action_sequence, actions_count, unique_frames_seen,
+                    survival_score, terminal_reason, times_extended
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT (game_type, level_number, terminal_frame_hash) DO UPDATE SET
+                    action_sequence = CASE 
+                        WHEN excluded.survival_score > frontier_checkpoints.survival_score 
+                        THEN excluded.action_sequence 
+                        ELSE frontier_checkpoints.action_sequence 
+                    END,
+                    actions_count = CASE 
+                        WHEN excluded.survival_score > frontier_checkpoints.survival_score 
+                        THEN excluded.actions_count 
+                        ELSE frontier_checkpoints.actions_count 
+                    END,
+                    survival_score = MAX(frontier_checkpoints.survival_score, excluded.survival_score),
+                    unique_frames_seen = MAX(frontier_checkpoints.unique_frames_seen, excluded.unique_frames_seen),
+                    times_extended = frontier_checkpoints.times_extended + 1,
+                    last_used_at = CURRENT_TIMESTAMP
+            """, (
+                game_type, level_number, terminal_frame_hash,
+                json.dumps(action_sequence), len(action_sequence),
+                unique_frames_seen, survival_score, terminal_reason
+            ))
+            
+            logger.info(f"[CHECKPOINT] Saved {game_type} L{level_number}: "
+                       f"{len(action_sequence)} actions, score={survival_score:.1f}, "
+                       f"reason={terminal_reason}")
+            return terminal_frame_hash
+            
+        except Exception as e:
+            logger.debug(f"[CHECKPOINT] Save failed: {e}")
+            return None
+
+    def _get_best_frontier_checkpoint(
+        self,
+        game_type: str,
+        level_number: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get the best checkpoint for a frontier level.
+        
+        Args:
+            game_type: Game type (e.g., 'as66', 'ft09')
+            level_number: Current level
+            
+        Returns:
+            Dict with 'actions' (list of ints), 'terminal_hash', 'survival_score'
+            or None if no checkpoint exists
+        """
+        try:
+            result = self.db.execute_query("""
+                SELECT action_sequence, actions_count, terminal_frame_hash, survival_score
+                FROM frontier_checkpoints
+                WHERE game_type = ? AND level_number = ?
+                ORDER BY survival_score DESC, times_extended DESC
+                LIMIT 1
+            """, (game_type, level_number))
+            
+            if result and result[0]:
+                row = result[0]
+                actions = json.loads(row['action_sequence'])
+                
+                # Mark as used
+                self.db.execute_query("""
+                    UPDATE frontier_checkpoints 
+                    SET times_used = times_used + 1, last_used_at = CURRENT_TIMESTAMP
+                    WHERE game_type = ? AND level_number = ? AND terminal_frame_hash = ?
+                """, (game_type, level_number, row['terminal_frame_hash']))
+                
+                logger.info(f"[CHECKPOINT] Retrieved {game_type} L{level_number}: "
+                           f"{len(actions)} actions, score={row['survival_score']:.1f}")
+                
+                return {
+                    'actions': actions,
+                    'terminal_hash': row['terminal_frame_hash'],
+                    'survival_score': row['survival_score'],
+                    'actions_count': row['actions_count'],
+                    'game_type': game_type,
+                    'level_number': level_number
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"[CHECKPOINT] Retrieval failed: {e}")
+            return None
+
+    def _replay_frontier_checkpoint(
+        self,
+        game_state: 'GameState',
+        checkpoint: Dict[str, Any],
+        game_id: str
+    ) -> Tuple[Optional['GameState'], int]:
+        """
+        Replay a frontier checkpoint to fast-forward to known-good state.
+        
+        Args:
+            game_state: Current game state
+            checkpoint: Checkpoint dict from _get_best_frontier_checkpoint()
+            game_id: Current game ID
+            
+        Returns:
+            Tuple of (final_game_state, actions_replayed)
+            Returns (None, 0) if replay failed
+        """
+        actions = checkpoint.get('actions', [])
+        if not actions:
+            return None, 0
+        
+        logger.info(f"[CHECKPOINT-REPLAY] Starting replay of {len(actions)} checkpoint actions")
+        
+        replayed = 0
+        current_state = game_state
+        
+        for action_num in actions:
+            try:
+                action = f"ACTION{action_num}"
+                result = self.arc_client.send_action(action)
+                
+                if result is None:
+                    logger.warning(f"[CHECKPOINT-REPLAY] Action {action} returned None, stopping")
+                    break
+                
+                current_state = result
+                replayed += 1
+                
+                # Check for game over during replay (checkpoint became invalid)
+                if current_state.state == "GAME_OVER":
+                    logger.warning(f"[CHECKPOINT-REPLAY] Game over at action {replayed}/{len(actions)} - checkpoint may be stale")
+                    # Mark checkpoint as degraded
+                    game_type = checkpoint.get('game_type') or (game_id.split('-')[0] if '-' in game_id else game_id[:4])
+                    level_number = checkpoint.get('level_number')
+                    terminal_hash = checkpoint.get('terminal_hash', '')
+                    if terminal_hash and level_number:
+                        try:
+                            self.db.execute_query("""
+                                UPDATE frontier_checkpoints 
+                                SET survival_score = survival_score * 0.5,
+                                    terminal_reason = 'invalidated'
+                                WHERE game_type = ? AND level_number = ? AND terminal_frame_hash = ?
+                            """, (game_type, level_number, terminal_hash))
+                        except Exception:
+                            pass
+                    return current_state, replayed
+                
+            except Exception as e:
+                logger.warning(f"[CHECKPOINT-REPLAY] Action {replayed+1} failed: {e}")
+                break
+        
+        logger.info(f"[CHECKPOINT-REPLAY] Completed: {replayed}/{len(actions)} actions replayed")
+        return current_state, replayed
 
     def _perform_level_survey(
         self,
