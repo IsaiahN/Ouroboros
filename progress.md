@@ -2,6 +2,84 @@
 
 ---
 
+## Session: January 28, 2026 - Winning Sequences Unique Index Bug Fix
+
+---
+
+### Approach: Fix UNIQUE constraint failure when storing winning sequences for under-represented game-levels
+
+**Timestamp**: 7:26:05 AM  
+**Status**: COMPLETE - Index dropped, schema updated
+
+---
+
+### Problem Statement
+
+Evolution error during sequence capture:
+```
+[Y] Storing sequence for under-represented game-level (only 1 active)
+ERROR - Error capturing winning sequence: UNIQUE constraint failed: winning_sequences.game_id, winning_sequences.level_number
+```
+
+---
+
+### Root Cause
+
+**Schema mismatch between design and constraint:**
+
+1. **Unique partial index**: `idx_winning_sequences_active ON winning_sequences(game_id, level_number) WHERE is_active = 1`
+   - Enforces **only 1 active sequence** per game+level
+   
+2. **Auto-cleanup logic** (line 26600): Designed to keep **top 3** sequences per game+level
+   - Only deactivates if >3 sequences exist
+   
+3. **Code comment** (line 26483): "Removed blanket 'replaced_by_new' deactivation"
+   - Old logic deactivated all before INSERT
+   - New logic relies on auto-cleanup AFTER INSERT
+
+**Result**: INSERT fails BEFORE auto-cleanup can run, because unique index only allows 1 active.
+
+---
+
+### Fix Applied
+
+1. **Schema update** - Removed unique index from `complete_database_schema.sql`:
+```sql
+-- NOTE: Unique index removed (Jan 2026) - design now allows up to 3 active sequences per game+level
+-- Auto-cleanup in core_gameplay.py keeps top 3 by success_rate, refs, and efficiency
+-- Old: CREATE UNIQUE INDEX idx_winning_sequences_active ON winning_sequences(game_id, level_number) WHERE is_active = 1;
+```
+
+2. **Migration** - Created `migrations/drop_winning_sequences_unique_index.py` and ran it:
+```
+[MIGRATE] Found unique index: idx_winning_sequences_active
+[MIGRATE] SUCCESS: Dropped idx_winning_sequences_active
+[MIGRATE] Verification - index exists: False
+```
+
+---
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `complete_database_schema.sql` | Removed unique index definition, added comment |
+| `migrations/drop_winning_sequences_unique_index.py` | NEW: Migration script |
+
+---
+
+### Design Intent (Restored)
+
+The system now correctly allows **up to 3 active sequences** per game+level:
+- INSERT succeeds without deactivating existing sequences
+- Auto-cleanup (after INSERT) keeps top 3 ranked by:
+  1. `success_rate_when_reused` (proven working > unproven)
+  2. `times_referenced` (heavily used > unused)
+  3. `total_actions ASC` (fewer actions = more efficient)
+  4. `total_score DESC` (higher score = further progress)
+
+---
+
 ## Session: January 28, 2026 - Integration Gap Fix (check_for_terminal_danger position parameter)
 
 ---
