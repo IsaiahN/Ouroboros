@@ -55,56 +55,22 @@ class TerminalPatternDetector:
     previously observed terminal states.
     
     KEY INSIGHT: It's not just the action that kills you - it's the
-    combination of STATE + ACTION that leads to terminal.
+    combination of STATE + ACTION (position) that leads to terminal.
+    
+    CONSOLIDATION (Jan 2026):
+    All death tracking uses position_death_patterns table exclusively.
+    Position-bucket fuzzy matching (8x8 pixel regions) is more robust than
+    exact frame_hash matching.
     """
     
     def __init__(self, db: DatabaseInterface):
         self.db = db
         self._ensure_tables_exist()
-        
-        # Cache for faster lookups
-        self._terminal_patterns_cache: Dict[str, List[Dict]] = {}
         self._cache_generation: int = -1
         
     def _ensure_tables_exist(self):
-        """Create terminal_patterns and death_zones tables if they don't exist."""
+        """Create position_death_patterns and death_zones tables if they don't exist."""
         try:
-            self.db.execute_query("""
-                CREATE TABLE IF NOT EXISTS terminal_patterns (
-                    pattern_id TEXT PRIMARY KEY,
-                    game_id TEXT NOT NULL,          -- Original game_id (for reference)
-                    game_type TEXT NOT NULL,        -- Game type for cross-session matching (e.g. 'sp80')
-                    level_number INTEGER NOT NULL,
-                    
-                    -- Pre-death state signature
-                    frame_hash TEXT NOT NULL,         -- Hash of frame before fatal action
-                    pre_death_actions TEXT NOT NULL,  -- JSON: Last 5 actions before death
-                    fatal_action INTEGER NOT NULL,    -- The action that caused game_over
-                    
-                    -- Pattern reliability
-                    occurrence_count INTEGER DEFAULT 1,
-                    confirmed_lethal INTEGER DEFAULT 0,    -- Times this pattern led to game_over
-                    false_positive_count INTEGER DEFAULT 0, -- Times it was avoided but didn't matter
-                    
-                    -- Metadata
-                    discovery_generation INTEGER,
-                    discovered_by_agent TEXT,
-                    last_occurrence_generation INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    
-                    -- Confidence that this pattern reliably predicts game_over
-                    confidence REAL DEFAULT 0.7,
-                    
-                    is_active INTEGER DEFAULT 1
-                )
-            """)
-            
-            # Index for fast lookups - use game_type for cross-session matching
-            self.db.execute_query("""
-                CREATE INDEX IF NOT EXISTS idx_terminal_patterns_lookup_v2
-                ON terminal_patterns (game_type, level_number, frame_hash, is_active)
-            """)
-            
             # ================================================================
             # DEATH ZONES TABLE - Spatial danger regions per level
             # ================================================================
@@ -371,85 +337,42 @@ class TerminalPatternDetector:
                                  pre_death_actions: List[int],
                                  fatal_action: int,
                                  agent_id: str,
-                                 generation: int) -> Optional[str]:
+                                 generation: int,
+                                 position: Optional[Tuple[int, int]] = None) -> Optional[str]:
         """
         Record a terminal pattern after game_over occurs.
         
-        This creates a "death signature" that future agents can check against
-        to avoid making the same fatal mistake.
+        DEPRECATED: This method now redirects to record_position_death().
+        Use record_position_death() directly for new code.
         
         Args:
             game_id: Game where death occurred
             level_number: Level where death occurred
-            frame_before_death: The frame state right before the fatal action
-            pre_death_actions: Last 5 actions taken before death
+            frame_before_death: The frame state right before the fatal action (unused)
+            pre_death_actions: Last 5 actions taken before death (unused)
             fatal_action: The action that caused game_over
             agent_id: Agent who died
-            generation: Current generation
+            generation: Current generation (unused)
+            position: (x, y) position - if not provided, uses (0, 0)
             
         Returns:
             pattern_id if recorded, None if failed
         """
-        try:
-            frame_hash = self.compute_frame_hash(frame_before_death)
-            
-            # Extract game_type from game_id (e.g., 'sp80' from 'sp80-abc123')
-            game_type = game_id.split('-')[0] if '-' in game_id else game_id
-            
-            # Check if this exact pattern already exists (match by game_type for cross-session learning)
-            existing = self.db.execute_query("""
-                SELECT pattern_id, occurrence_count, confirmed_lethal
-                FROM terminal_patterns
-                WHERE game_type = ? AND level_number = ? 
-                  AND frame_hash = ? AND fatal_action = ?
-                  AND is_active = 1
-            """, (game_type, level_number, frame_hash, fatal_action))
-            
-            if existing:
-                # Pattern already known - increment counts
-                pattern = existing[0]
-                self.db.execute_query("""
-                    UPDATE terminal_patterns
-                    SET occurrence_count = occurrence_count + 1,
-                        confirmed_lethal = confirmed_lethal + 1,
-                        confidence = MIN(0.95, confidence + 0.05),
-                        last_occurrence_generation = ?
-                    WHERE pattern_id = ?
-                """, (generation, pattern['pattern_id']))
-                
-                logger.info(f"[TERMINAL] Updated known pattern {pattern['pattern_id'][:8]} "
-                           f"(now {pattern['occurrence_count']+1} occurrences)")
-                return pattern['pattern_id']
-            
-            # Create new pattern - use game_type in pattern_id for consistency
-            pattern_id = f"term_{game_type}_{level_number}_{hashlib.md5(f'{frame_hash}{fatal_action}'.encode()).hexdigest()[:8]}"
-            
-            self.db.execute_query("""
-                INSERT INTO terminal_patterns (
-                    pattern_id, game_id, game_type, level_number,
-                    frame_hash, pre_death_actions, fatal_action,
-                    occurrence_count, confirmed_lethal,
-                    discovery_generation, discovered_by_agent,
-                    last_occurrence_generation, confidence, is_active
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, 0.7, 1)
-            """, (
-                pattern_id, game_id, game_type, level_number,
-                frame_hash, json.dumps(pre_death_actions[-5:]), fatal_action,
-                generation, agent_id,
-                generation
-            ))
-            
-            logger.info(f"[TERMINAL] NEW pattern recorded: {pattern_id} "
-                       f"(ACTION{fatal_action} at frame {frame_hash[:8]})")
-            
-            # Clear cache
-            self._cache_generation = -1
-            
-            return pattern_id
-            
-        except Exception as e:
-            logger.debug(f"Error recording terminal pattern: {e}")
-            return None
+        # Extract game_type from game_id
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # Use provided position or default to (0, 0) for level-wide tracking
+        pos = position if position else (0, 0)
+        
+        # Redirect to position_death_patterns
+        return self.record_position_death(
+            game_type=game_type,
+            level_number=level_number,
+            position=pos,
+            fatal_action=fatal_action,
+            agent_id=agent_id,
+            bucket_size=8
+        )
     
     # ========================================================================
     # RELATIVE THREAT PATTERN SYSTEM
@@ -732,95 +655,58 @@ class TerminalPatternDetector:
                                    current_frame: List[List[int]],
                                    recent_actions: List[int],
                                    planned_action: int,
-                                   min_confidence: float = 0.6) -> Optional[Dict[str, Any]]:
+                                   min_confidence: float = 0.6,
+                                   position: Optional[Tuple[int, int]] = None) -> Optional[Dict[str, Any]]:
         """
         Check if the planned action might lead to game_over.
         
-        This is the FORESIGHT mechanism - checking BEFORE taking action.
+        DEPRECATED: This method now redirects to check_position_danger().
+        Use check_position_danger() directly for new code.
         
         Args:
             game_id: Current game
             level_number: Current level
-            current_frame: Current game state
-            recent_actions: Last few actions taken
+            current_frame: Current game state (unused - position-bucket based now)
+            recent_actions: Last few actions taken (unused)
             planned_action: Action we're about to take
             min_confidence: Minimum pattern confidence to trigger warning
+            position: (x, y) position - required for position-bucket lookup
             
         Returns:
             None if safe, or Dict with warning info and alternative suggestion
         """
-        try:
-            frame_hash = self.compute_frame_hash(current_frame)
-            fuzzy_hash = self.compute_frame_hash(current_frame, sensitivity='fuzzy')
-            
-            # Extract game_type from game_id for cross-session pattern matching
-            game_type = game_id.split('-')[0] if '-' in game_id else game_id
-            
-            # Check for matching terminal patterns (by game_type, not game_id)
-            # This allows patterns learned in one session to protect all future sessions
-            patterns = self.db.execute_query("""
-                SELECT 
-                    pattern_id, frame_hash, pre_death_actions, fatal_action,
-                    occurrence_count, confirmed_lethal, confidence
-                FROM terminal_patterns
-                WHERE game_type = ? AND level_number = ?
-                  AND (frame_hash = ? OR frame_hash = ?)
-                  AND fatal_action = ?
-                  AND confidence >= ?
-                  AND is_active = 1
-                ORDER BY confidence DESC, confirmed_lethal DESC
-                LIMIT 5
-            """, (game_type, level_number, frame_hash, fuzzy_hash, 
-                  planned_action, min_confidence))
-            
-            if not patterns:
-                return None  # No danger detected
-            
-            best_match = patterns[0]
-            
-            # Additional check: Do recent actions match pre-death sequence?
-            # (This reduces false positives - same frame + same action, 
-            #  but different approach might be safe)
-            pre_death_seq = json.loads(best_match['pre_death_actions'])
-            
-            # Match score: How similar is our recent action sequence?
-            match_score = 0
-            if recent_actions and pre_death_seq:
-                # Compare last N actions
-                for i, (recent, pre_death) in enumerate(zip(
-                    reversed(recent_actions[-5:]), 
-                    reversed(pre_death_seq[-5:])
-                )):
-                    if recent == pre_death:
-                        match_score += 1
-            
-            # Require at least 2 matching actions to trigger warning
-            # (unless pattern is very high confidence)
-            if match_score < 2 and best_match['confidence'] < 0.85:
-                return None
-            
-            # DANGER DETECTED! Suggest alternative
-            alternative = self._suggest_alternative_action(
-                planned_action, 
-                [p['fatal_action'] for p in patterns],
-                recent_actions
-            )
-            
-            return {
-                'warning': True,
-                'pattern_id': best_match['pattern_id'],
-                'confidence': best_match['confidence'],
-                'fatal_action': planned_action,
-                'occurrence_count': best_match['occurrence_count'],
-                'confirmed_lethal': best_match['confirmed_lethal'],
-                'match_score': match_score,
-                'alternative_action': alternative,
-                'reason': f"ACTION{planned_action} caused game_over {best_match['confirmed_lethal']} times in this situation"
-            }
-            
-        except Exception as e:
-            logger.debug(f"Terminal pattern check failed: {e}")
+        # Extract game_type from game_id
+        game_type = game_id.split('-')[0] if '-' in game_id else game_id
+        
+        # If no position provided, cannot do position-bucket lookup
+        if not position:
             return None
+        
+        # Redirect to position_death_patterns via check_position_danger
+        danger = self.check_position_danger(
+            game_type=game_type,
+            level_number=level_number,
+            position=position,
+            planned_action=planned_action,
+            min_danger=min_confidence,
+            bucket_size=8
+        )
+        
+        if not danger:
+            return None
+        
+        # Convert check_position_danger result format to old format for compatibility
+        return {
+            'warning': True,
+            'pattern_id': danger.get('pattern_id', 'position_bucket'),
+            'confidence': danger.get('danger_score', 0.7),
+            'fatal_action': planned_action,
+            'occurrence_count': danger.get('death_count', 0),
+            'confirmed_lethal': danger.get('death_count', 0),
+            'match_score': 0,  # Not used in position-bucket system
+            'alternative_action': danger.get('suggested_alternative', 5),
+            'reason': danger.get('reason', f"ACTION{planned_action} dangerous at this position")
+        }
     
     def _suggest_alternative_action(self,
                                      avoid_action: int,
@@ -856,34 +742,51 @@ class TerminalPatternDetector:
         
         return safe_actions[0]
     
-    def record_false_positive(self, pattern_id: str):
+    def record_false_positive(self, pattern_id: str, 
+                              game_type: Optional[str] = None,
+                              level_number: Optional[int] = None,
+                              position: Optional[Tuple[int, int]] = None,
+                              action: Optional[int] = None):
         """
         Record when a pattern warning was heeded but game_over didn't happen anyway.
         
-        This helps reduce confidence in patterns that aren't reliable predictors.
+        DEPRECATED: Now uses position_death_patterns via record_position_survival.
+        
+        Args:
+            pattern_id: Original pattern ID (for logging only)
+            game_type: Game type for position lookup
+            level_number: Level for position lookup
+            position: (x, y) position where survival occurred
+            action: Action that was taken and survived
         """
-        try:
-            self.db.execute_query("""
-                UPDATE terminal_patterns
-                SET false_positive_count = false_positive_count + 1,
-                    confidence = MAX(0.3, confidence - 0.02)
-                WHERE pattern_id = ?
-            """, (pattern_id,))
-        except Exception:
-            pass
+        # If we have position data, record survival to weaken the danger signal
+        if game_type and level_number is not None and position and action:
+            self.record_position_survival(
+                game_type=game_type,
+                level_number=level_number,
+                position=position,
+                action_taken=action,
+                bucket_size=8
+            )
     
     def get_game_terminal_stats(self, game_id: str) -> Dict[str, Any]:
-        """Get terminal pattern statistics for a game."""
+        """
+        Get terminal pattern statistics for a game.
+        
+        Now uses position_death_patterns as the single source of truth.
+        """
         try:
+            game_type = game_id.split('-')[0] if '-' in game_id else game_id
+            
             stats = self.db.execute_query("""
                 SELECT 
                     COUNT(*) as total_patterns,
-                    SUM(confirmed_lethal) as total_deaths,
-                    AVG(confidence) as avg_confidence,
-                    MAX(occurrence_count) as max_occurrences
-                FROM terminal_patterns
-                WHERE game_id = ? AND is_active = 1
-            """, (game_id,))
+                    SUM(death_count) as total_deaths,
+                    AVG(danger_score) as avg_confidence,
+                    MAX(death_count) as max_occurrences
+                FROM position_death_patterns
+                WHERE game_type = ? AND is_active = 1
+            """, (game_type,))
             
             if stats:
                 return {
@@ -899,14 +802,19 @@ class TerminalPatternDetector:
     def cleanup_low_confidence_patterns(self, 
                                          min_confidence: float = 0.4,
                                          min_occurrences: int = 3):
-        """Remove patterns that haven't proven reliable."""
+        """
+        Remove patterns that haven't proven reliable.
+        
+        Now uses position_death_patterns: deactivates patterns with
+        low danger_score and high survival relative to deaths.
+        """
         try:
             self.db.execute_query("""
-                UPDATE terminal_patterns
+                UPDATE position_death_patterns
                 SET is_active = 0
-                WHERE confidence < ?
-                  AND occurrence_count >= ?
-                  AND false_positive_count > confirmed_lethal
+                WHERE danger_score < ?
+                  AND death_count >= ?
+                  AND survival_count > death_count
             """, (min_confidence, min_occurrences))
         except Exception:
             pass
@@ -1823,32 +1731,29 @@ class TerminalPatternDetector:
                     theory['testable_prediction'] = f"In {game_type} L{level_number}, avoid oscillating ACTION{last_four[0]}<->ACTION{last_four[1]} more than twice."
                     return theory
             
-            # Check for similar past patterns
+            # Check for similar past patterns from position_death_patterns (single source of truth)
             existing_patterns = self.db.execute_query("""
-                SELECT fatal_action, occurrence_count, pre_death_actions, confidence
-                FROM terminal_patterns
-                WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
-                ORDER BY occurrence_count DESC
+                SELECT fatal_action, death_count, danger_score, bucket_x, bucket_y, bucket_size
+                FROM position_death_patterns
+                WHERE game_type = ? AND level_number = ? AND is_active = 1
+                ORDER BY death_count DESC
                 LIMIT 5
-            """, (f"{game_type}%", level_number))
+            """, (game_type, level_number))
             
             if existing_patterns:
                 most_common = existing_patterns[0]
-                if most_common['occurrence_count'] >= 3:
+                if most_common['death_count'] >= 3:
                     # Build position context for actionable theory
                     position_str = ""
-                    if controlled_objects:
-                        positions = [(obj.get('x', -1), obj.get('y', -1)) for obj in controlled_objects if obj.get('x', -1) >= 0]
-                        if positions:
-                            if len(positions) == 1:
-                                position_str = f" from position ({positions[0][0]},{positions[0][1]})"
-                            else:
-                                position_str = f" with objects at {positions[:3]}"  # Show up to 3 positions
+                    bucket_x = most_common.get('bucket_x', 0)
+                    bucket_y = most_common.get('bucket_y', 0)
+                    bucket_size = most_common.get('bucket_size', 8)
+                    position_str = f" near position ({bucket_x * bucket_size}, {bucket_y * bucket_size})"
                     
-                    theory['theory'] = f"[{game_type.upper()}] ACTION{most_common['fatal_action']}{position_str} has caused game-over {most_common['occurrence_count']} times at L{level_number}. This action is dangerous in this region."
+                    theory['theory'] = f"[{game_type.upper()}] ACTION{most_common['fatal_action']}{position_str} has caused game-over {most_common['death_count']} times at L{level_number}. This action is dangerous in this region."
                     theory['hypothesis_type'] = 'repeated_failure'
                     theory['avoidance_strategy'] = f"In {game_type} L{level_number}, avoid ACTION{most_common['fatal_action']}{position_str}. Try alternative actions or approach from different angle."
-                    theory['confidence'] = min(0.9, 0.5 + most_common['occurrence_count'] * 0.1)
+                    theory['confidence'] = min(0.9, most_common['danger_score'])
                     theory['testable_prediction'] = f"In {game_type} L{level_number}, ACTION{most_common['fatal_action']} from similar position should reproduce failure."
                     return theory
             
@@ -1901,34 +1806,36 @@ class TerminalPatternDetector:
         Get existing game-over theories for a game/level.
         
         Returns theories from past failures that agents can learn from.
+        Uses position_death_patterns as the single source of truth.
         """
         try:
             game_type = game_id.split('-')[0] if '-' in game_id else game_id
             
+            # Query position_death_patterns (single source of truth)
             patterns = self.db.execute_query("""
-                SELECT pattern_id, fatal_action, pre_death_actions, 
-                       occurrence_count, confirmed_lethal, confidence
-                FROM terminal_patterns
-                WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
-                ORDER BY confirmed_lethal DESC, confidence DESC
+                SELECT pattern_id, fatal_action, death_count, danger_score,
+                       bucket_x, bucket_y, bucket_size
+                FROM position_death_patterns
+                WHERE game_type = ? AND level_number = ? AND is_active = 1
+                ORDER BY death_count DESC, danger_score DESC
                 LIMIT ?
-            """, (f"{game_type}%", level_number, limit))
+            """, (game_type, level_number, limit))
             
             theories = []
             for pattern in (patterns or []):
-                try:
-                    pre_death = json.loads(pattern['pre_death_actions']) if pattern.get('pre_death_actions') else []
-                except:
-                    pre_death = []
+                bucket_x = pattern.get('bucket_x', 0)
+                bucket_y = pattern.get('bucket_y', 0)
+                bucket_size = pattern.get('bucket_size', 8)
+                position_str = f"near ({bucket_x * bucket_size}, {bucket_y * bucket_size})"
                 
                 theories.append({
                     'pattern_id': pattern['pattern_id'],
                     'fatal_action': pattern['fatal_action'],
-                    'confirmed_deaths': pattern['confirmed_lethal'],
-                    'confidence': pattern['confidence'],
-                    'pre_death_sequence': pre_death,
-                    'theory': f"ACTION{pattern['fatal_action']} caused {pattern['confirmed_lethal']} deaths at level {level_number}",
-                    'avoidance_strategy': f"Avoid ACTION{pattern['fatal_action']} in similar states"
+                    'confirmed_deaths': pattern['death_count'],
+                    'confidence': pattern['danger_score'],
+                    'pre_death_sequence': [],  # Not tracked in position_death_patterns
+                    'theory': f"ACTION{pattern['fatal_action']} caused {pattern['death_count']} deaths at level {level_number} {position_str}",
+                    'avoidance_strategy': f"Avoid ACTION{pattern['fatal_action']} {position_str}"
                 })
             
             return theories

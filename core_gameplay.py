@@ -13215,16 +13215,15 @@ class GameplayEngine:
             # ===============================================================
             # POSITION-SPECIFIC DEATH AVOIDANCE FILTER
             # ===============================================================
-            # Check if the proposed action is deadly for THIS EXACT FRAME.
+            # Check if the proposed action is deadly for THIS position bucket.
             # Unlike level-wide avoidance, this is position-specific:
-            # - "Don't press LEFT when spawn position has enemy to left"
+            # - "Don't press LEFT when near spawn position with enemy to left"
             # - NOT "Don't press LEFT anywhere on level 5"
-            # The deadly actions set was computed by matching current frame_hash
-            # against terminal_patterns table.
+            # The deadly actions set was computed from position_death_patterns.
             # ===============================================================
             try:
                 _deadly_actions = getattr(self, '_deadly_first_actions', set())
-                # Position-specific: applies to any frame that matches a known death pattern
+                # Position-specific: applies to any position bucket that has death history
                 if _deadly_actions and action.startswith('ACTION'):
                     # Extract action number
                     action_num = int(action.replace('ACTION', ''))
@@ -13239,12 +13238,15 @@ class GameplayEngine:
                             action = f"ACTION{alt_action_num}"
                             frame_hash = getattr(self, '_current_frame_hash', None)
                             frame_hash_str = frame_hash[:8] if frame_hash else 'unknown'
-                            reason = f"[TERMINAL-AVOID] {original_action} deadly at frame {frame_hash_str} -> {action} | {reason[:40]}"
-                            logger.info(f"[TERMINAL-AVOID] Blocked {original_action} (frame {frame_hash_str}), using {action}")
+                            reason = f"[POS-BUCKET-AVOID] {original_action} deadly at pos bucket -> {action} | {reason[:40]}"
+                            logger.info(f"[POS-BUCKET-AVOID] Blocked {original_action}, using {action}")
                         else:
-                            logger.warning(f"[TERMINAL-AVOID] All actions deadly at this position! Proceeding with {action}")
+                            logger.warning(f"[POS-BUCKET-AVOID] All actions deadly at this position! Proceeding with {action}")
             except Exception as death_avoid_err:
-                logger.debug(f"Instant death avoidance failed: {death_avoid_err}")
+                logger.debug(f"Position death avoidance failed: {death_avoid_err}")
+            
+            # ===============================================================
+            # FIX #5: TRUE DELIBERATION - SYSTEM 2 REASONING
             
             # ===============================================================
             # FIX #5: TRUE DELIBERATION - SYSTEM 2 REASONING
@@ -17144,13 +17146,17 @@ class GameplayEngine:
                     game_id = self.session_manager.current_game_id or ''
                     current_level_check = int(game_state.score) + 1
                     
+                    # Get current position for position-bucket lookup
+                    foresight_position = getattr(self, '_current_agent_position', None)
+                    
                     danger = self.terminal_detector.check_for_terminal_danger(
                         game_id=game_id,
                         level_number=current_level_check,
                         current_frame=game_state.frame,
                         recent_actions=recent_action_nums,
                         planned_action=action_to_check,
-                        min_confidence=0.65
+                        min_confidence=0.65,
+                        position=foresight_position
                     )
                     
                     if danger and danger.get('warning'):
@@ -21677,7 +21683,7 @@ class GameplayEngine:
             'actions_with_score_increase': [],
             'actions_causing_game_over': [],
             'score_increasing_patterns': [],
-            'terminal_patterns': [],
+            'death_patterns': [],  # Patterns from position_death_patterns table
             'goal_insight': None,
             'confidence': 0.3
         }
@@ -27888,13 +27894,17 @@ class GameplayEngine:
                                         recent_action_nums.append(act)
                             
                             game_id = self.session_manager.current_game_id or ''
+                            # Get current position for position-bucket lookup
+                            replay_foresight_position = getattr(self, '_current_agent_position', None)
+                            
                             danger = self.terminal_detector.check_for_terminal_danger(
                                 game_id=game_id,
                                 level_number=actual_level,
                                 current_frame=game_state.frame,
                                 recent_actions=recent_action_nums,
                                 planned_action=action_num,
-                                min_confidence=0.65
+                                min_confidence=0.65,
+                                position=replay_foresight_position
                             )
                             
                             if danger and danger.get('warning'):

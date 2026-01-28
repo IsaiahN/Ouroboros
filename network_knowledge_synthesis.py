@@ -346,13 +346,17 @@ class NetworkKnowledgeSynthesis:
             return []
     
     def _get_game_over_theories(self, game_type: str, level: int) -> List[Dict]:
-        """Get all game-over theories from terminal pattern detector."""
+        """
+        Get all game-over theories from position_death_patterns.
+        
+        Uses position_death_patterns as the single source of truth for death tracking.
+        """
         try:
             theories = self.db.execute_query("""
-                SELECT pattern_id, frame_hash, fatal_action, pre_death_sequence,
-                       death_count, first_seen_at
-                FROM terminal_patterns
-                WHERE game_type = ? AND level_number = ?
+                SELECT pattern_id, fatal_action, death_count, danger_score,
+                       bucket_x, bucket_y, bucket_size, discovered_at as first_seen_at
+                FROM position_death_patterns
+                WHERE game_type = ? AND level_number = ? AND is_active = 1
                 ORDER BY death_count DESC
                 LIMIT 20
             """, (game_type, level))
