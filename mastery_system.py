@@ -287,21 +287,91 @@ class MasterySystem:
         # ================================================================
         # During replay, we randomly skip 10-50% of actions (based on tier).
         # If agent STILL wins, they understand the pattern, not just memorizing.
+        # 
+        # FIX (2026-01-28): For cumulative sequences (L2+), binary pass/fail is too strict.
+        # If L4 sequence skips a critical L1 action, agent dies on L1 (score=0).
+        # But this doesn't mean the sequence is bad - it means THAT action is essential.
+        # 
+        # New approach: Calculate "progress ratio" = final_score / target_level
+        # - If ablation reaches L3 out of L4, that's 75% progress = partial credit
+        # - Full pass (reaching target) still gets 100%
+        # 
+        # ALSO: If a sequence has very high cross-agent success (>80% with 50+ agents),
+        # give a "proven sequence" bonus. The ablation test may fail due to critical
+        # actions, but the sequence is clearly understood if many agents succeed with it.
+        # ================================================================
         ablation_results = self.db.execute_query("""
             SELECT COUNT(*) as total, 
-                   SUM(CASE WHEN test_passed THEN 1 ELSE 0 END) as passed
+                   SUM(CASE WHEN test_passed THEN 1 ELSE 0 END) as passed,
+                   AVG(COALESCE(final_score, 0)) as avg_score
             FROM ablation_test_results
             WHERE game_type = ? AND level_number = ?
         """, (game_type, level_number))
+        
+        # Also get cross-agent validation stats for "proven sequence" bonus
+        validation_stats = self.db.execute_query("""
+            SELECT 
+                COUNT(DISTINCT agent_id) as unique_agents,
+                AVG(CASE WHEN validation_success THEN 1.0 ELSE 0.0 END) as success_rate
+            FROM sequence_validation_attempts
+            WHERE game_id LIKE ? 
+              AND sequence_id IN (
+                  SELECT sequence_id FROM winning_sequences 
+                  WHERE game_id LIKE ? AND level_number = ? AND is_active = 1
+              )
+        """, (f"{game_type}-%", f"{game_type}-%", level_number))
+        
+        proven_agents = validation_stats[0]['unique_agents'] if validation_stats and validation_stats[0]['unique_agents'] else 0
+        proven_rate = validation_stats[0]['success_rate'] if validation_stats and validation_stats[0]['success_rate'] else 0.0
         
         ablation_success_rate = None
         if ablation_results and ablation_results[0]['total'] and ablation_results[0]['total'] > 0:
             total = ablation_results[0]['total']
             passed = ablation_results[0]['passed'] or 0
+            avg_score = ablation_results[0]['avg_score'] or 0.0
+            
+            # Binary pass rate (original)
             ablation_success_rate = passed / total
-            ablation_score = ablation_success_rate * 30.0
+            
+            # FIX: For L2+ sequences, also consider partial progress
+            # This gives credit for sequences that mostly work even when some actions skipped
+            if level_number >= 2:
+                # Progress ratio: how far did agents get on average?
+                # target is (level_number - 1) because score 3 = completed L3 = on L4
+                target_score = level_number - 1  # L4 sequence should reach score 3
+                if target_score > 0:
+                    progress_ratio = min(avg_score / target_score, 1.0)
+                    # Weighted combination: 60% full passes + 40% partial progress
+                    # This rewards sequences that mostly work even when some actions skipped
+                    combined_rate = (ablation_success_rate * 0.6) + (progress_ratio * 0.4)
+                    ablation_score = combined_rate * 30.0
+                else:
+                    ablation_score = ablation_success_rate * 30.0
+            else:
+                # L1 sequences: binary pass/fail makes sense
+                ablation_score = ablation_success_rate * 30.0
         else:
             ablation_score = 0.0
+        
+        # FIX (2026-01-28): "Proven sequence" bonus
+        # If the sequence has very high cross-agent success with many agents,
+        # it's clearly understood. Low ablation pass rate just means critical actions exist.
+        # Give minimum ablation score based on proven reliability.
+        if proven_agents >= 50 and proven_rate >= 0.8:
+            # Very strong proof: 50+ agents with 80%+ success
+            # Minimum ablation score = proven_rate * 15 (up to 15 pts guaranteed)
+            proven_bonus = proven_rate * 15.0
+            if ablation_score < proven_bonus:
+                logger.debug(f"[MASTERY] Proven sequence bonus: {ablation_score:.1f} -> {proven_bonus:.1f} "
+                            f"({proven_agents} agents, {proven_rate:.0%} success)")
+                ablation_score = proven_bonus
+        elif proven_agents >= 20 and proven_rate >= 0.7:
+            # Good proof: 20+ agents with 70%+ success  
+            # Minimum ablation score = proven_rate * 10 (up to 10 pts guaranteed)
+            proven_bonus = proven_rate * 10.0
+            if ablation_score < proven_bonus:
+                logger.debug(f"[MASTERY] Proven sequence bonus (minor): {ablation_score:.1f} -> {proven_bonus:.1f}")
+                ablation_score = proven_bonus
         
         # ================================================================
         # METRIC 3: CROSS-AGENT CONSISTENCY (max 20 points)
