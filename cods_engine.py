@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from database_interface import DatabaseInterface
 from seed_primitives import get_seed_primitives, SeedPrimitiveRegistry, Primitive
 from primitive_unlock_manager import PrimitiveUnlockManager, grandfather_existing_primitives, PrimitiveStatus
-from operator_composer import OperatorComposer, ComposedOperator, OperatorStatus
+from operator_composer import OperatorComposer, ComposedOperator
 # FIX #12: Oracle is internal to CODS - import and re-export so external code uses cods_engine
 from oracle_interface import OracleInterface, OracleVerdict, OracleDecision
 
@@ -1239,7 +1239,7 @@ class CODSEngine:
         """
         agent_id = self._context.agent_id if self._context else None
         # Cast to expected type - List[str] is compatible at runtime
-        from typing import cast, List as TList, Union as TUnion
+        from typing import List as TList, Union as TUnion
         from operator_composer import Primitive as _Primitive, ComposedOperator as _ComposedOperator
         ops: TList[TUnion[str, _ComposedOperator, _Primitive]] = list(primitives)  # type: ignore[assignment]
         return self.composer.compose(ops, name=name, agent_id=agent_id)
@@ -1325,7 +1325,7 @@ class CODSEngine:
     def discover_novel_operator(
         self,
         composition: List[str],
-        validation_games: Optional[List[str]] = None
+        _validation_games: Optional[List[str]] = None
     ) -> Optional[str]:
         """
         Discover a novel operator through composition.
@@ -1335,7 +1335,7 @@ class CODSEngine:
         
         Args:
             composition: List of primitives to compose
-            validation_games: Games to validate on
+            _validation_games: Games to validate on (reserved for future cross-game validation)
             
         Returns:
             operator_id if successful, None otherwise

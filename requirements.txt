@@ -5,6 +5,7 @@ pandas>=2.0.0
 pydeps>=1.12.0
 pytest>=8.0.0
 torch>=2.0.0  # CPU-only, for learned representations (Self-Supervised Dynamics)
+vulture>=2.11  # Dead code detection (Rule 3: No Orphaned Code)
 
 # Optional: Install Graphviz separately to view dependency graphs as SVG
 # Windows: https://graphviz.org/download/ (add to PATH)

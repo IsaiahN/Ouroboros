@@ -12,9 +12,8 @@ This script simulates the retrieval functions and reports disconnections.
 """
 
 import sqlite3
-import json
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Tuple
 from collections import defaultdict
 
 DB_PATH = Path(__file__).parent.parent / "core_data.db"
@@ -88,7 +87,7 @@ class DataUsageAuditor:
         rows = self.conn.execute(query).fetchall()
         
         # Group by game_type + level
-        level_data = defaultdict(list)
+        level_data: Dict[Tuple[str, int], List[Dict[str, Any]]] = defaultdict(list)
         for row in rows:
             key = (row['game_type'], row['level_number'])
             level_data[key].append(dict(row))
@@ -313,7 +312,7 @@ class DataUsageAuditor:
         rows = self.conn.execute(query).fetchall()
         
         print(f"  Levels with active sequences:")
-        never_used = []
+        never_used: List[sqlite3.Row] = []
         for row in rows[:10]:
             status = "[OK]" if row['total_refs'] > 0 else "[UNUSED]"
             print(f"    {status} {row['game_type']} L{row['level_number']}: "
@@ -568,7 +567,7 @@ class DataUsageAuditor:
             """
             usages = self.conn.execute(usage_query).fetchall()
             
-            usage_map = {}
+            usage_map: Dict[Tuple[str, int], int] = {}
             for u in usages:
                 key = (u['game_id'][:4] if u['game_id'] else '', u['level_number'])
                 usage_map[key] = usage_map.get(key, 0) + u['uses']
@@ -577,7 +576,7 @@ class DataUsageAuditor:
             print(f"  Levels with replay records: {len(usage_map)}")
             
             # Find sequences that exist but never replay
-            never_replayed = []
+            never_replayed: List[sqlite3.Row] = []
             for seq in sequences:
                 key = (seq['game_type'], seq['level_number'])
                 if key not in usage_map:
@@ -630,7 +629,7 @@ class DataUsageAuditor:
             
             # Check if those exact actions are STILL CAUSING DEATHS recently
             # (Not just usage - agents may use action at different positions safely)
-            violations = []
+            violations: List[Dict[str, Any]] = []
             for d in dangers:
                 # Check recent deaths for this game/level/action
                 check_query = """
@@ -707,13 +706,13 @@ class DataUsageAuditor:
             print(f"  Score-drop deaths found: {len(drops)}")
             
             # Group by game_type and action to check recording
-            drop_counts = defaultdict(int)
+            drop_counts: Dict[Tuple[str, int], int] = defaultdict(int)
             for d in drops:
                 game_type = d['game_id'][:4] if d['game_id'] else 'unknown'
                 drop_counts[(game_type, d['action_number'])] += 1
             
             # Check if these are recorded in death patterns
-            unrecorded = []
+            unrecorded: List[Dict[str, Any]] = []
             for (game_type, action), count in drop_counts.items():
                 check_query = """
                     SELECT death_count FROM position_death_patterns
@@ -836,7 +835,7 @@ class DataUsageAuditor:
                 if old_unused:
                     print(f"\n  [WARNING] {len(old_unused)} lessons >7 days old, rarely retrieved:")
                     for u in old_unused[:3]:
-                        content = u['lesson_text'][:50] + '...' if u['lesson_text'] and len(u['lesson_text']) > 50 else (u['lesson_text'] or 'N/A')
+                        _content = u['lesson_text'][:50] + '...' if u['lesson_text'] and len(u['lesson_text']) > 50 else (u['lesson_text'] or 'N/A')
                         print(f"    {u['game_type']}: {u['lesson_type']} ({u['age_days']:.0f} days, {u['times_retrieved']} uses)")
                     self.issues.append({
                         'category': 'lesson_application',
@@ -1057,7 +1056,7 @@ class DataUsageAuditor:
             
             if stats['total'] > 0:
                 actionable_rate = (stats['actionable'] or 0) / stats['total']
-                application_rate = (stats['total_applied'] or 0) / max(stats['actionable'] or 1, 1)
+                _application_rate = (stats['total_applied'] or 0) / max(stats['actionable'] or 1, 1)
                 
                 if stats['actionable'] and stats['actionable'] > 10 and (stats['total_applied'] or 0) < stats['actionable']:
                     print(f"\n  [WARNING] {stats['actionable']} actionable learnings but only {stats['total_applied'] or 0} applications")
@@ -1145,7 +1144,7 @@ class DataUsageAuditor:
         print("AUDIT SUMMARY")
         print("=" * 70)
         
-        by_category = defaultdict(list)
+        by_category: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for issue in self.issues:
             by_category[issue['category']].append(issue)
         

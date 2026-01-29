@@ -60,7 +60,7 @@ from breakthrough_budget_allocator import BreakthroughBudgetAllocator
 from breakthrough_detector import BreakthroughDetector
 from multi_stage_matching_pipeline import MultiStageMatchingPipeline
 from subgoal_planning_activator import SubgoalPlanningActivator
-from i_thread import IThread, IThreadState, StreamProposal, NoveltyConfig, MultiConflictResult, DeliberationEngine, GutInstinctResult, DeliberationResult
+from i_thread import IThread, DeliberationEngine, GutInstinctResult, DeliberationResult
 from agent_self_model import (
     AgentSelfModel,
     WeavingReporter,
@@ -10454,8 +10454,6 @@ class GameplayEngine:
             
             if deliberation_active and hasattr(self, 'deliberation_engine') and self.deliberation_engine:
                 try:
-                    import time as _time_mod
-                    
                     # -------------------------------------------------------
                     # Calculate tiered deliberation budget based on theory uncertainty
                     # -------------------------------------------------------
@@ -15812,6 +15810,11 @@ class GameplayEngine:
             duration_seconds: Game duration
         """
         try:
+            # Log duration for performance analysis
+            if duration_seconds > 0:
+                actions_per_second = actions_taken / duration_seconds if duration_seconds > 0 else 0
+                logger.debug(f"[PERF] {agent_id[:8]} played {game_id}: {actions_per_second:.1f} actions/sec")
+            
             # Get current performance snapshot
             current = self.db.execute_query("""
                 SELECT games_played, total_score, total_actions, 

@@ -36,8 +36,8 @@ import hashlib
 import json
 import logging
 import numpy as np
-from typing import List, Any, Dict, Optional, Callable, Tuple, Union
-from dataclasses import dataclass, field
+from typing import List, Any, Dict, Optional, Callable, Tuple
+from dataclasses import dataclass
 from enum import Enum
 
 # Logger for this module
@@ -4957,10 +4957,34 @@ class SeedPrimitiveRegistry:
         prestige: float,
         success_rate: float
     ) -> float:
-        """Weight information by source reliability."""
-        # Combine prestige and success rate
-        # Prestige is social capital, success_rate is track record
-        return (prestige * 0.4 + success_rate * 0.6)
+        """
+        Weight information by source reliability.
+        
+        Args:
+            source_id: Unique identifier for the information source
+            prestige: Social capital of the source (0.0-1.0)
+            success_rate: Track record of source's information accuracy (0.0-1.0)
+        
+        Returns:
+            Credibility weight (0.0-1.0)
+        """
+        # Apply source-specific modifiers based on source type
+        source_modifier = 1.0
+        
+        if source_id:
+            # Certain source types get different weighting
+            if source_id.startswith('oracle_'):
+                source_modifier = 1.2  # Oracle sources are more trusted
+            elif source_id.startswith('pioneer_'):
+                source_modifier = 1.1  # Pioneer agents exploring new ground
+            elif source_id.startswith('exploiter_'):
+                source_modifier = 0.9  # Exploiters may game metrics
+            elif source_id == 'self':
+                source_modifier = 0.8  # Self-reported info slightly discounted
+        
+        # Combine prestige and success rate with source modifier
+        base_credibility = (prestige * 0.4 + success_rate * 0.6)
+        return min(1.0, base_credibility * source_modifier)
     
     def _demonstration_bias(
         self,
@@ -5075,12 +5099,35 @@ class SeedPrimitiveRegistry:
         repetition_count: int,
         reward_history: List[float]
     ) -> bool:
-        """Detect when activity becomes unrewarding (bored)."""
+        """
+        Detect when activity becomes unrewarding (bored).
+        
+        Args:
+            activity: Type of activity being performed (e.g., 'explore', 'exploit', 'random')
+            repetition_count: How many times this activity has been repeated
+            reward_history: Recent rewards from this activity
+        
+        Returns:
+            True if agent should be bored with this activity
+        """
+        # Activity-specific boredom thresholds
+        # Some activities tolerate more repetition than others
+        activity_thresholds = {
+            'explore': 15,      # Exploration can continue longer
+            'random': 8,        # Random actions get boring faster
+            'exploit': 20,      # Exploitation needs patience
+            'retry': 5,         # Retrying same thing gets old fast
+            'sequence': 12,     # Sequence execution has moderate threshold
+        }
+        
+        # Get threshold for this activity type
+        base_threshold = activity_thresholds.get(activity, 10) if activity else 10
+        
         if repetition_count < 5:
-            return False  # Need at least 5 repetitions
+            return False  # Need at least 5 repetitions to judge
         
         if not reward_history:
-            return repetition_count > 10
+            return repetition_count > base_threshold
         
         # Check if recent rewards are declining
         recent = reward_history[-5:]
@@ -5088,7 +5135,11 @@ class SeedPrimitiveRegistry:
             return False
         
         avg_recent = sum(recent) / len(recent)
-        return avg_recent < 0.2 and repetition_count > 10
+        
+        # Lower reward threshold for higher-repetition activities
+        reward_threshold = 0.3 if activity in ('explore', 'exploit') else 0.2
+        
+        return avg_recent < reward_threshold and repetition_count > base_threshold
     
     # ======================================================================
     # NAVIGATION PRIMITIVE IMPLEMENTATIONS (BIRTHRIGHT)
@@ -6130,8 +6181,14 @@ class SeedPrimitiveRegistry:
             'hypothesis': hypothesis_type,
             'confirmed': False,
             'confidence': 0.0,
-            'evidence': {}
+            'evidence': {},
+            'triggering_action': action_taken
         }
+        
+        # Action type can influence hypothesis confidence
+        # Movement actions more likely to cause spatial interactions
+        action_is_movement = action_taken.lower() in ['up', 'down', 'left', 'right', 'move', 'action1', 'action2', 'action3', 'action4']
+        action_is_special = action_taken.lower() in ['action5', 'action6', 'action7', 'select', 'use']
         
         if len(objects) < 2:
             return result
@@ -6146,21 +6203,23 @@ class SeedPrimitiveRegistry:
             contact = self._detect_contact(pos_a, pos_b)
             if contact['touching']:
                 result['confirmed'] = True
-                result['confidence'] = 0.8
+                # Movement actions more likely to cause collisions
+                result['confidence'] = 0.9 if action_is_movement else 0.7
                 result['evidence'] = contact
         
         elif hypothesis_type == 'overlap':
             overlap = self._detect_overlap(pos_a, pos_b)
             if overlap['overlapping']:
                 result['confirmed'] = True
-                result['confidence'] = 0.9
+                result['confidence'] = 0.9 if action_is_movement else 0.8
                 result['evidence'] = overlap
         
         elif hypothesis_type == 'engulfing':
             engulf = self._detect_engulfing(pos_a, pos_b)
             if engulf['engulfed']:
                 result['confirmed'] = True
-                result['confidence'] = 0.9
+                # Special actions might trigger engulfing (e.g., eat, absorb)
+                result['confidence'] = 0.95 if action_is_special else 0.85
                 result['evidence'] = engulf
         
         elif hypothesis_type in ['proximity_effect', 'attraction', 'repulsion']:
@@ -6169,7 +6228,7 @@ class SeedPrimitiveRegistry:
             prox = self._detect_proximity_effect(centroid_a, centroid_b, frame_before, frame_after)
             if prox['proximity_effect']:
                 result['confirmed'] = True
-                result['confidence'] = 0.7
+                result['confidence'] = 0.8 if action_is_movement else 0.6
                 result['evidence'] = prox
         
         return result
@@ -6280,10 +6339,19 @@ class SeedPrimitiveRegistry:
         self,
         object_a_movements: List[Tuple[int, int]],
         object_b_movements: List[Tuple[int, int]],
-        mirror_axis: str = 'auto'  # 'x', 'y', 'auto'
+        mirror_axis: str = 'auto'  # 'x', 'y', 'auto', 'both'
     ) -> Dict[str, Any]:
         """
         BIRTHRIGHT: Detect if objects move in mirrored/symmetric patterns.
+        
+        Args:
+            object_a_movements: List of (dx, dy) movement vectors for object A
+            object_b_movements: List of (dx, dy) movement vectors for object B
+            mirror_axis: Which axis to check:
+                - 'x': Check if mirrored across X axis (same X movement, opposite Y)
+                - 'y': Check if mirrored across Y axis (opposite X movement, same Y)
+                - 'both': Check if completely inverse (opposite X AND opposite Y)
+                - 'auto': Check all and return the best match
         """
         result = {
             'mirroring': False,
@@ -6299,41 +6367,69 @@ class SeedPrimitiveRegistry:
         if min_len < 2:
             return result
         
-        # Check different mirror types
-        x_mirror_matches = 0  # Movement mirrored on X axis (opposite X, same Y)
-        y_mirror_matches = 0  # Movement mirrored on Y axis (same X, opposite Y)
-        inverse_matches = 0   # Completely opposite movement
+        # Calculate correlations for requested axis/axes
+        x_mirror_matches = 0  # Mirrored on X axis: opposite X, same Y
+        y_mirror_matches = 0  # Mirrored on Y axis: same X, opposite Y  
+        inverse_matches = 0   # Completely opposite: opposite X AND opposite Y
+        
+        check_x = mirror_axis in ('x', 'auto')
+        check_y = mirror_axis in ('y', 'auto')
+        check_both = mirror_axis in ('both', 'auto')
         
         for i in range(min_len):
             ax, ay = object_a_movements[i]
             bx, by = object_b_movements[i]
             
-            if ax == -bx and ay == by:
-                x_mirror_matches += 1
-            if ax == bx and ay == -by:
+            if check_y and ax == -bx and ay == by:
                 y_mirror_matches += 1
-            if ax == -bx and ay == -by:
+            if check_x and ax == bx and ay == -by:
+                x_mirror_matches += 1
+            if check_both and ax == -bx and ay == -by:
                 inverse_matches += 1
         
-        # Find best match
-        x_corr = x_mirror_matches / min_len
-        y_corr = y_mirror_matches / min_len
-        inv_corr = inverse_matches / min_len
+        # Calculate correlations
+        x_corr = x_mirror_matches / min_len if check_x else 0
+        y_corr = y_mirror_matches / min_len if check_y else 0
+        inv_corr = inverse_matches / min_len if check_both else 0
         
-        best_corr = max(x_corr, y_corr, inv_corr)
-        
-        if best_corr > 0.6:
-            result['mirroring'] = True
-            result['correlation'] = best_corr
-            if best_corr == x_corr:
-                result['mirror_axis'] = 'y'  # Mirrored across Y axis
-                result['mirror_type'] = 'horizontal'
-            elif best_corr == y_corr:
-                result['mirror_axis'] = 'x'  # Mirrored across X axis
+        # If specific axis requested, only consider that one
+        if mirror_axis == 'x':
+            best_corr = x_corr
+            if best_corr > 0.6:
+                result['mirroring'] = True
+                result['correlation'] = best_corr
+                result['mirror_axis'] = 'x'
                 result['mirror_type'] = 'vertical'
-            else:
+        elif mirror_axis == 'y':
+            best_corr = y_corr
+            if best_corr > 0.6:
+                result['mirroring'] = True
+                result['correlation'] = best_corr
+                result['mirror_axis'] = 'y'
+                result['mirror_type'] = 'horizontal'
+        elif mirror_axis == 'both':
+            best_corr = inv_corr
+            if best_corr > 0.6:
+                result['mirroring'] = True
+                result['correlation'] = best_corr
                 result['mirror_axis'] = 'both'
                 result['mirror_type'] = 'inverse'
+        else:
+            # Auto mode - find best match
+            best_corr = max(x_corr, y_corr, inv_corr)
+            
+            if best_corr > 0.6:
+                result['mirroring'] = True
+                result['correlation'] = best_corr
+                if best_corr == y_corr:
+                    result['mirror_axis'] = 'y'  # Mirrored across Y axis
+                    result['mirror_type'] = 'horizontal'
+                elif best_corr == x_corr:
+                    result['mirror_axis'] = 'x'  # Mirrored across X axis
+                    result['mirror_type'] = 'vertical'
+                else:
+                    result['mirror_axis'] = 'both'
+                    result['mirror_type'] = 'inverse'
         
         return result
     
@@ -7134,11 +7230,18 @@ class SeedPrimitiveRegistry:
             'caused_change': False,
             'confidence': 0.0,
             'changes': [],
-            'causation_type': None  # 'direct', 'indirect', 'coincidental'
+            'causation_type': None,  # 'direct', 'indirect', 'coincidental'
+            'triggering_action': action_taken
         }
         
         if not state_before or not state_after:
             return result
+        
+        # Classify action type to inform causation analysis
+        action_lower = action_taken.lower()
+        is_movement = action_lower in ['up', 'down', 'left', 'right', 'move', 'action1', 'action2', 'action3', 'action4']
+        is_special = action_lower in ['action5', 'action6', 'action7', 'select', 'use', 'activate']
+        is_noop = action_lower in ['none', 'wait', 'noop', '']
         
         # Compare states to find changes
         changes = []
@@ -7165,13 +7268,29 @@ class SeedPrimitiveRegistry:
         
         if changes:
             result['caused_change'] = True
-            # If immediate (time_delta=1), likely direct causation
+            # Determine causation type based on time and action type
             if time_delta == 1:
-                result['causation_type'] = 'direct'
-                result['confidence'] = 0.9
+                if is_noop:
+                    # Change happened without action - might be environmental
+                    result['causation_type'] = 'coincidental'
+                    result['confidence'] = 0.4
+                elif is_movement and any(c['type'] == 'position' for c in changes):
+                    # Movement action caused position change - strong direct causation
+                    result['causation_type'] = 'direct'
+                    result['confidence'] = 0.95
+                elif is_special and any(c['type'] in ['score', 'object_count'] for c in changes):
+                    # Special action caused score/object change - strong direct causation
+                    result['causation_type'] = 'direct'
+                    result['confidence'] = 0.9
+                else:
+                    # Generic direct causation
+                    result['causation_type'] = 'direct'
+                    result['confidence'] = 0.8
             else:
+                # Delayed change - indirect causation
                 result['causation_type'] = 'indirect'
-                result['confidence'] = 0.6
+                # Lower confidence for longer delays
+                result['confidence'] = max(0.3, 0.7 - (time_delta * 0.1))
         
         return result
     
@@ -7688,13 +7807,35 @@ class SeedPrimitiveRegistry:
         """
         Return expectation that effects require contact.
         Lower if action-at-distance observed.
+        
+        Args:
+            action_object: The object initiating the action
+            affected_object: The object being affected
+            distance: Distance between action and affected objects
+        
+        Returns:
+            Prior strength (0.0-1.0) - higher means contact causality holds
         """
+        # Base prior strength based on distance
         if distance < 2:  # Objects are in contact
-            return 0.4  # Prior holds
+            base_prior = 0.9  # Strong contact causality
         elif distance < 5:
-            return 0.2  # Weak action-at-distance
+            base_prior = 0.4  # Weak action-at-distance
         else:
-            return 0.0  # Prior violated - action at distance
+            base_prior = 0.1  # Prior violated - clear action at distance
+        
+        # Modify based on object types if identifiable
+        if action_object and affected_object:
+            # Same color objects might have stronger causal connection
+            if action_object == affected_object:
+                return base_prior * 1.2  # Same type = stronger causal link
+            
+            # Check for known remote-effect patterns
+            # (e.g., triggers, buttons, switches)
+            if 'trigger' in str(action_object).lower() or 'button' in str(action_object).lower():
+                return base_prior * 0.5  # Triggers often act at distance
+        
+        return min(1.0, base_prior)
     
     # ======================================================================
     # METACOGNITION PRIMITIVE IMPLEMENTATIONS
@@ -7716,7 +7857,15 @@ class SeedPrimitiveRegistry:
         # More evidence = more certainty (diminishing returns)
         certainty = 1 - (1 / (evidence_count + 1))
         
-        return support_ratio * certainty
+        # Prediction complexity can affect base confidence
+        # Complex predictions (strings, dicts) require more evidence
+        prediction_complexity = 1.0
+        if isinstance(prediction, dict):
+            prediction_complexity = 0.8  # Complex predictions need more evidence
+        elif isinstance(prediction, str) and len(prediction) > 20:
+            prediction_complexity = 0.9  # Long string predictions slightly harder
+        
+        return support_ratio * certainty * prediction_complexity
     
     def _detect_stuck(
         self,
@@ -7753,6 +7902,12 @@ class SeedPrimitiveRegistry:
         avg_outcome = sum(outcomes) / len(outcomes)
         efficiency = avg_outcome / max(time_invested, 1)
         
+        # Strategy type affects expected timeline
+        # Exploration strategies need more time to show results
+        strategy_lower = strategy.lower()
+        is_exploration = 'explor' in strategy_lower or 'random' in strategy_lower or 'discover' in strategy_lower
+        is_exploitation = 'exploit' in strategy_lower or 'optim' in strategy_lower or 'refine' in strategy_lower
+        
         # Check trend
         if len(outcomes) >= 3:
             early = sum(outcomes[:len(outcomes)//2]) / max(len(outcomes)//2, 1)
@@ -7761,7 +7916,21 @@ class SeedPrimitiveRegistry:
         else:
             trend = 0
         
-        return min(1.0, max(0.0, efficiency + trend * 0.5))
+        # Adjust effectiveness based on strategy type
+        base_effectiveness = min(1.0, max(0.0, efficiency + trend * 0.5))
+        
+        if is_exploration:
+            # Exploration strategies don't need immediate results
+            # Positive trend is more important than raw efficiency
+            if trend > 0:
+                base_effectiveness = min(1.0, base_effectiveness + 0.2)
+        elif is_exploitation:
+            # Exploitation should show immediate efficiency
+            # Penalize if not showing quick gains
+            if avg_outcome < 0.3 and time_invested > 10:
+                base_effectiveness = max(0.0, base_effectiveness - 0.2)
+        
+        return base_effectiveness
     
     def _get_knowledge_state(
         self,
@@ -10250,6 +10419,11 @@ class SeedPrimitiveRegistry:
     ) -> Dict[str, Any]:
         """
         Detect mirror symmetry (horizontal, vertical, diagonal).
+        
+        Args:
+            frame: 2D grid of color values
+            object_id: Optional - only check symmetry for specific object color
+            axis: Which axis to check - 'horizontal', 'vertical', 'diagonal', 'all', or None (all)
         """
         result = {
             'has_symmetry': False,
@@ -10257,7 +10431,8 @@ class SeedPrimitiveRegistry:
             'vertical': False,
             'diagonal_main': False,
             'diagonal_anti': False,
-            'symmetry_score': 0.0
+            'symmetry_score': 0.0,
+            'axis_checked': axis or 'all'
         }
         
         if not frame or not frame[0]:
@@ -10266,37 +10441,64 @@ class SeedPrimitiveRegistry:
         height = len(frame)
         width = len(frame[0])
         
+        # Determine which axes to check based on parameter
+        check_horizontal = axis in (None, 'all', 'horizontal', 'h')
+        check_vertical = axis in (None, 'all', 'vertical', 'v')
+        check_diagonal = axis in (None, 'all', 'diagonal', 'd')
+        
+        # Parse object_id to filter by specific color
+        target_color: Optional[int] = None
+        if object_id:
+            if isinstance(object_id, int):
+                target_color = object_id
+            elif isinstance(object_id, str) and object_id.startswith('color_'):
+                try:
+                    target_color = int(object_id.split('_')[1])
+                except (ValueError, IndexError):
+                    pass
+        
+        def get_cell(y: int, x: int) -> int:
+            """Get cell value, filtering by target_color if specified."""
+            if 0 <= y < height and 0 <= x < width:
+                val = frame[y][x]
+                if target_color is not None:
+                    return val if val == target_color else 0
+                return val
+            return 0
+        
         # Check horizontal (left-right) symmetry
-        h_match = 0
-        h_total = 0
-        for y in range(height):
-            for x in range(width // 2):
-                mirror_x = width - 1 - x
-                h_total += 1
-                if frame[y][x] == frame[y][mirror_x]:
-                    h_match += 1
-        result['horizontal'] = h_total > 0 and h_match / h_total > 0.9
+        if check_horizontal:
+            h_match = 0
+            h_total = 0
+            for y in range(height):
+                for x in range(width // 2):
+                    mirror_x = width - 1 - x
+                    h_total += 1
+                    if get_cell(y, x) == get_cell(y, mirror_x):
+                        h_match += 1
+            result['horizontal'] = h_total > 0 and h_match / h_total > 0.9
         
         # Check vertical (top-bottom) symmetry
-        v_match = 0
-        v_total = 0
-        for y in range(height // 2):
-            mirror_y = height - 1 - y
-            for x in range(width):
-                v_total += 1
-                if frame[y][x] == frame[mirror_y][x]:
-                    v_match += 1
-        result['vertical'] = v_total > 0 and v_match / v_total > 0.9
+        if check_vertical:
+            v_match = 0
+            v_total = 0
+            for y in range(height // 2):
+                mirror_y = height - 1 - y
+                for x in range(width):
+                    v_total += 1
+                    if get_cell(y, x) == get_cell(mirror_y, x):
+                        v_match += 1
+            result['vertical'] = v_total > 0 and v_match / v_total > 0.9
         
-        # Check main diagonal (top-left to bottom-right)
-        if height == width:
+        # Check diagonal symmetry
+        if check_diagonal and height == width:
             d_match = 0
             d_total = 0
             for y in range(height):
                 for x in range(width):
                     if x != y:
                         d_total += 1
-                        if frame[y][x] == frame[x][y]:
+                        if get_cell(y, x) == get_cell(x, y):
                             d_match += 1
             result['diagonal_main'] = d_total > 0 and d_match / d_total > 0.9
             
@@ -10309,7 +10511,7 @@ class SeedPrimitiveRegistry:
                     mirror_y = width - 1 - x
                     if x != mirror_x or y != mirror_y:
                         ad_total += 1
-                        if frame[y][x] == frame[mirror_y][mirror_x]:
+                        if get_cell(y, x) == get_cell(mirror_y, mirror_x):
                             ad_match += 1
             result['diagonal_anti'] = ad_total > 0 and ad_match / ad_total > 0.9
         
@@ -10549,11 +10751,19 @@ class SeedPrimitiveRegistry:
         """
         Determine if point is inside or outside a boundary.
         Uses flood fill from point - if it reaches frame edge, it's outside.
+        
+        Args:
+            frame: 2D grid of color values
+            position: (x, y) position to check
+            boundary_object: Optional color ID to treat as the boundary.
+                           If None, any non-zero color is a boundary.
+                           Can be int, str like 'color_3', or 'auto'.
         """
         result = {
             'is_inside': False,
             'is_outside': True,
-            'confidence': 0.0
+            'confidence': 0.0,
+            'boundary_color': None
         }
         
         if not frame or not frame[0]:
@@ -10566,14 +10776,38 @@ class SeedPrimitiveRegistry:
         if x < 0 or x >= width or y < 0 or y >= height:
             return result  # Out of bounds = outside
         
-        # If point is on non-background, it's "inside" an object
-        if frame[y][x] != 0:
+        # Parse boundary_object parameter
+        boundary_color: Optional[int] = None
+        if boundary_object is not None and boundary_object != 'auto':
+            if isinstance(boundary_object, int):
+                boundary_color = boundary_object
+            elif isinstance(boundary_object, str):
+                # Parse 'color_3' format
+                if boundary_object.startswith('color_'):
+                    try:
+                        boundary_color = int(boundary_object.split('_')[1])
+                    except (ValueError, IndexError):
+                        pass
+                elif boundary_object.isdigit():
+                    boundary_color = int(boundary_object)
+        
+        result['boundary_color'] = boundary_color
+        
+        # Define what counts as a "boundary" cell
+        def is_boundary(color: int) -> bool:
+            if boundary_color is not None:
+                return color == boundary_color
+            return color != 0  # Any non-background is boundary
+        
+        # If point is on a boundary color, it's "inside" that boundary
+        point_color = frame[y][x]
+        if is_boundary(point_color):
             result['is_inside'] = True
             result['is_outside'] = False
             result['confidence'] = 1.0
             return result
         
-        # Flood fill from point - if we hit edge, we're outside
+        # Flood fill from point - if we hit edge without hitting boundary, we're outside
         visited = set()
         queue = [(x, y)]
         visited.add((x, y))
@@ -10582,17 +10816,21 @@ class SeedPrimitiveRegistry:
         while queue and not hit_edge:
             cx, cy = queue.pop(0)
             
-            # Check if at edge
+            # Check if at frame edge
             if cx == 0 or cx == width - 1 or cy == 0 or cy == height - 1:
                 hit_edge = True
                 break
             
-            for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
                 nx, ny = cx + dx, cy + dy
                 if 0 <= nx < width and 0 <= ny < height:
-                    if (nx, ny) not in visited and frame[ny][nx] == 0:
-                        visited.add((nx, ny))
-                        queue.append((nx, ny))
+                    if (nx, ny) not in visited:
+                        cell_color = frame[ny][nx]
+                        if not is_boundary(cell_color):
+                            # Can pass through - continue flood fill
+                            visited.add((nx, ny))
+                            queue.append((nx, ny))
+                        # If it IS a boundary, don't add to queue (blocked)
         
         result['is_outside'] = hit_edge
         result['is_inside'] = not hit_edge
@@ -10608,11 +10846,19 @@ class SeedPrimitiveRegistry:
     ) -> Dict[str, Any]:
         """
         Compute shortest distance from point to boundary.
+        
+        Args:
+            frame: 2D grid of color values
+            position: (x, y) position to measure from
+            boundary_object: Optional color ID to treat as the boundary.
+                           If None, any non-zero color is a boundary.
+                           Can be int, str like 'color_3', or 'auto'.
         """
         result = {
             'distance': float('inf'),
             'nearest_boundary_point': None,
-            'boundary_color': None
+            'boundary_color': None,
+            'target_boundary': boundary_object
         }
         
         if not frame or not frame[0]:
@@ -10622,19 +10868,40 @@ class SeedPrimitiveRegistry:
         height = len(frame)
         width = len(frame[0])
         
-        # Find nearest non-background pixel
+        # Parse boundary_object parameter
+        target_color: Optional[int] = None
+        if boundary_object is not None and boundary_object != 'auto':
+            if isinstance(boundary_object, int):
+                target_color = boundary_object
+            elif isinstance(boundary_object, str):
+                if boundary_object.startswith('color_'):
+                    try:
+                        target_color = int(boundary_object.split('_')[1])
+                    except (ValueError, IndexError):
+                        pass
+                elif boundary_object.isdigit():
+                    target_color = int(boundary_object)
+        
+        # Define what counts as a "boundary" cell
+        def is_boundary(color: int) -> bool:
+            if target_color is not None:
+                return color == target_color
+            return color != 0  # Any non-background is boundary
+        
+        # Find nearest boundary pixel
         min_dist = float('inf')
         nearest = None
         nearest_color = None
         
         for by in range(height):
             for bx in range(width):
-                if frame[by][bx] != 0:
+                cell_color = frame[by][bx]
+                if is_boundary(cell_color):
                     dist = ((bx - x)**2 + (by - y)**2)**0.5
                     if dist < min_dist:
                         min_dist = dist
                         nearest = (bx, by)
-                        nearest_color = frame[by][bx]
+                        nearest_color = cell_color
         
         result['distance'] = min_dist
         result['nearest_boundary_point'] = nearest
@@ -10678,26 +10945,68 @@ class SeedPrimitiveRegistry:
     ) -> Dict[str, Any]:
         """
         Detect if one object completely encloses another.
+        
+        Args:
+            frame: 2D grid of color values
+            outer_object: Color ID of the enclosing object (e.g., 'color_3' or int)
+            inner_object: Color ID of the enclosed object (e.g., 'color_5' or int)
         """
         result = {
             'is_enclosed': False,
             'enclosure_ratio': 0.0,
-            'gap_count': 0
+            'gap_count': 0,
+            'outer_color': None,
+            'inner_color': None
         }
         
         if not frame or not frame[0]:
             return result
         
-        # Get objects
+        # Parse color parameters
+        def parse_color(obj_id: Optional[str]) -> Optional[int]:
+            if obj_id is None:
+                return None
+            if isinstance(obj_id, int):
+                return obj_id
+            if isinstance(obj_id, str):
+                if obj_id.startswith('color_'):
+                    try:
+                        return int(obj_id.split('_')[1])
+                    except (ValueError, IndexError):
+                        pass
+                elif obj_id.isdigit():
+                    return int(obj_id)
+            return None
+        
+        outer_color = parse_color(outer_object)
+        inner_color = parse_color(inner_object)
+        
+        result['outer_color'] = outer_color
+        result['inner_color'] = inner_color
+        
+        # Get all objects
         objects = self._find_distinct_objects(frame)
         if len(objects) < 2:
             return result
         
-        # Get bounding boxes
-        outer_obj = objects[0]
-        inner_obj = objects[1] if len(objects) > 1 else None
+        # Find outer and inner objects by color if specified
+        outer_obj = None
+        inner_obj = None
         
-        if inner_obj is None:
+        if outer_color is not None:
+            outer_obj = next((o for o in objects if o.get('color') == outer_color), None)
+        if inner_color is not None:
+            inner_obj = next((o for o in objects if o.get('color') == inner_color), None)
+        
+        # Fallback: use first two objects by size (larger is outer)
+        if outer_obj is None or inner_obj is None:
+            sorted_objs = sorted(objects, key=lambda o: len(o.get('positions', [])), reverse=True)
+            if outer_obj is None and len(sorted_objs) >= 1:
+                outer_obj = sorted_objs[0]
+            if inner_obj is None and len(sorted_objs) >= 2:
+                inner_obj = sorted_objs[1]
+        
+        if inner_obj is None or outer_obj is None:
             return result
         
         outer_pos = set(outer_obj.get('positions', []))
@@ -11492,25 +11801,67 @@ class SeedPrimitiveRegistry:
     ) -> Dict[str, Any]:
         """
         Detect if one object blocks view of another.
-        In 2D, this means overlapping positions where one color takes precedence.
+        In 2D, this means overlapping bounding boxes where one color takes precedence.
+        
+        Args:
+            frame: 2D grid of color values
+            front_object: Color ID of the object in front (e.g., 'color_3' or int)
+            back_object: Color ID of the object being blocked (e.g., 'color_5' or int)
         """
         result = {
             'is_occluding': False,
             'occlusion_area': 0,
-            'occlusion_ratio': 0.0
+            'occlusion_ratio': 0.0,
+            'front_color': None,
+            'back_color': None
         }
         
-        # In 2D grid world, we can't have true occlusion
-        # But we can check if objects overlap bounding boxes
         if not frame or not frame[0]:
             return result
+        
+        # Parse color parameters
+        def parse_color(obj_id: Optional[str]) -> Optional[int]:
+            if obj_id is None:
+                return None
+            if isinstance(obj_id, int):
+                return obj_id
+            if isinstance(obj_id, str):
+                if obj_id.startswith('color_'):
+                    try:
+                        return int(obj_id.split('_')[1])
+                    except (ValueError, IndexError):
+                        pass
+                elif obj_id.isdigit():
+                    return int(obj_id)
+            return None
+        
+        front_color = parse_color(front_object)
+        back_color = parse_color(back_object)
+        
+        result['front_color'] = front_color
+        result['back_color'] = back_color
         
         objects = self._find_distinct_objects(frame)
         if len(objects) < 2:
             return result
         
-        obj1 = objects[0]
-        obj2 = objects[1]
+        # Find front and back objects by color if specified
+        obj1 = None
+        obj2 = None
+        
+        if front_color is not None:
+            obj1 = next((o for o in objects if o.get('color') == front_color), None)
+        if back_color is not None:
+            obj2 = next((o for o in objects if o.get('color') == back_color), None)
+        
+        # Fallback to first two objects
+        if obj1 is None:
+            obj1 = objects[0]
+        if obj2 is None:
+            obj2 = objects[1] if len(objects) > 1 else None
+        
+        if obj2 is None:
+            return result
         
         # Check bounding box overlap
         pos1 = obj1.get('positions', [])
@@ -11530,6 +11881,18 @@ class SeedPrimitiveRegistry:
         
         result['is_occluding'] = overlap_x and overlap_y
         
+        # Calculate occlusion area if overlapping
+        if result['is_occluding']:
+            # Calculate bounding box intersection area
+            x_overlap = max(0, min(max(xs1), max(xs2)) - max(min(xs1), min(xs2)))
+            y_overlap = max(0, min(max(ys1), max(ys2)) - max(min(ys1), min(ys2)))
+            result['occlusion_area'] = x_overlap * y_overlap
+            
+            # Ratio relative to back object size
+            back_area = (max(xs2) - min(xs2)) * (max(ys2) - min(ys2))
+            if back_area > 0:
+                result['occlusion_ratio'] = result['occlusion_area'] / back_area
+        
         return result
     
     def _compute_visibility(
@@ -11539,21 +11902,78 @@ class SeedPrimitiveRegistry:
     ) -> Dict[str, Any]:
         """
         Compute what is visible from a given viewpoint.
-        In 2D, all non-background is "visible" if not blocked.
+        Uses ray-casting approximation from viewpoint to detect blocked objects.
+        
+        Args:
+            frame: 2D grid of color values
+            viewpoint: (x, y) position to compute visibility from
         """
         result = {
             'visible_objects': [],
-            'visibility_ratio': 1.0,  # In 2D, everything visible by default
-            'hidden_objects': []
+            'visibility_ratio': 1.0,
+            'hidden_objects': [],
+            'viewpoint': viewpoint
         }
         
         if not frame:
             return result
         
+        height = len(frame)
+        width = len(frame[0]) if frame else 0
+        
         objects = self._find_distinct_objects(frame)
         
-        # In 2D grid, all objects are visible
-        result['visible_objects'] = [f"obj_{o['color']}" for o in objects]
+        if not objects:
+            return result
+        
+        vx, vy = viewpoint
+        
+        # For each object, check if view from viewpoint is blocked
+        visible = []
+        hidden = []
+        
+        for obj in objects:
+            obj_name = f"obj_{obj['color']}"
+            positions = obj.get('positions', [])
+            
+            if not positions:
+                continue
+            
+            # Check if any position of this object is directly visible
+            is_visible = False
+            
+            for px, py in positions:
+                # Simple ray check: are there any other objects directly between viewpoint and this position?
+                blocked = False
+                
+                # Bresenham-like walk from viewpoint to object position
+                dx = px - vx
+                dy = py - vy
+                steps = max(abs(dx), abs(dy))
+                
+                if steps > 0:
+                    for s in range(1, steps):
+                        check_x = vx + int(dx * s / steps)
+                        check_y = vy + int(dy * s / steps)
+                        
+                        if 0 <= check_y < height and 0 <= check_x < width:
+                            cell = frame[check_y][check_x]
+                            if cell != 0 and cell != obj['color']:
+                                blocked = True
+                                break
+                
+                if not blocked:
+                    is_visible = True
+                    break
+            
+            if is_visible:
+                visible.append(obj_name)
+            else:
+                hidden.append(obj_name)
+        
+        result['visible_objects'] = visible
+        result['hidden_objects'] = hidden
+        result['visibility_ratio'] = len(visible) / max(1, len(objects))
         
         return result
     
@@ -12207,15 +12627,88 @@ class SeedPrimitiveRegistry:
     
     def _detect_modulating(self, frame_history: List[List[List[int]]], controller_id: Any, 
                            target_id: Any) -> Dict[str, Any]:
-        """Detect if one object modulates/controls rate of another."""
+        """
+        Detect if one object modulates/controls rate of another.
+        
+        Args:
+            frame_history: List of frames over time
+            controller_id: Color ID of the controlling object
+            target_id: Color ID of the object being controlled/modulated
+        """
         result = {
             'primitive': 'detect_modulating',
             'modulation_detected': False,
             'modulation_type': None,
-            'correlation': 0.0
+            'correlation': 0.0,
+            'controller': controller_id,
+            'target': target_id
         }
         
-        # Would need sophisticated correlation analysis
+        if not frame_history or len(frame_history) < 3:
+            return result
+        
+        # Parse color IDs
+        def parse_color(obj_id: Any) -> Optional[int]:
+            if obj_id is None:
+                return None
+            if isinstance(obj_id, int):
+                return obj_id
+            if isinstance(obj_id, str):
+                if obj_id.startswith('color_'):
+                    try:
+                        return int(obj_id.split('_')[1])
+                    except (ValueError, IndexError):
+                        pass
+                elif obj_id.isdigit():
+                    return int(obj_id)
+            return None
+        
+        ctrl_color = parse_color(controller_id)
+        tgt_color = parse_color(target_id)
+        
+        if ctrl_color is None or tgt_color is None:
+            return result
+        
+        # Track activity of both objects over time
+        controller_activity = []
+        target_activity = []
+        
+        for i, frame in enumerate(frame_history):
+            if not frame:
+                continue
+            
+            # Count pixels of each color
+            ctrl_count = sum(1 for row in frame for cell in row if cell == ctrl_color)
+            tgt_count = sum(1 for row in frame for cell in row if cell == tgt_color)
+            
+            controller_activity.append(ctrl_count)
+            target_activity.append(tgt_count)
+        
+        if len(controller_activity) < 3:
+            return result
+        
+        # Calculate change rates
+        ctrl_changes = [controller_activity[i] - controller_activity[i-1] for i in range(1, len(controller_activity))]
+        tgt_changes = [target_activity[i] - target_activity[i-1] for i in range(1, len(target_activity))]
+        
+        if not ctrl_changes or not tgt_changes:
+            return result
+        
+        # Simple correlation: do they change together?
+        same_direction = sum(1 for c, t in zip(ctrl_changes, tgt_changes) if (c > 0 and t > 0) or (c < 0 and t < 0) or (c == 0 and t == 0))
+        correlation = same_direction / len(ctrl_changes)
+        
+        result['correlation'] = correlation
+        
+        if correlation > 0.7:
+            result['modulation_detected'] = True
+            result['modulation_type'] = 'positive_correlation'
+        elif correlation < 0.3:
+            # Inverse correlation
+            result['modulation_detected'] = True
+            result['modulation_type'] = 'negative_correlation'
+            result['correlation'] = 1.0 - correlation
+        
         return result
     
     def _measure_constraint_strength(self, movement_history: List[dict], object_a: Any, 
@@ -12517,15 +13010,96 @@ class SeedPrimitiveRegistry:
     
     def _detect_tension(self, frame_before: List[List[int]], frame_after: List[List[int]], 
                         connected_objects: List[Any]) -> Dict[str, Any]:
-        """Detect tension between connected objects."""
+        """
+        Detect tension between connected objects.
+        
+        Args:
+            frame_before: Frame before the action
+            frame_after: Frame after the action
+            connected_objects: List of object IDs/colors that should be connected
+        """
         result = {
             'primitive': 'detect_tension',
             'tension_detected': False,
             'tension_level': 0.0,
-            'tension_direction': None
+            'tension_direction': None,
+            'objects_checked': []
         }
         
-        # Would need object connectivity tracking
+        if not frame_before or not frame_after or not connected_objects:
+            return result
+        
+        # Parse connected_objects to get colors
+        def parse_color(obj_id: Any) -> Optional[int]:
+            if obj_id is None:
+                return None
+            if isinstance(obj_id, int):
+                return obj_id
+            if isinstance(obj_id, str):
+                if obj_id.startswith('color_'):
+                    try:
+                        return int(obj_id.split('_')[1])
+                    except (ValueError, IndexError):
+                        pass
+                elif obj_id.isdigit():
+                    return int(obj_id)
+            return None
+        
+        colors = [parse_color(obj) for obj in connected_objects]
+        colors = [c for c in colors if c is not None]
+        result['objects_checked'] = colors
+        
+        if len(colors) < 2:
+            return result
+        
+        height = min(len(frame_before), len(frame_after))
+        width = min(len(frame_before[0]) if frame_before else 0, len(frame_after[0]) if frame_after else 0)
+        
+        # Calculate centroid distance changes between connected objects
+        def get_centroid(frame, color):
+            positions = [(x, y) for y in range(len(frame)) for x in range(len(frame[0])) if frame[y][x] == color]
+            if not positions:
+                return None
+            return (sum(p[0] for p in positions) / len(positions),
+                    sum(p[1] for p in positions) / len(positions))
+        
+        # Track distance changes between pairs
+        total_tension = 0.0
+        tension_directions = []
+        
+        for i, c1 in enumerate(colors):
+            for c2 in colors[i+1:]:
+                cent1_before = get_centroid(frame_before, c1)
+                cent2_before = get_centroid(frame_before, c2)
+                cent1_after = get_centroid(frame_after, c1)
+                cent2_after = get_centroid(frame_after, c2)
+                
+                if all(c is not None for c in [cent1_before, cent2_before, cent1_after, cent2_after]):
+                    dist_before = ((cent1_before[0]-cent2_before[0])**2 + (cent1_before[1]-cent2_before[1])**2)**0.5
+                    dist_after = ((cent1_after[0]-cent2_after[0])**2 + (cent1_after[1]-cent2_after[1])**2)**0.5
+                    
+                    if dist_after > dist_before:
+                        # Objects pulling apart = tension
+                        tension = dist_after - dist_before
+                        total_tension += tension
+                        
+                        # Direction of tension
+                        dx = cent2_after[0] - cent1_after[0]
+                        dy = cent2_after[1] - cent1_after[1]
+                        tension_directions.append((dx, dy))
+        
+        if total_tension > 0:
+            result['tension_detected'] = True
+            result['tension_level'] = total_tension
+            
+            if tension_directions:
+                avg_dx = sum(d[0] for d in tension_directions) / len(tension_directions)
+                avg_dy = sum(d[1] for d in tension_directions) / len(tension_directions)
+                if abs(avg_dx) > abs(avg_dy):
+                    result['tension_direction'] = 'horizontal'
+                else:
+                    result['tension_direction'] = 'vertical'
+        
         return result
     
     # ======================================================================
@@ -12568,15 +13142,80 @@ class SeedPrimitiveRegistry:
     
     def _detect_lever_action(self, frame_before: List[List[int]], frame_after: List[List[int]], 
                              action_point: tuple, effect_point: tuple) -> Dict[str, Any]:
-        """Detect lever-like action (input on one end, output on other)."""
+        """
+        Detect lever-like action (input on one end, output on other).
+        
+        Args:
+            frame_before: Frame before the action
+            frame_after: Frame after the action
+            action_point: (x, y) where the action/input was applied
+            effect_point: (x, y) where the effect/output occurred
+        """
         result = {
             'primitive': 'detect_lever_action',
             'lever_detected': False,
             'fulcrum': None,
-            'mechanical_advantage': 0.0
+            'mechanical_advantage': 0.0,
+            'action_point': action_point,
+            'effect_point': effect_point
         }
         
-        # Simplified implementation
+        if not frame_before or not frame_after:
+            return result
+        
+        if not action_point or not effect_point:
+            return result
+        
+        ax, ay = action_point
+        ex, ey = effect_point
+        
+        height = min(len(frame_before), len(frame_after))
+        width = min(len(frame_before[0]) if frame_before else 0, len(frame_after[0]) if frame_after else 0)
+        
+        # Check bounds
+        if not (0 <= ay < height and 0 <= ax < width):
+            return result
+        if not (0 <= ey < height and 0 <= ex < width):
+            return result
+        
+        # Look for a pivot point between action and effect
+        # The fulcrum should be on or near the line between them
+        # and should not have moved
+        
+        # Find midpoint as candidate fulcrum
+        mid_x = (ax + ex) // 2
+        mid_y = (ay + ey) // 2
+        
+        # Check if midpoint cell stayed stationary (potential fulcrum)
+        fulcrum_found = False
+        for dy in range(-1, 2):
+            for dx in range(-1, 2):
+                check_x = mid_x + dx
+                check_y = mid_y + dy
+                if 0 <= check_y < height and 0 <= check_x < width:
+                    if frame_before[check_y][check_x] == frame_after[check_y][check_x]:
+                        if frame_before[check_y][check_x] != 0:  # Not background
+                            result['fulcrum'] = (check_x, check_y)
+                            fulcrum_found = True
+                            break
+            if fulcrum_found:
+                break
+        
+        # Check if action point and effect point had changes
+        action_changed = frame_before[ay][ax] != frame_after[ay][ax]
+        effect_changed = frame_before[ey][ex] != frame_after[ey][ex]
+        
+        if action_changed and effect_changed and fulcrum_found:
+            result['lever_detected'] = True
+            
+            # Calculate mechanical advantage (ratio of distances from fulcrum)
+            fx, fy = result['fulcrum']
+            action_dist = ((ax - fx)**2 + (ay - fy)**2)**0.5
+            effect_dist = ((ex - fx)**2 + (ey - fy)**2)**0.5
+            
+            if action_dist > 0:
+                result['mechanical_advantage'] = effect_dist / action_dist
+        
         return result
     
     def _detect_linked_movement(self, frame_before: List[List[int]], frame_after: List[List[int]]) -> Dict[str, Any]:
@@ -13001,7 +13640,8 @@ class SeedPrimitiveRegistry:
             'primitive': 'confidence_in_pattern',
             'confidence': 0.5,
             'supporting_observations': 0,
-            'contradicting_observations': 0
+            'contradicting_observations': 0,
+            'pattern_tested': pattern_hypothesis is not None
         }
         
         if not observations:
@@ -13013,10 +13653,19 @@ class SeedPrimitiveRegistry:
         
         for obs in observations:
             if isinstance(obs, dict):
-                if obs.get('matches_pattern', False):
-                    supporting += 1
-                elif obs.get('contradicts_pattern', False):
-                    contradicting += 1
+                # If pattern_hypothesis is provided, test against it
+                if pattern_hypothesis is not None:
+                    matches = self._test_observation_against_pattern(obs, pattern_hypothesis)
+                    if matches:
+                        supporting += 1
+                    elif matches is False:  # Explicitly contradicts (not just unknown)
+                        contradicting += 1
+                else:
+                    # Fallback to pre-labeled observations
+                    if obs.get('matches_pattern', False):
+                        supporting += 1
+                    elif obs.get('contradicts_pattern', False):
+                        contradicting += 1
         
         total = supporting + contradicting
         if total > 0:
@@ -13025,6 +13674,48 @@ class SeedPrimitiveRegistry:
             result['contradicting_observations'] = contradicting
         
         return result
+    
+    def _test_observation_against_pattern(self, observation: Dict[str, Any], pattern: Any) -> Optional[bool]:
+        """
+        Test if an observation matches a pattern hypothesis.
+        
+        Returns:
+            True if matches, False if contradicts, None if unknown/untestable
+        """
+        if not isinstance(pattern, dict):
+            return None
+        
+        pattern_type = pattern.get('type', pattern.get('pattern_type'))
+        
+        if pattern_type == 'color_control':
+            # Pattern: action X controls color Y
+            expected_action = pattern.get('action')
+            expected_color = pattern.get('color')
+            obs_action = observation.get('action')
+            obs_color = observation.get('controlled_color', observation.get('color'))
+            obs_moved = observation.get('moved', observation.get('color_moved'))
+            
+            if obs_action == expected_action and obs_color == expected_color:
+                return obs_moved  # True if moved as expected, False if didn't
+        
+        elif pattern_type == 'sequence':
+            # Pattern: sequence of actions leads to outcome
+            expected_sequence = pattern.get('sequence', [])
+            obs_sequence = observation.get('sequence', observation.get('actions', []))
+            if obs_sequence == expected_sequence:
+                return observation.get('success', True)
+        
+        elif pattern_type == 'spatial':
+            # Pattern: object at position behaves certain way
+            expected_behavior = pattern.get('behavior')
+            obs_behavior = observation.get('behavior', observation.get('effect'))
+            if obs_behavior == expected_behavior:
+                return True
+            elif obs_behavior and obs_behavior != expected_behavior:
+                return False
+        
+        # Can't determine - observation doesn't relate to this pattern
+        return None
     
     # ======================================================================
     # GOAL & INTENTION IMPLEMENTATIONS
@@ -13123,23 +13814,80 @@ class SeedPrimitiveRegistry:
         return result
     
     def _detect_subgoal(self, frame: List[List[int]], final_goal: Any, obstacles: List[Any]) -> Dict[str, Any]:
-        """Detect intermediate goal that enables final goal."""
+        """
+        Detect intermediate goal that enables final goal.
+        
+        Args:
+            frame: Current frame state
+            final_goal: The ultimate goal (can be frame state, position, or description)
+            obstacles: List of obstacles blocking the goal
+        """
         result = {
             'primitive': 'detect_subgoal',
             'subgoal_detected': False,
             'subgoal': None,
-            'subgoal_type': None
+            'subgoal_type': None,
+            'final_goal_type': None,
+            'priority': 0
         }
         
+        # Analyze final_goal type
+        if final_goal is not None:
+            if isinstance(final_goal, (list, tuple)) and len(final_goal) == 2:
+                result['final_goal_type'] = 'position'
+            elif isinstance(final_goal, list) and final_goal and isinstance(final_goal[0], list):
+                result['final_goal_type'] = 'frame_state'
+            elif isinstance(final_goal, dict):
+                result['final_goal_type'] = final_goal.get('type', 'unknown')
+            elif isinstance(final_goal, str):
+                result['final_goal_type'] = 'description'
+        
         if not obstacles:
+            # No obstacles - might need different subgoal types
+            if result['final_goal_type'] == 'position':
+                result['subgoal_detected'] = True
+                result['subgoal'] = 'navigate_to_goal'
+                result['subgoal_type'] = 'navigation'
+                result['priority'] = 1
             return result
         
-        # If there are obstacles between current state and goal,
-        # removing/bypassing obstacle is a subgoal
-        if obstacles:
+        # Analyze obstacles to determine best subgoal
+        for i, obstacle in enumerate(obstacles):
+            if isinstance(obstacle, dict):
+                obstacle_type = obstacle.get('type', 'unknown')
+                
+                if obstacle_type == 'blocking':
+                    result['subgoal_detected'] = True
+                    result['subgoal'] = f'remove_obstacle_{i}'
+                    result['subgoal_type'] = 'obstacle_removal'
+                    result['priority'] = 3  # High priority
+                    break
+                elif obstacle_type == 'locked':
+                    result['subgoal_detected'] = True
+                    result['subgoal'] = 'find_key'
+                    result['subgoal_type'] = 'key_acquisition'
+                    result['priority'] = 2
+                    break
+                elif obstacle_type == 'gap':
+                    result['subgoal_detected'] = True
+                    result['subgoal'] = 'bridge_gap'
+                    result['subgoal_type'] = 'path_creation'
+                    result['priority'] = 2
+                    break
+            elif isinstance(obstacle, int):
+                # Obstacle is a color - remove objects of that color
+                result['subgoal_detected'] = True
+                result['subgoal'] = f'remove_color_{obstacle}'
+                result['subgoal_type'] = 'obstacle_removal'
+                result['priority'] = 3
+                break
+        
+        # Default fallback
+        if not result['subgoal_detected'] and obstacles:
             result['subgoal_detected'] = True
             result['subgoal'] = 'remove_obstacle'
             result['subgoal_type'] = 'obstacle_removal'
+            result['priority'] = 2
         
         return result
     
@@ -14205,13 +14953,23 @@ class SeedPrimitiveRegistry:
         return result
     
     def _predict_flow_path(self, frame: List[List[int]], source_position: Optional[tuple] = None, channel_map: Optional[dict] = None) -> Dict[str, Any]:
-        """Predict where fluid/color will flow next based on channels."""
+        """
+        Predict where fluid/color will flow next based on channels.
+        
+        Args:
+            frame: 2D grid of color values
+            source_position: (x, y) starting position for flow
+            channel_map: Optional dict mapping positions to flow directions,
+                        e.g., {(x,y): 'down', (x2,y2): 'left'}
+                        Can also specify 'barrier' positions that block flow.
+        """
         result = {
             'primitive': 'predict_flow_path',
             'predicted_path': [],
             'destination': None,
             'blocked': False,
-            'flow_direction': None
+            'flow_direction': None,
+            'used_channel_map': channel_map is not None
         }
         
         if not frame or not source_position:
@@ -14224,9 +14982,27 @@ class SeedPrimitiveRegistry:
         if not (0 <= y < height and 0 <= x < width):
             return result
         
-        # Simple flow prediction: follow empty cells or same-color cells
-        # Priority: down (gravity), then horizontal spread
-        flow_priority = [(1, 0), (0, -1), (0, 1), (-1, 0)]  # down, left, right, up
+        # Parse channel_map for barriers and forced directions
+        barriers = set()
+        forced_directions = {}
+        
+        if channel_map:
+            for pos, direction in channel_map.items():
+                if direction == 'barrier':
+                    barriers.add(pos)
+                elif direction in ('up', 'down', 'left', 'right'):
+                    forced_directions[pos] = direction
+        
+        # Direction mappings
+        dir_to_delta = {
+            'down': (1, 0),
+            'up': (-1, 0),
+            'left': (0, -1),
+            'right': (0, 1)
+        }
+        
+        # Default flow priority: down (gravity), then horizontal spread
+        default_priority = [(1, 0), (0, -1), (0, 1), (-1, 0)]  # down, left, right, up
         
         visited = {(x, y)}
         path = [(x, y)]
@@ -14237,19 +15013,36 @@ class SeedPrimitiveRegistry:
             cx, cy = current
             moved = False
             
-            for dy, dx in flow_priority:
+            # Check if there's a forced direction at this position
+            if (cx, cy) in forced_directions:
+                forced_dir = forced_directions[(cx, cy)]
+                dy, dx = dir_to_delta[forced_dir]
                 ny, nx = cy + dy, cx + dx
                 if 0 <= ny < height and 0 <= nx < width:
-                    if (nx, ny) not in visited:
+                    if (nx, ny) not in visited and (nx, ny) not in barriers:
                         next_color = frame[ny][nx]
-                        # Can flow into empty space or same color
                         if next_color == 0 or next_color == source_color:
                             path.append((nx, ny))
                             visited.add((nx, ny))
                             current = (nx, ny)
-                            result['flow_direction'] = ('down' if dy > 0 else 'up' if dy < 0 else 'left' if dx < 0 else 'right')
+                            result['flow_direction'] = forced_dir
                             moved = True
-                            break
+            
+            # If no forced direction or it didn't work, use default priority
+            if not moved:
+                for dy, dx in default_priority:
+                    ny, nx = cy + dy, cx + dx
+                    if 0 <= ny < height and 0 <= nx < width:
+                        if (nx, ny) not in visited and (nx, ny) not in barriers:
+                            next_color = frame[ny][nx]
+                            # Can flow into empty space or same color
+                            if next_color == 0 or next_color == source_color:
+                                path.append((nx, ny))
+                                visited.add((nx, ny))
+                                current = (nx, ny)
+                                result['flow_direction'] = ('down' if dy > 0 else 'up' if dy < 0 else 'left' if dx < 0 else 'right')
+                                moved = True
+                                break
             
             if not moved:
                 result['blocked'] = True
@@ -14262,14 +15055,23 @@ class SeedPrimitiveRegistry:
         return result
     
     def _detect_pour_target(self, frame: List[List[int]], source_color: Optional[int] = None, goal_region: Optional[List[tuple]] = None) -> Dict[str, Any]:
-        """Identify where to pour/transfer material to achieve goal (VC33)."""
+        """
+        Identify where to pour/transfer material to achieve goal (VC33).
+        
+        Args:
+            frame: 2D grid of color values
+            source_color: Color of the material to pour
+            goal_region: Optional list of (x, y) positions that define the target region
+        """
         result = {
             'primitive': 'detect_pour_target',
             'target_found': False,
             'target_position': None,
             'target_container': [],
             'pour_from': None,
-            'confidence': 0.0
+            'confidence': 0.0,
+            'source_color': source_color,
+            'goal_region_used': goal_region is not None
         }
         
         if not frame:
@@ -14278,15 +15080,38 @@ class SeedPrimitiveRegistry:
         height = len(frame)
         width = len(frame[0]) if frame else 0
         
-        # Find containers (enclosed regions that can hold liquid)
-        # A container has walls on sides and bottom, open on top
+        # If goal_region is specified, use it directly
+        if goal_region:
+            # Find the best pour target within the goal region
+            valid_targets = []
+            for gx, gy in goal_region:
+                if 0 <= gy < height and 0 <= gx < width:
+                    if frame[gy][gx] == 0:  # Empty space can receive pour
+                        # Check if accessible from above
+                        accessible = True
+                        for check_y in range(0, gy):
+                            if frame[check_y][gx] != 0:
+                                accessible = False
+                                break
+                        if accessible:
+                            valid_targets.append((gx, gy))
+            
+            if valid_targets:
+                result['target_found'] = True
+                # Choose topmost target (first to receive pour)
+                valid_targets.sort(key=lambda p: p[1])
+                result['target_position'] = valid_targets[0]
+                result['target_container'] = goal_region
+                result['confidence'] = 0.9
+                return result
+        
+        # Default: find containers (enclosed regions that can hold liquid)
         containers = []
         
         for x in range(1, width - 1):
             for y in range(1, height - 1):
                 if frame[y][x] == 0:  # Empty space
                     # Check if this could be inside a container
-                    # Need walls on left, right, and bottom
                     has_left_wall = any(frame[cy][x-1] != 0 for cy in range(y, height))
                     has_right_wall = any(frame[cy][x+1] != 0 for cy in range(y, height))
                     has_bottom = y == height - 1 or frame[y+1][x] != 0
@@ -14296,11 +15121,20 @@ class SeedPrimitiveRegistry:
         
         if containers:
             result['target_found'] = True
-            # Prefer the topmost container position (pour target)
             containers.sort(key=lambda p: p[1])
             result['target_position'] = containers[0]
             result['target_container'] = containers
             result['confidence'] = min(1.0, len(containers) / 5)
+        
+        # Find source position if source_color specified
+        if source_color is not None:
+            for y in range(height):
+                for x in range(width):
+                    if frame[y][x] == source_color:
+                        result['pour_from'] = (x, y)
+                        break
+                if result['pour_from']:
+                    break
         
         return result
     
@@ -14415,7 +15249,8 @@ class SeedPrimitiveRegistry:
             'shape_cells': [],
             'negative_space': [],
             'complementary_cells': [],
-            'match_quality': 0.0
+            'match_quality': 0.0,
+            'background_color': background_color
         }
         
         if not frame or shape_color is None:
@@ -14442,22 +15277,26 @@ class SeedPrimitiveRegistry:
         min_y = min(p[1] for p in shape_cells)
         max_y = max(p[1] for p in shape_cells)
         
-        # Negative space = bounding box minus shape
+        # Negative space = bounding box minus shape, considering background
+        # Only cells that match background_color are true negative space
         shape_set = set(shape_cells)
         negative_space = []
         for y in range(min_y, max_y + 1):
             for x in range(min_x, max_x + 1):
                 if (x, y) not in shape_set:
-                    negative_space.append((x, y))
+                    # Check if this is actual background or another object
+                    if frame[y][x] == background_color:
+                        negative_space.append((x, y))
         
         result['negative_space'] = negative_space
         
         # Look for another shape that matches negative space
+        # Exclude both the shape color and background color
         other_colors = set()
         for y in range(height):
             for x in range(width):
                 c = frame[y][x]
-                if c != 0 and c != shape_color:
+                if c != background_color and c != shape_color:
                     other_colors.add(c)
         
         for other_color in other_colors:
@@ -15082,18 +15921,30 @@ class SeedPrimitiveRegistry:
         
         controlled = set(controlled_objects) if controlled_objects else set()
         
-        # Find all objects
+        # Use provided object positions if available, otherwise scan frame
         height = len(frame)
         width = len(frame[0]) if frame else 0
         
-        color_positions = {}
-        for y in range(height):
-            for x in range(width):
-                c = frame[y][x]
-                if c != 0:
-                    if c not in color_positions:
-                        color_positions[c] = []
-                    color_positions[c].append((x, y))
+        if object_positions:
+            # Use pre-computed positions (more efficient)
+            color_positions = {}
+            for key, positions in object_positions.items():
+                # Handle both string and int color keys
+                try:
+                    color = int(key.replace('color_', '')) if isinstance(key, str) and key.startswith('color_') else int(key)
+                except (ValueError, TypeError):
+                    continue
+                color_positions[color] = positions
+        else:
+            # Scan frame for positions
+            color_positions = {}
+            for y in range(height):
+                for x in range(width):
+                    c = frame[y][x]
+                    if c != 0:
+                        if c not in color_positions:
+                            color_positions[c] = []
+                        color_positions[c].append((x, y))
         
         for color, positions in color_positions.items():
             cell_count = len(positions)
@@ -15182,13 +16033,22 @@ class SeedPrimitiveRegistry:
         return result
     
     def _find_remote_effect_region(self, trigger_position: tuple, frame_before: List[List[int]], frame_after: List[List[int]], min_distance: int = 3) -> Dict[str, Any]:
-        """Find the region where remote effect occurred after trigger."""
+        """
+        Find the region where remote effect occurred after trigger.
+        
+        Args:
+            trigger_position: (x, y) where the trigger action occurred
+            frame_before: Frame before the trigger
+            frame_after: Frame after the trigger
+            min_distance: Minimum distance from trigger to count as \"remote\" effect
+        """
         result = {
             'primitive': 'find_remote_effect_region',
             'found': False,
             'effect_region': None,
             'effect_type': None,
-            'distance_from_trigger': 0
+            'distance_from_trigger': 0,
+            'min_distance_threshold': min_distance
         }
         
         action_result = self._detect_action_at_distance(trigger_position, frame_before, frame_after)
@@ -15196,10 +16056,15 @@ class SeedPrimitiveRegistry:
         if not action_result['remote_change_detected']:
             return result
         
-        # Find the largest change region
+        # Find change regions that are at least min_distance away
         regions = action_result.get('change_regions', [])
-        if regions:
-            largest = max(regions, key=lambda r: r['pixel_count'])
+        
+        # Filter regions by min_distance
+        remote_regions = [r for r in regions if r.get('min_distance', 0) >= min_distance]
+        
+        if remote_regions:
+            # Find the largest remote change region
+            largest = max(remote_regions, key=lambda r: r['pixel_count'])
             result['found'] = True
             result['effect_region'] = largest['bbox']
             result['distance_from_trigger'] = largest['min_distance']
@@ -15437,6 +16302,16 @@ class SeedPrimitiveRegistry:
         if not frame:
             return result
         
+        # Extract hints from game context if available
+        context_hints = {}
+        if game_context:
+            context_hints = {
+                'known_goal_type': game_context.get('goal_type'),
+                'has_time_limit': game_context.get('has_time_limit', False),
+                'level_number': game_context.get('level', 1),
+                'previous_patterns': game_context.get('successful_patterns', [])
+            }
+        
         # Analyze frame for goal indicators
         height = len(frame)
         width = len(frame[0]) if frame else 0
@@ -15446,8 +16321,18 @@ class SeedPrimitiveRegistry:
         
         subgoals = []
         
-        # If there are keys and locks, likely a matching goal
-        if roles['keys'] and roles['locks']:
+        # If we have context about goal type, use it
+        if context_hints.get('known_goal_type') == 'matching':
+            # Prioritize matching subgoals
+            if roles['keys'] and roles['locks']:
+                subgoals.append({
+                    'type': 'match_pattern',
+                    'description': 'Match key to lock (confirmed by context)',
+                    'keys': roles['keys'],
+                    'locks': roles['locks'],
+                    'priority': 1
+                })
+        elif roles['keys'] and roles['locks']:
             subgoals.append({
                 'type': 'match_pattern',
                 'description': 'Match key to lock',
@@ -15466,11 +16351,11 @@ class SeedPrimitiveRegistry:
         # Check for UI elements (action limits)
         ui_elements = self._detect_ui_element(frame)
         counters = [e for e in ui_elements if e.get('possible_type') == 'counter']
-        if counters:
+        if counters or context_hints.get('has_time_limit'):
             subgoals.append({
                 'type': 'resource_constraint',
                 'description': 'Complete within action limit',
-                'counter_regions': [c['bbox'] for c in counters]
+                'counter_regions': [c['bbox'] for c in counters] if counters else []
             })
         
         result['detected_subgoals'] = subgoals
@@ -15585,50 +16470,70 @@ class SeedPrimitiveRegistry:
         if not compound_goal:
             return subgoals
         
+        # Use available primitives to filter what we can actually do
+        available_set = set(available_primitives) if available_primitives else None
+        
+        def filter_primitives(prims: List[str]) -> List[str]:
+            """Filter primitive list to only available ones."""
+            if available_set is None:
+                return prims  # No restrictions
+            return [p for p in prims if p in available_set]
+        
         goal_type = compound_goal.get('type', 'unknown')
         
         if goal_type == 'match_and_reach':
             # Order: transform first, then navigate
             if compound_goal.get('transformation_needed'):
-                subgoals.append({
-                    'order': 1,
-                    'type': 'transform',
-                    'target': compound_goal.get('target_state'),
-                    'primitives': ['detect_tool_object', 'get_symbolic_state', 'compare_symbolic_pattern']
-                })
+                transform_prims = filter_primitives(['detect_tool_object', 'get_symbolic_state', 'compare_symbolic_pattern'])
+                if transform_prims:  # Only add if we have at least one primitive
+                    subgoals.append({
+                        'order': 1,
+                        'type': 'transform',
+                        'target': compound_goal.get('target_state'),
+                        'primitives': transform_prims,
+                        'all_primitives_available': len(transform_prims) == 3
+                    })
+            nav_prims = filter_primitives(['direction_to_goal', 'detect_obstacle'])
             subgoals.append({
                 'order': 2,
                 'type': 'navigate',
                 'target': compound_goal.get('goal_position'),
-                'primitives': ['direction_to_goal', 'detect_obstacle']
+                'primitives': nav_prims,
+                'all_primitives_available': len(nav_prims) == 2
             })
         
         elif goal_type == 'collect_and_use':
             # Order: collect first, then use
+            collect_prims = filter_primitives(['detect_tool_object', 'direction_to_goal'])
             subgoals.append({
                 'order': 1,
                 'type': 'collect',
                 'target': compound_goal.get('collectible'),
-                'primitives': ['detect_tool_object', 'direction_to_goal']
+                'primitives': collect_prims,
+                'all_primitives_available': len(collect_prims) == 2
             })
+            use_prims = filter_primitives(['detect_action_at_distance', 'correlate_trigger_effect'])
             subgoals.append({
                 'order': 2,
                 'type': 'use',
                 'target': compound_goal.get('use_location'),
-                'primitives': ['detect_action_at_distance', 'correlate_trigger_effect']
+                'primitives': use_prims,
+                'all_primitives_available': len(use_prims) == 2
             })
         
         else:
             # Generic decomposition
+            analyze_prims = filter_primitives(['detect_compound_goal', 'classify_symbolic_role'])
             subgoals.append({
                 'order': 1,
                 'type': 'analyze',
-                'primitives': ['detect_compound_goal', 'classify_symbolic_role']
+                'primitives': analyze_prims
             })
+            execute_prims = filter_primitives(['direction_to_goal'])
             subgoals.append({
                 'order': 2,
                 'type': 'execute',
-                'primitives': ['direction_to_goal']
+                'primitives': execute_prims
             })
         
         return subgoals

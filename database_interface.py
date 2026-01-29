@@ -13,7 +13,7 @@ import sqlite3
 import json
 import logging
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 import threading
 import uuid

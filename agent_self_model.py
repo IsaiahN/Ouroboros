@@ -26,12 +26,11 @@ if TYPE_CHECKING:
 
 # IThread integration for Two Streams consciousness
 try:
-    from i_thread import IThread, IThreadState, ROLE_DEFAULT_WEIGHTS
+    from i_thread import IThread, ROLE_DEFAULT_WEIGHTS
     ITHREAD_AVAILABLE = True
 except ImportError:
     ITHREAD_AVAILABLE = False
     IThread = None  # type: ignore
-    IThreadState = None
     ROLE_DEFAULT_WEIGHTS = {
         'pioneer': (0.7, 0.3),
         'optimizer': (0.3, 0.7),
@@ -5136,22 +5135,6 @@ class AgentSelfModel:
                 'observation_count': 1,
                 'hypothesis_id': hypothesis_id
             }
-        
-        # Also store in agent's personal control map
-        try:
-            self.store_control_map(
-                agent_id=agent_id,
-                game_id=game_id,
-                level=level,
-                controlled_objects=[(controlled_color, action, direction)],
-                confidence=0.75
-            )
-        except Exception as e:
-            logger.debug(f"Personal control map update failed: {e}")
-        
-        # FIX #1 (CHECKLIST): If we reach here via the new hypothesis path,
-        # the return already happened. This is a fallback return.
-        return None
 
     def _trigger_symmetry_experiment(
         self,
@@ -11016,13 +10999,13 @@ class WeavingReporter:
         # Emotional state
         parts.append(f"Feeling {emotion}")
         
-        # Stream preference
+        # Stream preference with strength context
         if alpha > 0.6:
-            parts.append("trusting own experience")
+            parts.append(f"trusting own experience (strength={private_strength:.2f})")
         elif alpha < 0.4:
-            parts.append("following network wisdom")
+            parts.append(f"following network wisdom (strength={network_strength:.2f})")
         else:
-            parts.append("balancing self and network")
+            parts.append(f"balancing self ({private_strength:.2f}) and network ({network_strength:.2f})")
         
         # Conflict
         if conflict:
@@ -13803,8 +13786,6 @@ class EpisodicMemorySystem:
             )
         except Exception as e:
             logger.warning(f"Failed to reset wA/wB in DB: {e}")
-        
-        return new_wA, new_wB
         
         return new_wA, new_wB
 
