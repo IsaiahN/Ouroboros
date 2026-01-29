@@ -25029,9 +25029,10 @@ class GameplayEngine:
             # Track that this agent is using a sequence for this level
             agent_id = self.game_config.get('agent_id', 'unknown')
             session_id = self.session_manager.current_session_id
-            game_id = self.game_config.get('game_id', 'unknown')
+            # FIX: game_id is stored as 'current_game_id', not 'game_id'
+            game_id = self.game_config.get('current_game_id') or self.game_config.get('game_id', 'unknown')
             
-            if session_id and game_id:
+            if session_id and game_id and game_id != 'unknown':
                 self.db.log_level_sequence_usage(
                     session_id=session_id,
                     game_id=game_id,
@@ -28575,13 +28576,51 @@ class GameplayEngine:
                             logger.debug(f"[SOCIOPATH] Agent ignoring network wisdom (adherence: {social_adherence:.2f})")
                             return None
                     
+                    # ===============================================================
+                    # FIX (2026-01-29): MASTERY TIER BOOSTS NETWORK WISDOM CONFIDENCE
+                    # ===============================================================
+                    # If the network has "mastered" this level (expert/practitioner tier),
+                    # the network wisdom should be trusted MORE. This connects the mastery
+                    # data to action decision-making instead of just sequence gating.
+                    #
+                    # Mastery boost:
+                    # - expert: +0.15 confidence
+                    # - practitioner: +0.10 confidence  
+                    # - apprentice: +0.05 confidence
+                    # - novice: +0.00 confidence
+                    # ===============================================================
+                    mastery_boost = 0.0
+                    mastery_tier = 'novice'
+                    try:
+                        mastery_data = self.db.execute_query("""
+                            SELECT mastery_tier, total_mastery_score
+                            FROM level_mastery
+                            WHERE game_type = ? AND level_number = ?
+                        """, (game_type, level_number))
+                        
+                        if mastery_data and mastery_data[0]:
+                            mastery_tier = mastery_data[0]['mastery_tier'] or 'novice'
+                            if mastery_tier == 'expert':
+                                mastery_boost = 0.15
+                            elif mastery_tier == 'practitioner':
+                                mastery_boost = 0.10
+                            elif mastery_tier == 'apprentice':
+                                mastery_boost = 0.05
+                            
+                            if mastery_boost > 0:
+                                logger.debug(f"[MASTERY-BOOST] L{level_number} tier={mastery_tier} -> +{mastery_boost:.2f} confidence")
+                    except Exception as e:
+                        logger.debug(f"Could not query mastery tier: {e}")
+                    
                     # Determine if this is a normal suggestion or "least bad" suggestion
                     is_least_bad = best_confidence < 0.3 and len(action_analysis) >= 3
                     
                     if best_confidence >= 0.3:
                         # Normal case - high confidence suggestion
                         reasoning = f"Network history: ACTION{best_action} has {action_analysis[0]['success_rate']:.1%} success rate at L{level_number} ({action_analysis[0]['total_attempts']} attempts)"
-                        final_confidence = min(best_confidence * social_adherence, 1.0)
+                        final_confidence = min((best_confidence + mastery_boost) * social_adherence, 1.0)
+                        if mastery_boost > 0:
+                            reasoning += f" [mastery={mastery_tier}]"
                     elif is_least_bad:
                         # ALL-NEGATIVE CASE: Return the least bad option
                         # Find worst action for comparison
@@ -28593,8 +28632,8 @@ class GameplayEngine:
                             f"[LEAST-BAD] Network history: ACTION{best_action} is least harmful at L{level_number} "
                             f"(avg_change={best_change:.3f} vs worst={worst_change:.3f})"
                         )
-                        # Use lower confidence but still provide guidance
-                        final_confidence = max(0.25, min(best_confidence * social_adherence + 0.15, 0.45))
+                        # Use lower confidence but still provide guidance (mastery boost applies here too)
+                        final_confidence = max(0.25, min((best_confidence + mastery_boost) * social_adherence + 0.15, 0.45))
                         
                         logger.info(f"[NETWORK-WISDOM] L{level_number} all-negative case: suggesting ACTION{best_action} as least-bad (conf={final_confidence:.2f})")
                     else:
