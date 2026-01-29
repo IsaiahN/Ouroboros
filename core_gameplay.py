@@ -9383,9 +9383,81 @@ class GameplayEngine:
                 # ===================================================================
                 # Single source of truth: position_death_patterns table
                 # Provides fuzzy matching: "deaths at positions 8-15 on level 5"
+                #
+                # FIX (2026-01-29): FALLBACK POSITION ESTIMATION
+                # When _current_agent_position is None (new level, no self-model yet),
+                # we STILL need to check death patterns! Otherwise agents die instantly
+                # on frontier levels before they can even build a self-model.
+                #
+                # Fallback strategy:
+                # 1. Check bucket (0,0) - common spawn point
+                # 2. Check center of frame - reasonable default
+                # 3. Check all high-death buckets for this level
                 # ===================================================================
                 agent_pos = getattr(self, '_current_agent_position', None)
-                if agent_pos and hasattr(self, 'terminal_detector') and self.terminal_detector:
+                
+                # FALLBACK: If no position known, still check death patterns!
+                if agent_pos is None and hasattr(self, 'terminal_detector') and self.terminal_detector:
+                    # Try common fallback positions: bucket (0,0) and frame center
+                    frame_height = len(frame) if frame else 64
+                    frame_width = len(frame[0]) if frame and frame[0] else 64
+                    fallback_positions = [
+                        (0, 0),  # Common spawn at origin
+                        (frame_width // 2, frame_height // 2),  # Frame center
+                    ]
+                    
+                    # Query for high-death buckets on this level
+                    try:
+                        high_death_buckets = self.db.execute_query("""
+                            SELECT bucket_x, bucket_y, fatal_action, death_count
+                            FROM position_death_patterns
+                            WHERE game_type = ? AND level_number = ? AND is_active = 1
+                              AND death_count >= 10
+                            ORDER BY death_count DESC
+                            LIMIT 5
+                        """, (game_type, current_level))
+                        
+                        if high_death_buckets:
+                            # Add high-death buckets to check (converted to pixel coords)
+                            for hdb in high_death_buckets:
+                                # Bucket to pixel center: bucket_x * 8 + 4
+                                pixel_x = hdb['bucket_x'] * 8 + 4
+                                pixel_y = hdb['bucket_y'] * 8 + 4
+                                if (pixel_x, pixel_y) not in fallback_positions:
+                                    fallback_positions.append((pixel_x, pixel_y))
+                                # Also directly mark this action as deadly (regardless of position)
+                                deadly_actions_for_frame.add(hdb['fatal_action'])
+                                logger.info(
+                                    f"[DEATH-AVOID-FALLBACK] L{current_level}: ACTION{hdb['fatal_action']} "
+                                    f"killed {hdb['death_count']}x at bucket ({hdb['bucket_x']},{hdb['bucket_y']})"
+                                )
+                    except Exception as hdb_err:
+                        logger.debug(f"High-death bucket query failed: {hdb_err}")
+                    
+                    # Check fallback positions for additional deadly actions
+                    for fb_x, fb_y in fallback_positions[:3]:  # Limit to avoid too many queries
+                        for check_action in range(1, 8):
+                            if check_action in deadly_actions_for_frame:
+                                continue  # Already marked deadly
+                            try:
+                                danger_info = self.terminal_detector.check_position_danger(
+                                    game_type=game_type,
+                                    level_number=current_level,
+                                    position=(fb_x, fb_y),
+                                    planned_action=check_action,
+                                    min_danger=0.6,
+                                    bucket_size=8
+                                )
+                                if danger_info and danger_info.get('danger'):
+                                    deadly_actions_for_frame.add(check_action)
+                            except Exception:
+                                pass
+                    
+                    if deadly_actions_for_frame:
+                        self._deadly_first_actions = deadly_actions_for_frame
+                        logger.info(f"[DEATH-AVOID-FALLBACK] L{current_level}: Blocking {deadly_actions_for_frame} (position unknown, using fallback)")
+                
+                elif agent_pos and hasattr(self, 'terminal_detector') and self.terminal_detector:
                     agent_x, agent_y = agent_pos
                     # Check ALL 7 actions for position-bucket danger
                     for check_action in range(1, 8):
@@ -13911,20 +13983,42 @@ class GameplayEngine:
                 network_suggested_action = network_suggestion.get('action')
                 confidence = network_suggestion.get('confidence', 0.0)
                 reasoning_detail = network_suggestion.get('reasoning', 'Network history')
+                is_least_bad = network_suggestion.get('is_least_bad', False)
                 
-                # Use network suggestion if confidence is high enough
+                # ===============================================================
+                # FIX (2026-01-29): USE LEAST-BAD SUGGESTIONS
+                # ===============================================================
+                # Normal suggestions (conf >= 0.4): Use confidently
+                # Least-bad suggestions (conf 0.25-0.45): Use when no better option
+                #
+                # The "least-bad" flag indicates all actions have negative outcomes,
+                # but we should still prefer the one with the smallest loss.
+                # ===============================================================
+                use_network = False
                 if confidence >= 0.4:
+                    use_network = True
                     logger.info(f"[NETWORK] NETWORK WISDOM: ACTION{network_suggested_action} (confidence: {confidence:.2f}) - {reasoning_detail}")
+                elif is_least_bad and confidence >= 0.2:
+                    # Use least-bad suggestion even with lower confidence
+                    use_network = True
+                    logger.info(f"[NETWORK] LEAST-BAD WISDOM: ACTION{network_suggested_action} (conf={confidence:.2f}) - {reasoning_detail}")
+                
+                if use_network:
                     base_action = f"ACTION{network_suggested_action}"
-                    # Skip to applying biases below
+                    # Mark that we used network wisdom (for dm_biases logic)
+                    self._base_action_from_network = True
                 else:
                     logger.debug(f"Network suggestion (ACTION{network_suggested_action}) confidence too low ({confidence:.2f})")
                     # Low confidence - fall back to smart action selection
                     base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
+                    self._base_action_from_network = False
+            else:
+                self._base_action_from_network = False
         
         # If no network suggestion at all, use smart action selection
         if network_suggested_action is None:
             base_action = await self.action_handler.smart_action_selection(game_state, strategy, is_unbeaten_game)
+            self._base_action_from_network = False
         
         # ===================================================================
         # FRONTIER-LEVEL ABSTRACTION TEMPLATES
@@ -14121,13 +14215,38 @@ class GameplayEngine:
         # ===================================================================
         # APPLY DM BIASES: Decision-making integrations from emergent reasoning
         # DM biases apply AFTER hypothesis but integrate with final selection
+        #
+        # FIX (2026-01-29): DM_BIASES SHOULD DRIVE, NOT JUST OVERRIDE
+        # ===================================================================
+        # Previously, dm_biases only switched actions if current bias < -0.3.
+        # This meant when base_action came from random selection (smart_action_selection),
+        # the learned biases (from Q3/Q5/mastery data) were mostly ignored!
+        #
+        # New logic:
+        # - If base came from random/fallback: Let dm_biases PICK the best action
+        # - If base came from network wisdom: Only override if very negative
         # ===================================================================
         if dm_biases:
             action_num = int(base_action.replace("ACTION", "")) if isinstance(base_action, str) else base_action
             current_dm_bias = dm_biases.get(action_num, 0.0)
+            base_from_network = getattr(self, '_base_action_from_network', False)
+            
+            # Find the best and worst actions by DM bias
+            best_dm_action = max(dm_biases.items(), key=lambda x: x[1], default=(None, 0))
+            worst_dm_action = min(dm_biases.items(), key=lambda x: x[1], default=(None, 0))
+            
+            # ===============================================================
+            # PROACTIVE SELECTION: When base was random, use DM biases to pick
+            # ===============================================================
+            if not base_from_network and best_dm_action[0] is not None and best_dm_action[1] > 0.1:
+                # Base action came from random selection - let learned data drive!
+                if best_dm_action[1] > current_dm_bias + 0.15:  # Only switch if meaningfully better
+                    logger.info(f"[DM-DRIVE] Switching from random {base_action} to learned best ACTION{best_dm_action[0]} (bias {best_dm_action[1]:.2f})")
+                    base_action = f"ACTION{best_dm_action[0]}"
+                    dm_reasoning = f"DM-driven selection (learned bias: {best_dm_action[1]:.2f})"
             
             # If current action has strong negative DM bias, find alternative
-            if current_dm_bias < -0.3:
+            elif current_dm_bias < -0.3:
                 logger.info(f"[DM] Avoiding {base_action} (DM warns: bias {current_dm_bias:.2f})")
                 
                 # Find best alternative based on DM biases
@@ -28423,7 +28542,20 @@ class GameplayEngine:
                         best_confidence = confidence
                         best_action = action_num
                 
-                if best_action and best_confidence >= 0.3:
+                # ===============================================================
+                # FIX (2026-01-29): ALL-NEGATIVE CASE HANDLING
+                # ===============================================================
+                # When ALL actions have negative avg_score_change (like L5 frontier),
+                # the old code would return None because no action meets 0.3 threshold.
+                # But we HAVE data! We should return the LEAST BAD option.
+                #
+                # New logic:
+                # - If best_confidence >= 0.3: return normally (high confidence)
+                # - If best_confidence >= 0.0 AND data exists: return as "least_bad" with lower confidence
+                # - This prevents random action selection when we have useful avoidance data
+                # ===============================================================
+                
+                if best_action:
                     # Get agent's social rule adherence for bias adjustment
                     agent_data = self.db.execute_query("""
                         SELECT social_rule_adherence
@@ -28443,13 +28575,38 @@ class GameplayEngine:
                             logger.debug(f"[SOCIOPATH] Agent ignoring network wisdom (adherence: {social_adherence:.2f})")
                             return None
                     
-                    reasoning = f"Network history: ACTION{best_action} has {action_analysis[0]['success_rate']:.1%} success rate at L{level_number} ({action_analysis[0]['total_attempts']} attempts)"
+                    # Determine if this is a normal suggestion or "least bad" suggestion
+                    is_least_bad = best_confidence < 0.3 and len(action_analysis) >= 3
+                    
+                    if best_confidence >= 0.3:
+                        # Normal case - high confidence suggestion
+                        reasoning = f"Network history: ACTION{best_action} has {action_analysis[0]['success_rate']:.1%} success rate at L{level_number} ({action_analysis[0]['total_attempts']} attempts)"
+                        final_confidence = min(best_confidence * social_adherence, 1.0)
+                    elif is_least_bad:
+                        # ALL-NEGATIVE CASE: Return the least bad option
+                        # Find worst action for comparison
+                        worst_action = min(action_analysis, key=lambda x: x['confidence'])
+                        worst_change = worst_action['avg_score_change']
+                        best_change = action_analysis[0]['avg_score_change']
+                        
+                        reasoning = (
+                            f"[LEAST-BAD] Network history: ACTION{best_action} is least harmful at L{level_number} "
+                            f"(avg_change={best_change:.3f} vs worst={worst_change:.3f})"
+                        )
+                        # Use lower confidence but still provide guidance
+                        final_confidence = max(0.25, min(best_confidence * social_adherence + 0.15, 0.45))
+                        
+                        logger.info(f"[NETWORK-WISDOM] L{level_number} all-negative case: suggesting ACTION{best_action} as least-bad (conf={final_confidence:.2f})")
+                    else:
+                        # Not enough data for even least-bad suggestion
+                        return None
                     
                     return {
                         'action': best_action,
-                        'confidence': min(best_confidence * social_adherence, 1.0),
+                        'confidence': final_confidence,
                         'reasoning': reasoning,
-                        'analysis': action_analysis
+                        'analysis': action_analysis,
+                        'is_least_bad': is_least_bad
                     }
             
             # ===================================================================
@@ -28478,7 +28635,8 @@ class GameplayEngine:
                     return {
                         'action': action_num,
                         'confidence': success_rate * 0.5,  # Lower confidence for general pattern
-                        'reasoning': f"Game type pattern: ACTION{action_num} works {success_rate:.1%} of time on {game_type} games"
+                        'reasoning': f"Game type pattern: ACTION{action_num} works {success_rate:.1%} of time on {game_type} games",
+                        'is_least_bad': False  # Game-type patterns are not "least bad" - they're aggregate wins
                     }
             
             return None

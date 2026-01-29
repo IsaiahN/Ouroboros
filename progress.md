@@ -2,6 +2,238 @@
 
 ---
 
+## Session: January 28, 2026 - Non-Sequence Data Not Connecting to Action Selection
+
+---
+
+### Approach: Fix disconnection between collected learning data and action decision-making
+
+**Timestamp**: 11:48:00 PM  
+**Status**: IMPLEMENTATION COMPLETE - Ready for testing
+
+---
+
+### Problem Statement
+
+User asked: "why when an agent picks it up [sequence], its not able to reason beyond that or use what its learned, it seems to either stop early or not be using all the rules and lessons its picked up."
+
+Specifically:
+- L2 non-sequence data should exist, L1 non-sequence data, and L3 non-sequence data
+- Yet agents struggle and sometimes get 0s without the sequence
+- The data is not connecting properly to the action chooser
+
+---
+
+### Investigation Steps
+
+| Step | What | Finding |
+|------|------|---------|
+| 1 | Query level_mastery for as66 | Data EXISTS: L1=expert (66.0), L2=expert (78.5), L3=practitioner (53.3), L4=practitioner (47.9) |
+| 2 | Check mastery usage | ONLY used for gating sequence replay - NOT informing action choices! |
+| 3 | Query action_traces for as66 | Excellent data: L1 ACTION2=25.3% success, L2 ACTION3=27.1%, L3 ACTION6=24.9%, L4 ACTION6=26.7% |
+| 4 | Simulate `_get_network_action_wisdom` for L2 | WORKS: Returns ACTION3 with confidence 0.411 |
+| 5 | Simulate `_get_network_action_wisdom` for L5 | FAILS: All negative avg_score_change, best confidence 0.168 < 0.4 threshold → Returns None |
+| 6 | Query position_death_patterns for L5 | Data EXISTS: 18 patterns, 254 deaths, ACTION1/ACTION2 at bucket (0,0) have 79 deaths each |
+| 7 | Check death avoidance code | SKIPPED when `_current_agent_position` is None! |
+| 8 | Check when position is set | Only when `control_confidence >= 0.5` - requires self-model |
+| 9 | Check dm_biases usage | Only switches if current bias `< -0.3` - doesn't DRIVE selection |
+
+---
+
+### Root Causes Identified
+
+#### Root Cause 1: All-Negative Network Wisdom Returns None
+
+**Location**: [core_gameplay.py#L28540-L28620](core_gameplay.py#L28540-L28620)
+
+When ALL actions have negative `avg_score_change` (like L5 frontier), the confidence formula gave ~0.168 which is below the 0.4 threshold. The method returned `None` instead of recommending the "least bad" action.
+
+**Data Example (L5)**:
+```
+ACTION2: avg_score_change=-0.161 (least bad)
+ACTION4: avg_score_change=-1.329 (worst)
+```
+
+#### Root Cause 2: Death Avoidance Skipped on New Levels
+
+**Location**: [core_gameplay.py#L9387-L9485](core_gameplay.py#L9387-L9485)
+
+`_current_agent_position` is only set when `control_confidence >= 0.5`, which requires learning the controlled object. On NEW frontier levels, position is always `None` → entire death avoidance check was SKIPPED!
+
+**Impact**: L5 has 79 deaths for ACTION1 and ACTION2 at bucket (0,0) - but this data was never used.
+
+#### Root Cause 3: DM Biases Don't Drive Action Selection
+
+**Location**: [core_gameplay.py#L14127-L14175](core_gameplay.py#L14127-L14175)
+
+When `base_action` comes from random selection (`smart_action_selection`), dm_biases only switched action if current bias was `< -0.3`. The learned data (Q3/Q5/mastery) was mostly IGNORED for proactive selection.
+
+---
+
+### Fixes Implemented
+
+#### Fix 1: Least-Bad Network Wisdom (11:20 PM)
+
+**File**: [core_gameplay.py#L28548-L28600](core_gameplay.py#L28548-L28600)
+
+When all confidences are negative but data exists, return the "least bad" option with `is_least_bad=True` flag and confidence 0.25-0.45:
+
+```python
+# NEW: ALL-NEGATIVE CASE HANDLING
+is_least_bad = best_confidence < 0.3 and len(action_analysis) >= 3
+
+if is_least_bad:
+    # Find worst action for comparison
+    worst_action = min(action_analysis, key=lambda x: x['confidence'])
+    worst_change = worst_action['avg_score_change']
+    best_change = action_analysis[0]['avg_score_change']
+    
+    reasoning = (
+        f"[LEAST-BAD] Network history: ACTION{best_action} is least harmful at L{level_number} "
+        f"(avg_change={best_change:.3f} vs worst={worst_change:.3f})"
+    )
+    # Use lower confidence but still provide guidance
+    final_confidence = max(0.25, min(best_confidence * social_adherence + 0.15, 0.45))
+```
+
+#### Fix 2: Fallback Death Avoidance When Position Unknown (11:30 PM)
+
+**File**: [core_gameplay.py#L9400-L9458](core_gameplay.py#L9400-L9458)
+
+When `_current_agent_position` is None, query high-death buckets directly and check common spawn positions:
+
+```python
+# FALLBACK: If no position known, still check death patterns!
+if agent_pos is None and hasattr(self, 'terminal_detector') and self.terminal_detector:
+    # Try common fallback positions: bucket (0,0) and frame center
+    fallback_positions = [
+        (0, 0),  # Common spawn at origin
+        (frame_width // 2, frame_height // 2),  # Frame center
+    ]
+    
+    # Query for high-death buckets on this level
+    high_death_buckets = self.db.execute_query("""
+        SELECT bucket_x, bucket_y, fatal_action, death_count
+        FROM position_death_patterns
+        WHERE game_type = ? AND level_number = ? AND is_active = 1
+          AND death_count >= 10
+        ORDER BY death_count DESC
+        LIMIT 5
+    """, (game_type, current_level))
+    
+    if high_death_buckets:
+        for hdb in high_death_buckets:
+            # Directly mark this action as deadly
+            deadly_actions_for_frame.add(hdb['fatal_action'])
+```
+
+#### Fix 3: Use Least-Bad Network Suggestions (11:35 PM)
+
+**File**: [core_gameplay.py#L13988-L14021](core_gameplay.py#L13988-L14021)
+
+Accept least-bad suggestions when `is_least_bad=True` and `confidence >= 0.2`:
+
+```python
+use_network = False
+if confidence >= 0.4:
+    use_network = True
+    logger.info(f"[NETWORK] NETWORK WISDOM: ACTION{network_suggested_action} (confidence: {confidence:.2f})")
+elif is_least_bad and confidence >= 0.2:
+    # Use least-bad suggestion even with lower confidence
+    use_network = True
+    logger.info(f"[NETWORK] LEAST-BAD WISDOM: ACTION{network_suggested_action} (conf={confidence:.2f})")
+
+if use_network:
+    base_action = f"ACTION{network_suggested_action}"
+    self._base_action_from_network = True
+else:
+    base_action = await self.action_handler.smart_action_selection(...)
+    self._base_action_from_network = False
+```
+
+#### Fix 4: DM Biases Drive Action Selection (11:40 PM)
+
+**File**: [core_gameplay.py#L14217-L14270](core_gameplay.py#L14217-L14270)
+
+When `_base_action_from_network=False` (random selection), proactively select best DM bias action:
+
+```python
+if dm_biases:
+    base_from_network = getattr(self, '_base_action_from_network', False)
+    best_dm_action = max(dm_biases.items(), key=lambda x: x[1], default=(None, 0))
+    
+    # PROACTIVE SELECTION: When base was random, use DM biases to pick
+    if not base_from_network and best_dm_action[0] is not None and best_dm_action[1] > 0.1:
+        if best_dm_action[1] > current_dm_bias + 0.15:  # Only switch if meaningfully better
+            logger.info(f"[DM-DRIVE] Switching from random {base_action} to learned best ACTION{best_dm_action[0]}")
+            base_action = f"ACTION{best_dm_action[0]}"
+            dm_reasoning = f"DM-driven selection (learned bias: {best_dm_action[1]:.2f})"
+```
+
+#### Fix 5: STAGE 2 Return Consistency (11:47 PM)
+
+**File**: [core_gameplay.py#L28630-L28642](core_gameplay.py#L28630-L28642)
+
+Added missing `is_least_bad` key to STAGE 2 (game-type patterns) return:
+
+```python
+return {
+    'action': action_num,
+    'confidence': success_rate * 0.5,
+    'reasoning': f"Game type pattern: ACTION{action_num} works {success_rate:.1%}",
+    'is_least_bad': False  # Game-type patterns are aggregate wins, not least-bad
+}
+```
+
+---
+
+### Before vs After (L5 Example)
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| Network Wisdom | Returns `None` (conf 0.168 < 0.4) | Returns ACTION2 with `is_least_bad=True` (conf 0.35) |
+| Death Avoidance | SKIPPED (position=None) | Checks bucket (0,0) deaths - blocks ACTION1/ACTION2 (79 deaths each) |
+| DM Biases | Only switches if current < -0.3 | Proactively selects best learned action when base is random |
+
+---
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| Python syntax (`py_compile core_gameplay.py`) | ✅ PASSED |
+| `_base_action_from_network` set in all paths | ✅ 4 set points, 1 safe retrieval with `getattr` |
+| `dm_reasoning` initialized before use | ✅ Line 13087 |
+| `is_least_bad` in all return paths | ✅ Fixed STAGE 2 return |
+| Fallback position guards for null frame | ✅ `len(frame) if frame else 64` |
+
+---
+
+### Current Status
+
+**READY FOR TESTING** - All implementation complete, syntax verified.
+
+Next steps:
+1. Run evolution to test fixes
+2. Watch for log messages:
+   - `[NETWORK] LEAST-BAD WISDOM:` - Fix 1 working
+   - `[DEATH-AVOID-FALLBACK]` - Fix 2 working  
+   - `[DM-DRIVE]` - Fix 4 working
+3. Monitor L5+ performance on as66 and other frontier levels
+
+---
+
+### Files Modified
+
+- `core_gameplay.py`:
+  - Lines 9400-9458: Fallback death avoidance
+  - Lines 13988-14021: Least-bad network wisdom usage
+  - Lines 14217-14270: DM biases proactive selection
+  - Lines 28548-28610: Least-bad return handling
+  - Lines 28630-28642: STAGE 2 return consistency
+
+---
+
 ## Session: January 28, 2026 - Frontier Level Topology System (Bat Navigation Research)
 
 ---
