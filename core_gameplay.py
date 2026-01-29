@@ -9680,76 +9680,154 @@ class GameplayEngine:
                 alternative_dirs = map_intel.get('alternative_directions', [])
                 
                 # ===============================================================
-                # CONSOLIDATED DEATH AVOIDANCE FOR MAP-INTEL
+                # GRADUATED POSITION-AWARE DEATH AVOIDANCE FOR MAP-INTEL
                 # ===============================================================
-                # Single source of truth: position_death_patterns table
-                # This table has fuzzy position matching AND level-wide aggregation
-                # Query for level-wide death stats (sum across all positions)
+                # Position-specific: Query deaths at CURRENT position bucket
+                # Graduated: Use danger_score with time decay and survival signals
+                # NOT binary blocking - probabilistic avoidance that eases over time
                 # ===============================================================
-                deadly_action_nums = set(getattr(self, '_deadly_first_actions', set()))
                 
-                # Query position_death_patterns for level-wide deadly actions
-                # Aggregates death_count across ALL positions on this level
+                # Dictionary of action -> danger_score (0.0 to 1.0)
+                action_danger_scores: Dict[int, float] = {}
+                
                 try:
                     game_id = getattr(game_state, 'game_id', None) or getattr(self, '_current_game_id', '')
                     game_type = game_id[:4] if game_id and len(game_id) >= 4 else ''
                     current_level = int(game_state.score) + 1 if hasattr(game_state, 'score') else 1
+                    current_pos = getattr(self, '_current_agent_position', None)
                     
                     if game_type and hasattr(self, 'db') and self.db:
-                        # Single source of truth: position_death_patterns
-                        # Aggregates deaths across all position buckets for this level
-                        level_deaths = self.db.execute_query("""
-                            SELECT fatal_action, SUM(death_count) as total_deaths
-                            FROM position_death_patterns
-                            WHERE game_type = ? AND level_number = ? AND is_active = 1
-                            GROUP BY fatal_action
-                            HAVING total_deaths >= 10
-                            ORDER BY total_deaths DESC
-                        """, (game_type, current_level))
+                        # Calculate position bucket (8x8 grid)
+                        bucket_size = 8
+                        if current_pos:
+                            bucket_x = current_pos[0] // bucket_size
+                            bucket_y = current_pos[1] // bucket_size
+                            
+                            # Query deaths at THIS position bucket (with nearby buckets for fuzzy matching)
+                            position_deaths = self.db.execute_query("""
+                                SELECT fatal_action, death_count, survival_count, 
+                                       danger_score, generations_since_update
+                                FROM position_death_patterns
+                                WHERE game_type = ? AND level_number = ? AND is_active = 1
+                                  AND bucket_x BETWEEN ? AND ?
+                                  AND bucket_y BETWEEN ? AND ?
+                                ORDER BY danger_score DESC
+                            """, (game_type, current_level, 
+                                  bucket_x - 1, bucket_x + 1,  # Adjacent buckets too
+                                  bucket_y - 1, bucket_y + 1))
+                        else:
+                            # No position known - use level-wide but with lower confidence
+                            position_deaths = self.db.execute_query("""
+                                SELECT fatal_action, 
+                                       SUM(death_count) as death_count,
+                                       SUM(survival_count) as survival_count,
+                                       AVG(danger_score) as danger_score,
+                                       MIN(generations_since_update) as generations_since_update
+                                FROM position_death_patterns
+                                WHERE game_type = ? AND level_number = ? AND is_active = 1
+                                GROUP BY fatal_action
+                                HAVING SUM(death_count) >= 20
+                            """, (game_type, current_level))
                         
-                        if level_deaths:
-                            for ld in level_deaths:
-                                fatal_action = ld['fatal_action']
-                                death_count = ld['total_deaths']
-                                if fatal_action not in deadly_action_nums:
-                                    deadly_action_nums.add(fatal_action)
-                                    logger.info(f"[MAP-INTEL-DEATH] L{current_level}: ACTION{fatal_action} killed {death_count} agents - blocking")
+                        if position_deaths:
+                            for pd in position_deaths:
+                                fatal_action = pd['fatal_action']
+                                deaths = pd['death_count'] or 0
+                                survivals = pd['survival_count'] or 0
+                                stored_danger = pd['danger_score'] or 0.5
+                                gens_since = pd['generations_since_update'] or 0
+                                
+                                # GRADUATED DANGER CALCULATION:
+                                # 1. Base danger from death/survival ratio
+                                total = deaths + survivals
+                                if total > 0:
+                                    death_ratio = deaths / total
+                                else:
+                                    death_ratio = 0.5
+                                
+                                # 2. Time decay: danger decreases if no recent deaths
+                                # Halves every 10 generations without update
+                                time_decay = 0.5 ** (gens_since / 10.0)
+                                
+                                # 3. Survival signal: if survivals exist, reduce danger
+                                # More survivals = more confidence action can be safe
+                                survival_dampening = 1.0 / (1.0 + survivals * 0.1)
+                                
+                                # 4. Sample size confidence: low sample = lower confidence
+                                sample_confidence = min(1.0, total / 20.0)
+                                
+                                # Combined danger score
+                                danger = death_ratio * time_decay * survival_dampening * sample_confidence
+                                
+                                # Store the highest danger for this action (from nearby buckets)
+                                if fatal_action not in action_danger_scores:
+                                    action_danger_scores[fatal_action] = danger
+                                else:
+                                    action_danger_scores[fatal_action] = max(action_danger_scores[fatal_action], danger)
+                            
+                            # Log only significant dangers (> 0.3)
+                            for action_num, danger in sorted(action_danger_scores.items(), key=lambda x: -x[1]):
+                                if danger > 0.3:
+                                    logger.info(f"[MAP-INTEL-DANGER] L{current_level} pos={current_pos}: ACTION{action_num} danger={danger:.2f}")
+                                    
                 except Exception as e:
                     logger.debug(f"[MAP-INTEL] Death pattern query failed: {e}")
+                
+                # Convert danger scores to avoidance decisions (graduated, not binary)
+                # HIGH danger (>0.7): 90% chance to avoid
+                # MEDIUM danger (0.4-0.7): 60% chance to avoid  
+                # LOW danger (0.2-0.4): 30% chance to avoid
+                # MINIMAL danger (<0.2): don't avoid
+                def should_avoid_action(action_num: int) -> bool:
+                    danger = action_danger_scores.get(action_num, 0.0)
+                    if danger > 0.7:
+                        return random.random() < 0.9
+                    elif danger > 0.4:
+                        return random.random() < 0.6
+                    elif danger > 0.2:
+                        return random.random() < 0.3
+                    return False
                 
                 if alternative_dirs:
                     # Use suggested directions from map intelligence
                     dir_to_action = {'up': 'ACTION1', 'down': 'ACTION2', 'left': 'ACTION3', 'right': 'ACTION4'}
                     recovery_candidates = [dir_to_action.get(d) for d in alternative_dirs if d in dir_to_action]
-                    # Filter out deadly actions!
-                    safe_candidates = [c for c in recovery_candidates if int(c.replace('ACTION', '')) not in deadly_action_nums]
+                    # Filter using graduated danger (probabilistic, not absolute)
+                    safe_candidates = [c for c in recovery_candidates if not should_avoid_action(int(c.replace('ACTION', '')))]
                     if safe_candidates:
                         recovery_action = random.choice(safe_candidates)
                     elif recovery_candidates:
-                        # All suggested alternatives are deadly - try perpendicular instead
+                        # All alternatives marked dangerous - try perpendicular
                         perp_actions = perpendicular_map[last_action]
-                        safe_perp = [a for a in perp_actions if int(a.replace('ACTION', '')) not in deadly_action_nums]
+                        safe_perp = [a for a in perp_actions if not should_avoid_action(int(a.replace('ACTION', '')))]
                         if safe_perp:
                             recovery_action = random.choice(safe_perp)
                         else:
-                            # ALL recovery options are deadly - don't reroute, let death avoidance handle it
-                            logger.warning(f"[MAP-INTEL] All recovery options are deadly - not rerouting!")
-                            recovery_action = None
+                            # High danger everywhere - pick least dangerous option
+                            all_options = recovery_candidates + list(perp_actions)
+                            if all_options:
+                                least_dangerous = min(all_options, 
+                                    key=lambda a: action_danger_scores.get(int(a.replace('ACTION', '')), 0.0))
+                                logger.info(f"[MAP-INTEL] All options risky, picking least dangerous: {least_dangerous}")
+                                recovery_action = least_dangerous
+                            else:
+                                recovery_action = None
                     else:
                         recovery_action = random.choice(perpendicular_map[last_action])
                 else:
                     perp_actions = perpendicular_map[last_action]
-                    # Filter out deadly actions!
-                    safe_perp = [a for a in perp_actions if int(a.replace('ACTION', '')) not in deadly_action_nums]
+                    # Filter using graduated danger
+                    safe_perp = [a for a in perp_actions if not should_avoid_action(int(a.replace('ACTION', '')))]
                     if safe_perp:
                         recovery_action = random.choice(safe_perp)
                     else:
-                        # ALL perpendicular options are deadly - don't reroute
-                        logger.warning(f"[MAP-INTEL] All perpendicular options {perp_actions} are deadly {deadly_action_nums} - not rerouting!")
-                        recovery_action = None
+                        # Pick least dangerous perpendicular option
+                        least_dangerous = min(perp_actions, 
+                            key=lambda a: action_danger_scores.get(int(a.replace('ACTION', '')), 0.0))
+                        logger.info(f"[MAP-INTEL] Perpendicular options risky, picking least dangerous: {least_dangerous}")
+                        recovery_action = least_dangerous
                 
                 # Record that we hit something at this position (for future reference)
-                current_pos = getattr(self, '_current_agent_position', None)
                 if current_pos:
                     if not hasattr(self, '_collision_positions'):
                         self._collision_positions = {}
