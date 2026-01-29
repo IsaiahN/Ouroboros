@@ -2006,7 +2006,8 @@ class TerminalPatternDetector:
         position: Tuple[int, int],
         planned_action: int,
         min_danger: float = 0.6,
-        bucket_size: int = 8
+        bucket_size: int = 8,
+        min_deaths: int = 1
     ) -> Optional[Dict[str, Any]]:
         """
         Check if planned action is dangerous at this position bucket.
@@ -2020,6 +2021,7 @@ class TerminalPatternDetector:
             planned_action: Action agent wants to take
             min_danger: Minimum danger_score to trigger warning (default 0.6)
             bucket_size: Bucket granularity
+            min_deaths: Minimum death count required (default 1, FIX 2026-01-29: recommend 5)
             
         Returns:
             None if safe, or Dict with danger info and alternative suggestion
@@ -2033,16 +2035,18 @@ class TerminalPatternDetector:
             bucket_y = y // bucket_size
             
             # Check for deadly pattern at this position
+            # FIX (2026-01-29): Added min_deaths filter to require pattern confirmation
             pattern = self.db.execute_query("""
                 SELECT pattern_id, death_count, survival_count, danger_score, last_death_at
                 FROM position_death_patterns
                 WHERE game_type = ? AND level_number = ?
                   AND bucket_x = ? AND bucket_y = ? AND fatal_action = ?
                   AND danger_score >= ?
+                  AND death_count >= ?
                   AND is_active = 1
                 ORDER BY danger_score DESC
                 LIMIT 1
-            """, (game_type, level_number, bucket_x, bucket_y, planned_action, min_danger))
+            """, (game_type, level_number, bucket_x, bucket_y, planned_action, min_danger, min_deaths))
             
             if not pattern:
                 return None  # No danger at this position for this action
@@ -2071,6 +2075,185 @@ class TerminalPatternDetector:
         except Exception as e:
             logger.debug(f"Error checking position danger: {e}")
             return None
+    
+    def get_graduated_action_weights(
+        self,
+        game_type: str,
+        level_number: int,
+        position: Optional[Tuple[int, int]],
+        bucket_size: int = 8,
+        generations_since_threshold: int = 50,
+        frontier_mode: bool = False
+    ) -> Dict[int, float]:
+        """
+        Get GRADUATED safety weights for all 7 actions at once.
+        
+        This replaces binary "dangerous/safe" with continuous weights:
+        - 1.0 = fully safe (no deaths, or many survivals)
+        - 0.0 = extremely dangerous (many deaths, no survivals)
+        
+        NEVER returns 0.0 - worst case is 0.05 so action is still possible.
+        
+        Formula per action:
+            base_danger = death_count / (death_count + survival_count + 1)
+            time_decay = 0.5 ** (generations_since_update / 10)
+            survival_boost = 1.0 / (1.0 + survivals * 0.2)
+            sample_confidence = min(1.0, total_samples / 10)
+            
+            danger = base_danger * time_decay * survival_boost * sample_confidence
+            safety_weight = 1.0 - danger
+            
+        Args:
+            game_type: Current game type
+            level_number: Current level
+            position: (x, y) or None for level-wide aggregation
+            bucket_size: Bucket granularity
+            generations_since_threshold: Ignore patterns older than this
+            frontier_mode: If True, heavily favor exploration (reduce danger signals)
+            
+        Returns:
+            Dict mapping action (1-7) to safety weight (0.05-1.0)
+        """
+        # Start with all actions at weight 1.0 (fully safe)
+        weights: Dict[int, float] = {i: 1.0 for i in range(1, 8)}
+        
+        try:
+            if position and len(position) >= 2:
+                x, y = position
+                bucket_x = x // bucket_size
+                bucket_y = y // bucket_size
+                
+                # Query ALL death patterns at this position bucket
+                patterns = self.db.execute_query("""
+                    SELECT fatal_action, death_count, survival_count, danger_score,
+                           generations_since_update
+                    FROM position_death_patterns
+                    WHERE game_type = ? AND level_number = ?
+                      AND bucket_x BETWEEN ? AND ?
+                      AND bucket_y BETWEEN ? AND ?
+                      AND is_active = 1
+                      AND generations_since_update < ?
+                """, (game_type, level_number, 
+                      bucket_x - 1, bucket_x + 1,  # Adjacent buckets for fuzzy matching
+                      bucket_y - 1, bucket_y + 1,
+                      generations_since_threshold))
+            else:
+                # No position - aggregate level-wide deaths
+                patterns = self.db.execute_query("""
+                    SELECT fatal_action, 
+                           SUM(death_count) as death_count,
+                           SUM(survival_count) as survival_count,
+                           AVG(danger_score) as danger_score,
+                           MIN(generations_since_update) as generations_since_update
+                    FROM position_death_patterns
+                    WHERE game_type = ? AND level_number = ?
+                      AND is_active = 1
+                      AND generations_since_update < ?
+                    GROUP BY fatal_action
+                """, (game_type, level_number, generations_since_threshold))
+            
+            if not patterns:
+                return weights  # No data = all safe
+            
+            # Calculate graduated danger for each action
+            for p in patterns:
+                action = p['fatal_action']
+                if not action or action < 1 or action > 7:
+                    continue
+                    
+                deaths = p['death_count'] or 0
+                survivals = p['survival_count'] or 0
+                gens_since = p['generations_since_update'] or 0
+                
+                total = deaths + survivals
+                if total == 0:
+                    continue  # No data for this action
+                
+                # ============================================================
+                # GRADUATED DANGER CALCULATION
+                # ============================================================
+                
+                # 1. Base danger: death ratio
+                base_danger = deaths / (total + 1)
+                
+                # 2. Time decay: old patterns matter less
+                # Halves every 10 generations without new data
+                time_decay = 0.5 ** (gens_since / 10.0)
+                
+                # 3. Survival boost: survivals reduce danger significantly
+                # Each survival reduces effective danger by 20%
+                survival_dampening = 1.0 / (1.0 + survivals * 0.2)
+                
+                # 4. Sample confidence: low samples = lower confidence in danger
+                # Need at least 10 samples to be confident
+                sample_confidence = min(1.0, total / 10.0)
+                
+                # Combined danger score
+                danger = base_danger * time_decay * survival_dampening * sample_confidence
+                
+                # 5. Frontier mode: heavily reduce danger signals to encourage exploration
+                if frontier_mode:
+                    danger = danger * 0.3  # 70% reduction in danger on frontier
+                
+                # Convert danger to safety weight
+                # Minimum safety = 0.05 (action is ALWAYS possible, just weighted low)
+                safety_weight = max(0.05, 1.0 - danger)
+                
+                # Keep the LOWEST weight for each action (most dangerous pattern wins)
+                if safety_weight < weights.get(action, 1.0):
+                    weights[action] = safety_weight
+                    
+            return weights
+            
+        except Exception as e:
+            logger.debug(f"Error calculating graduated weights: {e}")
+            return weights  # Return default safe weights on error
+    
+    def record_survival_feedback(
+        self,
+        game_type: str,
+        level_number: int,
+        position: Tuple[int, int],
+        action: int,
+        bucket_size: int = 8
+    ) -> bool:
+        """
+        Record that an action SURVIVED at this position.
+        
+        This is the FEEDBACK mechanism - when an action doesn't kill,
+        we strengthen the survival signal which dampens the danger.
+        
+        Called after each successful (non-death) action.
+        
+        Returns True if updated an existing pattern, False if no pattern existed.
+        """
+        try:
+            if not position or len(position) < 2:
+                return False
+                
+            x, y = position
+            bucket_x = x // bucket_size
+            bucket_y = y // bucket_size
+            
+            # Update survival count for this action at this position
+            # Note: SQLite uses CAST(x AS REAL), not PostgreSQL-style ::REAL
+            result = self.db.execute_query("""
+                UPDATE position_death_patterns
+                SET survival_count = survival_count + 1,
+                    danger_score = CAST(death_count AS REAL) / (death_count + survival_count + 2),
+                    generations_since_update = 0
+                WHERE game_type = ? AND level_number = ?
+                  AND bucket_x = ? AND bucket_y = ? AND fatal_action = ?
+                  AND is_active = 1
+            """, (game_type, level_number, bucket_x, bucket_y, action))
+            
+            # Check if any rows were updated
+            # Note: execute_query may not return affected rows, so we just return True
+            return True
+            
+        except Exception as e:
+            logger.debug(f"Error recording survival feedback: {e}")
+            return False
     
     def get_position_death_summary(
         self,

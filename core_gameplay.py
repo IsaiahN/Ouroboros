@@ -3724,6 +3724,70 @@ class GameplayEngine:
         results.sort(key=lambda x: x[1], reverse=True)
         return results
     
+    def _action_filter_get_graduated_weights(
+        self,
+        frame: List[List[int]],
+        position: Optional[Tuple[int, int]]
+    ) -> Dict[int, float]:
+        """
+        Get graduated filter weights for all actions (v2.0 - not binary).
+        
+        Instead of binary skip/pass, return weights 0.05-1.0 for each action:
+        - 1.0: No filter information, fully allowed
+        - 0.5-0.99: Some negative signal, reduced weight
+        - 0.05-0.49: Strong negative signal, heavily reduced
+        
+        Integrates with action_safety_weights system for weighted selection.
+        
+        Returns:
+            Dict mapping action_num (1-7) to weight (0.05-1.0)
+        """
+        weights = {i: 1.0 for i in range(1, 8)}  # Start fully allowed
+        
+        if not frame or not position:
+            return weights
+        
+        for action_num in range(1, 8):
+            action = f"ACTION{action_num}"
+            composite_penalty = 0.0
+            
+            # -----------------------------------------------------------------
+            # Layer 1: Exact cache check - strongest signal
+            # If we have cache data showing failure, penalize heavily
+            # -----------------------------------------------------------------
+            cache_result = self._action_filter_layer1_cache_check(frame, position, action)
+            if cache_result is False:
+                # Known failure - heavy penalty but not absolute block
+                composite_penalty += 0.6
+            
+            # -----------------------------------------------------------------
+            # Layer 2: Object detection - moderate signal
+            # No interactive object suggests action won't work
+            # -----------------------------------------------------------------
+            if not self._action_filter_layer2_object_prefilter(frame, position, action):
+                # No object to interact with - moderate penalty
+                composite_penalty += 0.3
+            
+            # -----------------------------------------------------------------
+            # Layer 3: Pattern prediction - variable signal
+            # Low predicted success = proportional penalty
+            # -----------------------------------------------------------------
+            prediction = self._action_filter_layer3_pattern_predict(frame, position, action)
+            if prediction is not None:
+                # prediction is 0.0-1.0 success probability
+                # Low prediction = higher penalty
+                layer3_penalty = max(0.0, 0.3 * (1.0 - prediction))
+                composite_penalty += layer3_penalty
+            
+            # -----------------------------------------------------------------
+            # Apply composite penalty to weight
+            # Cap penalty at 0.95 so weight is always >= 0.05
+            # -----------------------------------------------------------------
+            composite_penalty = min(0.95, composite_penalty)
+            weights[action_num] = max(0.05, 1.0 - composite_penalty)
+        
+        return weights
+    
     def _action_filter_reset_for_level(self) -> None:
         """Reset per-level caches (keep cross-level learning in pattern predictor)."""
         self._action_effectiveness_cache.clear()
@@ -6222,13 +6286,15 @@ class GameplayEngine:
                             
                             # FIX: Use self._previous_frame (captured BEFORE action) not action_handler.last_frame
                             # The action_handler.last_frame is updated AFTER the action, making comparison meaningless
+                            # FIX (2026-01-29): Add selection_source to track which decision system chose this action
                             self._recent_action_traces.append({
                                 'action_type': action,
                                 'frame_before': self._previous_frame if hasattr(self, '_previous_frame') else self.action_handler.last_frame,
                                 'frame_after': game_state.frame,
                                 'score_change': score_change,  # Q5: score delta
                                 'outcome_type': outcome_type,  # Q5: neutral/score_increase/game_over
-                                'frame_changed': frame_changed
+                                'frame_changed': frame_changed,
+                                'selection_source': getattr(self, '_last_selection_source', 'unknown'),  # FIX: Track decision source
                             })
                             # FULL GAME MEMORY: Keep ALL traces for duration of game
                             # Agent needs complete history to reason about discoveries
@@ -6306,6 +6372,26 @@ class GameplayEngine:
                                     self._last_score_change = score_change
                                 except Exception:
                                     pass  # Don't break gameplay for tracking
+                            
+                            # ================================================================
+                            # GRADUATED DANGER SYSTEM: Record survival feedback
+                            # FIX (2026-01-29): When an action SURVIVES (doesn't cause death),
+                            # record it to dampen the danger signal for that position+action.
+                            # This is the feedback loop that allows "unlearning" false danger.
+                            # ================================================================
+                            if game_state.state != 'GAME_OVER':
+                                try:
+                                    action_num_surv = int(action.replace('ACTION', '')) if isinstance(action, str) else action
+                                    game_type_surv = game_id[:4] if game_id else ''
+                                    agent_pos_surv = getattr(self, '_current_agent_position', None)
+                                    self._record_action_survival(
+                                        game_type=game_type_surv,
+                                        level_number=current_level,
+                                        position=agent_pos_surv,
+                                        action=action_num_surv
+                                    )
+                                except Exception:
+                                    pass  # Don't break gameplay for survival tracking
                             
                             # ================================================================
                             # BIRTHRIGHT PERCEPTION - Runs EVERY action, unconditionally
@@ -9330,6 +9416,7 @@ class GameplayEngine:
                         f"color_{discovered_color} (reliability: {reliability:.2f})"
                     )
                     logger.info(f"[DISCOVERY->ACTION] Exploiting: {discovered_action} (reliability {reliability:.2f})")
+                    self._last_selection_source = 'discovery_exploitation'  # FIX: Track selection source
                     return discovered_action, exploit_reason
                 elif reliability >= 0.3:
                     # Medium confidence - test the hypothesis again
@@ -9338,6 +9425,7 @@ class GameplayEngine:
                         f"color_{discovered_color} (reliability: {reliability:.2f}, testing...)"
                     )
                     logger.info(f"[DISCOVERY->ACTION] Testing hypothesis: {discovered_action}")
+                    self._last_selection_source = 'discovery_test'  # FIX: Track selection source
                     return discovered_action, exploit_reason
             # If discovery wasn't usable, continue with normal selection
         
@@ -9346,19 +9434,31 @@ class GameplayEngine:
         
         # ===================================================================
         # ===================================================================
-        # POSITION-BUCKET DEATH AVOIDANCE (Single Source of Truth)
+        # GRADUATED POSITION-BUCKET DANGER SYSTEM (v2.0 - 2026-01-29)
         # ===================================================================
-        # Uses position_death_patterns table for ALL death avoidance:
-        # 1. Position-specific: Deaths at agent's current position bucket
-        # 2. Level-wide: Aggregated deaths across all positions (in MAP-INTEL)
+        # PHILOSOPHY: NEVER HARD-BLOCK, ALWAYS WEIGHT
+        # 
+        # Instead of binary "safe/deadly", we compute safety WEIGHTS for all
+        # 7 actions. Actions are NEVER blocked, but dangerous actions get
+        # lower weights in the final selection. This allows:
+        # - Agents to explore "dangerous" paths when they're the best option
+        # - Survival signals to dampen danger over time
+        # - Time decay to reduce impact of old patterns
+        # - Weighted random selection instead of filtering
         #
-        # This replaces the old frame_hash based system which was too specific
-        # (required pixel-perfect frame match) and rarely triggered.
-        # Position buckets provide fuzzy matching: 8x8 pixel regions.
+        # Formula per action:
+        #   danger = base_danger * time_decay * survival_dampening * confidence
+        #   safety_weight = max(0.05, 1.0 - danger)  # Never zero!
+        #
+        # The graduated system REPLACES the old binary deadly_actions_for_frame.
+        # We keep deadly_actions_for_frame for backward compatibility with code
+        # that filters by it, but the main selection logic uses weights.
         # ===================================================================
-        deadly_actions_for_frame: Set[int] = set()
+        deadly_actions_for_frame: Set[int] = set()  # Backward compat (very low weight = "deadly")
+        action_safety_weights: Dict[int, float] = {i: 1.0 for i in range(1, 8)}  # New graduated weights
         current_action_count = loop_state.action_count if loop_state else 0
-        self._deadly_first_actions = deadly_actions_for_frame  # Store for filter stage
+        self._deadly_first_actions = deadly_actions_for_frame  # For old code compat
+        self._action_safety_weights = action_safety_weights  # New graduated weights
         self._deadly_check_action_count = current_action_count
         self._current_frame_hash = None  # Keep for recording purposes
         try:
@@ -9379,132 +9479,160 @@ class GameplayEngine:
                 self._current_frame_hash = current_frame_hash
                 
                 # ===================================================================
-                # POSITION-BUCKET DEATH CHECK (Fuzzy Position Matching)
+                # GRADUATED DANGER WEIGHTS (Replaces binary blocking)
                 # ===================================================================
-                # Single source of truth: position_death_patterns table
-                # Provides fuzzy matching: "deaths at positions 8-15 on level 5"
-                #
-                # FIX (2026-01-29): FALLBACK POSITION ESTIMATION
-                # When _current_agent_position is None (new level, no self-model yet),
-                # we STILL need to check death patterns! Otherwise agents die instantly
-                # on frontier levels before they can even build a self-model.
-                #
-                # Fallback strategy:
-                # 1. Check bucket (0,0) - common spawn point
-                # 2. Check center of frame - reasonable default
-                # 3. Check all high-death buckets for this level
-                # ===================================================================
+                # Get context-aware danger threshold for backward compat
+                danger_threshold = self._get_context_aware_danger_threshold(
+                    game_id, current_level, current_action_count
+                )
+                
+                # Determine if this is frontier exploration
+                is_frontier_level = self._is_frontier_level(game_id, current_level)
+                frontier_mode = is_frontier_level and current_action_count < 30
+                
                 agent_pos = getattr(self, '_current_agent_position', None)
                 
-                # FALLBACK: If no position known, still check death patterns!
-                if agent_pos is None and hasattr(self, 'terminal_detector') and self.terminal_detector:
-                    # Try common fallback positions: bucket (0,0) and frame center
-                    frame_height = len(frame) if frame else 64
-                    frame_width = len(frame[0]) if frame and frame[0] else 64
-                    fallback_positions = [
-                        (0, 0),  # Common spawn at origin
-                        (frame_width // 2, frame_height // 2),  # Frame center
-                    ]
+                # Use the NEW graduated weights system from terminal_detector
+                if hasattr(self, 'terminal_detector') and self.terminal_detector:
+                    action_safety_weights = self.terminal_detector.get_graduated_action_weights(
+                        game_type=game_type,
+                        level_number=current_level,
+                        position=agent_pos,  # None is OK - will use level-wide aggregation
+                        bucket_size=8,
+                        generations_since_threshold=50,  # Ignore patterns older than 50 gens
+                        frontier_mode=frontier_mode  # Extra permissive on frontier
+                    )
+                    self._action_safety_weights = action_safety_weights
                     
-                    # Query for high-death buckets on this level
-                    try:
-                        high_death_buckets = self.db.execute_query("""
-                            SELECT bucket_x, bucket_y, fatal_action, death_count
-                            FROM position_death_patterns
-                            WHERE game_type = ? AND level_number = ? AND is_active = 1
-                              AND death_count >= 10
-                            ORDER BY death_count DESC
-                            LIMIT 5
-                        """, (game_type, current_level))
-                        
-                        if high_death_buckets:
-                            # Add high-death buckets to check (converted to pixel coords)
-                            for hdb in high_death_buckets:
-                                # Bucket to pixel center: bucket_x * 8 + 4
-                                pixel_x = hdb['bucket_x'] * 8 + 4
-                                pixel_y = hdb['bucket_y'] * 8 + 4
-                                if (pixel_x, pixel_y) not in fallback_positions:
-                                    fallback_positions.append((pixel_x, pixel_y))
-                                # Also directly mark this action as deadly (regardless of position)
-                                deadly_actions_for_frame.add(hdb['fatal_action'])
-                                logger.info(
-                                    f"[DEATH-AVOID-FALLBACK] L{current_level}: ACTION{hdb['fatal_action']} "
-                                    f"killed {hdb['death_count']}x at bucket ({hdb['bucket_x']},{hdb['bucket_y']})"
-                                )
-                    except Exception as hdb_err:
-                        logger.debug(f"High-death bucket query failed: {hdb_err}")
-                    
-                    # Check fallback positions for additional deadly actions
-                    for fb_x, fb_y in fallback_positions[:3]:  # Limit to avoid too many queries
-                        for check_action in range(1, 8):
-                            if check_action in deadly_actions_for_frame:
-                                continue  # Already marked deadly
-                            try:
-                                danger_info = self.terminal_detector.check_position_danger(
-                                    game_type=game_type,
-                                    level_number=current_level,
-                                    position=(fb_x, fb_y),
-                                    planned_action=check_action,
-                                    min_danger=0.6,
-                                    bucket_size=8
-                                )
-                                if danger_info and danger_info.get('danger'):
-                                    deadly_actions_for_frame.add(check_action)
-                            except Exception:
-                                pass
-                    
-                    if deadly_actions_for_frame:
-                        self._deadly_first_actions = deadly_actions_for_frame
-                        logger.info(f"[DEATH-AVOID-FALLBACK] L{current_level}: Blocking {deadly_actions_for_frame} (position unknown, using fallback)")
-                
-                elif agent_pos and hasattr(self, 'terminal_detector') and self.terminal_detector:
-                    agent_x, agent_y = agent_pos
-                    # Check ALL 7 actions for position-bucket danger
-                    for check_action in range(1, 8):
-                        danger_info = self.terminal_detector.check_position_danger(
-                            game_type=game_type,
-                            level_number=current_level,
-                            position=(agent_x, agent_y),  # FIX: Tuple, not separate x/y
-                            planned_action=check_action,  # FIX: Correct param name
-                            min_danger=0.6,  # FIX: Float (danger score threshold)
-                            bucket_size=8  # Fuzzy matching in 8x8 regions
-                        )
-                        if danger_info and danger_info.get('danger'):
-                            deadly_actions_for_frame.add(check_action)
-                            death_count = danger_info.get('death_count', 0)
-                            danger_score = danger_info.get('danger_score', 0)
-                            bucket = danger_info.get('position_bucket', (0, 0))
+                    # Log significant danger weights (< 0.5)
+                    danger_actions = [(a, w) for a, w in action_safety_weights.items() if w < 0.5]
+                    if danger_actions:
+                        for action, weight in sorted(danger_actions, key=lambda x: x[1]):
                             logger.info(
-                                f"[POSITION-BUCKET] L{current_level} bucket {bucket}: "
-                                f"ACTION{check_action} killed {death_count}x (danger={danger_score:.2f})"
+                                f"[DANGER-WEIGHT] L{current_level} pos={agent_pos}: "
+                                f"ACTION{action} safety={weight:.2f} (frontier={frontier_mode})"
                             )
                     
+                    # For backward compatibility: mark very low weight actions as "deadly"
+                    # This keeps old code working while new code uses weights
+                    for action, weight in action_safety_weights.items():
+                        if weight < 0.15:  # Very dangerous - add to old-style blocklist
+                            deadly_actions_for_frame.add(action)
+                    
                     if deadly_actions_for_frame:
                         self._deadly_first_actions = deadly_actions_for_frame
-                        logger.info(f"[DEATH-AVOID] Position-bucket: blocking {deadly_actions_for_frame} at ({agent_x},{agent_y})")
+                        logger.info(f"[DANGER-WEIGHT] Very dangerous (weight < 0.15): {deadly_actions_for_frame}")
+                
         except Exception as e:
-            logger.debug(f"Position-specific death check failed: {e}")
+            logger.debug(f"Graduated danger check failed: {e}")
         
         # ===================================================================
-        # EMBEDDING-BASED ACTION SUGGESTION (Self-Supervised Dynamics)
+        # PRIOR LESSONS INTEGRATION (v2.0 - GRADUATED)
+        # ===================================================================
+        # The lessons_learned_engine collects network knowledge from previous
+        # games. Prior lessons now MODIFY action_safety_weights instead of
+        # binary blocking, using the same graduated philosophy.
+        #
+        # Formula:
+        #   lesson_penalty = confidence * severity * recency_factor
+        #   action_safety_weights[action] *= (1.0 - lesson_penalty)
+        #
+        # Where:
+        #   confidence: How sure is the lesson (0.0-1.0)
+        #   severity: How bad is the outcome (death=0.8, failure=0.3)
+        #   recency_factor: Newer lessons matter more (1.0 for current, decay)
+        # ===================================================================
+        try:
+            prior_lessons = []
+            
+            # Try to get from game_config first (set by evolution runner)
+            if hasattr(self, 'game_config') and self.game_config.get('prior_lessons'):
+                prior_lessons = self.game_config['prior_lessons']
+            
+            # Also try from sensation context if available
+            if not prior_lessons:
+                sensation_ctx = getattr(self, '_last_sensation_context', {})
+                if sensation_ctx and isinstance(sensation_ctx, dict):
+                    prior_lessons = sensation_ctx.get('prior_lessons', [])
+            
+            if prior_lessons:
+                lessons_applied = 0
+                for idx, lesson in enumerate(prior_lessons[:10]):  # Limit to top 10 salient lessons
+                    if isinstance(lesson, dict):
+                        avoid_action = lesson.get('avoid_action') or lesson.get('action_to_avoid')
+                        confidence = lesson.get('confidence', 0.5)
+                        
+                        # Determine severity based on lesson type
+                        causes_death = lesson.get('causes_death', False) or lesson.get('is_death', False)
+                        causes_failure = lesson.get('causes_failure', False) or lesson.get('is_failure', False)
+                        
+                        if causes_death:
+                            severity = 0.8  # Death lessons are severe
+                        elif causes_failure:
+                            severity = 0.3  # Failure lessons are moderate
+                        else:
+                            severity = 0.1  # Other lessons are mild
+                        
+                        # Recency factor: earlier lessons in list are more salient
+                        recency_factor = 1.0 - (idx * 0.05)  # 5% decay per position
+                        
+                        # Calculate graduated penalty
+                        lesson_penalty = confidence * severity * recency_factor
+                        lesson_penalty = min(0.9, lesson_penalty)  # Cap at 90% reduction
+                        
+                        if avoid_action and lesson_penalty > 0.05:  # Only apply meaningful penalties
+                            try:
+                                action_num = int(str(avoid_action).replace('ACTION', ''))
+                                if 1 <= action_num <= 7:
+                                    old_weight = action_safety_weights.get(action_num, 1.0)
+                                    new_weight = max(0.05, old_weight * (1.0 - lesson_penalty))
+                                    action_safety_weights[action_num] = new_weight
+                                    self._action_safety_weights = action_safety_weights
+                                    lessons_applied += 1
+                                    
+                                    # Only log significant penalties
+                                    if lesson_penalty >= 0.3:
+                                        logger.info(
+                                            f"[PRIOR-LESSON] ACTION{action_num} weight {old_weight:.2f} -> {new_weight:.2f} "
+                                            f"(penalty={lesson_penalty:.2f}, conf={confidence:.2f}, severity={severity:.1f})"
+                                        )
+                            except (ValueError, TypeError):
+                                pass
+                
+                if lessons_applied > 0:
+                    # For backward compat: mark very low weight actions as "deadly"
+                    for action_num, weight in action_safety_weights.items():
+                        if weight < 0.15 and action_num not in deadly_actions_for_frame:
+                            deadly_actions_for_frame.add(action_num)
+                    self._deadly_first_actions = deadly_actions_for_frame
+                    
+                    # Log summary of weights after lessons
+                    low_weight_actions = [(a, w) for a, w in action_safety_weights.items() if w < 0.5]
+                    if low_weight_actions:
+                        logger.info(f"[PRIOR-LESSONS] Applied {lessons_applied} lessons. Low-weight actions: {low_weight_actions}")
+        except Exception as lesson_err:
+            logger.debug(f"Prior lessons integration failed: {lesson_err}")
+        
+        # ===================================================================
+        # EMBEDDING-BASED ACTION SUGGESTION (Self-Supervised Dynamics v2.0)
         # ===================================================================
         # Query learned frame representations to find similar past situations.
         # This provides IMPLICIT GENERALIZATION - the neural network learns
         # representations that capture structural similarity, enabling transfer
         # of knowledge across games without explicit rule encoding.
         #
-        # Only use as a TIE-BREAKER or when no other strategy has high confidence.
-        # Embedding similarity is a SOFT signal, not a hard rule.
+        # v2.0 GRADUATED APPROACH:
+        # Instead of binary threshold (>= 0.5 = use, < 0.5 = ignore), the 
+        # embedding suggestion now BOOSTS the action_safety_weights for the
+        # suggested action proportionally to confidence. This way:
+        # - High confidence (0.7+): Strong boost, likely to be selected
+        # - Medium confidence (0.4-0.7): Moderate boost, tiebreaker
+        # - Low confidence (<0.4): Minimal boost, doesn't dominate
         # ===================================================================
         embedding_suggestion = None
         try:
             if hasattr(self, 'self_model') and self.self_model:
                 # CROSS-GAME TRANSFER: Search ALL games and levels for similar situations
-                # This enables implicit generalization - the dynamics model learns
-                # structural similarity across games, so patterns from SP80 can help FT09
-                # and vice versa. The embedding space clusters similar puzzles regardless
-                # of game_type, color palette, or position.
-                
                 embedding_suggestion = self.self_model.get_embedding_suggested_action(
                     game_type=None,   # Search across ALL games
                     level=None,       # Search across ALL levels
@@ -9512,16 +9640,55 @@ class GameplayEngine:
                     top_k=10          # More candidates for cross-game voting
                 )
                 
-                if embedding_suggestion and embedding_suggestion.get('confidence', 0) >= 0.7:
-                    # High confidence embedding match - use it!
-                    suggested_action = f"ACTION{embedding_suggestion['suggested_action']}"
-                    reason = (
-                        f"[EMBEDDING-MATCH] Similar situation found ({embedding_suggestion['similar_count']} matches), "
-                        f"confidence {embedding_suggestion['confidence']:.2f}, "
-                        f"avg_outcome {embedding_suggestion.get('avg_outcome', 0):.2f}"
-                    )
-                    logger.info(f"[EMBEDDING] Using learned suggestion: {suggested_action} (conf={embedding_suggestion['confidence']:.2f})")
-                    return suggested_action, reason
+                if embedding_suggestion:
+                    confidence = embedding_suggestion.get('confidence', 0)
+                    suggested_action_num = embedding_suggestion.get('suggested_action')
+                    avg_outcome = embedding_suggestion.get('avg_outcome', 0)
+                    
+                    # v2.0: GRADUATED - boost action weights instead of binary decision
+                    if suggested_action_num and 1 <= suggested_action_num <= 7:
+                        action_safety_weights = getattr(self, '_action_safety_weights', {i: 1.0 for i in range(1, 8)})
+                        
+                        # Calculate boost: confidence * outcome_factor
+                        # - confidence 0.7 with good outcome (1.0) -> 1.5x boost
+                        # - confidence 0.4 with neutral outcome (0) -> 1.2x boost
+                        # - confidence 0.4 with bad outcome (-0.5) -> 1.0x (no boost)
+                        # If outcome is negative, reduce confidence contribution proportionally
+                        outcome_factor = 1.0 + (avg_outcome * 0.5)  # Range: 0.5 to 1.5
+                        outcome_factor = max(0.5, min(1.5, outcome_factor))  # Clamp
+                        
+                        # Only boost if outcome is not too bad
+                        if outcome_factor >= 0.8:  # Don't boost if outcome was very bad
+                            boost = 1.0 + (confidence * outcome_factor * 0.5)  # 1.0-1.75 range
+                            
+                            old_weight = action_safety_weights.get(suggested_action_num, 1.0)
+                            new_weight = min(2.0, old_weight * boost)  # Cap at 2.0
+                            action_safety_weights[suggested_action_num] = new_weight
+                            self._action_safety_weights = action_safety_weights
+                            
+                            if confidence >= 0.4:  # Log when meaningful
+                                logger.info(
+                                    f"[EMBEDDING-BOOST] ACTION{suggested_action_num} weight {old_weight:.2f} -> {new_weight:.2f} "
+                                    f"(conf={confidence:.2f}, outcome={avg_outcome:.2f}, boost={boost:.2f})"
+                                )
+                        else:
+                            # Outcome was bad - don't boost, maybe even warn
+                            logger.debug(
+                                f"[EMBEDDING-NO-BOOST] ACTION{suggested_action_num} skipped boost - "
+                                f"bad outcome {avg_outcome:.2f} (conf={confidence:.2f})"
+                            )
+                    
+                    # HIGH CONFIDENCE: Also return as direct suggestion (backward compat)
+                    if confidence >= 0.6 and suggested_action_num:
+                        suggested_action = f"ACTION{suggested_action_num}"
+                        reason = (
+                            f"[EMBEDDING-MATCH] Similar situation found ({embedding_suggestion.get('similar_count', 0)} matches), "
+                            f"confidence {confidence:.2f}, "
+                            f"avg_outcome {avg_outcome:.2f}"
+                        )
+                        logger.info(f"[EMBEDDING] Using learned suggestion: {suggested_action} (conf={confidence:.2f})")
+                        self._last_selection_source = 'embedding_suggestion'
+                        return suggested_action, reason
         except Exception as embed_err:
             logger.debug(f"Embedding suggestion failed (non-critical): {embed_err}")
         
@@ -9551,8 +9718,30 @@ class GameplayEngine:
                     exploration_mode = confidence_data.get('mode', 'random')
                     map_confidence = confidence_data.get('confidence', 0.0)
                     
+                    # FIX (2026-01-29): INVERTED TOPOLOGY LOGIC
+                    # OLD: Only help when map_confidence >= 0.5 (backwards - already know what to do)
+                    # NEW: Help when map_confidence < 0.3 (when LOST and need guidance)
+                    # Topology should guide exploration, not confirm known paths.
+                    
+                    # When confidence is LOW, use topology to suggest safe exploration
+                    if map_confidence < 0.3:
+                        # Get any known safe transitions from similar frames
+                        topo_suggestion = self._suggest_safe_action_from_topology(
+                            game_type=game_type,
+                            level_number=current_level,
+                            frame=game_state.frame,
+                            exclude_actions=deadly_actions_for_frame
+                        )
+                        
+                        if topo_suggestion:
+                            action_num, reason = topo_suggestion
+                            action_str = f"ACTION{action_num}"
+                            logger.info(f"[FRONTIER-TOPO] L{current_level} LOW confidence mode (conf={map_confidence:.2f}): guiding exploration")
+                            self._last_selection_source = 'frontier_topology_low_conf'
+                            return action_str, f"[FRONTIER-TOPO-GUIDE] {reason} (map conf={map_confidence:.2f}, helping when LOST)"
+                    
                     # In 'exploit' mode (confidence > 0.5), prefer known-safe actions
-                    if exploration_mode == 'exploit' and map_confidence >= 0.5:
+                    elif exploration_mode == 'exploit' and map_confidence >= 0.5:
                         topo_suggestion = self._suggest_safe_action_from_topology(
                             game_type=game_type,
                             level_number=current_level,
@@ -9564,6 +9753,7 @@ class GameplayEngine:
                             action_num, reason = topo_suggestion
                             action_str = f"ACTION{action_num}"
                             logger.info(f"[FRONTIER-TOPO] L{current_level} exploit mode (conf={map_confidence:.2f}): {reason}")
+                            self._last_selection_source = 'frontier_topology_exploit'
                             return action_str, reason
                     
                     elif exploration_mode == 'systematic':
@@ -9589,6 +9779,7 @@ class GameplayEngine:
                             action_str = f"ACTION{action_num}"
                             reason = f"[FRONTIER-TOPO] L{current_level} systematic: trying unexplored ACTION{action_num} (map coverage building)"
                             logger.info(reason)
+                            self._last_selection_source = 'frontier_topology_systematic'  # FIX: Track selection source
                             return action_str, reason
                     
                     # In 'random' mode or if no suggestion, continue with normal selection
@@ -10435,79 +10626,97 @@ class GameplayEngine:
                 logger.debug(f"Theory-gated scoring failed: {tg_err}")
             
             # ===============================================================
-            # ACTION EFFECTIVENESS FILTER - StochasticGoose-inspired
+            # ACTION EFFECTIVENESS FILTER - StochasticGoose-inspired (v2.0)
             # ===============================================================
-            # Check if the proposed action should be filtered based on:
-            # 1. Layer 1: Exact-match cache (this action failed here before)
-            # 2. Layer 2: Object detection (no interactive object at position)  
-            # 3. Layer 3: Pattern prediction (low success rate for this context)
+            # Instead of binary skip/pass, use graduated weights that combine
+            # with the action_safety_weights system. This allows effectiveness
+            # information to influence selection without hard blocking.
             #
-            # If filtered, try alternative actions in order of predicted success.
-            # This prevents wasting actions on known-ineffective moves.
+            # The filter layers provide signals:
+            # - Layer 1 (cache): Known failure = 0.6 penalty
+            # - Layer 2 (object): No object = 0.3 penalty  
+            # - Layer 3 (pattern): Low prediction = proportional penalty
+            #
+            # These combine with safety weights for weighted random selection.
             # ===============================================================
             try:
                 _filter_frame = getattr(game_state, 'frame', None)
                 _filter_pos = getattr(self, '_current_agent_position', None)
                 
                 if _filter_frame is not None and _filter_pos is not None and action.startswith('ACTION'):
-                    should_skip, skip_reason = self._action_filter_should_skip(
-                        _filter_frame, _filter_pos, action
-                    )
+                    # Get graduated filter weights (0.05-1.0 for each action)
+                    filter_weights = self._action_filter_get_graduated_weights(_filter_frame, _filter_pos)
                     
-                    if should_skip:
-                        # Try to find an alternative action
-                        _filter_candidates = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION6', 'ACTION7']
-                        _filter_candidates.remove(action) if action in _filter_candidates else None
+                    # Merge with existing action_safety_weights (multiplicative)
+                    action_safety_weights = getattr(self, '_action_safety_weights', {i: 1.0 for i in range(1, 8)})
+                    for action_num, filter_weight in filter_weights.items():
+                        old_weight = action_safety_weights.get(action_num, 1.0)
+                        action_safety_weights[action_num] = max(0.05, old_weight * filter_weight)
+                    self._action_safety_weights = action_safety_weights
+                    
+                    # Check if current action has very low weight - consider alternative
+                    action_num = int(action.replace('ACTION', ''))
+                    current_weight = action_safety_weights.get(action_num, 1.0)
+                    
+                    if current_weight < 0.25:  # Very low weight - try to find better alternative
+                        # Find action with highest weight
+                        best_action = max(action_safety_weights.keys(), key=lambda a: action_safety_weights.get(a, 0))
+                        best_weight = action_safety_weights.get(best_action, 1.0)
                         
-                        alternative_found = False
-                        for alt_action in _filter_candidates:
-                            alt_skip, _ = self._action_filter_should_skip(
-                                _filter_frame, _filter_pos, alt_action
-                            )
-                            if not alt_skip:
-                                original_action = action
-                                action = alt_action
-                                reason = f"{skip_reason} -> {alt_action} | {reason[:60]}"
-                                alternative_found = True
-                                logger.info(f"[ACTION-FILTER] Blocked {original_action}, using {alt_action}")
-                                break
-                        
-                        if not alternative_found:
-                            # All actions filtered - proceed with original but log warning
-                            logger.warning(f"[ACTION-FILTER] All actions filtered at {_filter_pos}, proceeding with {action}")
+                        # Only switch if alternative is significantly better (2x or more)
+                        if best_weight > current_weight * 2:
+                            original_action = action
+                            action = f"ACTION{best_action}"
+                            reason = f"[FILTER-GRAD] w={current_weight:.2f} -> ACTION{best_action} w={best_weight:.2f} | {reason[:50]}"
+                            logger.info(f"[ACTION-FILTER-GRAD] Low weight {original_action} ({current_weight:.2f}) -> {action} ({best_weight:.2f})")
+                    
+                    # Log significant weight reductions for debugging
+                    low_weights = [(a, w) for a, w in action_safety_weights.items() if w < 0.5]
+                    if low_weights:
+                        logger.debug(f"[FILTER-WEIGHTS] Low weights after 3-layer filter: {low_weights}")
             except Exception as filter_err:
                 logger.debug(f"Action filter check failed: {filter_err}")
             
             # ===============================================================
-            # POSITION-SPECIFIC DEATH AVOIDANCE FILTER
+            # POSITION-SPECIFIC DEATH AVOIDANCE (v2.0 - GRADUATED)
             # ===============================================================
-            # Check if the proposed action is deadly for THIS position bucket.
-            # Unlike level-wide avoidance, this is position-specific:
-            # - "Don't press LEFT when near spawn position with enemy to left"
-            # - NOT "Don't press LEFT anywhere on level 5"
-            # The deadly actions set was computed from position_death_patterns.
+            # Instead of binary blocking, use the graduated action_safety_weights
+            # that were computed earlier from position_death_patterns.
+            #
+            # The weights already incorporate:
+            # - Death pattern danger scores (time decayed)
+            # - Survival feedback dampening  
+            # - Sample confidence adjustments
+            # - Prior lessons integration
+            # - 3-layer filter integration
+            #
+            # Now we use weighted random selection to choose the actual action.
+            # Low-weight actions can still be selected, just less often.
             # ===============================================================
             try:
-                _deadly_actions = getattr(self, '_deadly_first_actions', set())
-                # Position-specific: applies to any position bucket that has death history
-                if _deadly_actions and action.startswith('ACTION'):
-                    # Extract action number
+                action_safety_weights = getattr(self, '_action_safety_weights', {i: 1.0 for i in range(1, 8)})
+                
+                if action.startswith('ACTION'):
                     action_num = int(action.replace('ACTION', ''))
-                    if action_num in _deadly_actions:
-                        # Find an alternative action that isn't deadly in THIS position
-                        all_actions = [1, 2, 3, 4, 5, 6, 7]
-                        safe_actions = [a for a in all_actions if a not in _deadly_actions]
+                    current_weight = action_safety_weights.get(action_num, 1.0)
+                    
+                    # Check if current action is significantly below average weight
+                    avg_weight = sum(action_safety_weights.values()) / 7
+                    
+                    if current_weight < 0.3 and current_weight < avg_weight * 0.5:
+                        # Current action is much riskier than alternatives
+                        # Use weighted selection to pick a safer action
+                        selected_action = self._weighted_action_selection(action_safety_weights)
                         
-                        if safe_actions:
-                            alt_action_num = random.choice(safe_actions)
+                        if selected_action != action_num:
                             original_action = action
-                            action = f"ACTION{alt_action_num}"
-                            frame_hash = getattr(self, '_current_frame_hash', None)
-                            frame_hash_str = frame_hash[:8] if frame_hash else 'unknown'
-                            reason = f"[POS-BUCKET-AVOID] {original_action} deadly at pos bucket -> {action} | {reason[:40]}"
-                            logger.info(f"[POS-BUCKET-AVOID] Blocked {original_action}, using {action}")
-                        else:
-                            logger.warning(f"[POS-BUCKET-AVOID] All actions deadly at this position! Proceeding with {action}")
+                            action = f"ACTION{selected_action}"
+                            new_weight = action_safety_weights.get(selected_action, 1.0)
+                            reason = f"[GRADUATED-SAFE] {original_action} w={current_weight:.2f} -> {action} w={new_weight:.2f} | {reason[:40]}"
+                            logger.info(f"[GRADUATED-SAFE] Weight-based switch: {original_action} ({current_weight:.2f}) -> {action} ({new_weight:.2f})")
+                        
+            except Exception as death_avoid_err:
+                logger.debug(f"Position death avoidance failed: {death_avoid_err}")
             except Exception as death_avoid_err:
                 logger.debug(f"Position death avoidance failed: {death_avoid_err}")
             
@@ -22993,6 +23202,46 @@ class GameplayEngine:
         
         return result
 
+    def _get_context_aware_danger_threshold(self, game_id: str, level: int, action_count: int) -> float:
+        """
+        Get dynamic danger threshold based on gameplay context.
+        
+        FIX (2026-01-29): Replaces flat 0.6 threshold with context-aware values.
+        From external review: frontier levels need exploration, spawn needs protection.
+        
+        Context Hierarchy:
+        - Frontier first 30 actions: 0.98 (very permissive - explore!)
+        - Checkpoint frontier: 0.97 (permissive - must take risks)
+        - Spawn protection (first 3 actions): 0.85 (strict - don't die immediately)
+        - Normal gameplay: 0.90 (standard)
+        
+        Args:
+            game_id: Current game ID
+            level: Current level number  
+            action_count: Actions taken so far on this level
+            
+        Returns:
+            Danger threshold (0.0-1.0) - only block actions above this
+        """
+        is_frontier = self._is_frontier_level(game_id, level)
+        is_replaying_checkpoint = getattr(self, '_replaying_checkpoint', False)
+        at_checkpoint_frontier = getattr(self, '_at_checkpoint_frontier', False)
+        
+        # Frontier levels need exploration (first 30 actions especially)
+        if is_frontier and action_count < 30:
+            return 0.98  # Very permissive - let them explore dangerous areas
+        
+        # At checkpoint frontier, must take risks to advance
+        if is_replaying_checkpoint and at_checkpoint_frontier:
+            return 0.97  # Permissive
+        
+        # Spawn protection (first 3 actions after level start)
+        if action_count < 3:
+            return 0.85  # Very strict - don't die immediately
+        
+        # Normal gameplay
+        return 0.90  # Standard threshold
+
     def _is_frontier_level(self, game_id: str, level: int) -> bool:
         """
         Check if this level is a frontier (unexplored by network).
@@ -23034,6 +23283,84 @@ class GameplayEngine:
         except Exception as e:
             logger.debug(f"Error checking frontier status: {e}")
             return True  # Assume frontier on error
+
+    def _weighted_action_selection(
+        self, 
+        action_safety_weights: Dict[int, float],
+        candidate_actions: Optional[List[int]] = None
+    ) -> int:
+        """
+        Select an action using weighted random choice based on safety weights.
+        
+        FIX (2026-01-29): This replaces binary filtering with probabilistic selection.
+        - High safety weight = high probability of selection
+        - Low safety weight = low probability (but NEVER zero!)
+        - Minimum weight is 0.05, so even "dangerous" actions can be chosen
+        
+        Args:
+            action_safety_weights: Dict mapping action (1-7) to safety weight (0.05-1.0)
+            candidate_actions: Optional list of actions to consider (default: 1-7)
+            
+        Returns:
+            Selected action number (1-7)
+        """
+        if candidate_actions is None:
+            candidate_actions = list(range(1, 8))
+        
+        # Get weights for candidates only
+        weights = [action_safety_weights.get(a, 1.0) for a in candidate_actions]
+        
+        # Normalize weights (ensure they sum to positive number)
+        total = sum(weights)
+        if total <= 0:
+            # Fallback: uniform selection
+            return random.choice(candidate_actions)
+        
+        # Weighted random choice
+        r = random.random() * total
+        cumulative = 0.0
+        for action, weight in zip(candidate_actions, weights):
+            cumulative += weight
+            if r <= cumulative:
+                return action
+        
+        # Fallback (shouldn't reach here)
+        return candidate_actions[-1]
+
+    def _record_action_survival(
+        self,
+        game_type: str,
+        level_number: int,
+        position: Optional[Tuple[int, int]],
+        action: int
+    ) -> None:
+        """
+        Record that an action SURVIVED (didn't cause death) at this position.
+        
+        This is the FEEDBACK loop for the graduated danger system:
+        - When an action succeeds, increase survival_count
+        - This dampens the danger signal over time
+        - Allows agents to "unlearn" false danger patterns
+        
+        Called after each successful (non-death) frame transition.
+        
+        Args:
+            game_type: Current game type
+            level_number: Current level
+            position: Agent position (x, y) or None
+            action: Action that was taken (1-7)
+        """
+        try:
+            if hasattr(self, 'terminal_detector') and self.terminal_detector:
+                self.terminal_detector.record_survival_feedback(
+                    game_type=game_type,
+                    level_number=level_number,
+                    position=position,
+                    action=action,
+                    bucket_size=8
+                )
+        except Exception as e:
+            logger.debug(f"Survival feedback recording failed: {e}")
 
     # =========================================================================
     # FRONTIER CHECKPOINT SYSTEM (Constructive Pathfinding)
