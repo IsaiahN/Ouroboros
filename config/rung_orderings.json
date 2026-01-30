@@ -1,0 +1,70 @@
+{
+  "_comment": "Custom decision rung orderings. Lower priority number = evaluated first.",
+  
+  "experimental_curiosity_first": [
+    ["infinite_loop_breaker", 1],
+    ["exploration_phase", 5],
+    ["survey", 10],
+    ["metacognitive_prediction", 15],
+    ["scientific_method", 20],
+    ["questioning_engine", 25],
+    ["two_streams", 30],
+    ["death_avoidance", 35],
+    ["network_wisdom", 40],
+    ["discovery_exploitation", 45],
+    ["embedding_suggestion", 50],
+    ["cods_engine", 55],
+    ["smart_action_selection", 99]
+  ],
+  
+  "minimal_fear": [
+    ["infinite_loop_breaker", 1],
+    ["survey", 5],
+    ["discovery_exploitation", 10],
+    ["embedding_suggestion", 15],
+    ["network_wisdom", 20],
+    ["cods_engine", 25],
+    ["exploration_phase", 30],
+    ["scientific_method", 35],
+    ["death_avoidance", 90],
+    ["smart_action_selection", 99]
+  ],
+  
+  "maximum_caution": [
+    ["infinite_loop_breaker", 1],
+    ["death_avoidance", 2],
+    ["questioning_engine", 5],
+    ["survey", 10],
+    ["network_wisdom", 15],
+    ["embedding_suggestion", 20],
+    ["discovery_exploitation", 25],
+    ["scientific_method", 30],
+    ["exploration_phase", 35],
+    ["cods_engine", 40],
+    ["smart_action_selection", 99]
+  ],
+  
+  "network_learner": [
+    ["infinite_loop_breaker", 1],
+    ["network_wisdom", 5],
+    ["embedding_suggestion", 10],
+    ["death_avoidance", 15],
+    ["discovery_exploitation", 20],
+    ["two_streams", 25],
+    ["survey", 30],
+    ["scientific_method", 35],
+    ["cods_engine", 40],
+    ["smart_action_selection", 99]
+  ],
+  
+  "pure_exploration": [
+    ["infinite_loop_breaker", 1],
+    ["survey", 5],
+    ["exploration_phase", 10],
+    ["questioning_engine", 15],
+    ["scientific_method", 20],
+    ["metacognitive_prediction", 25],
+    ["death_avoidance", 80],
+    ["smart_action_selection", 99]
+  ]
+}

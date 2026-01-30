@@ -1,13 +1,33 @@
+# =============================================================================
+# Core Dependencies
+# =============================================================================
 python-dotenv>=1.0.0
 aiohttp>=3.9.0
 numpy>=1.24.0
 pandas>=2.0.0
+
+# =============================================================================
+# ARC-AGI 3 Official SDK (NEW - January 2026)
+# =============================================================================
+# Official Python SDK for ARC-AGI-3 environments
+# Docs: https://docs.arcprize.org/
+arc-agi>=0.1.0
+
+# =============================================================================
+# Development & Testing
+# =============================================================================
 pydeps>=1.12.0
 pytest>=8.0.0
-torch>=2.0.0  # CPU-only, for learned representations (Self-Supervised Dynamics)
 vulture>=2.11  # Dead code detection (Rule 3: No Orphaned Code)
 
+# =============================================================================
+# Machine Learning (CPU-only)
+# =============================================================================
+torch>=2.0.0  # For learned representations (Self-Supervised Dynamics)
+
+# =============================================================================
 # Optional: Install Graphviz separately to view dependency graphs as SVG
 # Windows: https://graphviz.org/download/ (add to PATH)
 # Linux: sudo apt-get install graphviz
 # macOS: brew install graphviz
+# =============================================================================

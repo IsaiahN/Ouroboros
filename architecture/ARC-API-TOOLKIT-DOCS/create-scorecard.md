@@ -1,0 +1,54 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://docs.arcprize.org/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+# Create Scorecard
+
+> How to create a custom scorecard using the ARC-AGI Toolkit
+
+## Overview
+
+While the Toolkit automatically manages a default scorecard, you can create your own custom scorecards with tags and metadata to organize your experiments.
+
+## Creating a Custom Scorecard
+
+Use `create_scorecard()` to create a scorecard with custom fields:
+
+```python  theme={null}
+import arc_agi
+
+arc = arc_agi.Arcade()
+
+# Create a scorecard with custom fields
+scorecard_id = arc.create_scorecard(
+    source_url="https://github.com/my/repo",
+    tags=["experiment", "v1"],
+    opaque={"custom_field": "any data you want"}
+)
+
+print(f"Created scorecard: {scorecard_id}")
+```
+
+## Using Your Scorecard
+
+Pass the scorecard ID when creating environments:
+
+```python  theme={null}
+# Use your custom scorecard when making environments
+env = arc.make("ls20", scorecard_id=scorecard_id, render_mode="terminal")
+```
+
+All game runs will now be tracked under your custom scorecard.
+
+## Scorecard Fields
+
+| Field        | Description                                             |
+| ------------ | ------------------------------------------------------- |
+| `tags`       | Array of strings to categorize and filter scorecards    |
+| `source_url` | Optional URL field (e.g., link to your code repository) |
+| `opaque`     | Optional field for arbitrary data                       |
+
+## Next Steps
+
+* [Get Scorecard](/toolkit/get-scorecard) — Retrieve scorecard results
+* [Close Scorecard](/toolkit/close-scorecard) — Finalize and close a scorecard

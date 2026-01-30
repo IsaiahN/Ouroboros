@@ -1,13 +1,173 @@
 # Action Decision System Architecture
-**Version**: 1.1  
+**Version**: 2.2  
 **Date**: January 29, 2026  
-**Purpose**: Document all 42 features involved in gameplay action decision-making
+**Purpose**: Document all 42 features involved in gameplay action decision-making + Graduated Safety System v2.0 + Modular Rung System
 
 ---
 
 ## Overview
 
-The action decision system in `core_gameplay.py` uses a **ladder-based priority system** where multiple decision sources are evaluated in order. The first source to produce a high-confidence action "wins" and short-circuits the rest.
+The action decision system uses a **modular "decision rung" architecture** (see `decision_rung_system.py`) where:
+- All **42 decision features** are implemented as pluggable **rungs**
+- Orderings can be swapped like **LEGO bricks** via configuration
+- Multiple **strategies** are supported (ladder, weighted, phased, parallel)
+
+The default behavior in `core_gameplay.py` uses a **ladder-based priority system** where multiple decision sources are evaluated in order. The first source to produce a high-confidence action "wins" and short-circuits the rest.
+
+### Modular Rung System (COMPLETE - 42 Rungs)
+
+**Location**: `decision_rung_system.py` + `config/rung_orderings.json`
+
+**Core Concepts**:
+| Concept | Description |
+|---------|-------------|
+| **Rung** | A pluggable decision component with `evaluate(game_state, context) -> RungResult` |
+| **Ordering** | A priority list of rungs (lower = evaluated first) |
+| **Strategy** | How to combine rung outputs: `ladder`, `weighted`, `phased`, `parallel` |
+| **RungResult** | Standard output: `{action, confidence, reason, weights, metadata}` |
+
+**Available Strategies**:
+| Strategy | Behavior | Best For |
+|----------|----------|----------|
+| `ladder` | First confident answer wins | Efficiency, current behavior |
+| `weighted` | All rungs vote, weighted sum | Ensemble decisions |
+| `phased` | Different ordering by budget phase | Learning progression |
+| `parallel` | Run all, pick highest confidence | Maximum information |
+
+**Built-in Orderings (9 presets)**:
+| Ordering | Rungs | Philosophy |
+|----------|-------|------------|
+| `efficiency` | 13 | Exploit first, understand later (default) |
+| `llm_optimal` | 42 | Full 42-rung: understand first, exploit later |
+| `human_brain` | 19 | Fear + attention + social learning |
+| `comprehensive` | 42 | Full 42-rung: structured by category |
+| `phased_orientation` | 12 | Heavy on world-modeling |
+| `phased_hypothesis` | 12 | Heavy on theory formation |
+| `phased_exploitation` | 13 | Heavy on using known knowledge |
+| `minimal` | 6 | Essential rungs only for fast execution |
+| `frontier_exploration` | 13 | Exploration-heavy for frontier games |
+
+**Usage**:
+```python
+from decision_rung_system import DecisionRungSystem
+
+# Create system with strategy
+system = DecisionRungSystem(strategy='ladder', core_gameplay_ref=self)
+
+# Swap ordering like LEGO bricks
+system.load_ordering('llm_optimal')  # or 'comprehensive', 'human_brain', custom...
+
+# Make decision
+action, reason = system.decide(game_state, context)
+
+# Compare orderings on same state
+results = system.experiment_orderings(game_state, context, 
+    ['efficiency', 'llm_optimal', 'human_brain'])
+```
+
+**Custom Orderings** (in `config/rung_orderings.json`):
+```json
+{
+  "my_custom_ordering": [
+    ["infinite_loop_breaker", 1],
+    ["survey", 5],
+    ["death_avoidance", 10],
+    ["discovery_exploitation", 15],
+    ["smart_action_selection", 99]
+  ]
+}
+```
+
+---
+
+## Complete Rung Registry (42 Rungs)
+
+### By Category
+
+| Category | Rungs | Purpose |
+|----------|-------|---------|
+| **emergency** | `infinite_loop_breaker`, `coordinate_oscillation` | Override everything |
+| **orientation** | `survey`, `questioning_engine`, `exploration_phase`, `frustration_detection`, `breakthrough_budget`, `regulatory_signal`, `grid_exploration`, `primitive_stuck_detection`, `imagination_budget`, `network_exploration_stats` | Understand the world |
+| **hypothesis** | `scientific_method`, `two_streams`, `metacognitive_prediction`, `theory_gate`, `i_thread`, `sensation_engine`, `resonance_detector`, `deliberation_system` | Form and test theories |
+| **exploitation** | `discovery_exploitation`, `embedding_suggestion`, `network_wisdom`, `cods_engine`, `frontier_topology`, `map_intel_collision`, `abstraction_templates`, `few_shot_invariants`, `three_try_sequence`, `multi_stage_matching`, `near_miss_analyzer`, `subgoal_planning`, `visual_analyzer`, `micro_counterfactual`, `network_object_inventory`, `replay_learning`, `completion_prediction` | Use known knowledge |
+| **filter** | `death_avoidance`, `terminal_pattern`, `pariah_avoidance`, `three_layer_filter` | Modify action weights |
+| **fallback** | `smart_action_selection` | Always provides answer |
+
+### Alphabetical Index
+
+| Rung | Category | Default Priority | Source Feature |
+|------|----------|------------------|----------------|
+| `abstraction_templates` | exploitation | 45 | Feature 17 |
+| `breakthrough_budget` | orientation | 6 | Feature 27 |
+| `cods_engine` | exploitation | 40 | Feature 10 |
+| `completion_prediction` | exploitation | 39 | Feature 40 |
+| `coordinate_oscillation` | emergency | 3 | Feature 30 |
+| `death_avoidance` | filter | 15 | Feature 4 |
+| `deliberation_system` | hypothesis | 29 | Feature 37 |
+| `discovery_exploitation` | exploitation | 20 | Feature 5 |
+| `embedding_suggestion` | exploitation | 25 | Feature 6 |
+| `exploration_phase` | orientation | 22 | Feature 12 |
+| `few_shot_invariants` | exploitation | 46 | Feature 18 |
+| `frontier_topology` | exploitation | 28 | Feature 13 |
+| `frustration_detection` | orientation | 13 | Feature 21 |
+| `grid_exploration` | orientation | 47 | Feature 33 |
+| `i_thread` | hypothesis | 31 | Feature 24 |
+| `imagination_budget` | orientation | 4 | Feature 39 |
+| `infinite_loop_breaker` | emergency | 1 | Feature 14 |
+| `map_intel_collision` | exploitation | 24 | Feature 15 |
+| `metacognitive_prediction` | hypothesis | 18 | Feature 11 |
+| `micro_counterfactual` | exploitation | 44 | Feature 29 |
+| `multi_stage_matching` | exploitation | 42 | Feature 20 |
+| `near_miss_analyzer` | exploitation | 48 | Feature 25 |
+| `network_exploration_stats` | orientation | 9 | Feature 42 |
+| `network_object_inventory` | exploitation | 37 | Feature 34 |
+| `network_wisdom` | exploitation | 35 | Feature 9 |
+| `pariah_avoidance` | filter | 17 | Feature 22 |
+| `primitive_stuck_detection` | orientation | 11 | Feature 35 |
+| `questioning_engine` | orientation | 10 | Feature 3 |
+| `regulatory_signal` | orientation | 7 | Feature 28 |
+| `replay_learning` | exploitation | 43 | Feature 38 |
+| `resonance_detector` | hypothesis | 34 | Feature 32 |
+| `scientific_method` | hypothesis | 12 | Feature 7 |
+| `sensation_engine` | hypothesis | 33 | Feature 23 |
+| `smart_action_selection` | fallback | 99 | Feature 14 |
+| `subgoal_planning` | exploitation | 38 | Feature 26 |
+| `survey` | orientation | 5 | Feature 1 |
+| `terminal_pattern` | filter | 14 | Feature 22 |
+| `theory_gate` | hypothesis | 32 | Feature 16 |
+| `three_layer_filter` | filter | 55 | Feature 21 |
+| `three_try_sequence` | exploitation | 8 | Feature 19 |
+| `two_streams` | hypothesis | 30 | Feature 8 |
+| `visual_analyzer` | exploitation | 36 | Feature 31 |
+
+---
+
+## Optimal Ordering by Cognitive Goal
+
+### For Understanding Unknown Games (LLM-Optimal)
+```
+1. Survey → 2. Scientific Method → 3. Questioning → 4. Two-Streams →
+5. Metacognitive → 6. Network Wisdom → 7. Death Avoidance → 8. Exploit
+```
+**Rationale**: Build world model BEFORE optimizing
+
+### For Maximum Efficiency (Current Default)
+```
+1. Discovery → 2. Death → 3. Embedding → 4. Frontier → 5. Exploration →
+6. CODS → 7. Network Wisdom → 8. Fallback
+```
+**Rationale**: First confident answer wins
+
+### For Human-Like Cognition
+```
+1. Death (Amygdala) → 2. Survey (Attention) → 3. Embedding (Pattern) →
+4. Network (Social) → 5. Exploration (Curiosity) → 6. Scientific (Reasoning)
+```
+**Rationale**: Parallel fear + attention, social learning weighted heavily
+
+---
+
+## Legacy Ladder Documentation
 
 **Total Features Documented**: 42
 - Features 1-13: Main action selection ladder
@@ -504,43 +664,203 @@ template_actions = abstraction_engine.get_template_for_replay(game_type, level)
 
 ---
 
-## Known Issues & Gotchas
+## Graduated Safety System v2.0 (NEW 2026-01-29)
 
-### Issue 1: Level-Wide Death Aggregation (FIXED 2026-01-29)
+### Philosophy: NEVER HARD-BLOCK, ALWAYS WEIGHT
 
-**Problem**: Death patterns were aggregated across ALL positions on a level, blocking actions everywhere even if only dangerous at specific locations.
+Binary blocking was fundamentally wrong because:
+1. It removed the agent's ability to take calculated risks
+2. Old danger patterns never faded (permanent fear)
+3. No feedback loop for "unlearning" false danger
+4. Frontier exploration became impossible
 
-**Fix**: Query by position bucket (`bucket_x`, `bucket_y`) with ±1 bucket fuzzy matching.
+**The Graduated Approach**:
+- Every action has a weight 0.05-1.0 (NEVER zero)
+- Multiple systems contribute multiplicatively
+- Survival feedback dampens danger over time
+- Time decay allows "unlearning"
+- Frontier mode reduces danger signals by 70%
 
-### Issue 2: Binary Blocking (FIXED 2026-01-29)
+### Systems Graduated (Implementation Details)
 
-**Problem**: Actions were either "allowed" or "blocked" with no middle ground.
+#### 1. Death Pattern Avoidance (HIGH Priority)
 
-**Fix**: Graduated danger scores with probabilistic avoidance. Actions are never permanently off the table.
+**Before** (binary):
+```python
+if death_count >= 5:
+    deadly_actions_for_frame.add(action_num)  # BLOCKED forever
+```
 
-### Issue 3: No Time Decay
+**After** (graduated):
+```python
+base_danger = deaths / (deaths + survivals + 1)
+time_decay = 0.5 ** (generations_since_update / 10)
+survival_dampening = 1.0 / (1.0 + survivals * 0.2)
+sample_confidence = min(1.0, total_samples / 10)
+danger = base_danger * time_decay * survival_dampening * sample_confidence
+if frontier_mode:
+    danger *= 0.3  # 70% reduction on frontier
+safety_weight = max(0.05, 1.0 - danger)  # NEVER zero
+```
 
-**Problem**: Old death patterns from 100+ generations ago carry same weight as recent data.
+**Location**: `terminal_pattern_detector.py` - `get_graduated_action_weights()` method
 
-**Fix**: Time decay formula: `0.5^(generations/10)` - danger halves every 10 generations without update.
+**New Methods Added**:
+| Method | Location | Purpose |
+|--------|----------|---------|
+| `get_graduated_action_weights()` | terminal_pattern_detector.py L2079 | Returns safety weights 0.05-1.0 for all 7 actions |
+| `record_survival_feedback()` | terminal_pattern_detector.py L2212 | Records survival to dampen danger signals |
 
-### Issue 4: Survival Signals Ignored
+#### 2. Prior Lessons Integration (HIGH Priority)
 
-**Problem**: An action with 100 deaths and 50 survivals was treated same as 100 deaths and 0 survivals.
+**Before** (binary):
+```python
+if causes_death and avoid_action and confidence >= 0.6:
+    deadly_actions_for_frame.add(action_num)  # BLOCKED
+```
 
-**Fix**: Survival dampening: `1.0 / (1.0 + survivals * 0.1)`
+**After** (graduated):
+```python
+severity = 0.8 if causes_death else (0.3 if causes_failure else 0.1)
+recency_factor = 1.0 - (lesson_index * 0.05)  # Recent lessons matter more
+lesson_penalty = confidence * severity * recency_factor
+action_safety_weights[action_num] *= max(0.05, 1.0 - min(0.9, lesson_penalty))
+```
 
-### Issue 5: Mastery Data Not Connected (PARTIAL)
+**Location**: `core_gameplay.py` ~L9530-9620
 
-**Problem**: `level_mastery` data (expert/practitioner/apprentice/novice) only gated sequence replay, didn't inform action choices.
+#### 3. 3-Layer Action Filter (HIGH Priority)
 
-**Fix**: Mastery tier now boosts network wisdom confidence by +0.05 to +0.15.
+**Before** (binary):
+```python
+if should_skip:
+    # Find alternative - current action BLOCKED
+    for alt_action in candidates:
+        if not _action_filter_should_skip(alt_action):
+            action = alt_action
+            break
+```
 
-### Issue 6: All-Negative Network Wisdom Returns None (FIXED 2026-01-28)
+**After** (graduated):
+```python
+filter_weights = self._action_filter_get_graduated_weights(frame, position)
+for action_num, filter_weight in filter_weights.items():
+    action_safety_weights[action_num] *= filter_weight  # Multiplicative combination
+```
 
-**Problem**: When ALL actions have negative avg_score_change (frontier levels), confidence was too low and method returned None instead of "least bad" option.
+**Location**: `core_gameplay.py` ~L3728 (new method), ~L10620 (integration)
 
-**Fix**: Return least-bad suggestion with `is_least_bad=True` flag and lower confidence threshold (0.2).
+**New Method**:
+| Method | Location | Purpose |
+|--------|----------|---------|
+| `_action_filter_get_graduated_weights()` | core_gameplay.py L3728 | Returns filter weights 0.05-1.0 based on 3 layers |
+
+#### 4. Embedding Suggestion (MEDIUM Priority)
+
+**Before** (binary):
+```python
+if embedding_suggestion.get('confidence', 0) >= 0.5:
+    return suggested_action, reason  # USE IT
+# else: completely ignored
+```
+
+**After** (graduated):
+```python
+outcome_factor = 1.0 + (avg_outcome * 0.5)  # Range: 0.5-1.5
+if outcome_factor >= 0.8:  # Don't boost if outcome was very bad
+    boost = 1.0 + (confidence * outcome_factor * 0.5)
+    action_safety_weights[suggested_action_num] *= boost
+# High confidence (>= 0.6) still returns directly for backward compat
+```
+
+**Location**: `core_gameplay.py` ~L9632-9695
+
+#### 5. Position Death Avoidance (MEDIUM Priority)
+
+**Before** (binary):
+```python
+if action_num in _deadly_actions:
+    safe_actions = [a for a in all_actions if a not in _deadly_actions]
+    action = random.choice(safe_actions)  # Binary switch
+```
+
+**After** (graduated):
+```python
+if current_weight < 0.3 and current_weight < avg_weight * 0.5:
+    selected_action = self._weighted_action_selection(action_safety_weights)
+    # Probabilistic selection based on weights, not binary blocking
+```
+
+**Location**: `core_gameplay.py` ~L10680-10715
+
+**New Methods**:
+| Method | Location | Purpose |
+|--------|----------|---------|
+| `_weighted_action_selection()` | core_gameplay.py L23280 | Weighted random choice based on safety weights |
+| `_record_action_survival()` | core_gameplay.py L23320 | Calls terminal_detector survival feedback |
+
+### Integration Architecture (Multiplicative Weights)
+
+```
+                              INITIAL WEIGHTS
+                              (all 1.0 for actions 1-7)
+                                       │
+                ┌──────────────────────┼──────────────────────┐
+                │                      │                      │
+           ┌────▼────┐           ┌────▼────┐           ┌────▼────┐
+           │ Death   │           │ Prior   │           │ 3-Layer │
+           │ Pattern │           │ Lessons │           │ Filter  │
+           │ Danger  │           │ Penalty │           │ Penalty │
+           └────┬────┘           └────┬────┘           └────┬────┘
+                │ *= (1-danger)       │ *= (1-penalty)      │ *= filter_weight
+                │                     │                      │
+                └──────────────────────┼──────────────────────┘
+                                       │
+                               COMBINED WEIGHTS
+                              (action_safety_weights)
+                        Range: 0.05-1.0 per action (NEVER zero)
+                                       │
+                           ┌───────────┼───────────┐
+                           │           │           │
+                      ┌────▼────┐ ┌────▼────┐ ┌────▼────┐
+                      │Embedding│ │Position │ │Weighted │
+                      │ Boost   │ │Avoidance│ │Selection│
+                      └────┬────┘ └────┬────┘ └────┬────┘
+                           │           │           │
+                           └───────────┼───────────┘
+                                       │
+                                 FINAL ACTION
+                      (Probabilistic selection by weight)
+```
+
+### Console Log Tags for Graduated System
+
+| Tag | System | Meaning |
+|-----|--------|---------|
+| `[DANGER-WEIGHT]` | Death patterns | Graduated danger score applied |
+| `[PRIOR-LESSON]` | Prior lessons | Lesson penalty applied multiplicatively |
+| `[FILTER-GRAD]` | 3-layer filter | Graduated filter weights calculated |
+| `[EMBEDDING-BOOST]` | Embedding | Weight boost from similar frames |
+| `[SURVIVAL-FEEDBACK]` | Terminal detector | Survival recorded to dampen danger |
+| `[WEIGHTED-SELECT]` | Final selection | Probabilistic action chosen by weight |
+
+### Systems Already Graduated (No Changes Needed)
+
+| System | Status | Notes |
+|--------|--------|-------|
+| Q-Field Blocking | ✅ Intentional | Forces exploration when stuck - has escape hatches |
+| Pariah Penalties | ✅ Already graduated | Role-tolerance 0-0.95, network paralysis detection, toxicity decay |
+
+### Frontier Mode Special Handling
+
+On frontier (unbeaten) levels, danger signals are reduced by 70%:
+
+```python
+if frontier_mode:
+    danger *= 0.3  # Allow exploration of "dangerous" actions
+```
+
+This prevents agents from being paralyzed on new levels where all actions have some death history from early exploration attempts.
 
 ---
 
@@ -1447,6 +1767,10 @@ if len(unique_coords) <= 3 and max_count >= 3:
 
 | Date | Change |
 |------|--------|
+| 2026-01-29 | **v2.0**: Added comprehensive Graduated Safety System documentation |
+| 2026-01-29 | Documented 5 systems graduated: death patterns, prior lessons, 3-layer filter, embedding, position avoidance |
+| 2026-01-29 | Added Integration Architecture diagram showing multiplicative weight flow |
+| 2026-01-29 | Added console log tags for graduated system debugging |
 | 2026-01-29 | Added 6 more systems from reasoning log analysis (features 37-42) |
 | 2026-01-29 | Documented Survey System, Deliberation, Replay Learning, Imagination Budget |
 | 2026-01-29 | Documented Completion Prediction and Network Exploration Stats |
